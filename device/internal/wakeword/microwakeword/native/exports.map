@@ -1,0 +1,6 @@
+TATER_MWW_1 {
+  global:
+    tater_mww_*;
+  local:
+    *;
+};

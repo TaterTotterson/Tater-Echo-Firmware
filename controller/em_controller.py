@@ -315,7 +315,12 @@ BLE_ADVERTS_TYPE   = 0x06
 # ignores unknown frame types, so the adverts would vanish in silence, which is
 # a worse fault than the one being fixed. The control-plane `ble_adverts`
 # message stays handled forever, for firmware that predates this.
-CONTROLLER_FEATURES = ["ble_adverts_data"]
+#
+# `mww_shadow` says the controller understands the immediate, observational
+# microWakeWord crossing message. Firmware still includes aggregate mwwShadow
+# telemetry in stats for older controllers, but never sends them an event type
+# they did not negotiate.
+CONTROLLER_FEATURES = ["ble_adverts_data", "mww_shadow"]
 SPEAKER_FRAME_TYPE = 0x02
 SPEAKER_EOS_TYPE   = 0x03
 MIC_HEADER_LEN     = 3   # [type][seq_hi][seq_lo]
@@ -512,6 +517,11 @@ class Device:
         # applies a refractory period, so one per utterance) and only the most
         # recent few can ever be within a match window.
         self.shadow: em_shadow.ShadowTracker = em_shadow.ShadowTracker()
+        # Tater microWakeWord is a second, independent observer. Never reuse
+        # self.shadow here: both engines may run on the same PCM during an A/B
+        # trial, and combining their crossings would make the comparison
+        # impossible to interpret.
+        self.mww_shadow: em_shadow.ShadowTracker = em_shadow.ShadowTracker()
         # Monotonic instant of this controller's most recent wake detection,
         # consumed once by the turn record it belongs to.
         self.last_wake_mono = None  # float | None
@@ -917,6 +927,11 @@ class Device:
         otherwise.
         """
         return "oww_trigger" in (self.capabilities or [])
+
+    @property
+    def mww_shadow_capable(self) -> bool:
+        """Whether this firmware can observe Tater microWakeWord locally."""
+        return "mww_shadow" in (self.capabilities or [])
 
     @property
     def aec_hw_ref_capable(self) -> bool:
@@ -3892,6 +3907,10 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
                             # device is not scoring (see the allowlist note above:
                             # DeviceStats, here, and the consumer below).
                             "owwShadow":     msg.get("owwShadow"),
+                            # Tater microWakeWord is kept separate from the
+                            # inherited ONNX/openWakeWord observer so both can
+                            # run against the same audio during rollout.
+                            "mwwShadow":     msg.get("mwwShadow"),
                             # Which far-end reference the AEC is on: "hw",
                             # "sw", "off", or absent from firmware that
                             # cannot say. Deliberately NOT added to
@@ -3919,6 +3938,19 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
                                     f"{_sh.get('errors')} errors ({_sh.get('lastErr') or '-'}) "
                                     f"— comparison is running on a subset of the audio"
                                 )
+                        _mww = msg.get("mwwShadow") or {}
+                        device.mww_shadow.active = bool(_mww)
+                        if _mww and _mww.get("threshold"):
+                            try:
+                                device.mww_shadow.threshold = float(_mww["threshold"])
+                            except (TypeError, ValueError):
+                                pass
+                        if _mww and (_mww.get("drops") or _mww.get("errors")):
+                            log.warning(
+                                f"[{device_id}] microWakeWord shadow fell behind: "
+                                f"{_mww.get('drops')} chunks dropped, "
+                                f"{_mww.get('errors')} errors ({_mww.get('lastErr') or '-'})"
+                            )
                         if msg.get("ble"):
                             em_ble_proxy.update_stats(device_id, msg["ble"])
                         # Ambient light straight through to HA's sensor entity.
@@ -4081,6 +4113,19 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
                         device.shadow.record_cross(msg.get("score"), msg.get("ageMs"))
                         log.info(
                             f"[{device_id}] on-device wake crossing: "
+                            f"score={msg.get('score')} age={msg.get('ageMs')}ms "
+                            f"(shadow — not triggering)"
+                        )
+
+                    elif msg_type == "mww_shadow_cross":
+                        # A Tater microWakeWord sliding-window crossing. It is
+                        # recorded on its own tracker for future correlation,
+                        # but this shadow milestone never starts a turn.
+                        device.mww_shadow.record_cross(
+                            msg.get("score"), msg.get("ageMs")
+                        )
+                        log.info(
+                            f"[{device_id}] microWakeWord crossing: "
                             f"score={msg.get('score')} age={msg.get('ageMs')}ms "
                             f"(shadow — not triggering)"
                         )

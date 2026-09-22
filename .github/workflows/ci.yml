@@ -121,6 +121,9 @@ jobs:
       - name: Run go test
         working-directory: device
         run: go test ./internal/... ./pkg/...
+      - name: Test native microWakeWord runtime
+        working-directory: device
+        run: ./test_microwakeword_runtime.sh
 
   python-deps-audit:
     name: Python dependency audit

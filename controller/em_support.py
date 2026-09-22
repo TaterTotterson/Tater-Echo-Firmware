@@ -121,7 +121,7 @@ _STATS_FIELDS = (
     "cpuPct", "memUsedMb", "memTotalMb", "storageUsedMb", "storageTotalMb",
     "wifiRssi", "linkSpeedMbps", "wifiFreqMhz", "txBytes", "rxBytes",
     "cpuTempC", "maxTempC", "coresOnline", "coresTotal", "thermalCoreLimit",
-    "ambientLux", "owwShadow",
+    "ambientLux", "owwShadow", "mwwShadow",
 )
 
 _COUNTER_FIELDS = (

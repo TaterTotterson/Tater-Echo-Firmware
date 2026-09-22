@@ -18,15 +18,15 @@ type DeviceStats struct {
 	// spawn; the tx/rx counters are plain sysfs reads and ride every tick.
 	// Band and BSSID matter because a single SSID spanning 2.4/5GHz means
 	// a device can silently re-associate to a much slower radio.
-	LinkSpeedMbps  int     `json:"linkSpeedMbps,omitempty"`
-	WifiFreqMhz    int     `json:"wifiFreqMhz,omitempty"`
-	WifiBssid      string  `json:"wifiBssid,omitempty"`
+	LinkSpeedMbps int    `json:"linkSpeedMbps,omitempty"`
+	WifiFreqMhz   int    `json:"wifiFreqMhz,omitempty"`
+	WifiBssid     string `json:"wifiBssid,omitempty"`
 	// Deltas since the previous stats tick — throughput and loss.
-	TxBytes        uint64  `json:"txBytes"`
-	RxBytes        uint64  `json:"rxBytes"`
-	TxErrors       uint64  `json:"txErrors"`
-	TxDropped      uint64  `json:"txDropped"`
-	RxCrcErrors    uint64  `json:"rxCrcErrors"`
+	TxBytes     uint64 `json:"txBytes"`
+	RxBytes     uint64 `json:"rxBytes"`
+	TxErrors    uint64 `json:"txErrors"`
+	TxDropped   uint64 `json:"txDropped"`
+	RxCrcErrors uint64 `json:"rxCrcErrors"`
 	// Ble carries the BLE scanner diagnostics snapshot (bluetooth.Stats),
 	// nil when the proxy has never been enabled this boot.
 	Ble interface{} `json:"ble,omitempty"`
@@ -53,6 +53,9 @@ type DeviceStats struct {
 	// the same cost class as every other counter here, and the reason
 	// per-frame scores are never sent.
 	OwwShadow interface{} `json:"owwShadow,omitempty"`
+	// MwwShadow is the independent Tater microWakeWord shadow summary. It is
+	// separate from OwwShadow so both engines can be compared on the same PCM.
+	MwwShadow interface{} `json:"mwwShadow,omitempty"`
 	// AecRef is which far-end reference echo cancellation is running on:
 	// "hw" (the frame-aligned ch8 playback loopback), "sw" (the tap at the
 	// ALSA write) or "off". The aec_hw_ref capability says this firmware
@@ -74,24 +77,25 @@ type DeviceStats struct {
 // Safe for concurrent use — silently drops if not connected.
 func (c *ControlClient) SendStats(s DeviceStats) {
 	_ = c.writeJSON(map[string]interface{}{
-		"type":           "stats",
-		"cpuPct":         s.CPUPct,
-		"memUsedMb":      s.MemUsedMb,
-		"memTotalMb":     s.MemTotalMb,
-		"storageUsedMb":  s.StorageUsedMb,
-		"storageTotalMb": s.StorageTotalMb,
-		"wifiRssi":       s.WifiRssi,
-		"wifiSsid":       s.WifiSsid,
-		"linkSpeedMbps":  s.LinkSpeedMbps,
-		"wifiFreqMhz":    s.WifiFreqMhz,
-		"wifiBssid":      s.WifiBssid,
-		"txBytes":        s.TxBytes,
-		"rxBytes":        s.RxBytes,
-		"txErrors":       s.TxErrors,
-		"txDropped":      s.TxDropped,
-		"rxCrcErrors":    s.RxCrcErrors,
+		"type":             "stats",
+		"cpuPct":           s.CPUPct,
+		"memUsedMb":        s.MemUsedMb,
+		"memTotalMb":       s.MemTotalMb,
+		"storageUsedMb":    s.StorageUsedMb,
+		"storageTotalMb":   s.StorageTotalMb,
+		"wifiRssi":         s.WifiRssi,
+		"wifiSsid":         s.WifiSsid,
+		"linkSpeedMbps":    s.LinkSpeedMbps,
+		"wifiFreqMhz":      s.WifiFreqMhz,
+		"wifiBssid":        s.WifiBssid,
+		"txBytes":          s.TxBytes,
+		"rxBytes":          s.RxBytes,
+		"txErrors":         s.TxErrors,
+		"txDropped":        s.TxDropped,
+		"rxCrcErrors":      s.RxCrcErrors,
 		"ble":              s.Ble,
 		"owwShadow":        s.OwwShadow,
+		"mwwShadow":        s.MwwShadow,
 		"ambientLux":       s.AmbientLux,
 		"cpuTempC":         s.CPUTempC,
 		"maxTempC":         s.MaxTempC,

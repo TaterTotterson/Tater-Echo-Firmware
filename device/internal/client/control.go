@@ -1056,7 +1056,7 @@ func capabilities() []string {
 	// reason: proving ch8 is a loopback needs the speaker to have played,
 	// which has not happened at registration.
 	caps := []string{"mic", "speaker", "leds", "led_anim", "buttons",
-		"oww_shadow", "oww_trigger", "button_hold", "audio_mix",
+		"oww_shadow", "oww_trigger", "mww_shadow", "button_hold", "audio_mix",
 		"aec_hw_ref"}
 	if als.Present() {
 		caps = append(caps, "ambient_light")
@@ -1192,6 +1192,17 @@ func (c *ControlClient) SendOwwShadowCross(score float32, ageMs int64) {
 	})
 }
 
+// SendMWWShadowCross reports a Tater microWakeWord sliding-window crossing.
+// It is strictly observational and is sent only when the controller announced
+// FeatureMWWShadow, so older controllers never receive an unknown event type.
+func (c *ControlClient) SendMWWShadowCross(score float32, ageMs int64) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":  "mww_shadow_cross",
+		"score": score,
+		"ageMs": ageMs,
+	})
+}
+
 // SendOwwWake asks the controller to start a voice turn, because on-device
 // scoring crossed the wake threshold and owwOnDevice is "on".
 //
@@ -1244,6 +1255,11 @@ func (c *ControlClient) HasFeature(name string) bool {
 // controller ignores unknown frame types and would drop every advert in
 // silence.
 const FeatureBleAdvertsData = "ble_adverts_data"
+
+// FeatureMWWShadow is announced by a controller that can correlate immediate
+// microWakeWord crossings. Periodic mwwShadow stats remain backwards-compatible
+// telemetry and do not depend on this feature.
+const FeatureMWWShadow = "mww_shadow"
 
 // SendBleAdverts forwards a batch of BLE advertisements to the controller
 // (bluetooth_proxy path). adverts is marshalled as-is — []bluetooth.Advert,

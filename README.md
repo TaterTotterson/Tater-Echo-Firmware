@@ -1,4 +1,27 @@
-# EchoMuse
+# Tater Echo Firmware
+
+Tater Echo Firmware is an early-stage Tater-native voice satellite for rooted
+Amazon Echo Dot 2nd Generation hardware. It keeps EchoMuse's proven hardware
+support—the microphone array, hardware-aligned AEC reference, speaker, LED
+ring, buttons, and recovery-safe deployment—while moving wake detection and
+the satellite protocol onto the device in the same style as the Tater Linux
+satellites.
+
+The first complete native path is now in-tree: on-device microWakeWord,
+acknowledged two-second pre-roll, direct Tater WebSocket transport, Tater state
+animations, local WAV/MP3 playback, persistent media controls and ducking,
+local timers, optional second-STT wake verification, live settings,
+pairing-token persistence, and hash-verified A/B OTA with the inherited
+automatic rollback supervisor. The inherited EchoMuse controller path remains
+available whenever native mode is not configured. See
+[the port and test guide](docs/tater-native-port.md) for architecture, setup,
+current validation status, and the remaining real-hardware measurements.
+
+This repository preserves EchoMuse's Git history, and its original repository
+is configured locally as the `upstream` remote. The native code is ready for a
+controlled hardware test, but not yet for a fleet rollout.
+
+## EchoMuse upstream overview
 
 Give your Amazon Echo Dot 2nd Generation a second life as a fully local,
 open-source voice assistant and media player for Home Assistant.

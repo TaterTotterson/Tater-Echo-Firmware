@@ -33,10 +33,12 @@ import (
 	"github.com/wilbowes/EchoMuse/internal/config"
 	"github.com/wilbowes/EchoMuse/internal/platform"
 	"github.com/wilbowes/EchoMuse/internal/server"
+	"github.com/wilbowes/EchoMuse/internal/taternative"
+	"github.com/wilbowes/EchoMuse/internal/wakeword/microwakeword"
 	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
 	"github.com/wilbowes/EchoMuse/internal/wifi"
-	pkgbuttons "github.com/wilbowes/EchoMuse/pkg/buttons"
 	"github.com/wilbowes/EchoMuse/pkg/board"
+	pkgbuttons "github.com/wilbowes/EchoMuse/pkg/buttons"
 	"github.com/wilbowes/EchoMuse/pkg/led"
 )
 
@@ -119,6 +121,24 @@ func main() {
 	})
 
 	ctx := context.Background()
+	bootstrapPath := strings.TrimSpace(os.Getenv("TATER_NATIVE_CONFIG"))
+	bootstrap, err := taternative.LoadBootstrap(bootstrapPath)
+	if err != nil {
+		log.Fatalf("Tater native bootstrap: %v", err)
+	}
+	nativeURL := bootstrap.URL
+	if value := strings.TrimSpace(os.Getenv("TATER_NATIVE_URL")); value != "" {
+		nativeURL = value
+	}
+	nativeMode := nativeURL != ""
+	var nativeClient *taternative.Client
+	var nativePlayer *taternative.LocalPlayer
+	if nativeMode {
+		// Direct-native mode always needs the local detector. The incoming
+		// settings frame may refine model/threshold after hello.
+		enabled := true
+		config.Get().Apply(config.ConfigMessage{MwwShadowEnabled: &enabled})
+	}
 
 	dataClient := client.NewDataClient(deviceID, microphone, pcmSpeaker, canceller)
 	applyAecConfig(canceller, dataClient) // arm from env defaults before any config push
@@ -147,7 +167,6 @@ func main() {
 		},
 		func() { dataClient.StopMic() },
 	)
-
 	// Device-rendered ring animations (led_anim) — the animation engine
 	// runs on the device's own ticker, immune to controller/WiFi jitter.
 	controlClient.OnLEDAnim(func(raw json.RawMessage) {
@@ -216,6 +235,14 @@ func main() {
 		// event the controller actually starts a turn on.
 		if event.ClickType == pkgbuttons.DotClick && !event.Down {
 			s.CancelVolumeDisplay()
+			if nativeClient != nil {
+				if event.Muted {
+					log.Println("[tater-native] action button voice turn suppressed — muted")
+					return
+				}
+				nativeClient.StartButton()
+				return
+			}
 		}
 		controlClient.SendButton(event)
 	})
@@ -264,6 +291,121 @@ func main() {
 	// quiet again. Measured 2026-09-03. Nothing can stop mediaserver (the
 	// framework crash-loops without it), so the routing is reconciled instead.
 	go pcmSpeaker.WatchJackRouting(ctx)
+
+	if nativeMode {
+		nativePlayer = taternative.NewLocalPlayer(pcmSpeaker)
+		otaInstaller := taternative.NewOTAInstaller()
+		otaInstaller.Restart = func() {
+			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		}
+		tokenPath := bootstrap.TokenPath
+		if value := strings.TrimSpace(os.Getenv("TATER_TOKEN_PATH")); value != "" {
+			tokenPath = value
+		}
+		if tokenPath == "" {
+			tokenPath = "/data/local/etc/tater/device_token"
+		}
+		deviceName := bootstrap.DeviceName
+		if value := strings.TrimSpace(os.Getenv("TATER_DEVICE_NAME")); value != "" {
+			deviceName = value
+		}
+		if deviceName == "" {
+			deviceName = "Tater Echo " + deviceID
+		}
+		var nativeErr error
+		nativeClient, nativeErr = taternative.New(taternative.Config{
+			URL: nativeURL, Token: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_TOKEN")), bootstrap.Token), TokenPath: tokenPath,
+			DeviceID: deviceID, HardwareID: deviceID, DeviceName: deviceName,
+			Board: board.IDOf(board.Detect("")), FirmwareVersion: client.Version,
+			Room: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room),
+		}, taternative.Hooks{
+			Connected: func(selector string) {
+				log.Printf("[tater-native] connected as %s", selector)
+				if pulseCancel != nil {
+					pulseCancel()
+					pulseCancel = nil
+				}
+				pulseKind = ""
+				s.SetLinkDown(false)
+				if s.IsMuted() {
+					s.RestoreMuteRing()
+				} else {
+					s.StartAnim(nativeStateAnimation("idle"))
+					dataClient.StartLocalMic()
+				}
+				nativeClient.ReportSettings(map[string]any{
+					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
+				})
+			},
+			Disconnected: func(err error) {
+				if err != nil && err != context.Canceled {
+					log.Printf("[tater-native] disconnected: %v", err)
+				}
+				s.StopAnim()
+				s.SetLinkDown(true)
+				if pulseKind != "orange" {
+					if pulseCancel != nil {
+						pulseCancel()
+					}
+					pulseCtx, cancel := context.WithCancel(ctx)
+					pulseCancel, pulseKind = cancel, "orange"
+					go pulseOrange(pulseCtx, s)
+				}
+			},
+			State: func(state string, _ map[string]any) {
+				s.StartAnim(nativeStateAnimation(state))
+				if state == "listening" {
+					dataClient.RequestBeamLock()
+				} else if state == "idle" || state == "error" {
+					dataClient.RequestBeamUnlock()
+				}
+			},
+			Settings: func(values map[string]any) (map[string]any, error) {
+				applied, err := applyTaterSettings(values, s, canceller, dataClient)
+				applyMWWConfig(dataClient, nil, func(score float32, _ time.Time) bool {
+					return nativeClient != nil && nativeClient.Wake("hey_tater", score)
+				})
+				return applied, err
+			},
+			Status: func() map[string]any {
+				return map[string]any{
+					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
+					"muted":          s.IsMuted(),
+					"wake_engine":    map[string]any{"name": "micro_wake_word", "model": config.Get().Snapshot().MwwModel},
+				}
+			},
+			PlayVoice: nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
+			StartMedia:  nativePlayer.PlayMedia,
+			StopMedia:   func(string) { nativePlayer.StopMedia() },
+			PauseMedia:  func(string) { nativePlayer.PauseMedia() },
+			ResumeMedia: func(string) { nativePlayer.ResumeMedia() },
+			VolumeMedia: func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
+			TimerAlarm: func(active bool, _ taternative.Timer) {
+				nativePlayer.SetTimerAlarm(active)
+				if active {
+					s.StartAnim(nativeTimerAnimation())
+				} else {
+					state := "idle"
+					if nativeClient != nil {
+						state = nativeClient.State()
+					}
+					s.StartAnim(nativeStateAnimation(state))
+				}
+			},
+			OTA: otaInstaller.Install,
+		})
+		if nativeErr != nil {
+			log.Fatalf("Tater native configuration invalid: %v", nativeErr)
+		}
+		dataClient.OnPCM(nativeClient.PushAudio)
+		applyMWWConfig(dataClient, nil, func(score float32, _ time.Time) bool {
+			return nativeClient.Wake("hey_tater", score)
+		})
+		s.SetLinkDown(true)
+		pulseCtx, cancel := context.WithCancel(ctx)
+		pulseCancel, pulseKind = cancel, "orange"
+		go pulseOrange(pulseCtx, s)
+	}
 
 	controlClient.OnDisconnected(func() {
 		// Stop any device-local animation: the controller that owned it is
@@ -344,6 +486,7 @@ func main() {
 			st := collectStats()
 			st.Ble = bleScanner.Stats()
 			st.OwwShadow = shadowStats(dataClient)
+			st.MwwShadow = mwwShadowStats(dataClient)
 			st.AecRef = canceller.RefSource()
 			controlClient.SendStats(st)
 		}()
@@ -372,6 +515,7 @@ func main() {
 		applyAecConfig(canceller, dataClient)
 		applyBleConfig(bleScanner)
 		applyShadowConfig(dataClient, controlClient, pcmSpeaker, s)
+		applyMWWConfig(dataClient, controlClient, nil)
 	})
 
 	// Speaker flush — barge-in: cut buffered TTS the moment the controller
@@ -464,7 +608,14 @@ func main() {
 	// dump to confirm the sibling mute controls before touching them (see
 	// review C5 fix sequence) — deliberately not guessed at here.
 	s.SetMuteChangeCallback(func(muted bool) {
-		controlClient.SendMuteState(muted)
+		if nativeClient != nil {
+			nativeClient.ReportSettings(map[string]any{"muted": muted})
+			if muted {
+				nativeClient.StopCapture(true)
+			}
+		} else {
+			controlClient.SendMuteState(muted)
+		}
 		if muted {
 			dataClient.StopMic()
 		} else {
@@ -472,14 +623,22 @@ func main() {
 			// lock_mic, matching the normal idle state. If the controller
 			// also sends its own mic_start around the same time, StartMic
 			// is idempotent (ignores the call while already active).
-			dataClient.StartMic(false)
+			if nativeClient != nil {
+				dataClient.StartLocalMic()
+			} else {
+				dataClient.StartMic(false)
+			}
 		}
 	})
 
 	// Volume change — notify controller so HA entity and dashboard reflect it.
 	// Fires on every Set() call: physical button press or future volume_set command.
 	s.SetVolumeChangeCallback(func(level int) {
-		controlClient.SendVolumeState(level)
+		if nativeClient != nil {
+			nativeClient.ReportSettings(map[string]any{"volume_percent": deviceVolumePercent(level)})
+		} else {
+			controlClient.SendVolumeState(level)
+		}
 		// The hardware echo reference is tapped upstream of the DAC volume
 		// control, so it holds full scale whatever the user sets. Tell the
 		// canceller the scalar it cannot see, or every volume change is an
@@ -538,6 +697,12 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	go func() {
+		if nativeClient != nil {
+			if err := nativeClient.Run(ctx); err != nil && err != context.Canceled {
+				log.Printf("Tater native client stopped: %v", err)
+			}
+			return
+		}
 		if err := controlClient.Run(ctx, dataClient); err != nil && err != context.Canceled {
 			log.Printf("Control client stopped: %v", err)
 		}
@@ -558,6 +723,7 @@ func main() {
 			st := collectStats()
 			st.Ble = bleScanner.Stats()
 			st.OwwShadow = shadowStats(dataClient)
+			st.MwwShadow = mwwShadowStats(dataClient)
 			st.AecRef = canceller.RefSource()
 			controlClient.SendStats(st)
 			if tick%10 == 0 {
@@ -593,6 +759,11 @@ func main() {
 	sig := <-sigCh
 	log.Printf("Received %v — shutting down (muting output, amp off)", sig)
 	bleScanner.SetEnabled(false) // scan off + /dev/stpbt closed so the chip idles
+	if nativeClient != nil {
+		nativeClient.Close()
+	}
+	dataClient.SetMWWShadowScorer(nil)
+	dataClient.SetShadowScorer(nil)
 	pcmSpeaker.Close()
 	os.Exit(0)
 }
@@ -625,6 +796,38 @@ func shadowStats(dc *client.DataClient) interface{} {
 		// message that already exists.
 		"maxInferMs": st.MaxInferMs,
 		"maxGapMs":   st.MaxGapMs,
+	}
+}
+
+// mwwShadowStats drains the independent Tater microWakeWord observer. Raw and
+// sliding maxima are both retained: the former diagnoses model activity while
+// the latter is the actual value tested against the manifest threshold.
+func mwwShadowStats(dc *client.DataClient) interface{} {
+	sc := dc.MWWShadowScorer()
+	if sc == nil {
+		return nil
+	}
+	st := sc.Drain()
+	return map[string]interface{}{
+		"chunks":      st.Chunks,
+		"samples":     st.Samples,
+		"scores":      st.Scores,
+		"drops":       st.Drops,
+		"staleDrops":  st.StaleDrops,
+		"resets":      st.Resets,
+		"crossings":   st.Crossings,
+		"closeMisses": st.CloseMisses,
+		"maxRawScore": st.MaxRawScore,
+		"maxScore":    st.MaxScore,
+		"threshold":   st.Threshold,
+		"closeMiss":   st.CloseMiss,
+		"windowSize":  st.WindowSize,
+		"errors":      st.Errors,
+		"lastErr":     st.LastErr,
+		"ready":       sc.Ready(),
+		"maxInferMs":  st.MaxInferMs,
+		"maxGapMs":    st.MaxGapMs,
+		"maxQueueMs":  st.MaxQueueMs,
 	}
 }
 
@@ -974,6 +1177,361 @@ var shadowState struct {
 	mode    string
 	model   string
 	lastErr string
+}
+
+// mwwShadowState makes config reapplication idempotent. Rebuilding is more
+// expensive than changing a scalar: it reloads the TFLM model and discards its
+// streaming state, so only an actual enable/model/threshold change does it.
+var mwwShadowState struct {
+	enabled       bool
+	model         string
+	threshold     float64
+	slidingWindow int
+	closeMiss     float64
+	lastErr       string
+}
+
+// applyMWWConfig manages the Tater microWakeWord scorer. It is observational
+// when onWake is nil (legacy controller mode) and opens native voice turns
+// when direct Tater mode supplies the callback.
+func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient, onWake func(float32, time.Time) bool) {
+	snap := config.Get().Snapshot()
+	enabled := snap.MwwShadowEnabled != nil && *snap.MwwShadowEnabled
+	model := snap.MwwModel
+	threshold := float64(0)
+	if snap.MwwThreshold != nil {
+		threshold = *snap.MwwThreshold
+	}
+	slidingWindow := 0
+	if snap.MwwSlidingWindow != nil {
+		slidingWindow = *snap.MwwSlidingWindow
+	}
+	closeMiss := float64(0)
+	if snap.MwwCloseMiss != nil {
+		closeMiss = *snap.MwwCloseMiss
+	}
+
+	if !enabled {
+		if dc.MWWShadowScorer() != nil {
+			dc.SetMWWShadowScorer(nil)
+			log.Printf("[mww-shadow] disabled")
+		}
+		mwwShadowState.enabled = false
+		mwwShadowState.model = model
+		mwwShadowState.threshold = threshold
+		mwwShadowState.slidingWindow = slidingWindow
+		mwwShadowState.closeMiss = closeMiss
+		mwwShadowState.lastErr = ""
+		return
+	}
+
+	if dc.MWWShadowScorer() != nil && mwwShadowState.enabled &&
+		mwwShadowState.model == model && mwwShadowState.threshold == threshold &&
+		mwwShadowState.slidingWindow == slidingWindow && mwwShadowState.closeMiss == closeMiss {
+		return
+	}
+
+	sc, err := microwakeword.OpenShadowTuned(model, microwakeword.ScorerOverrides{
+		Threshold: float32(threshold), SlidingWindow: slidingWindow,
+		CloseMissThreshold: float32(closeMiss),
+	},
+		func(score float32, at time.Time) {
+			ageMs := time.Since(at).Milliseconds()
+			if onWake != nil && onWake(score, at) {
+				log.Printf("[mww] local wake score=%.3f age=%dms — native wake claimed", score, ageMs)
+				return
+			}
+			log.Printf("[mww-shadow] crossing score=%.3f age=%dms (report only)", score, ageMs)
+			if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
+				cc.SendMWWShadowCross(score, ageMs)
+			}
+		})
+	if err != nil {
+		if msg := err.Error(); msg != mwwShadowState.lastErr {
+			mwwShadowState.lastErr = msg
+			log.Printf("[mww-shadow] not started: %v", err)
+		}
+		dc.SetMWWShadowScorer(nil)
+		mwwShadowState.enabled = true
+		mwwShadowState.model = model
+		mwwShadowState.threshold = threshold
+		mwwShadowState.slidingWindow = slidingWindow
+		mwwShadowState.closeMiss = closeMiss
+		return
+	}
+
+	dc.SetMWWShadowScorer(sc)
+	mwwShadowState.enabled = true
+	mwwShadowState.model = model
+	mwwShadowState.threshold = threshold
+	mwwShadowState.slidingWindow = slidingWindow
+	mwwShadowState.closeMiss = closeMiss
+	mwwShadowState.lastErr = ""
+	mode := "shadow/report-only"
+	if onWake != nil {
+		mode = "active native wake"
+	}
+	log.Printf("[mww] scoring %s — %s", sc.Info(), mode)
+}
+
+func deviceVolumePercent(level int) int {
+	// server.volumeMax is the codec's unity-gain index and intentionally
+	// private to the server package. Native settings use a human 0..100 scale.
+	const unityIndex = 127
+	if level <= 0 {
+		return 0
+	}
+	if level >= unityIndex {
+		return 100
+	}
+	return int(math.Round(float64(level) * 100 / unityIndex))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nativeNumber(value any, fallback float64) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case json.Number:
+		if n, err := v.Float64(); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func nativeBool(value any, fallback bool) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on", "enabled":
+			return true
+		case "0", "false", "no", "off", "disabled":
+			return false
+		}
+	}
+	return fallback
+}
+
+var nativeVisuals = struct {
+	sync.RWMutex
+	brightness int
+	color      [3]uint8
+	listening  string
+	thinking   string
+	tool       string
+	replying   string
+}{
+	brightness: 80,
+	color:      [3]uint8{255, 90, 31},
+	listening:  "directional",
+	thinking:   "sparkle",
+	tool:       "ping_pong",
+	replying:   "voice_ring",
+}
+
+func applyNativeVisualSettings(values, applied map[string]any) {
+	nativeVisuals.Lock()
+	defer nativeVisuals.Unlock()
+	if value, ok := values["led_brightness"]; ok {
+		nativeVisuals.brightness = int(math.Round(nativeNumber(value, float64(nativeVisuals.brightness))))
+		if nativeVisuals.brightness < 0 {
+			nativeVisuals.brightness = 0
+		} else if nativeVisuals.brightness > 100 {
+			nativeVisuals.brightness = 100
+		}
+		applied["led_brightness"] = nativeVisuals.brightness
+	}
+	if value, ok := values["led_color"]; ok {
+		text := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fmt.Sprint(value))), "#")
+		if len(text) == 3 {
+			text = text[0:1] + text[0:1] + text[1:2] + text[1:2] + text[2:3] + text[2:3]
+		}
+		if number, err := strconv.ParseUint(text, 16, 24); err == nil && len(text) == 6 {
+			nativeVisuals.color = [3]uint8{uint8(number >> 16), uint8(number >> 8), uint8(number)}
+			applied["led_color"] = "#" + text
+		}
+	}
+	for key, target := range map[string]*string{
+		"led_listening_animation": &nativeVisuals.listening,
+		"led_thinking_animation":  &nativeVisuals.thinking,
+		"led_tool_call_animation": &nativeVisuals.tool,
+		"led_replying_animation":  &nativeVisuals.replying,
+	} {
+		if value, ok := values[key]; ok {
+			*target = strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+			applied[key] = *target
+		}
+	}
+}
+
+// applyTaterSettings maps Tater's native settings vocabulary onto the
+// firmware's existing runtime configuration and hardware controllers.
+func applyTaterSettings(values map[string]any, srv *server.Server, canceller *aec.Canceller, dc *client.DataClient) (map[string]any, error) {
+	applied := make(map[string]any, len(values))
+	for key, value := range values {
+		applied[key] = value
+	}
+	msg := config.ConfigMessage{}
+	applyNativeVisualSettings(values, applied)
+
+	if value, ok := values["volume_percent"]; ok {
+		percent := int(math.Round(nativeNumber(value, float64(deviceVolumePercent(srv.VolumeLevel())))))
+		if percent < 0 {
+			percent = 0
+		} else if percent > 100 {
+			percent = 100
+		}
+		srv.SetVolume(int(math.Round(float64(percent) * 127 / 100)))
+		applied["volume_percent"] = percent
+	}
+	if value, ok := values["wake_threshold"]; ok {
+		threshold := nativeNumber(value, 0)
+		if threshold <= 0 || threshold > 1 {
+			return applied, fmt.Errorf("wake_threshold must be in (0, 1]")
+		}
+		msg.MwwThreshold = &threshold
+		applied["wake_threshold"] = threshold
+	}
+	if value, ok := values["wake_sliding_window"]; ok {
+		window := int(math.Round(nativeNumber(value, 0)))
+		if window < 1 || window > 100 {
+			return applied, fmt.Errorf("wake_sliding_window must be between 1 and 100")
+		}
+		msg.MwwSlidingWindow = &window
+		applied["wake_sliding_window"] = window
+	}
+	if value, ok := values["close_miss_threshold"]; ok {
+		threshold := nativeNumber(value, 0)
+		if threshold <= 0 || threshold > 1 {
+			return applied, fmt.Errorf("close_miss_threshold must be in (0, 1]")
+		}
+		msg.MwwCloseMiss = &threshold
+		applied["close_miss_threshold"] = threshold
+	}
+	if value, ok := values["wake_engine"]; ok {
+		engine := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		switch engine {
+		case "off", "button", "micro_wake_word", "server":
+		default:
+			return applied, fmt.Errorf("unsupported wake_engine %q", engine)
+		}
+		enabled := engine == "micro_wake_word"
+		msg.MwwShadowEnabled = &enabled
+		applied["wake_engine"] = engine
+	}
+	if value, ok := values["wake_word"]; ok {
+		wakeWord := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		if wakeWord == "hey tater" {
+			wakeWord = "hey_tater"
+		}
+		if wakeWord == "custom_url" {
+			packageName, err := microwakeword.InstallPackageURL(context.Background(), strings.TrimSpace(fmt.Sprint(values["wake_word_url"])))
+			if err != nil {
+				return applied, err
+			}
+			msg.MwwModel = packageName
+			applied["wake_word"] = "custom_url"
+			applied["wake_word_url"] = strings.TrimSpace(fmt.Sprint(values["wake_word_url"]))
+		} else if wakeWord != "" && wakeWord != "hey_tater" {
+			return applied, fmt.Errorf("wake word %q is not installed on this Echo", wakeWord)
+		} else {
+			msg.MwwModel = "hey_tater"
+			applied["wake_word"] = "hey_tater"
+		}
+	}
+	if value, ok := values["aec_enabled"]; ok {
+		enabled := nativeBool(value, true)
+		msg.AecEnabled = &enabled
+		applied["aec_enabled"] = enabled
+	}
+	if value, ok := values["aec_delay_ms"]; ok {
+		delay := int(math.Round(nativeNumber(value, 0)))
+		if delay < 0 {
+			delay = 0
+		} else if delay > 1000 {
+			delay = 1000
+		}
+		msg.AecDelayMs = &delay
+		applied["aec_delay_ms"] = delay
+	}
+	if value, ok := values["barge_in_enabled"]; ok {
+		enabled := nativeBool(value, true)
+		msg.BargeInEnabled = &enabled
+		applied["barge_in_enabled"] = enabled
+	}
+	config.Get().Apply(msg)
+	applyAecConfig(canceller, dc)
+	return applied, nil
+}
+
+func nativeStateAnimation(state string) server.AnimSpec {
+	nativeVisuals.RLock()
+	brightness := float64(nativeVisuals.brightness) / 100
+	color := [3]uint8{
+		uint8(math.Round(float64(nativeVisuals.color[0]) * brightness)),
+		uint8(math.Round(float64(nativeVisuals.color[1]) * brightness)),
+		uint8(math.Round(float64(nativeVisuals.color[2]) * brightness)),
+	}
+	listening, thinking := nativeVisuals.listening, nativeVisuals.thinking
+	tool, replying := nativeVisuals.tool, nativeVisuals.replying
+	nativeVisuals.RUnlock()
+	visual := func(name, fallback string) string {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "solid", "directional":
+			return "solid"
+		case "pulse", "breathe", "heartbeat", "ripple":
+			return "pulse"
+		case "voice_ring", "equalizer":
+			return "meter"
+		case "sparkle", "ping_pong", "spinner", "orbit", "comet", "dual_comet", "scanner":
+			return "spin"
+		case "theater", "wave", "shimmer", "twinkle":
+			return "rotate"
+		default:
+			return fallback
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "listening":
+		return server.AnimSpec{Pattern: visual(listening, "solid"), Colors: [][3]uint8{color}, Listening: true, PeriodMs: 80, TTLSec: 30}
+	case "thinking":
+		return server.AnimSpec{Pattern: visual(thinking, "spin"), Colors: [][3]uint8{color, scaleNativeColor(color, 0.28)}, PeriodMs: 80, TTLSec: 135}
+	case "tool_call":
+		return server.AnimSpec{Pattern: visual(tool, "rotate"), Colors: [][3]uint8{color, {160, 35, 220}, {30, 5, 60}}, PeriodMs: 70, TTLSec: 135}
+	case "speaking", "playing":
+		return server.AnimSpec{Pattern: visual(replying, "meter"), Colors: [][3]uint8{color}, TTLSec: 180}
+	case "error":
+		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 900, TTLSec: 10}
+	default:
+		return server.AnimSpec{Pattern: "off"}
+	}
+}
+
+func scaleNativeColor(color [3]uint8, scale float64) [3]uint8 {
+	return [3]uint8{
+		uint8(math.Round(float64(color[0]) * scale)),
+		uint8(math.Round(float64(color[1]) * scale)),
+		uint8(math.Round(float64(color[2]) * scale)),
+	}
+}
+
+func nativeTimerAnimation() server.AnimSpec {
+	return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{255, 80, 0}}, PeriodMs: 650}
 }
 
 // applyShadowConfig starts, stops or re-points on-device wake word scoring from

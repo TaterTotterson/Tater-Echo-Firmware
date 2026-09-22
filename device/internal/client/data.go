@@ -15,6 +15,7 @@ import (
 	"github.com/wilbowes/EchoMuse/internal/beamformer"
 	"github.com/wilbowes/EchoMuse/internal/config"
 	"github.com/wilbowes/EchoMuse/internal/processor"
+	"github.com/wilbowes/EchoMuse/internal/wakeword/microwakeword"
 	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
 	"github.com/wilbowes/EchoMuse/pkg/mic"
 	"github.com/wilbowes/EchoMuse/pkg/speaker"
@@ -205,12 +206,25 @@ type DataClient struct {
 	onDirectionChange func(angle float64)
 	directionMu       sync.Mutex
 
+	// pcmObserver receives the exact 80 ms, post-beamforming/post-AEC PCM
+	// chunks used by the wake scorers and sent to the legacy controller.  It
+	// is the transport-neutral seam used by the Tater native client: native
+	// mode can own the same audio pipeline without opening an EchoMuse data
+	// WebSocket, while legacy mode can mirror an already-running stream.
+	pcmObserverMu sync.RWMutex
+	pcmObserver   func([]byte)
+
 	// shadowScorer scores the always-on wake stream on the device without
 	// acting on it (internal/wakeword/shadow), nil when off. Guarded because
 	// a config push swaps it from the control goroutine while the mic
 	// goroutine is pushing frames into it.
 	shadowMu     sync.Mutex
 	shadowScorer *shadow.Scorer
+	// mwwShadowScorer observes the identical post-AEC 80 ms frames with the
+	// Tater microWakeWord runtime. It remains independent of the inherited
+	// openWakeWord scorer so either experiment can be enabled by itself.
+	mwwShadowMu     sync.Mutex
+	mwwShadowScorer *microwakeword.ShadowScorer
 
 	// Hardware echo reference detection (#385). Ch8 of the mic capture is a
 	// loopback of the device's own playback on biscuit, arriving in the same
@@ -385,10 +399,48 @@ func (d *DataClient) ShadowScorer() *shadow.Scorer {
 	return d.shadowScorer
 }
 
+// SetMWWShadowScorer installs or removes the Tater microWakeWord observer.
+// The old scorer is closed after releasing the pointer lock so the microphone
+// goroutine never waits for a native inference already in flight.
+func (d *DataClient) SetMWWShadowScorer(s *microwakeword.ShadowScorer) {
+	d.mwwShadowMu.Lock()
+	old := d.mwwShadowScorer
+	d.mwwShadowScorer = s
+	d.mwwShadowMu.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
+// MWWShadowScorer returns the currently active Tater microWakeWord observer.
+func (d *DataClient) MWWShadowScorer() *microwakeword.ShadowScorer {
+	d.mwwShadowMu.Lock()
+	defer d.mwwShadowMu.Unlock()
+	return d.mwwShadowScorer
+}
+
 func (d *DataClient) OnDirectionChanged(cb func(angle float64)) {
 	d.directionMu.Lock()
 	d.onDirectionChange = cb
 	d.directionMu.Unlock()
+}
+
+// OnPCM installs a non-blocking observer for processed 16 kHz mono S16_LE
+// chunks. The callback runs on the microphone goroutine and therefore must
+// copy or enqueue the slice before returning.
+func (d *DataClient) OnPCM(cb func([]byte)) {
+	d.pcmObserverMu.Lock()
+	d.pcmObserver = cb
+	d.pcmObserverMu.Unlock()
+}
+
+func (d *DataClient) observePCM(pcm []byte) {
+	d.pcmObserverMu.RLock()
+	cb := d.pcmObserver
+	d.pcmObserverMu.RUnlock()
+	if cb != nil {
+		cb(pcm)
+	}
 }
 
 func (d *DataClient) NotifyReady(serverAddr string) {
@@ -511,6 +563,24 @@ func (d *DataClient) StartMic(lockMic bool) {
 	d.micConn = conn
 	go d.streamMic(conn, d.micStopCh, lockMic)
 	log.Println("[data] Mic streaming started")
+}
+
+// StartLocalMic starts the permanent, ungated microphone pipeline without a
+// legacy data connection. It is used by direct Tater-native mode. StartMic
+// and StartLocalMic share ownership state so only one beamformer/AEC pipeline
+// can exist at a time.
+func (d *DataClient) StartLocalMic() {
+	d.micMu.Lock()
+	defer d.micMu.Unlock()
+	if d.micActive {
+		return
+	}
+	d.micWanted, d.micWantedLock = false, false
+	d.micActive = true
+	d.micStopCh = make(chan struct{})
+	d.micConn = nil
+	go d.streamMic(nil, d.micStopCh, false)
+	log.Println("[data] local microphone pipeline started")
 }
 
 // resumeMic restores the stream on a new data connection when the
@@ -847,8 +917,17 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	if sc := d.ShadowScorer(); sc != nil {
 		sc.Reset()
 	}
+	if sc := d.MWWShadowScorer(); sc != nil {
+		sc.Reset()
+	}
 
 	sendFrame := func(payload []byte) {
+		// A nil connection is the deliberate standalone-native path. The
+		// processed PCM has already reached observePCM below; there is no
+		// legacy framing or socket write to perform.
+		if conn == nil {
+			return
+		}
 		frame := make([]byte, 3+len(payload))
 		frame[0] = frameTypeMic
 		binary.BigEndian.PutUint16(frame[1:3], seqNum)
@@ -1090,6 +1169,10 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 					if sc := d.ShadowScorer(); sc != nil {
 						sc.PushBytes(buf[:vadOwwChunkBytes])
 					}
+					if sc := d.MWWShadowScorer(); sc != nil {
+						sc.PushBytes(buf[:vadOwwChunkBytes])
+					}
+					d.observePCM(buf[:vadOwwChunkBytes])
 					sendFrame(buf[:vadOwwChunkBytes])
 					buf = buf[vadOwwChunkBytes:]
 				}

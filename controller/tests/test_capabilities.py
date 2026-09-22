@@ -317,3 +317,18 @@ def test_the_controller_announces_its_own_features_and_the_device_reads_them():
         f"controller announces {announced - consumed} which the device never "
         f"looks for — the feature would never be used and nothing would say so"
     )
+
+
+def test_microwakeword_shadow_is_negotiated_and_never_dispatched_as_a_wake():
+    """The new observer must report through its own message path, with no
+    accidental fall-through into the active oww_wake handler."""
+    py = CONTROLLER.read_text()
+    go = CONTROL_GO.read_text()
+
+    assert '"mww_shadow"' in py[py.index("CONTROLLER_FEATURES = ["):]
+    assert 'FeatureMWWShadow = "mww_shadow"' in go
+    assert 'elif msg_type == "mww_shadow_cross":' in py
+    block = py[py.index('elif msg_type == "mww_shadow_cross":'):]
+    block = block[:block.index('elif msg_type == "oww_wake":')]
+    assert "mww_shadow.record_cross" in block
+    assert "pending_wake.offer" not in block

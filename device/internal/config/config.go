@@ -31,6 +31,14 @@ type Device struct {
 	// Wake word
 	OwwThreshold float64
 	OwwModel     string
+	// MwwShadowEnabled independently enables the Tater microWakeWord runtime.
+	// It is observational only: crossings are reported but never start a turn.
+	// MwwThreshold=0 uses the model manifest's calibrated threshold.
+	MwwShadowEnabled bool
+	MwwThreshold     float64
+	MwwSlidingWindow int
+	MwwCloseMiss     float64
+	MwwModel         string
 	// BargeInEnabled / BargeInThreshold mirror the controller's barge-in
 	// settings. The device needs them for on-device scoring: while the speaker
 	// is streaming, the controller lowers its wake bar to BargeInThreshold
@@ -161,6 +169,11 @@ func (d *Device) loadDefaults() {
 	d.OwwThreshold = envFloat("OWW_THRESHOLD", 0.5)
 	d.OwwModel = envStr("OWW_MODEL", "hey_jarvis_v0.1")
 	d.OwwOnDevice = normaliseOnDevice(envStr("OWW_ON_DEVICE", OnDeviceOff))
+	d.MwwShadowEnabled = envBool("MWW_SHADOW_ENABLED", false)
+	d.MwwThreshold = envFloat("MWW_THRESHOLD", 0)
+	d.MwwSlidingWindow = envInt("MWW_SLIDING_WINDOW", 0)
+	d.MwwCloseMiss = envFloat("MWW_CLOSE_MISS_THRESHOLD", 0)
+	d.MwwModel = envStr("MWW_MODEL", "hey_tater")
 	d.BargeInThreshold = envFloat("BARGE_IN_THRESHOLD", 0.05)
 	d.DuckDb = envFloat("DUCK_DB", -18)
 	d.AdcDigitalGain = envInt("ADC_DIGITAL_GAIN", 88)
@@ -213,6 +226,21 @@ func (d *Device) Apply(msg ConfigMessage) {
 	}
 	if msg.OwwOnDevice != "" {
 		d.OwwOnDevice = normaliseOnDevice(msg.OwwOnDevice)
+	}
+	if msg.MwwShadowEnabled != nil {
+		d.MwwShadowEnabled = *msg.MwwShadowEnabled
+	}
+	if msg.MwwThreshold != nil && *msg.MwwThreshold >= 0 && *msg.MwwThreshold <= 1 {
+		d.MwwThreshold = *msg.MwwThreshold
+	}
+	if msg.MwwSlidingWindow != nil && *msg.MwwSlidingWindow >= 0 && *msg.MwwSlidingWindow <= 100 {
+		d.MwwSlidingWindow = *msg.MwwSlidingWindow
+	}
+	if msg.MwwCloseMiss != nil && *msg.MwwCloseMiss >= 0 && *msg.MwwCloseMiss <= 1 {
+		d.MwwCloseMiss = *msg.MwwCloseMiss
+	}
+	if msg.MwwModel != "" {
+		d.MwwModel = msg.MwwModel
 	}
 	if msg.BargeInEnabled != nil {
 		d.BargeInEnabled = *msg.BargeInEnabled
@@ -281,6 +309,10 @@ func (d *Device) Snapshot() ConfigMessage {
 	// Same reason as beamformingEnabled above: copy, never point into the
 	// mutex-guarded struct.
 	bargeInEnabled := d.BargeInEnabled
+	mwwShadowEnabled := d.MwwShadowEnabled
+	mwwThreshold := d.MwwThreshold
+	mwwSlidingWindow := d.MwwSlidingWindow
+	mwwCloseMiss := d.MwwCloseMiss
 	agcEnabled := true
 	if d.AgcEnabled != nil {
 		agcEnabled = *d.AgcEnabled
@@ -304,6 +336,11 @@ func (d *Device) Snapshot() ConfigMessage {
 		OwwThreshold:       d.OwwThreshold,
 		OwwModel:           d.OwwModel,
 		OwwOnDevice:        d.OwwOnDevice,
+		MwwShadowEnabled:   &mwwShadowEnabled,
+		MwwThreshold:       &mwwThreshold,
+		MwwSlidingWindow:   &mwwSlidingWindow,
+		MwwCloseMiss:       &mwwCloseMiss,
+		MwwModel:           d.MwwModel,
 		BargeInEnabled:     &bargeInEnabled,
 		BargeInThreshold:   d.BargeInThreshold,
 		StartupVolume:      d.StartupVolume,
@@ -325,23 +362,28 @@ func (d *Device) Snapshot() ConfigMessage {
 // ConfigMessage mirrors the JSON shape of the config control message
 // sent by the controller. JSON tags must match em_controller.py exactly.
 type ConfigMessage struct {
-	Type               string   `json:"type,omitempty"`
+	Type string `json:"type,omitempty"`
 	// Pointer typed so 0 is expressible. Both are raw tinymix control
 	// values and 0 is the bottom of each control's own range — a legitimate
 	// setting, and the one somebody reaches for in a loud room. Under the
 	// "non-zero means set" rule they were silently ignored: the dashboard
 	// slider offers 0, the config stored 0, and the device carried on at
 	// whatever gain it already had.
-	AdcDigitalGain     *int     `json:"adcDigitalGain,omitempty"`
-	AdcMicpga          *int     `json:"adcMicpga,omitempty"`
-	MicGainDb          *int     `json:"micGainDb,omitempty"`
-	StartupVolume      int      `json:"startupVolume,omitempty"`
-	VadThreshold       float64  `json:"vadThreshold,omitempty"`
-	VadSpeechMs        int      `json:"vadSpeechMs,omitempty"`
-	VadSilenceMs       int      `json:"vadSilenceMs,omitempty"`
-	OwwThreshold       float64  `json:"owwThreshold,omitempty"`
-	OwwModel           string   `json:"owwModel,omitempty"`
-	OwwOnDevice        string   `json:"owwOnDevice,omitempty"`
+	AdcDigitalGain   *int     `json:"adcDigitalGain,omitempty"`
+	AdcMicpga        *int     `json:"adcMicpga,omitempty"`
+	MicGainDb        *int     `json:"micGainDb,omitempty"`
+	StartupVolume    int      `json:"startupVolume,omitempty"`
+	VadThreshold     float64  `json:"vadThreshold,omitempty"`
+	VadSpeechMs      int      `json:"vadSpeechMs,omitempty"`
+	VadSilenceMs     int      `json:"vadSilenceMs,omitempty"`
+	OwwThreshold     float64  `json:"owwThreshold,omitempty"`
+	OwwModel         string   `json:"owwModel,omitempty"`
+	OwwOnDevice      string   `json:"owwOnDevice,omitempty"`
+	MwwShadowEnabled *bool    `json:"mwwShadowEnabled,omitempty"`
+	MwwThreshold     *float64 `json:"mwwThreshold,omitempty"`
+	MwwSlidingWindow *int     `json:"mwwSlidingWindow,omitempty"`
+	MwwCloseMiss     *float64 `json:"mwwCloseMissThreshold,omitempty"`
+	MwwModel         string   `json:"mwwModel,omitempty"`
 	// ConsolePassword is the hashed record emOS's init checks before handing
 	// over a shell on the USB serial console. A POINTER, and it has to be: an
 	// EMPTY record is the legitimate "no password" setting, so with a plain
@@ -352,7 +394,7 @@ type ConfigMessage struct {
 	// Consumed by the firmware only to write it to disk for init — the
 	// firmware never checks it, because the console must work when the
 	// firmware is not running. Ignored on FireOS, which uses adbd.
-	ConsolePassword    *string  `json:"consolePassword,omitempty"`
+	ConsolePassword *string `json:"consolePassword,omitempty"`
 	// ConsoleTimeoutMin is the emOS console idle timeout in MINUTES: 0 for no
 	// timeout, otherwise 1-90. A POINTER for ConsolePassword's reason — zero
 	// is the legitimate "no timeout" setting, so with omitempty it would be

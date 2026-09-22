@@ -5758,6 +5758,7 @@ def _merge_device(row) -> dict:
         # scoring: a toggle that silently does nothing on old firmware is worse
         # than no toggle, because it looks like the feature is broken.
         "owwShadowCapable": getattr(live, "oww_shadow_capable", False) if live else False,
+        "mwwShadowCapable": getattr(live, "mww_shadow_capable", False) if live else False,
         # Separate from shadow: firmware in the field scores and reports
         # without being able to act on it, and offering those "on" produces a
         # device that never answers.
