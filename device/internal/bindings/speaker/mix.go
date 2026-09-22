@@ -40,7 +40,12 @@ const unityGain int32 = 1 << 15
 // an exponential approach: 4 is then a time constant, not a duration, and
 // the gain crawls the last few percent for over a second — measured at 31
 // periods (1.3s) to settle, against the 170ms this comment used to claim.
-const duckRampPeriods = 4
+//
+// Now 1 (2026-09-22): the duck has to land with the listening ring, which the
+// device lights at its own wake crossing, and four periods put ~150ms of ramp
+// on top of the hardware buffer. The gain is still interpolated per SAMPLE
+// across the one period, so it remains a 43ms fade rather than a step.
+const duckRampPeriods = 1
 
 // rampStep is the most the gain may move in one period.
 const rampStep = unityGain / duckRampPeriods

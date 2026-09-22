@@ -14,6 +14,7 @@ import (
 
 	"github.com/wilbowes/EchoMuse/internal/bindings/codec"
 	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
+	"github.com/wilbowes/EchoMuse/internal/outchain"
 
 	"github.com/Binozo/GoTinyAlsa/pkg/pcm"
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
@@ -22,6 +23,18 @@ import (
 // cardNr/deviceNr live in pcmstatus.go so the host test can pin them against
 // the status path — this file is ARM-only (build tag `server`).
 const periodSize  = 2048
+
+// The hardware tier: what ALSA holds ahead of the DAC. It is sized ONLY for
+// this loop's scheduling lateness — WiFi is the deep queue's job — and every
+// frame of it is latency a duck cannot touch, since ducking happens as audio
+// leaves the deep queue. It was 4 x 2048 (171ms). Measured on VVV 2026-09-22
+// under music, wake scoring, the output chain and turns: the loop was never
+// more than 19ms late (worst gap 61.7ms against a 42.7ms period). 4 x 1024 is
+// 85ms. Each mixed period is written as two halves, so the mix cadence, the
+// stream units and the wire are all unchanged.
+const alsaPeriodSize = 1024
+const alsaPeriodCount = 4
+const alsaBufferFrames = alsaPeriodSize * alsaPeriodCount
 const periodBytes = periodSize * 2 * 2 // 2 channels * 2 bytes = 8192
 
 // The wire carries MONO 48kHz — PumpPeriod duplicates L=R before queueing.
@@ -88,6 +101,15 @@ type PcmSpeaker struct {
 	duckTarget atomic.Int32
 	mixer      Mixer
 
+	// chain is the output chain (EQ, bass guard, limiter), run on the MIX,
+	// after the duck and before the taps and the DAC. Inactive until the
+	// controller says it has stopped processing (SetOutputChainActive), so
+	// the chain never runs twice. chainBuf is where a silent period is
+	// processed while filter tails decay: silencePeriod is shared and must
+	// never be written.
+	chain    *outchain.Chain
+	chainBuf []byte
+
 	// echoTap, when non-nil, receives every period pumped to ALSA — real
 	// audio and silence alike — so an AEC reference stream advances in
 	// lockstep with the playback clock. Fixed at construction (silenceLoop
@@ -129,6 +151,8 @@ func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeake
 		deadCh:   make(chan struct{}),
 		echoTap:  echoTap,
 		levelTap: levelTap,
+		chain:    outchain.New(48000),
+		chainBuf: make([]byte, periodBytes),
 	}
 	s.voice = newAudioStream(audioChanDepth, s.deadCh)
 	s.music = newAudioStream(audioChanDepth, s.deadCh)
@@ -166,12 +190,12 @@ func (p *PcmSpeaker) Init() error {
 	device := tinyalsa.NewDevice(cardNr, deviceNr, pcm.Config{
 		Channels:         2,
 		SampleRate:       48000,
-		PeriodSize:       periodSize,
-		PeriodCount:      4,
+		PeriodSize:       alsaPeriodSize,
+		PeriodCount:      alsaPeriodCount,
 		Format:           tinyalsa.PCM_FORMAT_S16_LE,
-		StartThreshold:   periodSize,
-		StopThreshold:    periodSize * 4,
-		SilenceThreshold: periodSize * 4,
+		StartThreshold:   alsaPeriodSize,
+		StopThreshold:    alsaBufferFrames,
+		SilenceThreshold: alsaBufferFrames,
 	})
 
 	session, err := device.NewAudioSession()
@@ -347,6 +371,7 @@ func (p *PcmSpeaker) WatchJackRouting(ctx context.Context) {
 // rather than hanging.
 func (p *PcmSpeaker) silenceLoop() {
 	defer close(p.deadCh)
+	var meter writeLoopMeter // bench builds only; empty otherwise
 	for {
 		select {
 		case <-p.stopCh:
@@ -375,8 +400,19 @@ func (p *PcmSpeaker) silenceLoop() {
 		}
 
 		out := p.mixer.Mix(voice, music, p.duckTarget.Load())
+		process := out != nil
 		if out == nil {
 			out = silencePeriod
+			if !p.chain.Idle() {
+				// Filter tails still ringing out of the last audio.
+				copy(p.chainBuf, silencePeriod)
+				out, process = p.chainBuf, true
+			}
+		}
+		if process {
+			if applied := p.chain.Process(out); applied != nil {
+				log.Printf("[speaker] output chain: %s", applied)
+			}
 		}
 
 		// Taps see the MIXED output, which is what the speaker actually
@@ -394,11 +430,30 @@ func (p *PcmSpeaker) silenceLoop() {
 		if p.levelTap != nil {
 			p.levelTap(level)
 		}
-		if err := p.session.Pump(out); err != nil {
+		meter.beforeWrite()
+		if err := p.pump(out); err != nil {
 			log.Printf("silenceLoop: pump error: %v", err)
 			return
 		}
+		meter.afterWrite()
 	}
+}
+
+// pump writes one mixed period to ALSA in hardware-period pieces, so the
+// buffer is topped up a hardware period at a time rather than waiting for
+// room for the whole mixed period — which would let it drain to half.
+func (p *PcmSpeaker) pump(out []byte) error {
+	const chunk = alsaPeriodSize * 4 // stereo S16
+	for off := 0; off < len(out); off += chunk {
+		end := off + chunk
+		if end > len(out) {
+			end = len(out)
+		}
+		if err := p.session.Pump(out[off:end]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // report logs and forwards a completed stream's stats. A nil st is an
@@ -407,6 +462,13 @@ func (p *PcmSpeaker) report(st *StreamStats, plane string) {
 	if st == nil {
 		log.Printf("[speaker] UNDERRUN: %s channel drained mid-stream — injecting silence", plane)
 		return
+	}
+	if p.chain.Active() {
+		// What the chain DID over the stream, as em_eq.describe_activity
+		// reports it controller-side. Maxima since the last stream ended.
+		cs := p.chain.TakeStats()
+		log.Printf("[speaker] %s output chain: guard_reduction=%.2fdB limiter_reduction=%.2fdB clipped=%d/%d bypassed",
+			plane, cs.GuardReductionDb, cs.LimiterReductionDb, cs.Clipped, cs.ClippedBypassed)
 	}
 	log.Printf("[speaker] %s stream complete — returning to silence "+
 		"(periods=%d underruns=%d minDepth=%d primeWait=%dms recvSpan=%dms maxGap=%dms)",
@@ -467,7 +529,33 @@ func (p *PcmSpeaker) SetDuck(db float64) {
 	p.duckTarget.Store(DuckGain(db))
 }
 
-// IsStreaming reports whether a VOICE stream is currently mid-flight.
+// SetOutputChain sets the output chain's configuration; it lands on the next
+// period, keeping filter and limiter state, so a change mid-song is heard
+// within ~43ms and does not click.
+func (p *PcmSpeaker) SetOutputChain(params outchain.Params) { p.chain.SetParams(params) }
+
+// SetOutputChainActive hands the output chain to this device (true) or back
+// to the controller (false). Only the controller's `output_chain` feature
+// may turn it on: a controller that does not announce it is still
+// processing the audio itself, and the chain run twice doubles the EQ.
+func (p *PcmSpeaker) SetOutputChainActive(on bool) {
+	if on == p.chain.Active() {
+		return
+	}
+	where := "the controller"
+	if on {
+		where = "this device"
+	}
+	log.Printf("[speaker] output chain now runs on %s", where)
+	p.chain.SetActive(on)
+}
+
+// VoiceAudible reports whether a VOICE stream is audible: arriving, queued,
+// or played within hold. The hold lets a caller cover what follows the last
+// period out of the speaker, such as a model whose window still holds echo.
+//
+// It replaced IsStreaming, which reported only "still arriving on the wire"
+// and so dropped the barge bar ~0.1s into a 3s reply (2026-09-22).
 //
 // Added for on-device wake word scoring: while the speaker is playing, the
 // controller lowers its wake threshold to bargeInThreshold, because echo at the
@@ -480,10 +568,14 @@ func (p *PcmSpeaker) SetDuck(db float64) {
 // the same rule on its side (wake-over-music scores against bargeInThreshold
 // only when barge-in is enabled). Reporting music as "streaming" would drop
 // the device's bar for as long as a song plays.
-func (p *PcmSpeaker) IsStreaming() bool { return p.voice.isActive() }
+func (p *PcmSpeaker) VoiceAudible(hold time.Duration) bool {
+	return p.voice.playedWithin(time.Now(), hold)
+}
 
-// IsPlayingMusic reports whether a music stream is mid-flight.
-func (p *PcmSpeaker) IsPlayingMusic() bool { return p.music.isActive() }
+// MusicAudible is VoiceAudible for the music plane.
+func (p *PcmSpeaker) MusicAudible(hold time.Duration) bool {
+	return p.music.playedWithin(time.Now(), hold)
+}
 
 // EndStream marks the in-flight voice stream complete (0x03). Always arrives
 // after every 0x02 period of that stream has been handed to PumpPeriod —
@@ -505,7 +597,7 @@ func (p *PcmSpeaker) EndMusicStream() { p.music.endStream() }
 //      ~1.3s skip). The controller sends the EOS on the cancel path too, so
 //      the discard always terminates.
 //
-// Up to PeriodCount ALSA periods (~170ms) already handed to the hardware
+// Up to alsaBufferFrames (~85ms) already handed to the hardware
 // still play — cutting those needs a stream restart, which costs more in
 // click/pop than it saves.
 func (p *PcmSpeaker) Flush() { p.voice.flush() }

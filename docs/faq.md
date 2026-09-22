@@ -11,19 +11,13 @@ faults worth checking before you file, and
 
 ## Rooting and unlocking
 
-### The XDA thread says to update to amonet v2.0.0. Should I?
-**Not on an Echo you use with EchoMuse.** v2.0.0 (10 September 2026) replaces
-the Echo's bootloaders, and after that FireOS 5 no longer boots. EchoMuse only
-runs on FireOS 5, emOS included, because emOS uses the FireOS 5 kernel.
+### Should I use amonet v1.1.0 or v2.0.0?
+**Either works.** v1.1.0 leaves the Echo on FireOS 5, where you can install
+emOS or keep FireOS with root. v2.0.0 moves it to FireOS 6, where EchoMuse
+offers emOS. Moving between amonet versions is part of the unlock, so follow
+R0rt1z2's XDA thread for that.
 
-- **Unlocking a new Echo:** use **v1.1.0**, which is still attached to the
-  thread.
-- **Already installed v2.0.0:** do not try to go back by flashing FireOS 5 or
-  an older amonet. v2.0.0 rewrote the preloader, LK and TrustZone, and writing
-  old ones back by hand is how an Echo gets hard-bricked. EchoMuse does not run
-  on FireOS 6 today, so for now that Echo stays on FireOS 6.
-
-Why it happens is explained at the top of [rooting](rooting.md).
+More in [rooting](rooting.md).
 
 ### The unlock won't run on my Mac.
 **It needs Linux.** The unlock is
@@ -369,9 +363,15 @@ downloaded from GitHub when you choose to update. Set
 `update_check_interval` to `0` to stop even that.
 
 ### Is my voice audio sent anywhere?
-It goes from the device to your controller to your Home Assistant, over your
-LAN. Where it goes after that is whatever speech-to-text you configured in
-HA — that choice is yours, not ours.
+Only after the wake word, by default. The Echo listens for it itself and
+sends nothing until it hears it; then what you say goes to your controller and
+your Home Assistant, over your LAN, until you stop speaking. Where it goes
+after that is whatever speech-to-text you configured in HA — that choice is
+yours, not ours.
+
+An Echo set to detect the wake word **on the controller** streams to the
+controller all the time instead, and the dashboard says which ones do. See
+[listening.md](listening.md).
 
 ### Is a support bundle safe to attach to a public issue?
 Yes, by design. It's an allowlist: no transcripts, no saved audio, no WiFi

@@ -74,6 +74,29 @@ keep `pkg/led`, `pkg/mic`, `pkg/speaker` and `pkg/buttons` honest as
 interfaces, and treat each Android call site as something to isolate. Nothing
 here commits the project to shipping a distro.
 
+## Where a standard exists, conform to it and prove it
+
+**If what we are handling has a known standard or spec, abide by the spec, and
+have a test that proves it** (Wil, 2026-09-19). Look up what the spec ALLOWS,
+and how the tool consuming it behaves — read its source where it matters —
+then write the test from the spec's edges rather than from typical input:
+minimum and maximum lengths, every character class it permits, the forms it
+forbids, and published test vectors where they exist. Where possible, check
+against the real implementation rather than our reading of it.
+
+The worked example is #586. An SSID is 0–32 arbitrary bytes (IEEE 802.11) and
+a WPA2 passphrase is 8–63 printable ASCII characters or 64 hex; our WiFi
+handling was written against the names people happened to test with. All four
+paths that take an SSID were wrong — refusing valid `"` and `\`, trimming
+spaces, writing `Café` back as `Caf\xc3\xa9`, and on emOS putting the SSID
+inside a shell command, where an apostrophe broke it — and nothing failed,
+because every test used plain ASCII. The fix was tested against the IEEE
+802.11i PSK vectors and against our own wpa_supplicant build parsing each form.
+
+A corollary that follows from the same bug: **never interpolate user-supplied
+text into a shell command** (serial console, `adb shell`, `sh -c`). Send hex,
+base64 or a file.
+
 ## Writing to people: bottom line first
 
 Anything a **person** reads leads with the answer and stays short — PR
@@ -130,10 +153,28 @@ and most of this file exists because something was learned the expensive way.
 Short where a person is being addressed; complete where something is being
 recorded.
 
+## Listening is private by default, and every claim about it is the Echo's own
+
+**Where the wake word is detected is chosen per Echo, and `docs/listening.md`
+is the spec** (Wil, 2026-09-21: "one or the other … not a mush of both with
+documentation that implies one thing when it's not correct"). "On this Echo"
+(`owwOnDevice=on`, the default for new installs) sends nothing until the Echo's
+own wake word fires, then only until end of speech; "On the controller"
+(`off`) streams continuously and is labelled as streaming wherever it shows.
+`shadow` is a developer diagnostic, not a user choice. Three rules follow:
+
+- **Privacy statements come from what the Echo REPORTS (`listen_state` →
+  `em_listen.resolve`), never from configuration.** Unknown is shown as
+  unknown, never as private.
+- **Nothing ever falls back to streaming.** An Echo that cannot run its own
+  wake word is `degraded` (button only) and says why.
+- **The device enforces its own limits** (ack timeout, max session length,
+  mute, link loss), so no controller failure can leave an Echo streaming.
+
 ## Device/controller compatibility
 
 The two halves version independently, so any pairing can occur in the field. Two rules, both guarded by `tests/test_capabilities.py`:
-- **Negotiate by capability, not version.** The device announces what it implements in its register message (`internal/client/control.go`, `capabilities()`: `mic`, `speaker`, `leds`, `led_anim`, `buttons`, `oww_shadow`, `oww_trigger`, `button_hold`, `audio_mix`, `aec_hw_ref`, and `ambient_light` **only when the sensor is actually readable**); the controller reads `Device.capabilities` via properties like `led_anim_capable` / `oww_shadow_capable`. Never compare version strings — that puts release history in the controller and misjudges dev builds. A UI control whose feature the device lacks is shown **disabled with the reason**, never as a control that silently does nothing.
+- **Negotiate by capability, not version.** The device announces what it implements in its register message (`internal/client/control.go`, `capabilities()`: `mic`, `speaker`, `leds`, `led_anim`, `buttons`, `oww_shadow`, `oww_trigger`, `button_hold`, `audio_mix`, `aec_hw_ref`, `oww_local_only`, `output_chain`, and `ambient_light` **only when the sensor is actually readable**); the controller reads `Device.capabilities` via properties like `led_anim_capable` / `oww_shadow_capable`. Never compare version strings — that puts release history in the controller and misjudges dev builds. A UI control whose feature the device lacks is shown **disabled with the reason**, never as a control that silently does nothing.
   **`oww_shadow` and `oww_trigger` are two capabilities and must stay two.** Shadow shipped first, so there is firmware in the field that scores and reports but has no code to act — reading "can score" as "can trigger" stands the controller's own detection down and waits for a trigger that never comes, which presents as a device that scores perfectly and never answers. Same reason `audio_mix` is announced rather than assumed: without it the controller must keep the pause/resume path, because a device that cannot mix simply never plays the `0x04` stream.
   **`aec_hw_ref` is the shape to copy when a capability cannot be proven at registration.** It says the firmware knows how to take the AEC far-end reference from a playback loopback in the mic capture; whether the board HAS one is answered separately by `aecRef` (`"hw"`/`"sw"`/`"off"`) on the stats report, because confirming a loopback needs the speaker to have played and nothing has at register time. Same "could it" vs "is it" split as `oww_shadow` against `shadow.active`. Gate UI on the runtime value, not the capability: the AEC delay control is meaningless on a frame-aligned reference but essential to a device that fell back to the software tap, and both announce the capability.
   **Negotiation runs BOTH ways, and the controller's half is newer.** The `ack` carries `features` — the controller's own capability list, read exactly as the device's is: a feature that is absent is one the controller cannot do. It exists because `ble_adverts` moved from the control plane to `0x06` on the data plane (#404), and a device sending that frame to a controller which cannot read it loses every advertisement in **silence**, since unknown frame types are ignored. That is the general hazard whenever a message MOVES rather than being added: the old path stops being used and the new one is discarded, and nothing at either end reports it. Adding a message is safe unnegotiated; moving one never is.
@@ -147,7 +188,7 @@ The two halves version independently, so any pairing can occur in the field. Two
 Device firmware, controller and emOS are versioned independently from the same repo:
 
 - **Device**: plain `v*` tags (e.g. `v2.7.6`) → `release.yml` → GitHub Release with the `server` binary asset. The tag is embedded in the binary and compared against `firmware_ver` by OTA — don't change this scheme.
-- **emOS**: `emos-v*` tags → `emos-release.yml` → GitHub Release with **two init assets** — `init` (aarch64, for FireOS 5's 64-bit kernel) and `init32` (armv7a, for FireOS 6's 32-bit one), both static and built with the pinned compiler image. The init must match the device's KERNEL, not its userspace; the firmware beside it is armv7a either way. The release asserts each one's architecture, that both are static, and that they are not the same file (two compiles differing only in a triple is where a copy-paste publishes one binary twice), then runs all six off-target checks against the source it is publishing. **`init` keeps that name** — `_fetch_latest_emos_release` selects on it by exact name, so renaming it strands every controller in the field. **An init is all that is published, and it cannot be otherwise** — a bootable image carries the device's own kernel and DTBs, so shipping one would redistribute Amazon's code; the image is assembled from the boot partition each user reads off their own device. The namespace is load-bearing twice: `emos/build.sh` stamps `/etc/os-release` from `git describe --match 'emos-v*'` and without it stamps whatever tag is nearest (a controller release number, which is worse than "unknown" because it looks plausible), and it keeps emOS out of the firmware OTA's way, since `_fetch_latest_release` selects a tag starting `v` with a `server` asset and `emos-v0.1` matches neither test. `_fetch_latest_emos_release` is the mirror image and is deliberately a separate function rather than a parameter — the two select on opposite things and share no cache, so folding them together would mean one cache holding whichever kind was asked for last. `git tag -a --cleanup=verbatim`, for the reason below.
+- **emOS**: `emos-v*` tags → `emos-release.yml` → GitHub Release with **two inits** — `init` (aarch64, for FireOS 5's 64-bit kernel), published as its own asset, and `init32` (armv7a, for FireOS 6's 32-bit one), which ships inside `emos-payload.zip` alongside `em-wifi` and the rest of the userspace (checked on emos-v0.8), both static and built with the pinned compiler image. The init must match the device's KERNEL, not its userspace; the firmware beside it is armv7a either way. The release asserts each one's architecture, that both are static, and that they are not the same file (two compiles differing only in a triple is where a copy-paste publishes one binary twice), then runs all six off-target checks against the source it is publishing. **`init` keeps that name** — `_fetch_latest_emos_release` selects on it by exact name, so renaming it strands every controller in the field. **An init is all that is published, and it cannot be otherwise** — a bootable image carries the device's own kernel and DTBs, so shipping one would redistribute Amazon's code; the image is assembled from the boot partition each user reads off their own device. The namespace is load-bearing twice: `emos/build.sh` stamps `/etc/os-release` from `git describe --match 'emos-v*'` and without it stamps whatever tag is nearest (a controller release number, which is worse than "unknown" because it looks plausible), and it keeps emOS out of the firmware OTA's way, since `_fetch_latest_release` selects a tag starting `v` with a `server` asset and `emos-v0.1` matches neither test. `_fetch_latest_emos_release` is the mirror image and is deliberately a separate function rather than a parameter — the two select on opposite things and share no cache, so folding them together would mean one cache holding whichever kind was asked for last. `git tag -a --cleanup=verbatim`, for the reason below.
 - **Controller**: `controller-v*` tags (e.g. `controller-v2.8.0`) → `controller-release.yml` → Docker image pushed to `ghcr.io/wilbowes/echomuse-controller` (`X.Y.Z` + `latest`, CPU-only, **multi-arch: linux/amd64 + linux/arm64** — it said amd64 here until 2026-08-13, long after arm64 shipped). **No GitHub Release is created** — the OTA system's release polling (`em_api._fetch_latest_release`) filters for `v*` tags with a `server` asset, but controller releases stay out of the releases list entirely by design. **Tag controller releases with `git tag -a --cleanup=verbatim` too**: with no Release behind them, the annotation is the *only* copy of the notes, and it is what the dashboard's controller-update notice displays (`em_api._fetch_controller_release` reads it via `git/matching-refs` + the tag object). A lightweight controller tag ships an image nobody can read a changelog for. Pick the newest tag by **parsed version, never list order** — the refs API sorts lexically and returns `controller-v2.9.0` *after* `controller-v2.10.0`.
 
   The notice is **advisory only and must stay that way** (`tests/test_deploy.py` enforces GET-only + no mutating call in the banner): the controller is the user's container, updated with their own `docker compose pull`. An in-app update would restart the process serving the page, mid-request, with no way to report the outcome. Note a locally-built image defaults `EM_CONTROLLER_VERSION` to `dev`, which resolves to `unknown` and correctly shows nothing — pass `--build-arg EM_CONTROLLER_VERSION=$(git describe --tags --match 'controller-v*')` for a local build that knows what it is. Version comparison lives in `version.py` (`parse`/`compare`) so it is unit-testable without aiohttp; a build between tags parses **equal** to its tag and is ahead, not behind.
@@ -217,7 +258,7 @@ Credential delivery: the provisioning wizard installs credentials over adb pre-f
 
 `config.ConfigMessage` JSON fields (camelCase) are sent from controller to device on connect and on per-device config change. Non-zero fields are applied; zero/nil fields are ignored (partial update). Changes take effect immediately — no restart required.
 
-Configurable parameters: `consolePassword`, `vadThreshold`, `vadSpeechMs`, `vadSilenceMs`, `owwThreshold`, `owwModel`, `owwSpeexNs`, `adcDigitalGain`, `adcMicpga`, `micGainDb`, `startupVolume`, `beamAngle`, `beamformingEnabled`, `aecEnabled`, `aecDelayMs`, `aecTailMs`, `aecRefSource`, `agcEnabled`, `nsAsr`, `bargeInEnabled`, `bargeInThreshold`, `bleProxyEnabled`, `eqBands`, `eqLoudness`, `limiterEnabled`, `limiterThreshold`, `limiterRelease`, `bassGuardEnabled`, `bassGuardDb`, `ledScene`, `ledListenColor`, `ledThinkColor`, `meterAttack`, `meterDecay`, `meterFloor`, `meterGamma`, `meterRef`, `meterCurve`, `wakeArbitrationMs`, `duckDb`, `buttonSingleTapEvent`, `buttonMultiTapMs`, `owwOnDevice` and `saveUtterances` (`consolePassword` is written to disk for emOS's init rather than acted on — the console must work when the firmware is not running — and its EMPTY value is meaningful, so it rides as a POINTER and the "non-zero means set" rule above does not apply to it; the last two are controller-consumed for scoping purposes, though `owwOnDevice` IS acted on by the device; `saveUtterances`, `wakeArbitrationMs`, the two `button*` keys and the five output-chain keys — `limiter*` and `bassGuard*` — are ignored by it, because that processing all happens controller-side before the audio reaches the wire).
+Configurable parameters: `consolePassword`, `vadThreshold`, `vadSpeechMs`, `vadSilenceMs`, `owwThreshold`, `owwModel`, `owwSpeexNs`, `adcDigitalGain`, `adcMicpga`, `micGainDb`, `startupVolume`, `beamAngle`, `beamformingEnabled`, `aecEnabled`, `aecDelayMs`, `aecTailMs`, `aecRefSource`, `agcEnabled`, `nsAsr`, `bargeInEnabled`, `bargeInThreshold`, `bleProxyEnabled`, `eqBands`, `eqLoudness`, `limiterEnabled`, `limiterThreshold`, `limiterRelease`, `bassGuardEnabled`, `bassGuardDb`, `ledScene`, `ledListenColor`, `ledThinkColor`, `meterAttack`, `meterDecay`, `meterFloor`, `meterGamma`, `meterRef`, `meterCurve`, `wakeArbitrationMs`, `duckDb`, `buttonSingleTapEvent`, `buttonMultiTapMs`, `owwOnDevice` and `saveUtterances` (`consolePassword` is written to disk for emOS's init rather than acted on — the console must work when the firmware is not running — and its EMPTY value is meaningful, so it rides as a POINTER and the "non-zero means set" rule above does not apply to it; the last two are controller-consumed for scoping purposes, though `owwOnDevice` IS acted on by the device; `saveUtterances`, `wakeArbitrationMs` and the two `button*` keys are ignored by it, because that processing happens controller-side. The seven output-chain keys — `eqBands`, `eqLoudness`, `limiter*`, `bassGuard*` — are applied by firmware announcing `output_chain`, and only once the controller's ack carries the same feature; until then the controller processes the audio and the device holds the values unused).
 
 ## Build and test quickref
 

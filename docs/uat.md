@@ -178,14 +178,19 @@ it.
 **Flag:** A model that uploads and is selectable but never triggers — that is
 a specific known class of bug and worth a report.
 
-### C5 · On-device wake word
-**Do:** Config → Wake word → turn on on-device detection.
-**Expect:** Wakes still work. Device → Activity still records turns.
-**Flag:** Wakes that stop entirely, or wake latency that gets noticeably
-worse.
+### C5 · Private listening
+**Do:** Config → Wake word detection → **On this Echo**. Wait for the line
+under it to say *listening privately*.
+**Expect:** Wakes still work, the first word of your command is not clipped,
+and interrupting a long reply with the wake word still works (with barge-in
+on). The home screen line counts this Echo as not streaming.
+**Flag:** Wakes that stop, a clipped first word, *button only* with no reason
+you can act on, or the line saying *listening privately* while the Echo shows
+as streaming anywhere else.
 
 ### C6 · Multiple devices don't both answer
-**Do:** With two devices in earshot, say the wake word once.
+**Do:** With two devices in earshot, say the wake word once. Repeat with one
+set to **On this Echo** and the other to **On the controller**.
 **Expect:** One device answers. The other doesn't.
 **Flag:** Both answering, or neither.
 

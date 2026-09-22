@@ -220,18 +220,23 @@
   .ww .phrase a:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .ww .built { margin-left: auto; font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); }
 
-  /* pipeline stepper */
-  .stepper { display: flex; align-items: center; margin: 14px 2px 16px; }
+  /* pipeline stepper. Top-aligned: only the running step has a third line
+     (its count), so centring would bounce the row while a build runs. */
+  .stepper { display: flex; align-items: flex-start; margin: 14px 2px 16px; }
   .step { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: none; width: 92px; }
   .step .bub { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border);
                background: var(--sunken); }
   .step.done .bub { background: var(--ok); border-color: var(--ok); }
   .step.active .bub { background: var(--lcd-amber); border-color: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  /* the running stage shows how far it is instead of a bulb */
+  .step.active .bub.fill { width: 56px; border-radius: 4px;
+    background: linear-gradient(to right, var(--lcd-amber) var(--fill, 0%), var(--sunken) var(--fill, 0%)); }
+  .step .prog { text-transform: none; letter-spacing: 0; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--lcd-amber) 25%, transparent); } }
   .step span { font-family: 'DM Mono', monospace; font-size: 8.5px; text-transform: uppercase;
                letter-spacing: 0.08em; color: var(--muted); text-align: center; }
   .step.done span, .step.active span { color: var(--text2); }
-  .conn { flex: 1; height: 2px; background: var(--border); margin: 0 2px 18px; min-width: 8px; }
+  .conn { flex: 1; height: 2px; background: var(--border); margin: 6px 2px 0; min-width: 8px; }
   .conn.done { background: var(--ok); }
 
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -379,6 +384,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let state = null, logOffset = 0, lastJobKey = null, lastWwHtml = null;
+let logDone = '', logTail = '';   // log lines already complete, and the line still being written
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -426,17 +432,30 @@ function render() {
 
   // wake words
   const html = state.wakewords.length ? state.wakewords.map(w => {
-    const stages = [
+    const stages = [                      // label, done, build stage it shows
       ['Created', true],
-      ['Voices', w.clips_train > 0],
-      ['Mixing', w.features_built],
-      ['Ready', w.model_built],
+      ['Voices', w.clips_train > 0, 'generate'],
+      ['Mixing', w.features_built, 'augment'],
+      ['Ready', w.model_built, 'train'],
     ];
-    const activeIdx = stages.findIndex(s => !s[1]);
+    // A running build reports its stage and how far along it is (clips and
+    // feature files counted in the wake word's directory, training steps
+    // from train.py's log); other jobs just pulse the next step. The
+    // numbers themselves are painted by paintProgress(), not baked in
+    // here: this markup is compared below to decide whether to rebuild the
+    // list, and a value that moves every poll would rebuild it every poll.
+    const progress = w.progress;
     const isTraining = busy() && state.job.label.includes(`'${w.name}'`);
-    const stepper = stages.map(([t, done], i) => {
-      const cls = done ? 'done' : (isTraining && i === activeIdx ? 'active' : '');
-      return `<div class="step ${cls}"><div class="bub"></div><span>${t}</span></div>` +
+    let activeIdx = -1;
+    if (progress) activeIdx = stages.findIndex(s => s[2] === progress.stage);
+    else if (isTraining) activeIdx = stages.findIndex(s => !s[1]);
+    const stepper = stages.map(([t, done, stage], i) => {
+      const active = i === activeIdx;
+      const cls = active ? 'active' : done ? 'done' : '';
+      const filled = active && progress && progress.total;
+      const bub = `<div class="bub${filled ? ' fill' : ''}"></div>`;
+      const prog = filled ? '<span class="prog"></span>' : '';
+      return `<div class="step ${cls}"${filled ? ` data-stage="${stage}"` : ''}>${bub}<span>${t}</span>${prog}</div>` +
              (i < stages.length - 1 ? `<div class="conn ${stages[i+1][1] ? 'done' : ''}"></div>` : '');
     }).join('');
     return `
@@ -516,6 +535,25 @@ function render() {
     if (open.has(d.closest('.ww').dataset.name)) d.open = true;
 }
 
+/* The fill and its count move every poll; set in place on the card
+   render() has already put there, so the list markup stays stable and the
+   cards keep their state (a recording in progress, a verdict) during a
+   build. */
+function paintProgress() {
+  for (const w of state.wakewords) {
+    const p = w.progress;
+    if (!p || !p.total) continue;
+    // Matched on the stage, not on whichever step is active: render() leaves
+    // the DOM alone while a settings field is being typed in, and a count
+    // must not land on a step that has since moved on.
+    const step = document.querySelector(
+      `.ww[data-name="${CSS.escape(w.name)}"] .step[data-stage="${p.stage}"]`);
+    if (!step) continue;
+    step.querySelector('.bub').style.setProperty('--fill', `${Math.min(100, 100 * p.done / p.total).toFixed(1)}%`);
+    step.querySelector('.prog').textContent = `${p.done.toLocaleString()} / ${p.total.toLocaleString()}`;
+  }
+}
+
 /* Google credentials panel */
 function renderGoogle() {
   const g = state.google || {};
@@ -541,7 +579,7 @@ function renderJob() {
   if (!j) return;
   const key = j.kind + j.started;
   if (key !== lastJobKey) {
-    lastJobKey = key; logOffset = 0; $('logPre').textContent = '';
+    lastJobKey = key; logOffset = 0; logDone = logTail = ''; $('logPre').textContent = '';
     $('console').classList.add('min');
     $('toggleLog').textContent = 'show log';
   }
@@ -554,6 +592,21 @@ function renderJob() {
   $('cancelJob').style.display = j.running ? '' : 'none';
 }
 
+// tqdm (train.py, the augmenter) redraws its bar with \r: keep only the
+// last redraw of each line, or a progress bar arrives as thousands of
+// near-identical lines and pushes everything useful out of the buffer.
+const collapseCr = t => t.replace(/[^\r\n]*\r(?=[^\n])/g, '');
+
+// Fold a chunk of raw log into [done, tail]: committed whole lines, and the
+// line still being written. A line can straddle two reads, so the tail is
+// shown but not committed until its newline arrives: a live bar keeps
+// updating in place, and the 100k trim only ever eats committed history,
+// never the line being redrawn. (Tested by tests/console_log.test.mjs.)
+function foldLog(done, tail, data) {
+  const buf = tail + data, cut = buf.lastIndexOf('\n') + 1;
+  return [(done + collapseCr(buf.slice(0, cut))).slice(-100000), collapseCr(buf.slice(cut))];
+}
+
 async function pollLog() {
   if (!state || !state.job) return;
   const r = await (await fetch(`/api/log?offset=${logOffset}`)).json();
@@ -561,14 +614,15 @@ async function pollLog() {
     logOffset = r.offset;
     const pre = $('logPre');
     const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
-    pre.textContent = (pre.textContent + r.data).slice(-100000);
+    [logDone, logTail] = foldLog(logDone, logTail, r.data);
+    pre.textContent = logDone + logTail;
     if (stick) pre.scrollTop = pre.scrollHeight;
   }
 }
 
 async function refresh() {
   try { state = await api('/api/state'); } catch { return; }
-  render(); renderJob();
+  render(); renderJob(); paintProgress();
 }
 
 /* Turn `forge.py test` output into a plain-language verdict */

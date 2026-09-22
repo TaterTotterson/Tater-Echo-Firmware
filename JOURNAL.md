@@ -3149,3 +3149,441 @@ warnings (none since 12:19, several coincided with console use, two overnight
 did not); `wifi_tx_thro` 302/258 on emOS against 0 on stock; the new
 `start_server.sh` has not been through a reboot on a FireOS device running
 EchoMuse — the bench has none.
+
+## 2026-09-18 — the mute button is a key, and what stock FireOS does to make sound
+
+**The Dot 2's mute is not a hardware kill switch.** Measured on VVV (stock
+FireOS 5.5.5.4) with Wil at the device. The physical press arrives as
+`KEY_MUTE` on `/dev/input/event1` (`mtk-kpd`), identical to one injected with
+`sendevent`. Muted, all nine capture channels read bit-exact zero with Wil
+clapping: the mute is real, and it is in the digital path (codec ADCs or the
+audio front end), since an analogue disconnect would still leave a noise
+floor. One injected `KEY_MUTE` then undid the PHYSICAL mute: ring off, the
+seven mics back at ~−62dBFS, claps at −34dBFS. Wil's working theory was a
+flip-flop behind the button; there is none in this path. `gpio445` stayed high
+throughout, muted or not, consistent with it being the wrong pin (the real
+mute LED is gpio444, `mute_button.go`).
+
+This corrected `docs/quickstart.md`, which called our mute "hardware-level
+since v2.7.4". Ours is the same shape as stock's: the firmware writes the four
+codecs' mute controls and refuses `mic_start`. Real, and inside the chips, but
+reversible by any root process, and "hardware-level" read as "software cannot
+undo it". The internal notes' "hardware ADC mute" is accurate and stays; it
+is the user-facing claim that promised more than the board has.
+
+**Recording the array needs our own tool, and the mediaserver trap is sharper
+than the jack notes said.** Stock `tinycap` cannot open biscuit's mic at any
+depth: `-b 24` is 4-byte S24_LE, the hardware takes only packed S24_3LE, and
+16/32 fail the same way. `porting/pcm_capture` is `capture_mics` with flags.
+And a PCM mediaserver holds is not merely busy: `tinypcminfo -D 0 -d 24`
+blocked indefinitely and had to be killed, so everything that touches the mic
+runs after `stop media`, which Android undoes by restarting it.
+
+**Watching stock make a sound recovers the route we found by hand.**
+`porting/probe.sh` presses volume up then down so FireOS plays its chime, and
+diffs the mixer, regmaps and DAPM graph against idle. On VVV: `pcm23p` at
+S16_LE/2ch/48k, `Ext_Speaker_Amp_Switch` On, `Audio_DacMux_Setting` flipped,
+`HP Driver Gain Volume` 0→6, codec `003f`/`0040`/`0089`/`0090`/`0091`. That is
+the DAC path biscuit's bring-up assembled over weeks; for a new board it is
+one chime.
+
+**#463 changes nothing on stock FireOS 5, and #455's premise was read off
+slot B.** Its patch function, run on three stock FireOS 5 boot images
+(5.5.5.4's update package, a 2017 image and the v2test copy), wrote bytes
+identical to the old 51-byte replacement: a stock slot A cmdline is only
+`bootopt=64S3,32N2,64N2`. The "everything FireOS shipped" list (lowmemorykiller,
+rootwait, verity) is slot B's. Merged on that basis without a bench run.
+
+**VVV's slot B is a 32-bit kernel.** `boot_b_x` (p11) starts `00 00 a0 e1`
+after its MTK header, an ARM zImage, and carries `bootopt=…,32N2`; slot A is
+gzip and `64N2`. So `bootopt`'s third field reads as kernel bitness, and a
+FireOS 5 Dot 2 carries a 32-bit kernel image it never boots. One device.
+
+**Also today:** `porting/` (profile, probe, `pcm_capture`, a README for
+testers) in #570; the dev add-on installed on the HA host from main + #563 +
+#568 + #569, stopped, `boot: manual`, ESPHome from 16201; #563 and #568
+rebased over #463's conflicts.
+
+**The FireOS 5 native wizard path, on the bench.** VVV restored to stock
+5.5.5.4 (wipe cache/data, sideload `272.6.8.0`, f1r30s; the lk/tee write
+errors in the log are amonet's TWRP protecting the unlock), then provisioned
+through the dev add-on with the soaking firmware (v2.15.0-37-gd5e9456). All 13
+steps; #568's escrow landed before the flash, a wrong Magisk file was refused
+before any write, and Restore verified against the partition; #463's cmdline
+came out exactly as predicted. The new firmware registered, HA adopted it on
+16201, and a full turn ran (`Close the office blind.`, outcome ok) — the first
+time the name-based mixer code has run under stock FireOS rather than emOS.
+
+It found three wizard faults. A restore left the run on the next step as if
+the undone write still held, and a boot image picked as the custom server
+installed cleanly, the step verifying only size — both fixed in #571 (a
+restore ends the run; the file must be a 32-bit ARM ELF carrying our module
+path). And the "already registered" check matched a row created only by a
+minted TLS token, which has no `firmware_ver` and has never connected — not
+yet fixed.
+
+**HA's satellite setup timed out once, n=1.** The connection test failed on
+the first attempt and passed on the second, and from our side the two are
+identical: the proxied test sound fetched, 102 periods streamed, playback
+device-confirmed in 4.5s. The only difference is timing — the first announce
+arrived 0.2s after HA's first connection. The test passes when the satellite
+fetches a URL, and for ESPHome HA wraps that URL in its ffmpeg proxy, so the
+fetch that counts is ffmpeg's; the guess is that it, or HA's listener, was not
+ready that early. Unverified: HA debug logging on `assist_satellite` and
+`esphome` across a re-add would settle it. The same session's
+`SatelliteBusyError` was a 7.3s link stall stretching a 2.9s announcement to
+8.7s while HA asked for another — correct refusal, VVV's WiFi worth watching.
+
+**All three provisioning paths ran on hardware through the dev add-on
+(main + #563 + #568 + #569), and the release order's bench gate is met.**
+
+*emOS on FireOS 6, the spare, #563's three slot cases*, each set up by hand in
+TWRP and verified by read-back after dropping caches, with both slots copied
+off first (`/root/em-diag/spare-2026-09-18/`). Stock only in B: built from B,
+emOS to A, B's md5 unchanged read from emOS afterwards (`busybox mknod` then
+md5). Both stock: built from A against system_a (p13), B kept, and emOS booted
+on p13 for the first time on this unit. Stock only in A: the wizard copied A
+to B and verified it, logged "Stock FireOS is now kept in slot B", and only
+then wrote A; B read back as `7506fab…` from the device afterwards. That is
+the copy path, and it is the one that protects the only stock image.
+
+The build is REPRODUCIBLE: run 1's image was byte-identical to the one
+already in slot A (same donor, same init, same stamp, `82a6cba9…` both), and
+runs 2 and 3 built `e615da4c…` twice. So a re-provision that changes nothing
+writes identical bytes — run 1 proved the logic and the write path, not a
+change of content.
+
+*emOS on FireOS 5*, on G090LF11803611NF (v1) rather than VVV, because it was
+already emOS v0.5 and makes the v1 re-provision case: escrowed our own image
+(`d619034b…`, recognised by the ramoops marker alone — it predates the
+`emos.system=` stamp), the packer rebuilt from it without doubling its own
+arguments, and it came up v0.7 on aarch64 and registered. No stamp on v1 is by
+design (the v1 path sends no system partition; emOS falls back to p13). #564's
+`/system` read worked on TWRP 3.2.3, its last untested case. v1's slot B holds
+the 32-bit-kernel image again (`32N2`), as on VVV.
+
+**Traps met on the way.** TWRP 3.7's dd refuses `conv=fsync` outright ("conv
+option disabled") and writes nothing — caught only because every hand write
+was read back; the wizard is unaffected because it writes with busybox dd.
+Plugging a Dot into this box power-cycles it, so the console is not there for
+~40s. This box has no udev: a third ACM port needed `mknod /dev/ttyACM2 c 166
+2`. And the emOS console's idle timeout drops back to the password gate, where
+a command is taken as a wrong password.
+
+**Still owed from the bench:** the "already registered" check matching a
+token-only row; the stale "No Echo unlocked with v2 has been through this
+wizard before"; and "Build: Android 16.1.0" read from TWRP's own ramdisk on
+the first line. #571 (restore ends the run, the server-binary check, the
+FAIL-BUSY scan) is green and not merged. The three bench devices now hold
+dev's CA, so the ea.7 soak needs them re-provisioned through EA.
+
+**The first public board profile leaked its owner's identifiers.** @technotiger
+ran `porting/profile.sh` on a Dot 3 (donut) and attached the result to #527.
+The Dot 3 publishes Amazon's whole idme block in its device tree, so the
+serial, WiFi and Bluetooth MACs and `mac_sec` went out with it: the script
+read `/proc/idme` through an allowlist and then copied the tree's `/idme` node
+wholesale. The Dot 2's tree has no such node, so testing on VVV found nothing.
+Deleted the comment, apologised, and pointed them at GitHub Support — the
+direct attachment URL still serves the file after the comment is gone, which
+is worth knowing before anyone relies on deletion. #574 removes `/idme` and
+`/chosen` before anything is built from the tree and, as the backstop,
+refuses to make the archive if the device's serial survives anywhere in the
+output; the #527 post now links the fixed commit. The shape to remember: an
+allowlist on one path is no protection if a second path copies the same data
+raw.
+
+**Evening.** ea.7 (RC1) is on the EA add-on; EFF reconnected and took the new
+`start_server.sh` (md5 `4e91b101…`), which is safe on released firmware because
+`platform-init` needs the `EM_PLATFORM_INIT_V1` marker v2.15.0 lacks and every
+control name exists on stock FireOS 5. The soak has not started: the spare,
+VVV and NF still trust dev's CA and need re-provisioning through EA.
+
+The first Dot 3 (donut, MT8167B) profile: LED driver identical to biscuit's
+(`is31fl3236` @ 0-003f), mics 4ch S32_LE on `pcm1c`, playback `pcm6p`
+S16/2ch/48k through a TAS2770, an AWB write-back stream on `pcm7c` that looks
+like a hardware echo reference, `gpio-privacy` delivering KEY_MUTE with DOWN
+and UP 48µs apart (a latch, probably — untested), and its BCB marking slot B
+active. It also exposed two porting bugs fixed in #575: its mic belongs to one
+of Amazon's own daemons, not mediaserver (probe.sh now finds the holder's init
+service by pid), and toybox `ps` needs `-A`.
+
+#566 (quiet jack output) was answered; the jack gain fix has been in v2.15.0
+since 09-10. #576 is open and NOT merged: the emOS / FireOS 5 slug per device,
+middle-ellipsis for long names and versions across six sites, and a 32-character
+label cap (HA itself has none; 255 is its entity_id limit). Its first browser
+look squeezed the tile's name to two letters, so the name now owns the header
+row with firmware · OS beneath it — built into the dev add-on (stopped) and
+not yet seen.
+
+
+## 2026-09-19 — what a TWRP wipe takes, and why it does not matter on biscuit
+
+Wil asked for an optional TWRP wipe at the start of the wizard and, before it
+was built, for an in-depth look at what `twrp wipe data` actually does, since
+he uses it routinely. From TWRP's source (android-8.1 for v1's 3.2.3,
+android-12.1 for v2's 3.7): `wipe data` is `Factory_Reset()`, which deletes
+everything in /data except lost+found, misc/vold and — on data-media builds —
+media/; `wipe cache` formats /cache. So it removes `/data/nvram`, MediaTek's
+home for WiFi/BT config, and emOS never runs the `nvram_daemon` that rebuilds
+it. Wil's own wipes were always followed by a FireOS boot, which rebuilds it.
+
+**On biscuit nothing in /data/nvram is per-device**, measured read-only over
+USB serial on EFF and the spare. The GPT has no `nvram`, `nvdata` or `proinfo`
+partition — the three libnvram restores from — so the stock daemon can only
+write compiled defaults. EFF's `APRDEB/WIFI` is byte-identical to the 512-byte
+symbol `stWifiCfgDefault` in its own `/system/lib/libcustom_nvram.so`, plus a
+trailer `0xAA` and an 8-bit checksum (add on even bytes, xor on odd; n=1 on a
+non-zero file). The MACs and mic/ALS calibration live in `/proc/idme`, a
+partition: wlan0 matched idme's `mac_addr` on both. Both kernels do read
+`/data/nvram/APCFG/APRDEB/WIFI` (country, 5GHz enable, band-edge TX power),
+and the spare — no /data/nvram at all — ran 16h associated on 5GHz. EFF, WITH
+the file, still runs country `WW`: the default's country code is 0, which the
+driver replaces with WW. After a clean reboot of both, the spare (no file)
+reads identically: `/proc/net/wlan/country` WW, firmware 0xa.66, associated at
+5785, and the same `Country:0 is not support. Replaced with WW` at boot.
+Whether the fallback matches `stWifiCfgDefault` in the TX power fields is not
+measured — the driver's NVRAM lines sit below the default log level. If
+parity is ever wanted the file can be regenerated from the device's own
+`/system` by symbol name: data, no vendor code.
+
+A bench trap met on the way: with no udev here, the ACM minors follow USB
+enumeration order, so rebooting two devices swapped ttyACM0 and ttyACM1.
+Re-read `/sys/class/tty/ttyACM*/device/../serial` after every reboot.
+
+The wipe shipped **emOS flow only**, default off: on FireOS 5 a data wipe also
+takes f1r30s with it and the wizard does not reinstall it (#269 Part 1).
+
+**Follow-up, same morning.** VVV (FireOS 5.5.5.4 + EchoMuse) also runs country
+`WW` with nothing in `wifi_country_code`, and its WIFI record is byte-identical
+to EFF's — two devices, one default. The FireOS 6 library
+(`/system/vendor/lib/libcustom_nvram.so`) carries the same `stWifiCfgDefault`.
+What stock FireOS with Alexa set up does for country is unknown (no stock unit
+left) and was deliberately not chased. The emOS flow now writes the record at
+Install EchoMuse if it is missing (`ensureWifiNvram`), read from the device's
+own /system by symbol name, so a wiped emOS device runs stock's radio settings
+rather than the driver's fallback. Never overwrites; warns rather than fails.
+
+**Evening: every valid SSID, on every path.** Wil asked whether names with
+spaces and special characters were covered. They were not, on any of the four
+paths that take one. The emOS wizard put the SSID and password inside a
+single-quoted shell command on the console, so `Bob's WiFi` broke it (and a
+crafted name could run commands); the FireOS wizard, the controller and the
+firmware all refused `"` and `\`; both scan parsers trimmed spaces and passed
+wpa_cli's `Caf\xc3\xa9` escapes through as the name, which then named a
+different network; and `em-wifi` split scan output on whitespace, cutting "My
+Home WiFi" to "My". An SSID is 0-32 arbitrary bytes, so it is now handled as
+bytes throughout: decoded from printf_encode, carried as `ssid_hex`, compared
+as bytes, and written quoted when wpa_supplicant's quoted form can hold it —
+it reads to the LAST `"` (wpa_config_parse_string, and the same in
+wpa_config_parse_psk), so quotes and backslashes are literal — or as hex when
+not. Over the console only hex is ever sent, so nothing typed reaches a shell;
+the emOS wizard derives the 64-hex PSK in the browser (PBKDF2, checked against
+the IEEE 802.11i vectors). Verified by running the emOS wpa_supplicant 2.10
+build under qemu (in a PID namespace: 32-bit bionic refuses pids above 65535)
+against a conf with each form, which printed the exact bytes back. FireOS's
+older supplicant keeps the quoted form it has always had; hex there is only for
+names quoting cannot carry, and has not been seen on a FireOS device.
+
+**Released at close: ea.10 (RC4) and emOS v0.8.** #585 (barge slider runs
+Precise → Eager like Sensitivity; schema v24 lowers a stored owwThreshold above
+0.975, since #549 only clamps on write) and #586 (every valid SSID) merged,
+tested together on main (1149 passed), then `controller-ea-v2.24.0-ea.10` and
+`emos-v0.8` cut from 52cff1d. ea.10 is on GHCR for both arches with `:latest`
+still 2.23.1. emOS v0.8 is v0.7 plus the `em-wifi` fix — the init is unchanged,
+which matters because every controller including GA fetches the latest emOS
+release — and it is the first release published without GitHub's generated PR
+list (#582). The EA add-on was deliberately NOT updated, so the overnight soak
+runs uninterrupted on ea.9. The firmware half of #586 is on main and not in the
+soaked binary (v2.15.0-69); it needs a device test before `v2.16.0`.
+
+Wil set two directions at the end of the day. **emOS OTA (#573) is the priority
+for the release after GA**, and should take the same form as the server binary
+update — per device from the Updates tab, shell-plane push to `.part`, md5
+before anything is written, serialised with the other OTAs, rolled back if the
+new image does not come up. And a standing rule, now in CLAUDE.md: **where a
+standard or spec exists, conform to it and prove it with a test** — the SSID
+bug is its worked example.
+
+Also today: #543 (@scragnog) and #547 (@costajohnt) merged after we resolved
+their `ci.yml` clashes on their branches; #565 and #552 have change requests
+out; every open issue now carries labels (new `area:emos`, `area:porting`); and
+all six release pages were stripped of the generated PR list that credited
+unrelated work.
+
+## 2026-09-20 — GA: firmware v2.16.0 and controller 2.24.0, and a production Echo moved to emOS
+
+**Released:** firmware `v2.16.0` from 9aab9aa (#586's every-valid-SSID and
+#591), and `controller-v2.24.0`, promoted from the build already green on the
+pin commit (558ad13) — GHCR `2.24.0` + `latest`, the GA add-on pinned, the
+changelog in both add-on directories. Wil updated his own system to GA the
+same morning: devices on the new binary, WiFi switching working on FireOS 5.
+
+Two faults were found on hardware on release day, and both came down to who
+can read a file. **An emOS older than v0.5 never reads the conf the firmware
+writes**: firmware writes `/data/emos/wpa.conf`, an older init starts the
+supplicant from Android's conf, so a WiFi change goes to a file nothing reads
+and the switch times out at 45s. EFF was on emOS 0.3; the fix was updating its
+emOS, not code. **#591: the conf was written root-only**, and Amazon's
+supplicant runs as uid `wifi`, so it exited, init left a zombie, and the
+device booted with no network. `confMode` now picks by the same test init uses
+(`/sbin/wpa_supplicant` present → root 0600, absent → `wifi:wifi` 0660), with
+`/data/emos` at 0770 root:wifi because the wizard's WiFi step calls
+`save_config` and the supplicant rewrites the file in place.
+
+**After GA, same day: `controller-v2.24.1`**, with two wizard changes found by
+Wil on hardware. #593 lets the wizard re-provision a known device and keep its
+controller record — the duplicate guard was client-side only, and
+`ensure_device_token` already keeps a row's token and approval — so a device
+keeps its id, ESPHome port, config and HA entities. Wil ran three devices
+through it end to end; it is the emOS upgrade path for GA users until #573.
+#594 refuses to Magisk-patch an emOS boot image: the FireOS flow patched
+whatever was in the slot, which bootloops an emOS device (Wil hit it and
+recovered by re-provisioning). Step 1 cannot catch it, because emOS mounts
+FireOS's `/system` and build.prop reports 5.1.1, so `isOurBootImage` matches
+the emOS slot probe's two markers — `emos.system=` and the full
+`ramoops.mem_address=0x44400000`, the second catching pre-0.5 images — and
+refuses before the pull.
+
+**The first production Echo moved from FireOS 5 to emOS through the
+provisioner**, data and cache wipe included (Wil, 14:18): the fielded path,
+not a bench one. Decided the same afternoon: no general restore-image button
+in the provisioner — the emOS Restore step only replays an escrow from the same
+run, which is what makes it safe; going back to FireOS 5 is the amonet
+instructions' job.
+
+The gap left open: an existing user has no in-place emOS upgrade.
+Re-provisioning works but assigns a new ESPHome port, by design, so every
+satellite has to be re-added in HA. #573 (emOS OTA) is next.
+
+## 2026-09-21 — the day after GA, and private listening built
+
+Seven commits to main in the morning. **`em-wifi` now ships on both bases**:
+it was installed only inside `build.sh`'s `if [ -f "$WPA_CLI" ]`, which a FireOS
+5 image never satisfies, because that image carries no `/sbin` userspace.
+**And it had been writing a conf FireOS 5 could not read** — the #591 bug again
+from the other side: a root-owned 0600 conf, unreadable to Amazon's
+supplicant running as uid 1010, which exits at every start while init respawns
+it every 5s. On 11NF em-wifi reported the join and the device dropped off the
+network seconds later. It now `chmod 660` and `chown 1010:1010` — by number,
+because there is no /etc/passwd to resolve a name. It passed cleanly on the
+FireOS 6 spare and hid there, since `/sbin` against `/system/bin` also means
+root against the `wifi` user, and nothing in the source says so. Also:
+**mksh never read the kernel hostname** — Android's mkshrc builds `$HOSTNAME`
+from `getprop ro.product.device`, empty with no property service, then the
+literal `android` — so init now passes it in the environment: `emos` for
+services, `em-<serial>` for the USB console, where somebody at a cable may not
+know which Echo they plugged in. Settings gained a System tab, the wizard's
+copy had a pass, and the v1/v2 partition story in the docs was corrected from
+amonet's own source: v2 undoes v1's GPT patch, so an `_x` alias on a v2 device
+means the restore never ran (#598, refusing correctly). **An `emos-v*` tag is
+owed before any controller release**, because `EMOS_SBIN_BOTH_ARCHES` names a
+payload member the current release lacks.
+
+**Wake word detection is now chosen per Echo, and one or the other.** Wil's
+direction: "stand by our privacy-first creds and have integrity" — docs must
+never imply one thing while the code does another. "On this Echo" (the default
+for new installs; existing fleets are pinned to "off" by migration v25, since
+defaults are layered under stored config) sends nothing until the Echo's own
+wake word fires, then only until end of speech. "On the controller" streams
+continuously and is labelled as streaming everywhere it shows; shadow leaves
+the UI as a developer diagnostic. `docs/listening.md` is the spec. The device
+side is `internal/listen` — a 2s ring, numbered sessions, and its own limits
+(3s ack timeout, 30s max, mute, link loss), so no controller failure can leave
+an Echo streaming. The controller side is `em_listen`: the privacy statement is
+resolved from what the Echo REPORTS (`listen_state`), never from configuration,
+and unknown is shown as unknown. An Echo that cannot run its own wake word is
+`degraded` — button only, saying why — and never falls back to streaming. PR
+#602.
+
+First bench test that night on VVV: three wakes each opened a session, were
+acknowledged and closed at HA's end of speech, with nothing sent in between;
+mute stopped the mic entirely; `listen: local` within 0.4s of connect.
+Barge-in did not fire over a 19-second reply, which is the next entry.
+
+## 2026-09-22 — barge-in from cold, the audio chain on the Echo, and nothing sent unless someone speaks
+
+**The barge bar dropped for a tenth of a second.** The device keyed its lower
+barge-in bar on `IsStreaming` — "still arriving on the wire" — which clears at
+end of stream, and a reply arrives in about 0.1s, so for nearly all of it the
+bar was back at 0.5. It now holds while the reply is audible, plus the 1.96s
+the wake model's window still contains echo (de03c18). Also merged: #609,
+fixing #607's shared capture buffer in the GoTinyAlsa fork.
+
+**Barge-in works from the first reply after a restart.** With the bar fixed,
+the remaining fault was the echo canceller's cold start: 10–20s of playback
+before it converged. Wil asked for best practice rather than a bodge, so the
+question went to a replay harness over raw 9-channel captures, scored on wake
+detection across 8 frame phases (one wake word moved 0.96→0.30 for a 2–4ms
+shift, so a single alignment proves nothing). WebRTC AEC3, the "best practice"
+hypothesis, lost: its suppressor ate near-end speech (2.4/5, 0.9/3). The winner
+was speex at a 64ms tail, starting from an echo path saved from a *different*
+capture: 5.0/5, 4.0/4, 20dB from the first second. Converged, 16ms and 300ms
+reach the same 20.3dB, so the long tail only ever slowed learning. The Echo
+now saves its echo path after a well-converged reply (at most daily) and
+reloads it at boot; the 64ms tail applies to the hardware reference only (PR
+#610).
+
+**Arbitration by capture time**, after Wil's push to "build for reasonably
+dodgy wifi": two Echoes answering one utterance happened when a late frame or
+a controller backlog made one wake look later than it was heard. Every claim is
+now dated by when the audio was captured — the controller's own wakes from the
+stream's sequence numbers, private wakes from the Echo's monotonic clock via a
+min-RTT ping — and a wake for a session the Echo has already closed is
+ignored. The wake model's reset moved off the event loop, where it had been
+costing ~400ms per controller-scored wake. Six shared wakes on the bench, one
+answer each.
+
+**The output chain runs on the Echo** (#243): EQ → bass guard → limiter in Go
+at the ALSA write, held bit-exact to vectors generated from the Python, and
+negotiated both ways as `output_chain` so audio is never shaped twice. EQ
+changes are heard within a period instead of after the 4s lead. On the way,
+VVV went deaf: a follow-up turn nobody answered ended on the device's own
+no-speech timeout and nothing handed back to the wake stream (4b9a557). Then
+Wil's requirement — "if I say the wake word and the LED lights I expect the
+music to duck at the same time" — met by a tiered buffer: the Echo ducks at its
+own wake crossing, the ALSA tier shrinks to 85ms (4×1024), and the controller's
+duck confirms it. Measured first: the write loop's worst gap between writes
+under load was 61.7ms.
+
+**Nothing is sent to HA unless someone speaks.** A false wake over music got
+"you're very welcome" in reply: HA's VAD engaged on ducked-music residue and
+Whisper heard "Thank you. Thank you." The controller now holds a turn's audio
+until Silero VAD (inside openwakeword already) scores a frame at 0.5, then
+releases all of it in order; silent turns peaked 0.03, speech 0.72–1.00. Over
+music on VVV, four wakes followed by silence and a real false wake all sent
+nothing. The Echo's own gate for button and follow-up turns moved from an RMS
+threshold to the same model: 9.2% of one core at 12.5 frames/s, only while a
+turn is open. **openwakeword's `silero_vad.onnx` takes ONNX Runtime 1.19 on
+armv7 down with SIGBUS inside `CreateSession`** — tensors stored as protobuf
+`raw_data` at arbitrary offsets; rewriting only the int64 tensors still
+faulted — and it looks like a hang, because debuggerd crashes dumping the
+32-bit process and leaves it stopped with an empty tombstone. Every tensor in
+its typed field loads and is bit-identical; a Docker stage builds it, pinned by
+sha256 in and out.
+
+The wake bar over music is not settled. A per-frame trace showed the logged
+wake score is the CROSSING frame, not the peak, so the day's first comparison
+of real and false wakes was wrong: real wakes peak 0.82–1.00 with one at
+0.446, the two traced false wakes 0.347 and 0.390. A longer run of frames
+does not separate them; a peak bar might. Collecting more.
+
+**Every Echo carries the full asset set whatever its wake word mode** (Wil:
+"either could be switched to the other mode and should be already in a state
+to accommodate the switch"), repaired on connect and queued behind the OTA lock,
+since an upgrade has the whole fleet reconnect at once. **A missing model never
+moves an Echo to the controller's wake word** — an opt-in was designed and
+dropped: "the button still works regardless."
+
+**The mid-answer gaps were partly ours.** HA's streaming TTS pauses between
+sentences while the LLM writes the next one, and ffmpeg's FLAC decoder held
+1.65s of audio (frame threading across 8 cores; 0.88s on one thread), which
+reached the Echo only when the next sentence did. TTS is now requested as WAV
+at the wire format and passed straight through. Four answers, one 49 seconds
+long: no underruns, against a 2s gap earlier the same evening. Music Assistant
+keeps sending its own FLAC, and plays as before.
+
+**Merged at close:** #602 → #610 → #613, in order, merge commits, CI green
+against main each time. One flake found on the way: the output chain vectors'
+float stats differ in the last bit between CI runners (11.059648197723096
+against 11.0596481977231); the audio is still compared exactly, the stats now
+to 1e-9. Nothing is released yet — an `emos-v*` tag is still owed first.

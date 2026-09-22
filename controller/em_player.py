@@ -644,16 +644,21 @@ class MediaSession:
         # head (measured against a listening test on 2026-08-19: no audible
         # difference reported, because none of the changes were reaching the
         # audio at all).
-        eq = em_eq.StreamingEQ(SPEAKER_RATE, device.eq_bands, device.eq_loudness,
-                               limiter=em_limiter.Limiter(
-                                   SPEAKER_RATE,
-                                   threshold_db=device.limiter_threshold,
-                                   release_ms=device.limiter_release,
-                                   enabled=device.limiter_enabled),
-                               guard=em_mbc.BassGuard(
-                                   SPEAKER_RATE,
-                                   bass_guard_db=device.bass_guard_db,
-                                   enabled=device.bass_guard_enabled))
+        #
+        # A device that runs the chain itself gets the music untouched.
+        if device.output_chain_on_device:
+            eq = em_eq.Passthrough()
+        else:
+            eq = em_eq.StreamingEQ(SPEAKER_RATE, device.eq_bands, device.eq_loudness,
+                                   limiter=em_limiter.Limiter(
+                                       SPEAKER_RATE,
+                                       threshold_db=device.limiter_threshold,
+                                       release_ms=device.limiter_release,
+                                       enabled=device.limiter_enabled),
+                                   guard=em_mbc.BassGuard(
+                                       SPEAKER_RATE,
+                                       bass_guard_db=device.bass_guard_db,
+                                       enabled=device.bass_guard_enabled))
         start_pos = self._pos
         proc = None
         seg_start = loop.time()

@@ -106,9 +106,17 @@ fi
 WPA_CLI=${WPA_CLI:-$HERE/prebuilt/wpa_cli}
 if [ -f "$WPA_CLI" ]; then
     install -m 0755 "$WPA_CLI" "$WORK/root/sbin/wpa_cli"
-    install -m 0755 "$HERE/device/em-wifi" "$WORK/root/sbin/em-wifi"
-    echo "including wpa_cli and em-wifi"
+    echo "including wpa_cli"
 fi
+
+# em-wifi rides in EVERY image, unlike the binaries above. It is repo source
+# rather than a prebuilt, so it is always available; it resolves wpa_cli and
+# wpa_supplicant the way init does -- /sbin first, then /system/bin -- so on a
+# FireOS 5 image with no /sbin userspace it drives Amazon's supplicant instead
+# of refusing. Coupling it to the wpa_cli prebuilt made it a FireOS 6 tool by
+# accident and left the FireOS 5 fleet with no console way to set WiFi.
+install -m 0755 "$HERE/device/em-wifi" "$WORK/root/sbin/em-wifi"
+echo "including em-wifi"
 
 # busybox, when one has been built. A FireOS 6 /system ships toybox and NO
 # busybox, so without this there is no udhcpc (hence no address), no ntpd, no

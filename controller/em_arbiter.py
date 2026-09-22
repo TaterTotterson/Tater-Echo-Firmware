@@ -41,6 +41,18 @@ spread between devices hearing one utterance (~200ms observed, driven by
 the device's 160ms mic batching) without being so long that a genuinely
 separate wake in another room gets swallowed.
 
+**Claims are compared by when the audio was HEARD, not when the claim
+arrived** (docs/listening.md, "Arbitration"). An Echo detecting its own wake
+reports how long ago it captured the audio, and a message can spend a second
+or more in a TCP retransmit on this fleet's links (#139). Compared by arrival,
+the near Echo's late claim fell outside the winner's window, read as a new
+utterance, and started a second answer. So each claim carries `heard_at`, a
+claim loses if it was heard within `window_s` of the winner's, and the
+winner's claim is held for `window_s + slack_s` so a late claim still finds
+it. A granted claim is never revoked — that would cut off a turn already
+listening. Without `heard_at` a claim is heard on arrival, which is exactly
+the old behaviour.
+
 Pure asyncio, no imports from the rest of the controller — unit-tested
 in tests/test_arbiter.py.
 """
@@ -61,28 +73,37 @@ class WakeArbiter:
 
     def __init__(self) -> None:
         self._winner: str | None = None
-        self._claimed_at: float = 0.0
+        self._heard_at: float = 0.0
 
-    def claim(self, device_id: str, window_s: float) -> str:
+    def claim(self, device_id: str, window_s: float,
+              heard_at: float | None = None, slack_s: float = 0.0) -> str:
         """
         Try to claim the current utterance. Returns the winning device_id
         — equal to device_id if this device won and should answer, or
         another device's id if this detection is a duplicate to discard.
 
+        `heard_at` is when this claim's audio was captured, in the event
+        loop's clock (em_listen.heard_at); None means now. `slack_s` extends
+        how long the winning claim is held, to cover claims still in flight.
+
         Returns immediately; there is no waiting on either path.
         """
         now = asyncio.get_running_loop().time()
+        heard = now if heard_at is None else min(heard_at, now)
         held = (
             self._winner is not None
-            and now - self._claimed_at < window_s
+            and self._winner != device_id
+            and abs(heard - self._heard_at) < window_s
+            and now - self._heard_at < window_s + max(0.0, slack_s)
         )
-        if held and self._winner != device_id:
+        if held:
             return self._winner
-        # Either nothing is claimed, the claim has expired, or this is the
-        # same device waking again (a genuinely new utterance in the room
-        # that already answered). Re-arm the window from now.
+        # Either nothing is claimed, the claim has expired, this was heard
+        # outside the window (a separate utterance), or this is the same
+        # device waking again (a genuinely new utterance in the room that
+        # already answered). Re-arm from this claim.
         self._winner = device_id
-        self._claimed_at = now
+        self._heard_at = heard
         return device_id
 
     def release(self, device_id: str) -> None:
@@ -93,4 +114,4 @@ class WakeArbiter:
         """
         if self._winner == device_id:
             self._winner = None
-            self._claimed_at = 0.0
+            self._heard_at = 0.0

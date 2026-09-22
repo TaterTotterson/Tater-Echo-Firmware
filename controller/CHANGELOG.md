@@ -1,5 +1,154 @@
 # Changelog
 
+## 2.24.1
+
+**Re-provision a device without losing it.** The wizard recognised a device the
+controller already knew and offered one way forward: delete it. That reassigned
+its ESPHome port, so every satellite had to be re-added in Home Assistant, and
+the device's config and history went with it. There is now a second choice —
+keep the record — and the device comes back with its port, config and entities
+intact. It matters because re-running the wizard is currently the only way to
+move an existing device onto a newer emOS.
+
+**An emOS device is no longer patched as if it were FireOS.** The FireOS flow
+patched whatever was in the boot slot, which on a device already running emOS
+produces a bootloop. It now reads the slot first and refuses, before anything
+is written, naming both ways on. The FireOS 5 check could not catch this: emOS
+mounts FireOS's /system, so the device reports 5.1.1 exactly as a stock one
+does.
+
+The device's own storage is still wiped by a re-provision, and its console
+password record still cleared. It is the controller's record that survives.
+
+## 2.24.1-ea.1 (Early Access)
+
+**Re-provision a device without losing it.** The wizard recognised a device the
+controller already knew and offered one way forward: delete it. That reassigned
+its ESPHome port, so every satellite had to be re-added in Home Assistant, and
+its config and history went with it. There is now a second choice — keep the
+record — and the device comes back with its port, config and entities intact.
+
+Worth having because re-running the wizard is currently the only way to move an
+existing device onto a newer emOS. The device's own storage is still wiped, and
+its console password record is still cleared; it is the controller's record
+that survives.
+
+## 2.24.0
+
+The Early Access line since 2.23.1, now general. The headline changes:
+
+**Any WiFi network name works** (#586). Names carrying quotes, backslashes,
+leading or trailing spaces, or characters outside plain ASCII were refused,
+trimmed or written back mangled, on every path that took one. An apostrophe
+broke the emOS WiFi step outright. Every name the standard allows now works,
+tested against the IEEE 802.11i vectors and confirmed on hardware.
+
+**emOS runs on FireOS 6**, with its own WiFi bring-up, supplicant and DHCP,
+and the wizard provisions it end to end. emOS is the default; FireOS stays a
+labelled choice.
+
+**The provisioning wizard** reports the kernel architecture and version per
+device, shows the OS each device booted, and adds a Connect Console step.
+
+Note for anyone re-provisioning an existing device: it comes back with a new
+ESPHome port, so its satellite has to be re-added in Home Assistant. Ports are
+never reused, deliberately — a stale config entry cannot then point at a
+different device.
+
+## 2.24.0-ea.10 (Early Access)
+
+**Any WiFi network name works** (#586). The wizard refused names or passwords
+containing `"` or `\`, dropped spaces at the start or end of a name, and wrote
+names like "Café" back wrongly. On emOS an apostrophe in the name or password,
+as in "Bob's WiFi", broke the WiFi step outright. Every name the WiFi standard
+allows now works, and every valid WPA2 password. Changing a device's network
+from the dashboard gets the same fix with the next firmware.
+
+**The wake word sensitivity slider can no longer be set to a value that never
+fires** (#543, thanks @scragnog). Its strictest notch set a threshold nothing
+can reach, which looked like a device that had stopped responding. The slider
+now runs 0.1–0.975 in finer steps, and a device already stored at the old
+value is corrected on upgrade (#585).
+
+**The barge-in slider runs the same way as Sensitivity** (#585): precise on the
+left, eager on the right.
+
+The database moves to schema v24 on first start, and a backup is taken first.
+
+## 2.24.0-ea.9 (Early Access)
+
+**FireOS 5 emOS devices are labelled 64-bit** (#581). They showed "emOS
+(32-bit)": the server is a 32-bit program, and a 64-bit kernel identifies
+itself to it as armv8l, which the dashboard read the wrong way round.
+
+## 2.24.0-ea.8 (Early Access)
+
+Release candidate 2 for the next GA. Everything below ran on real devices
+before it was cut.
+
+**The wizard can wipe the device first, on emOS** (#577). A new "Wipe data and
+cache first" switch, off by default, erases /data and /cache in TWRP before
+anything is installed, then checks that it happened. It is not offered for
+FireOS: a wipe there also removes f1r30s, which the wizard does not reinstall.
+
+**emOS devices get stock FireOS's WiFi settings file** (#577). FireOS writes it
+at every boot and emOS never does, so a wiped emOS device ran on the WiFi
+driver's built-in defaults. The wizard now writes it from the device's own
+/system if it is missing. Nothing unique to the device lives there on the Echo
+Dot 2: its MAC addresses and calibration are elsewhere and survive a wipe.
+
+**Each device shows which OS it runs** (#576, #579). "emOS" or "FireOS 5" on
+the tile and device page, and for emOS whether its kernel is 32-bit (FireOS 6)
+or 64-bit (FireOS 5). The kernel needs the next firmware release to report it.
+Long device names and firmware versions now fit their rows, and new names are
+limited to 32 characters; existing names are unchanged.
+
+**Smaller fixes.** Device log rows line up before 10am (#578). If the serial
+port picker times out while emOS boots, the button now reads Connect Console
+rather than suggesting another reboot (#580).
+
+## 2.24.0-ea.7 (Early Access)
+
+This is the release candidate for the next GA. Before it was cut, every
+provisioning path ran end to end on real devices: FireOS 5, emOS on FireOS 5,
+and emOS on FireOS 6.
+
+**emOS now always goes in slot A on amonet v2** (#544). v2's bootloader only
+ever starts slot A; setting the other slot active changes nothing. The wizard
+wrote emOS to whichever slot did not hold stock FireOS, so on a device with
+stock in A it went to B and never ran, and the device quietly booted FireOS.
+When A holds the only stock image, it is now copied to B and verified first,
+and A is not touched unless that copy verified. Reported by @jthoward64.
+
+**The FireOS flow saves your boot image before patching it** (#468). The emOS
+flow always did; the FireOS flow patched with no way back. The original now
+downloads before anything is written, and a failed recovery step offers
+Restore. After a restore the wizard stops and asks you to start again.
+
+**The boot image patch keeps FireOS's own arguments** (#463, thanks
+@be-student). It used to replace the whole cmdline; it now adds the SELinux
+setting to what is there. On stock FireOS 5.5.5.4 the result is identical.
+
+**Devices on TWRP 3.7 (amonet v2) are identified again** (#564). The wizard
+read no FireOS build on them and silently skipped its release and board checks.
+
+**Smaller wizard fixes.** A custom server file must be an EchoMuse server:
+a boot image picked by mistake used to install and report success. A device
+that never finished registering no longer blocks a re-run. An early WiFi scan
+on emOS waits for the radio instead of failing.
+
+**An emOS device's kernel crash reaches the support bundle** (#559). When a
+device reconnects after a crash, the controller collects the end of its kernel
+log.
+
+**The startup script sent to devices changes** (#557, #558). It sets audio
+controls by name rather than by number: on the FireOS 6 kernel the numbers
+point two controls early, which left audio silent. On emOS, with the next
+firmware, it also applies stock FireOS's thermal and CPU policy. Devices pick
+the script up when they
+connect, and it takes effect on their next reboot. The same fix inside the
+server itself ships with the next firmware release.
+
 ## 2.24.0-ea.6 (Early Access)
 
 **The emOS image now carries the `/system` it was built beside** (#545). The

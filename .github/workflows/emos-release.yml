@@ -182,7 +182,7 @@ jobs:
       # qemu + an armv7 Alpine image makes it a NATIVE build, so there is no
       # cross-compilation surface to get wrong. It costs ~8 minutes.
       - name: Set up qemu (for the armv7 busybox build)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm
 
@@ -275,6 +275,10 @@ jobs:
       - name: Release notes from the tag annotation
         run: |
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]; then
+            echo "::error::$GITHUB_REF_NAME is a lightweight tag; it has no release notes. Re-tag with git tag -a."
+            exit 1
+          fi
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/emos-notes.md
           echo "--- notes that will be published ---"
           cat /tmp/emos-notes.md
@@ -295,6 +299,10 @@ jobs:
             emos/build/bb/busybox-*.tar.bz2
             emos/build/bb/busybox-LICENSE
           body_path: /tmp/emos-notes.md
-          generate_release_notes: true
+          # No generated list. GitHub's is every PR merged anywhere in the repo
+          # between two emos-v* tags — controller, docs, firmware — with "New
+          # Contributors" credits for work that is not in emOS (emos-v0.7
+          # credited a wake word cache fix). The tag annotation is the notes.
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

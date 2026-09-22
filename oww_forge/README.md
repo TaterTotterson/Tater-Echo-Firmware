@@ -46,7 +46,10 @@ The UI covers the whole flow: asset download with live progress, wake-word
 creation, build with a streaming log console, Google-TTS mix-in, wav-upload
 testing, and `.onnx` download. One job runs at a time (training saturates
 the machine anyway); state is derived from disk on every poll, so it
-survives container restarts. Light and dark follow the dashboard, sharing
+survives container restarts. While a build runs, the card's stepper shows
+how far the current stage is: clips generated, feature files finished, or
+training steps parsed from the log across all three of `train.py`'s
+sequences. Light and dark follow the dashboard, sharing
 its `em-theme` setting. No auth — LAN tool.
 
 A run can be **stopped** from the console bar, its settings changed under
@@ -128,9 +131,12 @@ automatic: if no CUDA device is visible at runtime, torch runs on CPU and
 badge).
 
 - Host **with** the nvidia container runtime: use `forge` / `forge-ui` as-is.
-- Host **without** it: `docker compose run --rm forge-cpu …` (same image, no
-  GPU reservation), or build with `GPU: "0"` for a ~3GB CPU-only image
-  instead of ~10GB.
+- Host **without** it, web UI: `docker compose up -d forge-ui-cpu` (the same
+  service minus the GPU reservation; naming it starts its `cpu` profile). CLI:
+  `docker compose run --rm forge-cpu …`. Both work from the ~10GB CUDA image;
+  build with `GPU=0 docker compose build forge-ui-cpu` for a ~3GB CPU-only
+  image instead. With the published image, the same services are in
+  `docker-compose.deploy.yml` on the `:latest-cpu` tag.
 
 ### Asset sizes
 

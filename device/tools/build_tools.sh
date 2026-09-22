@@ -47,6 +47,7 @@ build_tool capture_mics
 build_tool bf_capture
 build_module_tool oww_probe
 build_module_tool mixer_probe "-tags server"   # needs the tinyalsa mixer backend
+build_module_tool vad_probe  # Silero VAD correctness + paced CPU
 
 echo ""
 echo "Deploy:"

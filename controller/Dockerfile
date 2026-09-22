@@ -1,3 +1,17 @@
+# Silero VAD for the device's speech gate, rewritten so ONNX Runtime can load
+# it on armv7 (tools/silero_typed.py — as openwakeword ships it, ORT 1.19
+# takes SIGBUS in CreateSession on the Echo). A separate stage so `onnx` and
+# its dependencies never reach the controller image; only the model is copied.
+# Input and output are both pinned by sha256: the output is what devices run,
+# and it is the file measured on VVV. MIT licensed.
+FROM python:3.12-slim AS silero
+COPY tools/silero_typed.py /tmp/
+RUN pip install --no-cache-dir --root-user-action=ignore onnx==1.20.1 && \
+    python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/silero_vad.onnx', '/tmp/in.onnx')" && \
+    echo "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28  /tmp/in.onnx" | sha256sum -c - && \
+    python /tmp/silero_typed.py /tmp/in.onnx /silero_vad.onnx && \
+    echo "da5e8a9c9c07981b907e8affe5497fe604958c51b67bff07231778d701d164d0  /silero_vad.onnx" | sha256sum -c -
+
 FROM python:3.12-slim
 # Links the GHCR package page back to the repo (and lets the package inherit
 # the repo's public visibility once connected).
@@ -85,6 +99,8 @@ COPY em_support.py .
 COPY em_shadow.py .
 COPY em_barge.py .
 COPY em_ns.py .
+COPY em_speechgate.py .
+COPY em_wav.py .
 COPY em_pki.py .
 COPY em_hostip.py .
 COPY em_ingressauth.py .
@@ -101,11 +117,13 @@ COPY em_oww_models.py .
 COPY em_oww_metadata.py .
 COPY em_oww_warmup.py .
 COPY em_arbiter.py .
+COPY em_listen.py .
 COPY em_button.py .
 COPY em_tap_burst.py .
 COPY em_player.py .
 COPY em_config_sections.py .
 COPY em_console_pw.py .
+COPY em_labels.py .
 COPY em_crashlog.py .
 COPY em_emos_build.py .
 COPY em_recordings.py .
@@ -114,6 +132,7 @@ COPY em_firmware.py .
 COPY em_announce.py .
 COPY em_runbarrier.py .
 COPY em_volume.py .
+COPY em_wifi.py .
 COPY em_timers.py .
 COPY version.py .
 # ESPHome native API subpackage (frame protocol, message registry, vendored protobuf)
@@ -149,6 +168,7 @@ RUN mkdir -p /app/models/oww_runtime && \
     echo "84737dd1fdb715f0ee695c0a9864f6949b66ecb4c46ca733bc9211bf0c2a7b5f  /tmp/ort.aar" | sha256sum -c - && \
     python -c "import zipfile, shutil; z = zipfile.ZipFile('/tmp/ort.aar'); shutil.copyfileobj(z.open('jni/armeabi-v7a/libonnxruntime.so'), open('/app/models/oww_runtime/libonnxruntime.so', 'wb'))" && \
     rm /tmp/ort.aar
+COPY --from=silero /silero_vad.onnx /app/models/oww_runtime/silero_vad.onnx
 # Dashboard SPA — placeholder is index.html, full dashboard is dashboard.html
 COPY static/ ./static/
 # Compile JSX dashboard with esbuild

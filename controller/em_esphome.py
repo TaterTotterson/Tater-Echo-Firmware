@@ -65,6 +65,7 @@ Cancel (esphome mode):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import socket
@@ -84,6 +85,8 @@ import em_ns
 import em_announce
 import em_recordings
 import em_runbarrier
+import em_speechgate
+import em_wav
 import em_oww_models
 import em_oww_metadata
 import em_player
@@ -196,6 +199,9 @@ class TurnTrace:
 # 3 = 240ms. Lower if first command word gets clipped; raise if wake-word
 # tail bleeds into transcripts.
 VOICE_PREROLL_DISCARD = 3
+
+# The rate the device plays: TTS is asked for, and decoded to, exactly this.
+WIRE_RATE = 48000
 from esphome.satellite_server import SatelliteServerProtocol, serve, _HANDLED
 from esphome.feature_flags import (
     MediaPlayerEntityFeature,
@@ -559,13 +565,15 @@ class EchoMuseSatellite(SatelliteServerProtocol):
 
         if isinstance(msg, api_pb2.ListEntitiesRequest):
             log.debug(f"[{self._log_name}] ListEntitiesRequest from {self.peer}")
-            # supported_formats (Voice-PE-style): tells HA to run TTS and
-            # announcement audio through its ffmpeg proxy and hand us a URL
-            # already transcoded to 48kHz mono FLAC — the device's native
-            # wire rate — instead of whatever the TTS provider produced.
-            # _fetch_tts_audio then decodes without resampling. Harmless on
-            # HA versions that ignore it: ffmpeg decodes any format/rate.
-            _fmt = dict(format="flac", sample_rate=48000,
+            # supported_formats: tells HA to run TTS and announcement audio
+            # through its ffmpeg proxy and hand us a URL already at the wire
+            # format, 48kHz mono S16 — as WAV, which is that PCM behind a
+            # header, so _stream_tts_audio passes it straight through with no
+            # decoder to hold audio back between sentences (em_wav). It was
+            # FLAC, copied from Voice PE, which decodes on its own device.
+            # Harmless on HA versions that ignore it: anything else is decoded
+            # by ffmpeg.
+            _fmt = dict(format="wav", sample_rate=WIRE_RATE,
                         num_channels=1, sample_bytes=2)
             yield api_pb2.ListEntitiesMediaPlayerResponse(
                 object_id="media_player",
@@ -1418,9 +1426,12 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 try:
                     if trace:
                         trace.t_playback_ms = trace.elapsed_ms()
-                    pcm_bytes = await post_turn_play(
-                        _stamp_first_audio(_stream_tts_audio(self._tts_audio_url))
-                    )
+                    # Closed explicitly: the player BREAKS out of its loop on
+                    # a barge-in, and teardown (ffmpeg's kill) must run then,
+                    # not whenever the generator is collected.
+                    async with contextlib.aclosing(_stamp_first_audio(
+                            _stream_tts_audio(self._tts_audio_url))) as chunks:
+                        pcm_bytes = await post_turn_play(chunks)
                 except Exception as e:
                     log.error(f"[{self._log_name}] TTS audio stream failed: {e}")
                     if trace: trace.outcome = "tts_error"
@@ -1676,6 +1687,14 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         first_speech_at = None
         last_speech_at  = None
 
+        # Speech gate (em_speechgate): audio is held until Silero hears speech,
+        # so a turn nobody speaks in sends HA nothing to transcribe. Once
+        # open, speech_seen comes from the gate rather than the RMS check,
+        # which ducked-music residue passes. None = model unavailable, and
+        # the turn streams ungated exactly as before.
+        vad = em_speechgate.new_turn()
+        gate = em_speechgate.SpeechGate() if vad is not None else None
+
         def _is_speech(chunk: bytes) -> bool:
             samples = np.frombuffer(chunk, dtype=np.int16)
             if samples.size == 0:
@@ -1826,77 +1845,90 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                     if self._trace:
                         self._trace.t_first_frame_ms = self._trace.elapsed_ms()
 
-                # Every frame, not just until the first hit: the controller's
-                # own endpoint needs to know when speech LAST was, not only
-                # that it once happened.
-                if _is_speech(payload):
-                    now = time.monotonic()
-                    last_speech_at = now
-                    if first_speech_at is None:
-                        first_speech_at = now
+                if gate is None:
+                    frames = [payload]
+                else:
+                    prob = await asyncio.get_running_loop().run_in_executor(
+                        None, vad.prob, payload)
+                    frames = gate.push(payload, prob)
+                    if gate.open and not speech_seen:
+                        speech_seen = True
+                        log.info(f"[{self._log_name}] Speech gate {gate.summary()}, p={prob:.2f}")
+                        asyncio.ensure_future(device.beam_lock())
+                for payload in frames:
+                    # Every frame, not just until the first hit: the controller's
+                    # own endpoint needs to know when speech LAST was, not only
+                    # that it once happened.
+                    if _is_speech(payload):
+                        now = time.monotonic()
+                        last_speech_at = now
+                        if first_speech_at is None:
+                            first_speech_at = now
 
-                if not speech_seen and last_speech_at is not None:
-                    speech_seen = True
-                    log.debug(
-                        f"[{self._log_name}] Speech detected (above noise floor "
-                        f"{getattr(device, 'noise_floor', 0.0):.4f}) — no-speech timeout disarmed"
-                    )
-                    # Lock the beamformer onto the speaker now that they're
-                    # audibly talking. Matters for continuation turns (the wake
-                    # turn already locked at detection — the device no-ops a
-                    # second lock) and after any TTS mic restart, which resets
-                    # the beam to ch6 omni.
-                    asyncio.ensure_future(device.beam_lock())
-
-                if denoiser is not None:
-                    raw_payload = payload
-                    try:
-                        payload = await asyncio.get_running_loop().run_in_executor(
-                            None, denoiser.process, payload
+                    if gate is None and not speech_seen and last_speech_at is not None:
+                        speech_seen = True
+                        log.debug(
+                            f"[{self._log_name}] Speech detected (above noise floor "
+                            f"{getattr(device, 'noise_floor', 0.0):.4f}) — no-speech timeout disarmed"
                         )
-                    except Exception as e:
-                        log.warning(
-                            f"[{self._log_name}] NS failed mid-turn ({e}) — "
-                            f"raw audio for the rest of this turn"
-                        )
-                        # Dropped from the loop, but the counters it collected
-                        # up to the failure still describe this turn.
-                        ns_reporter = denoiser
-                        denoiser = None
-                        payload = raw_payload
-                    else:
-                        if em_ns.DEBUG_DIR:
-                            ns_debug_raw.extend(raw_payload)
-                            ns_debug_out.extend(payload)
+                        # Lock the beamformer onto the speaker now that they're
+                        # audibly talking. Matters for continuation turns (the wake
+                        # turn already locked at detection — the device no-ops a
+                        # second lock) and after any TTS mic restart, which resets
+                        # the beam to ch6 omni.
+                        asyncio.ensure_future(device.beam_lock())
 
-                # Utterance capture sits HERE, below the denoiser, so the saved
-                # file is byte-for-byte what goes on the wire to HA — i.e. what
-                # STT actually heard. Tapping above NS (as this first shipped)
-                # answered "how good is the mic" but could not answer "why was
-                # the transcript wrong" on any device with nsAsr on, which is
-                # the question people actually ask. If NS fails mid-turn the
-                # payload falls back to raw for the rest of the turn and the
-                # capture follows it, which stays correct by construction.
-                if capture is not None and len(capture) < em_recordings.MAX_UTTERANCE_BYTES:
-                    capture.extend(payload)
+                    if denoiser is not None:
+                        raw_payload = payload
+                        try:
+                            payload = await asyncio.get_running_loop().run_in_executor(
+                                None, denoiser.process, payload
+                            )
+                        except Exception as e:
+                            log.warning(
+                                f"[{self._log_name}] NS failed mid-turn ({e}) — "
+                                f"raw audio for the rest of this turn"
+                            )
+                            # Dropped from the loop, but the counters it collected
+                            # up to the failure still describe this turn.
+                            ns_reporter = denoiser
+                            denoiser = None
+                            payload = raw_payload
+                        else:
+                            if em_ns.DEBUG_DIR:
+                                ns_debug_raw.extend(raw_payload)
+                                ns_debug_out.extend(payload)
 
-                if self._trace:
-                    self._trace.audio_frames += 1
-                pcm_buf.extend(payload)
+                    # Utterance capture sits HERE, below the denoiser, so the saved
+                    # file is byte-for-byte what goes on the wire to HA — i.e. what
+                    # STT actually heard. Tapping above NS (as this first shipped)
+                    # answered "how good is the mic" but could not answer "why was
+                    # the transcript wrong" on any device with nsAsr on, which is
+                    # the question people actually ask. If NS fails mid-turn the
+                    # payload falls back to raw for the rest of the turn and the
+                    # capture follows it, which stays correct by construction.
+                    if capture is not None and len(capture) < em_recordings.MAX_UTTERANCE_BYTES:
+                        capture.extend(payload)
 
-                # Send in 320-byte chunks (20ms at 16kHz mono S16_LE) —
-                # split small for smoother ESPHome API streaming.
-                AUDIO_CHUNK = 320
-                while len(pcm_buf) >= AUDIO_CHUNK:
-                    chunk = bytes(pcm_buf[:AUDIO_CHUNK])
-                    del pcm_buf[:AUDIO_CHUNK]
-                    self._send_one(api_pb2.VoiceAssistantAudio(data=chunk))
+                    if self._trace:
+                        self._trace.audio_frames += 1
+                    pcm_buf.extend(payload)
+
+                    # Send in 320-byte chunks (20ms at 16kHz mono S16_LE) —
+                    # split small for smoother ESPHome API streaming.
+                    AUDIO_CHUNK = 320
+                    while len(pcm_buf) >= AUDIO_CHUNK:
+                        chunk = bytes(pcm_buf[:AUDIO_CHUNK])
+                        del pcm_buf[:AUDIO_CHUNK]
+                        self._send_one(api_pb2.VoiceAssistantAudio(data=chunk))
         finally:
             # What the gate actually did to this turn. Logged unconditionally
             # when NS ran, because until now a denoiser chewing speech and a
             # quiet room were indistinguishable from any log, on either side
             # — which is why #137 spent nine days on two theories that a
             # single number would have settled.
+            if gate is not None and not gate.open:
+                log.info(f"[{self._log_name}] Speech gate {gate.summary()}")
             ns_reporter = denoiser if denoiser is not None else ns_reporter
             if ns_reporter is not None:
                 log.info(f"[{self._log_name}] NS: {ns_reporter.zero_report()}")
@@ -2032,9 +2064,12 @@ async def _stream_tts_audio(url: str) -> AsyncIterator[bytes]:
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            async for pcm in _stream_tts_audio_once(url):
-                emitted = True
-                yield pcm
+            # aclosing, as below: a barge-in closes this generator, and the
+            # inner one must tear ffmpeg down NOW, not when collected.
+            async with contextlib.aclosing(_stream_tts_audio_once(url)) as once:
+                async for pcm in once:
+                    emitted = True
+                    yield pcm
             return
         except Exception as err:
             last_exc = err
@@ -2051,65 +2086,123 @@ async def _stream_tts_audio(url: str) -> AsyncIterator[bytes]:
 
 
 async def _stream_tts_audio_once(url: str) -> AsyncIterator[bytes]:
-    """Run one HTTP-to-ffmpeg streaming attempt for _stream_tts_audio."""
+    """Run one HTTP streaming attempt for _stream_tts_audio.
+
+    A WAV already at the wire format (what we declare to HA — see
+    supported_formats) is passed straight through: no decoder, so nothing is
+    held back when HA pauses between sentences (em_wav). Anything else is
+    decoded by ffmpeg.
+    """
     import aiohttp
 
+    timeout = aiohttp.ClientTimeout(
+        total=None,
+        connect=10,
+        sock_connect=10,
+        sock_read=60,
+    )
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            resp.raise_for_status()
+            chunks = resp.content.iter_chunked(16 * 1024)
+            head = bytearray()
+            wav = em_wav.WavStream()
+            pcm = b""
+            try:
+                async for chunk in chunks:
+                    head += chunk
+                    if len(head) >= 4 and head[:4] != b"RIFF":
+                        break
+                    pcm = wav.push(chunk)
+                    if wav.ready:
+                        break
+            except em_wav.NotWav:
+                pass
+
+            if wav.ready and em_wav.is_wire_pcm(wav.format, WIRE_RATE):
+                log.debug("TTS: WAV passthrough")
+                odd = b""
+                async for part in _prepend(pcm, chunks):
+                    part = odd + part
+                    cut = len(part) & ~1
+                    odd = part[cut:]
+                    if cut:
+                        yield part[:cut]
+                return
+
+            log.info(f"TTS: decoding with ffmpeg ({wav.format or 'not WAV'})")
+            # aclosing: a barge-in closes THIS generator, and an inner one left
+            # to the garbage collector would run its kill-first teardown late,
+            # leaving ffmpeg alive past the turn.
+            async with contextlib.aclosing(
+                    _ffmpeg_decode(_prepend(bytes(head), chunks))) as decoded:
+                async for pcm in decoded:
+                    yield pcm
+
+
+async def _prepend(first: bytes, rest: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    if first:
+        yield first
+    async for chunk in rest:
+        yield chunk
+
+
+async def _ffmpeg_decode(encoded: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """Decode any format ffmpeg reads to wire PCM, yielding as it decodes.
+
+    `-threads 1`: frame-threaded decoding holds one frame per thread before it
+    emits anything, which on an 8-core host kept ~1.7s of FLAC inside ffmpeg
+    (0.9s with one thread) — audio that is then stranded whenever the input
+    pauses. See em_wav for why TTS normally avoids this path altogether.
+    """
     proc: asyncio.subprocess.Process | None = None
     feeder: asyncio.Task | None = None
     stderr_task: asyncio.Task | None = None
     try:
-        timeout = aiohttp.ClientTimeout(
-            total=None,
-            connect=10,
-            sock_connect=10,
-            sock_read=60,
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-threads", "1",
+            "-i", "pipe:0",
+            "-f", "s16le", "-ar", str(WIRE_RATE), "-ac", "1",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                resp.raise_for_status()
-                proc = await asyncio.create_subprocess_exec(
-                    "ffmpeg", "-hide_banner", "-loglevel", "error",
-                    "-i", "pipe:0",
-                    "-f", "s16le", "-ar", "48000", "-ac", "1",
-                    "pipe:1",
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
 
-                async def _feed_encoded_audio() -> None:
-                    assert proc is not None and proc.stdin is not None
-                    try:
-                        async for chunk in resp.content.iter_chunked(16 * 1024):
-                            proc.stdin.write(chunk)
-                            await proc.stdin.drain()
-                    finally:
-                        if not proc.stdin.is_closing():
-                            proc.stdin.close()
-                            await proc.stdin.wait_closed()
+        async def _feed_encoded_audio() -> None:
+            assert proc is not None and proc.stdin is not None
+            try:
+                async for chunk in encoded:
+                    proc.stdin.write(chunk)
+                    await proc.stdin.drain()
+            finally:
+                if not proc.stdin.is_closing():
+                    proc.stdin.close()
+                    await proc.stdin.wait_closed()
 
-                feeder = asyncio.create_task(_feed_encoded_audio())
+        feeder = asyncio.create_task(_feed_encoded_audio())
 
-                # stderr is drained CONCURRENTLY, not after stdout EOF. A pipe
-                # holds ~64KB; if ffmpeg fills it, it blocks writing stderr,
-                # stops producing stdout, and the reader below waits forever.
-                # -loglevel error keeps that rare, but the case that produces
-                # lots of stderr is a malformed or truncated response — exactly
-                # the degraded case this path has to survive.
-                assert proc.stderr is not None
-                stderr_task = asyncio.create_task(proc.stderr.read())
+        # stderr is drained CONCURRENTLY, not after stdout EOF. A pipe
+        # holds ~64KB; if ffmpeg fills it, it blocks writing stderr,
+        # stops producing stdout, and the reader below waits forever.
+        # -loglevel error keeps that rare, but the case that produces
+        # lots of stderr is a malformed or truncated response — exactly
+        # the degraded case this path has to survive.
+        assert proc.stderr is not None
+        stderr_task = asyncio.create_task(proc.stderr.read())
 
-                assert proc.stdout is not None
-                while pcm := await proc.stdout.read(16 * 1024):
-                    yield pcm
+        assert proc.stdout is not None
+        while pcm := await proc.stdout.read(16 * 1024):
+            yield pcm
 
-                await feeder
-                err = await stderr_task
-                return_code = await asyncio.wait_for(proc.wait(), timeout=15.0)
-                if return_code != 0:
-                    raise RuntimeError(
-                        f"ffmpeg streaming decode failed: {err.decode()[:200]}"
-                    )
+        await feeder
+        err = await stderr_task
+        return_code = await asyncio.wait_for(proc.wait(), timeout=15.0)
+        if return_code != 0:
+            raise RuntimeError(
+                f"ffmpeg streaming decode failed: {err.decode()[:200]}"
+            )
     finally:
         # Kill ffmpeg FIRST, before cancelling the feeder — the ordering is
         # what makes this teardown terminate at all.
@@ -2155,7 +2248,7 @@ async def _fetch_tts_audio(url: str) -> bytes:
 
     Uses ffmpeg subprocess — handles MP3, WAV, FLAC, OGG transparently
     regardless of which TTS provider HA is configured with. When HA honours
-    our declared supported_formats the URL already serves 48kHz mono FLAC
+    our declared supported_formats the URL already serves 48kHz mono WAV
     and the -ar here is a no-op; otherwise ffmpeg's proper resampler does
     the conversion (better than the numpy linear interpolation this
     replaced, which cost ~2dB above 8kHz).
@@ -2198,7 +2291,7 @@ async def _fetch_tts_audio(url: str) -> bytes:
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-i", "pipe:0",
-        "-f", "s16le", "-ar", "48000", "-ac", "1",
+        "-f", "s16le", "-ar", str(WIRE_RATE), "-ac", "1",
         "pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
@@ -2809,7 +2902,10 @@ async def _persist_turn(device, turn_record: dict) -> None:
         # device actually drove the turn — on a controller-triggered turn the
         # column does not apply, and writing our own score into it would make
         # every row agree with itself.
-        if str(turn_record.get("trigger", "")).startswith("wakeword-dev"):
+        # A privately listening Echo sends this controller nothing to score,
+        # so there is no comparison to make and no miss to record.
+        if (str(turn_record.get("trigger", "")).startswith("wakeword-dev")
+                and not getattr(device, "private_listening", False)):
             ctrl_score, ctrl_delta = device.ctrl_shadow.match(wake_mono)
             turn_record["ctrl_wake_score"]    = ctrl_score
             turn_record["ctrl_wake_delta_ms"] = ctrl_delta

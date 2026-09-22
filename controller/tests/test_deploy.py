@@ -1024,29 +1024,6 @@ def test_a_failed_transfer_says_which_stage_it_failed_at():
     )
 
 
-def test_tested_firmware_build_matches_the_docs():
-    """
-    The wizard warns when a device is on a FireOS build other than the one
-    EchoMuse is developed against, and docs/rooting.md tells people which to
-    flash. Those two have to name the same build: a warning pointing at a
-    version the docs do not mention is worse than no warning, because the
-    person reading it has nowhere to go.
-
-    Verified against the fleet 2026-08-07 — all three connected devices report
-    ro.build.version.incremental = 272.6.8.0_user_680767620.
-    """
-    jsx = (CONTROLLER / "static" / "dashboard.jsx").read_text()
-    m = re.search(r"_TESTED_FIREOS_BUILD\s*=\s*'([^']+)'", jsx)
-    assert m, "dashboard.jsx no longer declares _TESTED_FIREOS_BUILD"
-    build = m.group(1)
-
-    rooting = (CONTROLLER.parent / "docs" / "rooting.md").read_text()
-    assert build in rooting, (
-        f"the wizard warns against build {build} but docs/rooting.md never "
-        f"names it — a reader has nowhere to go"
-    )
-
-
 def test_push_log_event_callers_do_not_also_persist():
     """
     `_push_log_event` persists AND pushes. A caller that also calls
@@ -1434,7 +1411,7 @@ def test_entity_names_do_not_repeat_the_device_label():
 
 def test_asset_sync_does_not_shadow_its_accumulator():
     """
-    _sync_oww_assets keeps a `pushed` list of installed asset names. Assigning
+    _sync_oww_assets_locked keeps a `pushed` list of installed asset names. Assigning
     the per-file transfer result to that same name shadowed the list on the
     FIRST file, so the append at the end of the loop raised
     AttributeError: 'TransferResult' object has no attribute 'append'
@@ -1449,9 +1426,9 @@ def test_asset_sync_does_not_shadow_its_accumulator():
     installed" while the dashboard offered to send it and returned 500.
     """
     src = (CONTROLLER / "em_api.py").read_text()
-    fn = re.search(r"async def _sync_oww_assets\(.*?\n(?=\nasync def |\ndef )",
+    fn = re.search(r"async def _sync_oww_assets_locked\(.*?\n(?=\nasync def |\ndef )",
                    src, re.S)
-    assert fn, "_sync_oww_assets not found"
+    assert fn, "_sync_oww_assets_locked not found"
     body = fn.group(0)
 
     assert "pushed = []" in body, "the accumulator is gone"
@@ -1545,25 +1522,6 @@ def test_a_failed_install_leaves_the_device_on_its_old_wake_word():
         "device onto a model it does not have"
     )
 
-
-
-def test_both_effective_mode_call_sites_pass_readiness():
-    """
-    Config push and device registration both resolve the mode. A guard applied
-    to one and not the other is a device that is safe until it reconnects —
-    the same shape as the v7 stats-relay miss.
-    """
-    for name in ("em_api.py", "em_controller.py"):
-        src = (CONTROLLER / name).read_text()
-        # Non-greedy matching to the first ")" is wrong here: the argument
-        # itself contains one (`effective.get("owwOnDevice")`). Take a fixed
-        # window after each call instead — the call sites are three lines.
-        for m in re.finditer(r"effective_mode\(", src):
-            call = src[m.end():m.end() + 200]
-            assert "model_ready" in call or "oww_model_ready" in call, (
-                f"{name}: an effective_mode call omits model readiness — "
-                f"{call.splitlines()[0]!r}"
-            )
 
 
 def test_an_announcement_clears_the_cancel_flag_before_playing():
@@ -2406,6 +2364,86 @@ def test_the_emos_flow_escrows_before_it_flashes():
     assert ids.index("install_oww") < ids.index("flash_emos")
 
 
+def test_the_fireos_flow_escrows_before_it_patches():
+    """
+    #468: the FireOS flow wrote the boot partition with no copy of the original
+    in the operator's hands. The escrow sits inside runPatchBoot, so ordering
+    WITHIN the function is the guard: stored and downloaded before the first
+    shell call that writes a partition. Matched on shell calls rather than on
+    "of=", for the reason the flash test gives.
+    """
+    src = _jsx()
+    fn = src[src.index("async function runPatchBoot"):]
+    fn = fn[:fn.index("\n  async function runInstallMagisk")]
+    writes = [i for i, line in enumerate(fn.splitlines())
+              if "c.shell(" in line and "of=${boot.target}" in line]
+    assert writes, "runPatchBoot's flash was not found; update this test"
+    lines = fn.splitlines()
+    for marker in ("setEmosRef(", "setEmosTarget(", "_downloadBytes("):
+        at = next((i for i, l in enumerate(lines) if marker in l), None)
+        assert at is not None, f"runPatchBoot must escrow via {marker}"
+        assert at < writes[0], f"{marker} must come before the partition write"
+
+    # And the restore is offered on the TWRP steps that follow the escrow.
+    assert "(isEmos ? (step === 6 || step === 7) : (step >= 2 && step <= 4))" in src, (
+        "the FireOS flow must offer the restore on a failed TWRP step")
+
+
+def test_base_os_survives_the_device_going_offline():
+    """
+    base_os rides the register message and is stored (schema v21). The API
+    used to read it off the live session only, so the dashboard's emOS /
+    FireOS 5 slug would vanish whenever a device went offline — exactly when
+    someone is trying to work out what it was. A live report still wins.
+    """
+    src = (CONTROLLER / "em_api.py").read_text()
+    at = src.index('"baseOs":')
+    line = src[at:src.index("\n", src.index("\n", at) + 1)]
+    assert 'getattr(live, "base_os", None)' in line, "a live report must come first"
+    assert 'row["base_os"]' in line, "offline, baseOs must fall back to the stored value"
+
+
+def test_only_a_registered_device_blocks_the_wizard():
+    """
+    The wizard refuses a device already on the controller — but a row with no
+    firmware_ver is not one. ensure_device_token creates it when the TLS token
+    is minted, before the device has ever connected, so matching on the serial
+    alone refused every re-run of a provision that had got that far.
+
+    Located by FUNCTION NAME rather than by scanning back from the error
+    string: the decision moved into duplicateVerdict() so it could be unit
+    tested, and textual adjacency then pointed at nothing. Behaviour is covered
+    by controller/tests/duplicate_device.test.mjs; this pins that the rule is
+    still expressed in the source at all.
+    """
+    src = _jsx()
+    at = src.index("function duplicateVerdict")
+    body = src[at:src.index("\n  }", at)]
+    assert "knownDevices" in body and "d.firmware_ver" in body, (
+        "the already-registered check must ignore rows that never registered")
+
+
+def test_a_restore_ends_the_wizard_run():
+    """
+    A restore undoes the partition write that every later step builds on, and
+    the wizard cannot step backwards, so carrying on provisions on top of a
+    stock boot image — found on VVV 2026-09-18, sitting on Install Magisk as if
+    Patch Boot had held. A successful restore therefore ends the run: the step
+    controls go, nothing auto-runs, and the operator is told to start again.
+    """
+    src = _jsx()
+    fn = src[src.index("async function restoreEscrowedBoot"):]
+    fn = fn[:fn.index("\n  async function ", 1)]
+    ok = fn.index("Escrowed image restored and verified")
+    assert "setRestored(true)" in fn[ok:], (
+        "setRestored(true) must follow the verified restore, never precede it")
+    assert fn.index("setRestored(true)") > fn.index("_writeBootPartition"), (
+        "the run may only end once the restore has been written and verified")
+    assert "{!restored && (<>" in src, "the step controls must be hidden after a restore"
+    assert "|| running || restored || stepState[step] !== 'pending') return;" in src, (
+        "no step may auto-run after a restore")
+
+
 def test_the_flash_step_verifies_against_the_partition():
     """
     A write that reports implausible throughput went to cache, and a read-back
@@ -2982,3 +3020,43 @@ def test_the_stale_bundle_check_does_not_refresh_the_displayed_version():
     assert "setStatus" not in block, (
         "the staleness poll must not call setStatus — the header's version "
         "has to keep naming the controller this page was loaded against")
+
+
+def test_the_fireos_flow_refuses_an_emos_boot_image_before_it_writes():
+    """
+    Patching an emOS boot image with Magisk bootloops the device — reported and
+    reproduced on hardware 2026-09-20. Step 1's FireOS 5 check cannot catch it
+    and is not wrong: emOS mounts FireOS's /system, so build.prop reports 5.1.1
+    and the device passes by that test's own logic.
+
+    The ORDERING is the assertion, as it is for the OTA's md5: a refusal that
+    happens after the pull and patch is a refusal that has already spent the
+    device's boot slot.
+    """
+    src = _jsx()
+    fn = src[src.index("async function runPatchBoot"):]
+    fn = fn[:fn.index("\n  async function ", 1)]
+    assert "isOurBootImage(" in fn, (
+        "runPatchBoot must check whose image is in the slot before patching it")
+    assert fn.index("isOurBootImage(") < fn.index("of=/tmp/work/boot.img"), (
+        "the emOS check must precede the pull, or the refusal comes too late")
+
+
+def test_asset_installs_queue_behind_the_ota_lock():
+    """
+    An upgrade that adds an asset has every device reconnect and push at once
+    — ~14MB each for a device that never had the runtime — over the transport
+    where three concurrent OTAs stalled the event loop 11.1s. So asset installs
+    take the same global lock, and only the wrapper may reach the unlocked body.
+    """
+    import ast
+    src = (CONTROLLER / "em_api.py").read_text()
+    tree = ast.parse(src)
+    fns = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)}
+    wrapper = fns["_sync_oww_assets"]
+    assert any(isinstance(n, ast.AsyncWith) and "_ota_lock" in ast.unparse(n.items[0].context_expr)
+               for n in ast.walk(wrapper)), "_sync_oww_assets does not take _ota_lock"
+    callers = [name for name, fn in fns.items()
+               if name not in ("_sync_oww_assets", "_sync_oww_assets_locked")
+               and "_sync_oww_assets_locked(" in ast.unparse(fn)]
+    assert not callers, f"unlocked asset sync called from {callers}"

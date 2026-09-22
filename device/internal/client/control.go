@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,17 @@ import (
 //	-ldflags "-X github.com/wilbowes/EchoMuse/internal/client.Version=v2.1.0"
 var Version = "dev"
 
+// monoEpoch anchors MonoMs. A time.Time from time.Now carries a monotonic
+// reading, so a difference between two of them ignores the wall clock being
+// stepped — which the controller does on every ack (time_ms).
+var monoEpoch = time.Now()
+
+// MonoMs is t on this process's monotonic clock, in ms. It rides ping replies
+// and wakes so the controller can map it onto its own clock through the
+// cleanest exchange it has seen (em_listen.DeviceClock) and date a wake by
+// when it was captured, however long the message spent in flight.
+func MonoMs(t time.Time) int64 { return t.Sub(monoEpoch).Milliseconds() }
+
 // ─── Message types ────────────────────────────────────────────────────────────
 
 type controlMessage struct {
@@ -54,6 +66,9 @@ type controlMessage struct {
 	// has DNS for an NTP pool. Absent from older controllers, which correctly
 	// reads as "no opinion" — see clock.ShouldStep.
 	TimeMs int64 `json:"time_ms,omitempty"`
+	// Session is the private-listening session a listen_ack or listen_close
+	// refers to (docs/listening.md).
+	Session uint32 `json:"session,omitempty"`
 }
 
 // ─── Callbacks ────────────────────────────────────────────────────────────────
@@ -75,10 +90,14 @@ type ConfigAppliedCallback func(msg config.ConfigMessage)
 type VolumeSetCallback func(level int)
 type BeamLockCallback func(lock bool)
 
-// WifiChangeCallback receives a wifi_change request. It must return
+// ListenCallback receives listen_ack / listen_close, by type.
+type ListenCallback func(kind string, session uint32)
+
+// WifiChangeCallback receives a wifi_change request, with the SSID as its exact
+// bytes (see internal/wifi/ssid.go). It must return
 // quickly (the executor runs in its own goroutine) — the control
 // connection is about to drop when the network switches.
-type WifiChangeCallback func(ssid, psk string)
+type WifiChangeCallback func(ssid []byte, psk string)
 
 // ─── ControlClient ────────────────────────────────────────────────────────────
 
@@ -101,6 +120,7 @@ type ControlClient struct {
 	wifiChangeCallback    WifiChangeCallback
 	wifiCommitCallback    StateCallback
 	wifiScanCallback      StateCallback
+	listenCallback        ListenCallback
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -141,6 +161,7 @@ func NewControlClient(
 }
 
 func (c *ControlClient) OnLEDAnim(cb LEDAnimCallback)             { c.ledAnimCallback = cb }
+func (c *ControlClient) OnListen(cb ListenCallback)               { c.listenCallback = cb }
 func (c *ControlClient) OnDisconnected(cb StateCallback)          { c.disconnectedCallback = cb }
 func (c *ControlClient) OnConnected(cb StateCallback)             { c.connectedCallback = cb }
 func (c *ControlClient) OnPending(cb StateCallback)               { c.pendingCallback = cb }
@@ -515,6 +536,14 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 		// Unread by current controllers, so safe to add unnegotiated.
 		"board": board.IDOf(board.Detect("")),
 	}
+	// The running kernel, `uname -m` and `uname -r`. Generic across boards, and
+	// on biscuit the only thing that separates emOS on FireOS 5's 64-bit
+	// kernel from emOS on FireOS 6's 32-bit one. Unread by older controllers,
+	// so safe to add unnegotiated; omitted if uname fails.
+	if m, r := platform.Kernel(); m != "" {
+		reg["kernel_arch"] = m
+		reg["kernel_release"] = r
+	}
 	// Resolved fresh per registration: a cached-at-startup value goes stale
 	// after a WiFi change, and if the process started while the network was
 	// down (e.g. wifi.RecoverIfPending bouncing WiFi) it cached 127.0.0.1
@@ -782,13 +811,25 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 			// Safe network switch (see internal/wifi). The executor owns
 			// the whole sequence device-side — this connection is about to
 			// die when the network flips.
+			//
+			// ssid_hex carries the SSID's exact bytes, which is the only way
+			// to name a network whose SSID is not valid UTF-8 (any 0–32
+			// octets are valid). An older controller sends only ssid, whose
+			// UTF-8 bytes are the SSID for every name it could offer. A
+			// malformed ssid_hex becomes an empty SSID, which the change
+			// refuses with a reason rather than guessing.
 			var msg struct {
-				SSID string `json:"ssid"`
-				PSK  string `json:"psk"`
+				SSID    string `json:"ssid"`
+				SSIDHex string `json:"ssid_hex"`
+				PSK     string `json:"psk"`
 			}
 			if err := json.Unmarshal(raw, &msg); err == nil && c.wifiChangeCallback != nil {
+				ssid := []byte(msg.SSID)
+				if msg.SSIDHex != "" {
+					ssid, _ = hex.DecodeString(msg.SSIDHex)
+				}
 				log.Printf("[control] wifi_change received (ssid=%q)", msg.SSID)
-				c.wifiChangeCallback(msg.SSID, msg.PSK)
+				c.wifiChangeCallback(ssid, msg.PSK)
 			}
 
 		case "wifi_commit":
@@ -800,6 +841,15 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 		case "wifi_scan":
 			if c.wifiScanCallback != nil {
 				c.wifiScanCallback()
+			}
+
+		// Private-listening sessions (docs/listening.md). A message about a
+		// session that is not the open one is ignored further down, by the
+		// gate: it is a late message about a session already gone.
+		case "listen_ack", "listen_close":
+			var msg controlMessage
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Session != 0 && c.listenCallback != nil {
+				c.listenCallback(peek.Type, msg.Session)
 			}
 
 		case "speaker_flush":
@@ -834,18 +884,21 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 
 		case "ping":
 			// Echo the controller's sequence id so it can pair the reply
-			// with the send it timed. The device deliberately does NOT
-			// stamp its own clock: Echos boot with bogus clocks pre-NTP
-			// (the same reason TLS verification is clamped to build time),
-			// so RTT is measured entirely controller-side against one
-			// monotonic clock. Without an id, the unsolicited keepalive
+			// with the send it timed. RTT is measured entirely
+			// controller-side against one monotonic clock; the device's
+			// wall clock is never sent (Echos boot with bogus clocks
+			// pre-NTP, the same reason TLS verification is clamped to
+			// build time). `mono` is the device's MONOTONIC time, which is
+			// what lets the controller map a wake's capture instant onto
+			// its own clock. Without an id, the unsolicited keepalive
 			// pongs below are indistinguishable from replies and would be
 			// paired with whatever ping happened to be outstanding.
 			var ping struct {
 				ID json.RawMessage `json:"id"`
 			}
 			if err := json.Unmarshal(raw, &ping); err == nil && len(ping.ID) > 0 {
-				c.writeJSON(map[string]any{"type": "pong", "id": ping.ID})
+				c.writeJSON(map[string]any{"type": "pong", "id": ping.ID,
+					"mono": MonoMs(time.Now())})
 			} else {
 				c.writeJSON(map[string]string{"type": "pong"})
 			}
@@ -1055,9 +1108,21 @@ func capabilities() []string {
 	// "is it" split as oww_shadow against shadow.active, and for the same
 	// reason: proving ch8 is a loopback needs the speaker to have played,
 	// which has not happened at registration.
+	//
+	// "oww_local_only": this firmware can listen privately — score locally
+	// and send nothing until its own wake word fires (docs/listening.md).
+	// Whether it IS doing so is listen_state, for the aec_hw_ref reason: it
+	// depends on the scorer loading and on the controller's features, neither
+	// known at registration.
+	//
+	// "output_chain": this firmware can run the speaker output chain (EQ,
+	// bass guard, limiter) itself, at the ALSA write. It runs it only when
+	// the controller's ack carries the same feature, which is the controller
+	// saying it has stopped: either half alone keeps the old path, and both
+	// together must never process the same audio twice.
 	caps := []string{"mic", "speaker", "leds", "led_anim", "buttons",
 		"oww_shadow", "oww_trigger", "mww_shadow", "button_hold", "audio_mix",
-		"aec_hw_ref"}
+		"aec_hw_ref", "oww_local_only", "output_chain"}
 	if als.Present() {
 		caps = append(caps, "ambient_light")
 	}
@@ -1162,13 +1227,21 @@ func (c *ControlClient) SendWifiResult(ok bool, ssid, errMsg string) {
 // released independently, so this firmware must keep working against a
 // controller that predates the nested payload. Don't "tidy" the duplication
 // away until every controller in the fleet reads stats.
-func (c *ControlClient) SendPlaybackStats(periods, underruns uint64, stats interface{}) {
-	_ = c.writeJSON(map[string]interface{}{
+//
+// barge, when non-nil, is the on-device scorer's view of the stream:
+// {peak, bar, frames} at the barge-in bar (shadow.TakeBargeWindow).
+func (c *ControlClient) SendPlaybackStats(periods, underruns uint64, stats interface{},
+	barge map[string]interface{}) {
+	msg := map[string]interface{}{
 		"type":      "playback_stats",
 		"periods":   periods,
 		"underruns": underruns,
 		"stats":     stats,
-	})
+	}
+	if barge != nil {
+		msg["barge"] = barge
+	}
+	_ = c.writeJSON(msg)
 }
 
 // SendOwwShadowCross reports that on-device shadow scoring reached the wake
@@ -1218,12 +1291,52 @@ func (c *ControlClient) SendMWWShadowCross(score float32, ageMs int64) {
 // for the same reason as shadow crossings: an Echo's wall clock is unreliable
 // before NTP. The controller needs it to compare claims across devices without
 // network delay deciding which room answers.
-func (c *ControlClient) SendOwwWake(score, threshold float32, ageMs int64) {
+//
+// Under private listening the wake also opened `session`, whose audio follows
+// on the data plane as frameTypeListen, and carries the room's noise floor
+// (the controller can no longer measure it from a stream it does not get) and
+// whether the speaker was playing, which is what makes it a barge-in. Session
+// 0 means no session: the device is streaming, and those fields are omitted.
+//
+// capturedMono is the same instant as ageMs on MonoMs's clock. ageMs is
+// measured when the message is built, so time the message then spends in
+// flight is invisible to it; capturedMono is not, once the controller has
+// mapped the clock from ping replies.
+func (c *ControlClient) SendOwwWake(score, threshold float32, capturedAt time.Time,
+	session uint32, floor float64, barge bool) {
+	msg := map[string]interface{}{
+		"type":         "oww_wake",
+		"score":        score,
+		"threshold":    threshold,
+		"ageMs":        time.Since(capturedAt).Milliseconds(),
+		"capturedMono": MonoMs(capturedAt),
+	}
+	if session != 0 {
+		msg["session"] = session
+		msg["floor"] = floor
+		msg["barge"] = barge
+	}
+	_ = c.writeJSON(msg)
+}
+
+// SendListenState reports what the device is actually doing with its wake
+// stream — the "is it" to oww_local_only's "could it". Sent on every change
+// and after every ack, since the controller keeps no memory of it across a
+// reconnect.
+func (c *ControlClient) SendListenState(state, reason string) error {
+	msg := map[string]interface{}{"type": "listen_state", "state": state}
+	if reason != "" {
+		msg["reason"] = reason
+	}
+	return c.writeJSON(msg)
+}
+
+// SendListenEnd reports a session the device closed without being told to.
+func (c *ControlClient) SendListenEnd(session uint32, reason string) {
 	_ = c.writeJSON(map[string]interface{}{
-		"type":      "oww_wake",
-		"score":     score,
-		"threshold": threshold,
-		"ageMs":     ageMs,
+		"type":    "listen_end",
+		"session": session,
+		"reason":  reason,
 	})
 }
 
@@ -1260,6 +1373,19 @@ const FeatureBleAdvertsData = "ble_adverts_data"
 // microWakeWord crossings. Periodic mwwShadow stats remain backwards-compatible
 // telemetry and do not depend on this feature.
 const FeatureMWWShadow = "mww_shadow"
+
+// FeatureListenSession is announced by a controller that understands
+// private-listening sessions: listen_state, session-tagged oww_wake, the
+// frameTypeListen audio frame, and the listen_* replies. Without it the device
+// keeps streaming, because an older controller only acts on a device wake when
+// wake-stream frames are arriving — a device that went quiet on it would be
+// deaf.
+const FeatureListenSession = "listen_session"
+
+// FeatureOutputChain is announced by a controller that sends this device's
+// audio UNPROCESSED and leaves EQ, bass guard and limiter to the device.
+// Absent, the controller is still processing and the device must not.
+const FeatureOutputChain = "output_chain"
 
 // SendBleAdverts forwards a batch of BLE advertisements to the controller
 // (bluetooth_proxy path). adverts is marshalled as-is — []bluetooth.Advert,

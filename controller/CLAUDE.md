@@ -648,12 +648,20 @@ Two guards sit in front of that, both tested by reintroducing the bug:
 
 ## Controller audio pipeline
 
-1. **Wake word** — openwakeword (ONNX) runs in a thread executor per device on `mic_queue`. When 2+ devices are connected, `em_arbiter.py` applies **first-detector-wins** suppression: the first device to cross threshold answers *immediately* (no added latency, the claim is synchronous) and any other device detecting within `wakeArbitrationMs` (default 700, 0 = off) stands down and logs "Wake ceded". The claim is released at turn end. Do NOT reinstate the original best-SNR-after-a-wait design: it taxed every wake ~364ms (it gated on devices *connected*, not in earshot) and field data showed SNR at detection was indistinguishable across devices (0.9/1.15/0.93) while the SNR winner produced a worse transcript than the first detector.
+1. **Wake word** — **two paths, chosen per Echo from its own `listen_state`** (docs/listening.md). `wake_word_listener` dispatches to `_private_listen` for an Echo listening privately (it detects its own wake word and sends a `0x07` session only after it) and to `_stream_listen` otherwise, and each returns when the Echo moves to the other. Rules for the private path:
+
+    - **Turns run as tasks; the loop never awaits them**, so a wake during a turn is decided at once (`_private_barge`) rather than queued behind the turn it should interrupt. The stream path gets that from `_barge_watcher`, which a private Echo gives nothing to score.
+    - **End of speech closes the session** (`on_thinking_esphome`), or ends the lock_mic stream of a button/follow-up turn with `mic_stop` — which on a private Echo returns it to local listening rather than stopping it. `_run_voice_locked`'s finally closes any session still open, on every exit path.
+    - **Session audio is routed by `SessionRouter`, never by `oww_paused`.** It arrives on another socket from its `oww_wake`, before or after it; the router holds it, then `_run_voice_locked(session=)` delivers it AFTER the stale-frame drain. A flag-routed frame on the wrong side of a flip became the start of the next command.
+    - **Follow-up questions use the bounded turn stream** (`mic_stop` + `mic_start_turn`), exactly as the button does — there is no controller-opened session.
+    - **Controller-only measurements are absent, not zero**: `ctrl_wake_score` is not recorded (and no "controller MISS" is logged), `owwNearMisses` is null, `noise_floor` comes from the Echo's `floor` on each wake.
+
+    On the stream path, openwakeword (ONNX) runs in a thread executor per device on `mic_queue`. When 2+ devices are connected, `em_arbiter.py` applies **first-detector-wins** suppression: the first device to HEAR the wake answers *immediately* (no added latency, the claim is synchronous; each claim carries its capture time, arrival − device-reported age − half the smoothed RTT, so a late message cannot turn a near Echo's wake into a second answer) and any other device detecting within `wakeArbitrationMs` (default 700, 0 = off) stands down and logs "Wake ceded". The claim is released at turn end. Do NOT reinstate the original best-SNR-after-a-wait design: it taxed every wake ~364ms (it gated on devices *connected*, not in earshot) and field data showed SNR at detection was indistinguishable across devices (0.9/1.15/0.93) while the SNR winner produced a worse transcript than the first detector.
 
     **A device with no HA behind it stands down BEFORE arbitration, and never runs the turn at all** (`em_esphome.can_serve_turn`, the same `get_server`/`get_satellite` pair `trigger_voice_turn` refuses on, so a device counted as able cannot turn out to be unable a tick later). Detection order is a **proximity** proxy and says nothing about whether HA has ever dialled that device's satellite port, so unqualified first-detector-wins hands the utterance to an unlinked Echo, stands down the linked one, and the winner then dies `no_ha` in milliseconds: nothing answers, and the device that could have is the one that went dark. Measured on the fleet 2026-08-29 — a device scoring **0.912** lost to one scoring 0.609 that crossed 449ms earlier, so loudness and detection order do genuinely disagree; that is one observation and not a case for reopening best-SNR, which stays settled. The ordering is the guard: a check after the claim leaves the claim taken, and `tests/test_deploy.py` pins that `can_serve_turn` precedes `_wake_arbiter.claim` and gates it. `em_arbiter` deliberately does **not** know about any of this — a second copy of the rule is one that can disagree with the first.
 
     **The stand-down still records the wake and still plays the cue, every time** (`em_esphome.record_dropped_wake` + `_leds_turn_end`). Both matter for the same reason the row exists on the turn path: a wake during an HA outage that leaves no trace is indistinguishable from a device that heard nothing. And the cue reports the **device's state, not a turn's outcome**, so it fires whether or not another Echo took the utterance — gating it on losing would make it vanish exactly on the multi-device fleets where the confusion is worst. That is the correction to the first version of this, which only cued when the device ran its own doomed turn: standing in front of an unlinked Echo, you got a ring that lit and went dark while another room answered, which reads as a broken cue (Wil, 2026-08-29). The button path stands down identically — it is the control someone reaches for when the wake word appeared to do nothing, so silence there is the worst version of the bug.
-2. **Voice turn** — on wake or dot-button: drain stale frames → acquire `voice_lock` → stream mic to HA via the ESPHome satellite → receive TTS URL → **incrementally** fetch + ffmpeg-decode straight to 48kHz mono → **EQ → bass guard → limiter** (`em_eq.py`, `em_mbc.py`, `em_limiter.py` — see "The output chain" below for why that order) → stream back as 0x02 frames, **paced to `VOICE_LEAD_S`=4.0s ahead of realtime** (see below). `_stream_tts_audio` pipes the HTTP response into one long-lived ffmpeg and yields PCM as it decodes, so playback starts while HA is still generating — neither the encoded response nor the decoded speech is accumulated. **A retry is only safe before the first PCM has been emitted**; `_fetch_tts_audio` remains for callers that genuinely need the whole buffer
+2. **Voice turn** — on wake or dot-button: drain stale frames → acquire `voice_lock` → stream mic to HA via the ESPHome satellite → receive TTS URL → **incrementally** fetch + ffmpeg-decode straight to 48kHz mono → **EQ → bass guard → limiter** (`em_eq.py`, `em_mbc.py`, `em_limiter.py` — see "The output chain" below for why that order) → stream back as 0x02 frames, **paced to `VOICE_LEAD_S`=4.0s ahead of realtime** (see below). `_stream_tts_audio` yields PCM as the HTTP response arrives, so playback starts while HA is still generating — neither the encoded response nor the decoded speech is accumulated. **TTS is requested as WAV at the wire format and passed straight through, with no decoder** (`em_wav`, 2026-09-22). It was FLAC, copied from Voice PE, and ffmpeg's FLAC decoder holds audio back — ~1.7s with default frame threading on an 8-core host, 0.9s with one thread, measured feeding real-time input. With streaming TTS behind an LLM, HA pauses between sentences; audio held in the decoder then reaches the Echo only when the next sentence's bytes arrive, so HA's pause became a longer silent gap mid-answer (VVV, 2026-09-22: `maxGap=2041ms`, a voice underrun 2s into the response). Any other format still goes through ffmpeg, now `-threads 1`. The stream is closed with `contextlib.aclosing` at every level: the player BREAKS out of its loop on a barge-in, and an unclosed generator runs ffmpeg's kill-first teardown only when collected — measured leaving ffmpeg running after the close. **A retry is only safe before the first PCM has been emitted**; `_fetch_tts_audio` remains for callers that genuinely need the whole buffer
 
 ## Pacing: why the voice stream is held 4s ahead, not sent as fast as it can go
 
@@ -738,8 +746,16 @@ paced that far ahead of realtime, so processing happens when the audio is
 generated and the listener hears it a lead-time afterwards. Anyone A/B-ing must
 wait ~5s before judging; quick toggling reads as "nothing happened" because the
 old audio is still in the device buffer. Moving the chain onto the device is
-the only real fix and is filed as #243 — the same argument that forced ducking
-device-side.
+the only real fix (#243) — the same argument that forced ducking device-side —
+and it now exists: `device/internal/outchain`, negotiated as `output_chain` in
+BOTH directions. The device announces it; the controller announces it back on
+the ack and then sends that device's audio untouched (`em_eq.Passthrough`, gated
+on `Device.output_chain_on_device` at all three playback paths —
+`tests/test_output_chain_on_device.py` finds them by AST). A change there is
+heard within one period. **This Python is still the reference**: the Go is held
+bit-exact to vectors generated from it (`device/internal/outchain/testdata/`),
+and `tests/test_outchain_vectors.py` fails when the Python changes without the
+vectors being regenerated — carry the change to the Go in the same PR.
 
 **`bassGuardDb` barely moves the output, and the default hardly matters.**
 Measured 2026-08-19 on a 50Hz + 1kHz mix at ordinary level: across the whole
@@ -871,10 +887,10 @@ with no way for the user to tell which they had.
   wire action. When we duck, nothing was ever paused — the pause has to
   actually happen at release, or it is silently dropped and the music plays
   on.
-- **Music does NOT count as "streaming"** for the device's wake threshold
-  (`IsStreaming` is voice-only). It is a quiet continuous bed, not a response
-  being talked over; reporting it would drop the device's wake bar for the
-  length of a song.
+- **Music counts for the device's wake bar since private listening**
+  (`speakerPlaying` = `VoiceAudible || MusicAudible`), mirroring this side's
+  wake-over-music rule, since a private Echo sends nothing for the controller
+  to score. `VoiceAudible` alone still decides the `barge` flag on `oww_wake`.
 - Taps see the MIXED output, which is more correct than before: the AEC
   far-end reference is what needs cancelling from the mic, and with music
   under a response the echo is the sum.
@@ -1021,14 +1037,18 @@ single written ladder. `docs/audio-states.md` §2 is the nearest thing.
 | `em_shadow.py` | On-device wake word shadow mode — correlates device-reported threshold crossings with the controller's own detections (clock domains, match window, consume-on-match) |
 | `em_scenes.py` | LED ring scenes — resolves `ledScene`/`ledListenColor`/`ledThinkColor` config into render-ready listening/spinner frames |
 | `em_esphome.py` | ESPHome-mode satellite servers (`EchoMuseSatellite`, `DeviceESPhomeServer`) |
-| `em_arbiter.py` | Multi-device wake arbitration — pools same-utterance detections, best SNR answers |
+| `em_arbiter.py` | Multi-device wake arbitration — first to HEAR wins: claims carry capture time (`heard_at`) and the winner is held for window + slack, never revoked |
+| `em_listen.py` | Private listening (docs/listening.md): `resolve` (what an Echo is actually doing with its mic — the only source for privacy statements), `SessionRouter` (which `0x07` session audio may reach a turn), capture-time maths. Pure, tested in test_listen.py |
 | `em_player.py` | Media playback sessions — `media_player.play_media` → streaming ffmpeg decode → paced 0x02 feed; pause/resume/stop; voice preempts music (`interrupt`/`resume_interrupted`) |
 | `em_config_sections.py` | Fleet-vs-device config scoping — the six sections, `STATE_KEYS`, and the merge that resolves a device's effective config |
 | `em_tap_burst.py` | Coalesces a burst of action-button taps into one single/double/triple event. The window is restarted per tap and `enabled()` is re-checked at expiry, both correct. **The window is timed at the CONTROLLER, on arrival**, so the gap it measures is the real gap plus the RTT difference between the two taps — 26.4% of probes on this fleet exceed 200ms, which is why double/triple are unreliable below ~350ms (#115). The fix is a device-measured gap, the same reasoning as `heldMs` |
 | `em_recordings.py` | Utterance capture storage — WAVs in `recordings/` beside the DB, per-device file-count retention, ownership-checked path resolution |
 | `em_turnclock.py` | When a voice turn stops waiting, as a pure function. **The no-speech window is measured from the FIRST REAL AUDIO FRAME, not from turn start** — those answer different questions, and measured from turn start a slow link masquerades as a silent user. A 1373ms delivery gap (#139) shortened a 5s window to 3.6s and answered `no_speech` to someone mid-sentence, with the audio captured perfectly on the device and TCP holding it. `FIRST_AUDIO_GRACE` bounds the other side so audio that never arrives still ends the turn. Also holds `ha_vad_stalled_verdict` — the controller's own endpoint for turns HA's VAD never engaged on, see below |
+| `em_speechgate.py` | Holds a turn's audio until Silero VAD (shipped inside openwakeword) hears speech, then releases the whole held stream in order — so a turn nobody speaks in sends HA nothing, and Whisper cannot transcribe music residue as "Thank you". Every trigger and both listening modes pass through it in `_stream_mic_audio`. Once open, `speech_seen` comes from the gate, not the RMS check, which residue passes. Fails open (no model = ungated). `SpeechGate` is pure and tested; see the module docstring for why it holds rather than trims |
+| `em_wav.py` | Incremental WAV header parsing so TTS reaches the device with no decoder: placeholder sizes on a stream, chunks before `data`, RIFF pad bytes, PCM/EXTENSIBLE `fmt`. `is_wire_pcm` decides passthrough vs ffmpeg. Tested from the format's edges and against ffmpeg's real piped header |
 | `em_runbarrier.py` | Serialising ESPHome pipeline runs across a barge-in, as a pure state machine. The protocol carries **no run identifier**, so the satellite is what keeps two runs from overlapping — see the barge-in rules under the voice backend. Split out for `em_linkauth`'s reason: the suite cannot import `em_esphome` |
 | `em_announce.py` | Running an HA announcement to completion. Owns the two rules that pull against each other — never reply early, always reply — because `VoiceAssistantAnnounceFinished` is HA's completion signal and HA **blocks** on it |
+| `em_wifi.py` | What a WiFi network may be called (0–32 arbitrary bytes, `ssid_hex` on the wire) and what its WPA2 passphrase may be. Mirrors `device/internal/wifi/ssid.go` and the dashboard's `_ssidProblem`/`_pskProblem`; `_post_device_wifi` checks with it so a bad request fails before a device-side switch and rollback |
 | `em_linkauth.py` | The device-link auth decision as a pure function. Split out of `em_controller._link_auth_ok` so it is testable: the suite does not import em_controller, so this was security logic with no coverage until it orphaned a device |
 | `em_timers.py` | Voice-assistant timers (#167) — the alarm ring, and the two dismissal matchers that must NOT be one. `is_dismissal` is generous because a missed dismissal leaves the alarm going and HA answering "there are no timers"; `is_dismissal_only` is strict because it suppresses HA's reply, and a false positive there is not a spare stop, it is a lost answer ("turn off the kitchen light" over a ringing alarm). Phrases are stripped longest-first so `turn off` is consumed before the bare `off` strands `turn` |
 | `em_ble_proxy.py` | BLE proxy ESPHome servers — a second, separate ESPHome device per Echo (own port from the shared counter, own mDNS, MAC = serial-derived with the locally-administered bit flipped). Forwards `ble_adverts` control messages from the device's passive scanner (`device/internal/bluetooth`, raw HCI over `/dev/stpbt`; enabling durably disables Android's BT stack) to HA as raw advertisements. Lifecycle = idempotent `reconcile()` driven by `bleProxyEnabled` |
@@ -1330,6 +1350,7 @@ global and both entry points go through it — the fleet deploy and a
 hand-clicked single update collide identically, and only the first was ever
 going to be noticed.
 
+- **Wake word asset installs take the same lock** (`_sync_oww_assets`, 2026-09-22). Every device carries the full asset set whatever its mode, so an upgrade that adds an asset has the whole fleet reconnect and push at once — ~14MB each for a device on the controller's wake word that never had the runtime, which is most of an existing fleet. Same transport, same stall; same queue, same `OTA_MAX_HOLD_S` cap. A test pins that only the wrapper reaches `_sync_oww_assets_locked`.
 - **The binary is fetched inside the lock**, so a queued device holds nothing
   but its place in line, and the lock is released in a `finally` — an update
   that raises would otherwise hold it for the life of the process and no
@@ -1482,7 +1503,7 @@ Device-side payloads the controller distributes (`start_server.sh` via `/api/pro
 - **Debounced per device** (`RECONCILE_DEBOUNCE_S`, 15 min), because reconnects are routine on this fleet and the payloads are not; they change when someone deploys or edits a config, which is minutes to days apart. The stamp is claimed **before** the work, so a device reconnecting mid-run cannot start a second one against the same shell plane. `_delete_device` calls `forget_reconcile` — a re-added device is the one whose payloads are least likely to be right.
 - **A silent device is not a missing file.** `_shell_run` swallows every exception and returns `""`, so an absent md5 and a device that never answered were the same string — and the syncs read empty as out-of-date. That was harmless while they only ran mid-OTA against a shell already proven; seconds after connect the shell plane is very likely **not up yet**, so it meant a pointless push and a user-visible "out of date" event that was untrue. Both syncs now append `_SHELL_OK` to the probe and return untouched without it. Same shape as `reconcile_oww_assets`'s "failure to LOOK is not evidence of absence".
 
-Note the mode gate is deliberately kept: with `owwOnDevice=off` the device scores nothing and the 12.3MB runtime is irrelevant, so the assets reconcile still returns early there. The other two payloads are md5 compares and run regardless.
+**The wake word MODE does not gate the assets reconcile — every device carries the full set** (Wil, 2026-09-22: "either could be switched to the other mode and should be already in a state to accommodate the switch — consistency across the devices is key"). It used to return early under `owwOnDevice=off` on the grounds that such a device scores nothing and the 12.3MB runtime is irrelevant. Two things made that wrong: the speech gate's `silero_vad.onnx` is used in BOTH modes, so a controller-scoring device was left on the RMS gate; and a device that must install 14MB before it can switch mode is the "enabled it and nothing happened" this whole system exists to remove. The mode now decides one thing only, in `em_oww_assets.reconcile_action` (pure, tested): a device scoring LOCALLY whose selected classifier is missing is deaf, so it is warned about and sent its config again once repaired; any other gap is a quiet repair. **The mode itself is never changed** — no device is moved to the controller's wake word because a model is missing, and there is no opt-in for it (Wil, 2026-09-22: "the button still works regardless"); `effective_mode` takes no readiness, and an AST test fails if the reconcile ever assigns the mode. Only firmware that cannot load a runtime at all (`oww_shadow` absent) is skipped. An AST test fails if a `MODE_OFF` early return reappears. The other two payloads are md5 compares and run regardless.
 
 **Every payload needs an update path, and `tests/test_deploy.py` enforces it** (a file in `device_payloads/` unreferenced by `em_api.py` fails CI). The debloat pair had none until 2026-07-30 and every fielded device needed a manual push. `_sync_debloat` also rides the OTA and reconciles **both** halves — the boot script by md5, and the `pm hide` list by asking the device which listed packages are still visible — because round 2 added a *package* and a script-only sync would have looked like it worked while changing nothing. It is additionally exposed as `POST /api/devices/{id}/debloat` (Updates tab → Maintenance), which is **required, not a convenience**: the OTA path cannot reach a device already on the latest firmware. Two traps in that reconcile, both of which produced confident wrong answers: match package names with `grep -qx` (whole line) — an unanchored `*package:$p*` also matches `package:$p.client` — and never treat `pm list packages -u` minus `pm list packages` as the hidden count, since it includes uninstalled packages.
 
@@ -1655,10 +1676,29 @@ throughout — so the rules below are all one rule seen from different angles.
   that could not run yields empty strings, and empty is NOT evidence — the
   error that must not happen is refusing a working v1.1.0 device because `od`
   was missing. The absence of `boot_[ab]_amonet` is deliberately not one of
-  the signs: v2's installer does not rewrite the GPT, so a device upgraded
-  from v1 may still carry v1's names. Derived from R0rt1z2's published
-  sources, not from a v2 device, since none has been through the wizard yet.
-  `unlock_verdict.test.mjs`.
+  the signs, but NOT for the reason this used to give. It said v2's installer
+  does not rewrite the GPT, so an upgraded device might still carry v1's
+  names. **It does rewrite it, and that is the whole of the v1-versus-v2
+  partition story** (read out of `modules/main.py` and `modules/gpt.py` on
+  amonet's `mt8163-biscuit` branch, 2026-09-21, and confirmed on the spare):
+
+    - **v1 patched the table.** It renamed the real boot partitions to
+      `boot_a_x` / `boot_b_x` and carved two NEW `boot_a` / `boot_b` entries
+      out of the end of userdata to hold the exploit. That is why the bare
+      name is the payload there and why TWRP remaps it — and why writing a
+      kernel to a bare name on such a device costs the unlock.
+    - **v2 undoes it**, at install step 1.2 "Undo the partition table an older
+      amonet patched in": `unpatch()` renames `boot_a_x` back to `boot_a`,
+      zeroes v1's two added entries, and extends userdata to the last LBA
+      again. It then re-parses and raises `bad gpt` if any `_x` survived.
+    - **So a correctly installed v2 device has no `_x` and its bare `boot_a`
+      IS the real boot partition.** Measured on the spare (unlocked on v1,
+      upgraded to v2): no `_x` and no `_amonet` anywhere, and v2's own `_real`
+      aliases on `lk` and `tee` instead.
+
+  An `_x` alias on a device claiming v2 therefore means the restore did not
+  run or did not take, which is #598 — refuse it, because the bare name there
+  really is the payload. `unlock_verdict.test.mjs`.
 - **`_STEP_MODE` is enforced at every step, not only on Reconnect.** It existed
   and was correct and was consulted in one place, where a mismatch logged a
   line and left Retry enabled. In Android `/dev/block/other-boot` is amonet's
@@ -1749,12 +1789,29 @@ reference for any future emOS image and the only way back to FireOS, and we ship
 neither a kernel nor a userspace: once both slots hold emOS there is nothing on
 the device to rebuild from.
 
+**emOS always goes in `boot_a`, because amonet v2's bootloader on biscuit only
+ever starts `boot_a` (#544).** The BCB changes `androidboot.slot_suffix` and
+nothing else. Measured twice: the reporter's device, BCB B-active, ran the stock
+image in `boot_a` while a marker stamped into `boot_b`'s cmdline never
+appeared; and the spare on 2026-09-17, BCB B-active, booted the emOS image in
+`boot_a` with `slot_suffix=_b`. kaeru hooks the slot choice and passes normal
+boots straight to the stock LK's `get_boot_part()`, so the source does not
+settle it — the hardware does. The earlier rule (write the slot that is not
+stock) was right only when stock happened to be in B, which is why the spare
+provisioned fine on 09-16 and @jthoward64's device did not.
+
 `classifyBootSlots` reads each slot's own 512-byte header and `chooseBootSlots`
-decides; both are pure, and `tests/slot_choice.test.mjs` covers them. Four
-outcomes — one stock and one ours (the re-provision case, so running twice is
-idempotent), both stock (keep the one that boots, take the other), one stock and
-one empty, and **both ours, which refuses** and names the escrow as the way out.
-That refusal is the state every device the old rule touched is already in.
+decides; both are pure, and `tests/slot_choice.test.mjs` covers them. The
+target is A in every case:
+- **stock in A, stock in B** — build from A, overwrite A, B keeps its stock.
+- **stock only in A** — copy A to B first, through the same verified
+  `_writeBootPartition`, and do not touch A unless that copy verified.
+- **stock only in B** (the re-provision case) — build from B, overwrite A.
+- **no stock anywhere, or no slot B to keep a copy in** — refuse.
+
+The escrow reads the DONOR slot (`plan.donorDev`), not the slot LK reports
+booting, since the suffix says nothing about which image is running. The
+restore writes the escrow to A, which is what makes it boot.
 
 - **Ours-vs-stock is decided in SHELL, not in the parser**, so no test of
   `classifyBootSlots` can reach it. It matches TWO markers: `emos.system=`,
@@ -1764,19 +1821,17 @@ That refusal is the state every device the old rule touched is already in.
   escrowed an emOS image AS the stock recovery image while the real one was
   never found. Matched by full ADDRESS, because reading OURS as stock costs the
   escrow and reading STOCK as ours overwrites it.
-- **Writing a slot does not select it.** Amazon's bootloader picks from a
-  `bootloader_control` at `misc`+864 — magic `0x42424100`, a version byte, then
-  AOSP's `slot_metadata` bitfield per slot (priority low 4 bits, tries next 3,
-  successful top). `_activateBootSlot` sets it with TWRP's `bcbtool set_active`,
-  with a raw read as fallback so a recovery without the tool can still be TOLD
-  it is about to boot the wrong image. Without this a verified write boots the
-  other slot, which presents as the flash having done nothing.
+- **The BCB is still set to A** (`_activateBootSlot`, TWRP's `bcbtool
+  set_active`, raw read as fallback). It no longer chooses the image, but it
+  decides the suffix LK passes, and a stock image restored into A expects its
+  own slot's system. Layout at `misc`+864: magic `0x42424100`, a version byte,
+  then AOSP's `slot_metadata` bitfield per slot (priority low 4 bits, tries
+  next 3, successful top), no checksum.
 - **The image records which `/system` it was built beside** (`system_part` on
   the build POST → `emos.system=` on the cmdline). The wizard resolves
   `system_a`/`system_b` through TWRP's by-name map because that is the only
-  place those names exist; emOS has none. Do NOT derive it from the BCB — that
-  says where emOS is booting FROM, which after this change is deliberately the
-  other slot.
+  place those names exist; emOS has none. Do NOT derive it from the BCB or
+  the suffix — neither says which image is running.
 - **v1 is gated out of all of it.** Its `other-boot` names the active slot and
   it has no BCB of this shape. It therefore still overwrites the stock image,
   and fixing that needs a v1 device: the boot partitions are p17/p18 in

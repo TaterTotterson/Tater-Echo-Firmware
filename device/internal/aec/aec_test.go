@@ -484,20 +484,20 @@ func TestDelayChangeDoesNotRebuildOnTheHardwarePath(t *testing.T) {
 		t.Fatalf("delayMs not recorded for a later software fallback: got %d", c.delayMs)
 	}
 
-	// A TAIL change is a real filter change and must still rebuild.
+	// Nor does a tail change: aecTailMs sets the software tap's length, and
+	// the hardware path runs at hwTailMs (TestHardwarePathUsesItsOwnTail).
 	c.SetParams(true, 400, 200)
-	if c.st == before {
-		t.Fatal("tail change must rebuild the echo state even on the hardware path")
+	if c.st != before {
+		t.Fatal("tail change rebuilt the echo state on the hardware path")
 	}
 
 	// And on the software path a delay change must still re-seed the ring,
 	// which is the whole reason the rebuild exists.
+	// Checked by the re-seeded ring, not by comparing c.st: free-then-init of
+	// the same size often returns the same address, which made a pointer
+	// comparison flaky (it failed locally and passed in CI).
 	c.SetHardwareRef(false)
-	prev := c.st
 	c.SetParams(true, 500, 200)
-	if c.st == prev {
-		t.Fatal("delay change must rebuild on the software path")
-	}
 	if c.count != 500*sampleRate/1000 {
 		t.Fatalf("ring not re-seeded to the bulk delay: got %d samples", c.count)
 	}

@@ -25,6 +25,28 @@ def fresh_db(tmp_path, monkeypatch):
         db._conn = None
 
 
+@pytest.fixture()
+def one_hour(monkeypatch):
+    """Pin em_db's clock to the middle of an hour.
+
+    The rollups bucket by wall-clock hour, so a test that writes twice and
+    reads one row fails whenever the two writes straddle the hour — which CI
+    hit at 11:59:59 UTC on 2026-09-22 (`assert 0 == 10`). Only em_db's
+    reference to `time` is replaced; patching the module would reach pytest.
+    """
+    import time as _time
+
+    class _Clock:
+        def __getattr__(self, name):
+            return getattr(_time, name)
+
+        @staticmethod
+        def time():
+            return 1_800_000_000 + 1800.0
+
+    monkeypatch.setattr(db, "time", _Clock())
+
+
 def _cols(table: str) -> set:
     return {r[1] for r in db._conn.execute(f"PRAGMA table_info({table})")}
 
@@ -340,7 +362,7 @@ def test_shadow_counters_accumulate_and_max(fresh_db):
     assert r["dev_max_score"] == 0.9
 
 
-def test_shadow_counters_do_not_disturb_near_miss_columns(fresh_db):
+def test_shadow_counters_do_not_disturb_near_miss_columns(fresh_db, one_hour):
     """The dev_* arguments were added to an existing upsert that the wake loop
     calls every 2s. A mistake in the ON CONFLICT list would corrupt near-miss
     accounting, which has nothing to do with this feature."""
@@ -366,7 +388,7 @@ def test_device_metrics_has_thermal_columns(fresh_db):
         assert c in cols, f"device_metrics.{c} missing"
 
 
-def test_thermal_stats_relay_and_rollup(fresh_db):
+def test_thermal_stats_relay_and_rollup(fresh_db, one_hour):
     """The relay guard: a device stat has to be named in DeviceStats (Go), the
     em_controller allowlist AND here, or it is silently dropped. This covers
     the third."""
@@ -388,7 +410,7 @@ def test_thermal_stats_relay_and_rollup(fresh_db):
     assert m["thermal_limit_min"] == 3, "throttling happened this hour"
 
 
-def test_unreadable_temp_does_not_dilute_the_mean(fresh_db):
+def test_unreadable_temp_does_not_dilute_the_mean(fresh_db, one_hour):
     """A missing sensor reading must be skipped, not counted as 0C — averaging
     a zero in reads as a cool device, which is the wrong direction for a metric
     whose whole job is to warn."""
@@ -399,7 +421,7 @@ def test_unreadable_temp_does_not_dilute_the_mean(fresh_db):
     assert m["cpu_temp_avg"] == 40.0, "one temp sample, not 20.0"
 
 
-def test_metrics_without_thermals_stay_null(fresh_db):
+def test_metrics_without_thermals_stay_null(fresh_db, one_hour):
     """Older firmware sends no thermal fields; those must read as absent rather
     than as a 0C device with 0 cores."""
     db.record_device_stats("dev-old", {"cpuPct": 22.0, "memUsedMb": 180})

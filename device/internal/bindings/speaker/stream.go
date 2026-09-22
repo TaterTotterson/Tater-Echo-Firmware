@@ -96,6 +96,11 @@ type audioStream struct {
 	recvMaxGapNs atomic.Int64
 	recvBytes    atomic.Uint64
 
+	// When the ALSA goroutine last took a period to play. Atomic because
+	// the mic side reads it (playedWithin) to know whether sound is coming
+	// out, which isActive cannot say once a stream has fully arrived.
+	lastTakeNs atomic.Int64
+
 	// ── consumption-side accounting, pump-loop-local by contract ──────────
 	// Only the ALSA goroutine touches these, so they need no synchronisation.
 	playing      bool // mid-stream from the consumer's point of view
@@ -203,6 +208,20 @@ func (s *audioStream) isActive() bool {
 	return s.active
 }
 
+// playedWithin reports whether this plane is audible: audio still arriving,
+// queued to play, or a period played within hold.
+//
+// isActive alone clears at EOS, and a reply arrives far faster than it plays
+// (recvSpan 112ms for a ~3s answer, measured 2026-09-22), so it was false for
+// nearly all of the time the reply was actually heard.
+func (s *audioStream) playedWithin(now time.Time, hold time.Duration) bool {
+	if s.isActive() || len(s.ch) > 0 {
+		return true
+	}
+	last := s.lastTakeNs.Load()
+	return last > 0 && now.UnixNano()-last < int64(hold)
+}
+
 // ready reports whether the pump loop should take a period this round.
 //
 // The prime gate: while not yet playing, hold on silence until the buffer has
@@ -229,6 +248,7 @@ func (s *audioStream) take() []byte {
 	case period := <-s.ch:
 		s.playing = true
 		s.periods++
+		s.lastTakeNs.Store(time.Now().UnixNano())
 		// Buffer margin: occupancy remaining *after* taking this period.
 		// len() on a channel is O(1); no allocation, no log.
 		//

@@ -283,6 +283,9 @@ def cmd_new(args) -> None:
 
 BUILD_STEPS = ["generate", "augment", "train"]
 STEP_FLAGS = {"generate": "--generate_clips", "augment": "--augment_clips", "train": "--train_model"}
+# What augment writes to <output_dir>/<name>/, in the order train.py computes them.
+FEATURE_FILES = ("positive_features_train.npy", "negative_features_train.npy",
+                 "positive_features_test.npy", "negative_features_test.npy")
 
 
 def cmd_build(args) -> None:
@@ -317,10 +320,8 @@ def cmd_build(args) -> None:
     # the missing ones. Partial set → recompute all four.
     if "augment" in steps:
         feat_dir = WAKEWORDS / name / name
-        feats = ["positive_features_train.npy", "positive_features_test.npy",
-                 "negative_features_train.npy", "negative_features_test.npy"]
-        have = [f for f in feats if (feat_dir / f).exists()]
-        if have and len(have) < len(feats):
+        have = [f for f in FEATURE_FILES if (feat_dir / f).exists()]
+        if have and len(have) < len(FEATURE_FILES):
             log(f"found {len(have)}/4 feature files from an interrupted augment — recomputing all")
             args.overwrite = True
 

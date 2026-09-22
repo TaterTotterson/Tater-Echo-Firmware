@@ -9,14 +9,9 @@ own. It pairs the device's existing MediaTek 3.18 kernel with our own PID 1 and
 our own busybox, with bionic and tinyalsa mounted read-only from the device's
 `/system`.
 
-> **⚠️ emOS needs the FireOS 5 kernel, so do not install amonet-biscuit
-> v2.0.0.** Version 2.0.0 of the unlock (10 September 2026) replaces the
-> Echo's bootloaders, and after that FireOS 5, and with it emOS, no longer
-> boots. The emOS init is also a 64-bit (aarch64) binary, which FireOS 6's
-> 32-bit kernel cannot run. Unlock with **v1.1.0**. If you have already
-> installed v2.0.0, **do not try to go back by flashing FireOS 5 or an older
-> amonet**: that rewrites bootloaders by hand, which is how an Echo gets
-> hard-bricked. See the top of [`docs/rooting.md`](../docs/rooting.md).
+emOS runs on both of the Echo Dot 2's kernels: FireOS 5's 64-bit one
+(amonet-biscuit v1.1.0) and FireOS 6's 32-bit one (v2.0.0). The wizard picks
+the matching init by reading your own boot image.
 
 **Status: 0.4, bench-proven, not field-proven.** Still a small number of
 devices over a handful of days. A complete voice turn has run on it — wake word
@@ -36,8 +31,8 @@ Three things changed since 0.1 that are worth knowing before you try it:
 - **emOS is no longer a one-way door.** `/init recovery` reboots the device
   into TWRP from its own console, and the wizard's first step already accepts
   a device that is in TWRP — so emOS → recovery → re-provision is a path that
-  works, without powering the device off and holding the mute button in the
-  dark. New in 0.4, confirmed on hardware 2026-09-10.
+  works, without powering the device off and holding a button in the dark.
+  New in 0.4, confirmed on hardware 2026-09-10.
 
 `emos-v0.4` is tagged and published so the wizard can fetch the init, which is
 the only part of an image that can be distributed. **A tag is not a claim that
@@ -725,14 +720,28 @@ nothing guarantees B stays pristine, and it boots FireOS without our permissive
 cmdline or the `service echomuse` init entry, so EchoMuse does not start. It
 boots, which is what recovery is for.
 
-**Our cmdline patch DESTROYS the original arguments rather than appending
-them.** `runPatchBoot` zeroes bytes 64-576 of the header and writes 51 bytes,
-so slot A's cmdline is exactly `bootopt=64S3,32N2,64N2
-androidboot.selinux=permissive` and everything FireOS shipped is gone. The
-device boots regardless - LK supplies `root=`, `androidboot.hardware` and the
-rest, and the kernel defaults cover what is left - so this has been true for
-the life of the wizard with nothing to show for it. Slot B is the only reason
-it is visible at all.
+**On amonet v2 that last resort does not boot from where it is.** v2's
+bootloader only ever starts `boot_a` (#544); the BCB changes
+`androidboot.slot_suffix` and nothing else. A stock image kept in B is a copy
+to restore INTO A, not a slot to switch to. The wizard therefore always writes
+emOS to A and keeps stock in B, copying it there first when A held the only
+one.
+
+**The cmdline patch preserves the original arguments.** `runPatchBoot` appends
+`androidboot.selinux=permissive` to the existing NUL-terminated field if absent.
+It does not replace FireOS's `bootopt`, `rootwait`, `init`, build-variant or
+verity arguments, and it refuses to patch if the combined value cannot fit
+while retaining a terminator. It replaces each existing
+`androidboot.selinux=enforce` token in place with
+`androidboot.selinux=permissive`, preserving all other argument bytes and
+whitespace. Other unknown SELinux values are refused. Appending a duplicate
+cannot safely override the first value. The wizard validates the actual field
+even when the unpack log contains `permissive`; it skips rewriting the cmdline
+only when the bounded transformation leaves the image unchanged.
+Earlier wizard versions zeroed bytes 64-576 and wrote only 51 bytes; the device
+happened to boot because LK supplied `root=`,
+`androidboot.hardware` and the rest, and the kernel defaults covered what was
+left. Slot B was the only reason the loss was visible.
 
 **The patch itself is NOT inert, and the ordering is why.** LK splices the
 image's cmdline into the middle of its own and then appends
@@ -751,13 +760,16 @@ init, and a write-once property gives the opposite precedence to the one a
 kernel parameter would. Both tokens on the cmdline with the device reading
 permissive IS the measurement that settles it.
 
-Appending rather than replacing is therefore the fix, and it has to keep that
-property: append `androidboot.selinux=permissive` to whatever cmdline the
-image already carries, so it still lands ahead of LK's `enforce`. 215 bytes
-plus 31 against a 512-byte field, so it fits. It needs a hardware test, since
-an argument that is currently absent and unmissed may matter on a device that
-is not this one - and do NOT copy slot B's cmdline as a template: its `bootopt`
-third field is `32N2` against slot A's `64N2`, so it is a different build.
+When the image has no SELinux argument, appending preserves that ordering: the
+image's permissive value still lands ahead of LK's `enforce`. When the image
+already carries `androidboot.selinux=enforce`, replacing that token in place
+sets the first image-owned value correctly without discarding any other
+argument. The observed 215-byte field plus the appended argument fits within
+512 bytes. The byte-level behavior is covered by a Node regression test, but
+the revised image still needs a hardware boot test, since an argument that is
+currently absent and unmissed may matter on another device. Do NOT copy slot
+B's cmdline as a template: its `bootopt` third field is `32N2` against slot A's
+`64N2`, so it is a different build.
 
 **`misc` (`p8`) holds a boot-control block, and it is empty.** 4KB of zeros
 with one record at offset **0x360**:
@@ -901,8 +913,9 @@ is not proof it rebooted — compare uptime or a build fingerprint.
   The other three paths remain, and none of them is in the wizard either:
 
   - **Return to stock, by hand.** Boot into TWRP — unplug the power, hold
-    **mute** down, and apply power with it still held, until the ring shows an
-    alternating cyan pattern — then wipe
+    **mute** or **+** (volume up) down, and apply power with it still held,
+    until the ring changes (which button depends on the amonet version) —
+    then wipe
     cache, wipe data, sideload the FireOS 5 image, **and then flash
     `f1r30s.zip`**. That last step is not optional: a stock flash restores
     dm-verity against a partition table the unlock modified, so **the OS will

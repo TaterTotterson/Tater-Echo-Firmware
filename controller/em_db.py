@@ -38,14 +38,16 @@ log = logging.getLogger("echomuse.db")
 # ─── Default device config ────────────────────────────────────────────────────
 
 DEFAULT_DEVICE_CONFIG = {
-    # owwOnDevice: on-device wake word scoring. "off" or "shadow".
-    # Shadow scores the wake stream on the device and reports what it WOULD
-    # have detected, without acting on it, so the two can be compared on the
-    # same audio. Default off and it should stay that way: it costs ~38% of one
-    # core permanently on top of the ~18-20% mic-pipeline baseline, and it
-    # needs ONNX Runtime plus the models installed on the device out of band
-    # (they are not in the firmware). Enable on ONE device at a time.
-    "owwOnDevice":      "off",
+    # owwOnDevice: where the wake word is detected (docs/listening.md).
+    # "on" — on the Echo, which sends nothing until it hears it; "off" — on
+    # the controller, from a continuous stream; "shadow" — both, a streaming
+    # diagnostic. "on" is the default for NEW installs since 2026-09-21: it
+    # costs the Echo ~0.4 of a core, and privacy is what the project stands
+    # on. Existing installs keep what they had — _fixup_v25 pins "off" into a
+    # fleet config that never stored the key, because defaults are layered
+    # UNDER stored config and changing this line alone would silently switch
+    # every existing fleet.
+    "owwOnDevice":      "on",
     "adcDigitalGain":   88,
     "adcMicpga":        40,
     # micGainDb: fixed digital gain (dB) the device applies to the full
@@ -950,6 +952,43 @@ MIGRATIONS: list[str] = [
 
     UPDATE system_config SET value = '22' WHERE key = 'schema_version';
     """,
+
+    # ── v23 — the kernel each device booted ──────────────────────────────────
+    #
+    # base_os says "emos" and board says "biscuit" whichever kernel emOS runs
+    # on, so the dashboard could not tell FireOS 5's 64-bit kernel (aarch64,
+    # 3.18.19+) from FireOS 6's 32-bit one (armv7l, 3.18.19-g…). The register
+    # message now carries `uname -m` and `uname -r`; stored for the reason
+    # base_os is (v21), so an offline device keeps its label. Generic across
+    # boards. NULL means never reported.
+    """
+    ALTER TABLE devices ADD COLUMN kernel_arch TEXT;
+    ALTER TABLE devices ADD COLUMN kernel_release TEXT;
+
+    UPDATE system_config SET value = '23' WHERE key = 'schema_version';
+    """,
+
+    # ── v24 — a stored wake threshold that can never fire ───────────────────
+    #
+    # #549 caps owwThreshold at OWW_THRESHOLD_MAX on every WRITE, but a 1.0
+    # stored before it — the old Sensitivity slider's strictest notch — stays
+    # in the database until someone saves again, and the device keeps a bar
+    # nothing clears. The work is in _fixup_v24; this entry only moves the
+    # version, so the rule has one copy.
+    """
+    UPDATE system_config SET value = '24' WHERE key = 'schema_version';
+    """,
+
+    # ── v25 — keep existing fleets' wake word mode through the new default ──
+    #
+    # owwOnDevice's default moved "off" → "on" (private listening,
+    # docs/listening.md). Defaults are layered under stored fleet config, so
+    # a fleet that never saved the key would flip on upgrade. Wil's call:
+    # existing deployments keep their configuration, and the release notes
+    # tell them how to switch. The work is in _fixup_v25.
+    """
+    UPDATE system_config SET value = '25' WHERE key = 'schema_version';
+    """,
 ]
 
 # Post-migration fixups that need Python rather than SQL. Keyed by the schema
@@ -1013,7 +1052,66 @@ def _fixup_v19(conn) -> None:
                 f"its entities."
             )
 
-_MIGRATION_FIXUPS = {11: _fixup_v11, 19: _fixup_v19}
+def _fixup_v24(conn) -> None:
+    """
+    Lower any stored owwThreshold above OWW_THRESHOLD_MAX, per device and fleet.
+
+    Through _clamp_wake_threshold, so this and the write path cannot disagree
+    about the ceiling. A config that will not parse is left alone: this repairs
+    one value and has no business rewriting anything it cannot read.
+    """
+    rows = conn.execute("SELECT device_id, config FROM devices").fetchall()
+    for row in rows:
+        try:
+            cfg = json.loads(row["config"] or "{}") or {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+        fixed = _clamp_wake_threshold(cfg, row["device_id"])
+        if fixed is not cfg:
+            conn.execute("UPDATE devices SET config = ? WHERE device_id = ?",
+                         (json.dumps(fixed), row["device_id"]))
+    row = conn.execute(
+        "SELECT value FROM system_config WHERE key = 'global_device_config'").fetchone()
+    if row:
+        try:
+            cfg = json.loads(row["value"] or "{}") or {}
+        except (json.JSONDecodeError, TypeError):
+            return
+        fixed = _clamp_wake_threshold(cfg, "fleet")
+        if fixed is not cfg:
+            conn.execute(
+                "UPDATE system_config SET value = ? WHERE key = 'global_device_config'",
+                (json.dumps(fixed),))
+
+
+def _fixup_v25(conn) -> None:
+    """
+    Pin owwOnDevice="off" into a stored fleet config that lacks it.
+
+    A fresh database already carries the key — v3 seeds the whole of
+    DEFAULT_DEVICE_CONFIG — so this touches only fleets that predate it,
+    which is exactly the set whose behaviour the new default would change.
+    Device rows need nothing: a key a device does not store falls through to
+    the fleet's. A config that will not parse is left alone.
+    """
+    row = conn.execute(
+        "SELECT value FROM system_config WHERE key = 'global_device_config'").fetchone()
+    if not row:
+        return
+    try:
+        cfg = json.loads(row["value"] or "{}") or {}
+    except (json.JSONDecodeError, TypeError):
+        return
+    if "owwOnDevice" in cfg:
+        return
+    cfg["owwOnDevice"] = "off"
+    conn.execute(
+        "UPDATE system_config SET value = ? WHERE key = 'global_device_config'",
+        (json.dumps(cfg),))
+
+
+_MIGRATION_FIXUPS = {11: _fixup_v11, 19: _fixup_v19, 24: _fixup_v24,
+                     25: _fixup_v25}
 
 # ─── Connection management ────────────────────────────────────────────────────
 
@@ -1464,6 +1562,15 @@ def set_device_base_os(device_id: str, base_os: Optional[str]) -> None:
         conn.execute(
             "UPDATE devices SET base_os = ? WHERE device_id = ?",
             (base_os, device_id),
+        )
+
+
+def set_device_kernel(device_id: str, arch: str, release: str) -> None:
+    """Record the kernel a device booted (`uname -m`, `uname -r`), per register."""
+    with _tx() as conn:
+        conn.execute(
+            "UPDATE devices SET kernel_arch = ?, kernel_release = ? WHERE device_id = ?",
+            (arch, release, device_id),
         )
 
 

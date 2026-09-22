@@ -36,8 +36,10 @@
 // Unlike the wizard (ADB shell), this package runs inside the root Go
 // binary, so file writes use plain os.WriteFile — none of the mksh
 // redirect quirks apply. FireOS needs ownership restored to wifi:wifi
-// (AID_WIFI=1010) 0660 or the framework can't read it; emOS has no such user
-// and the file holds a PSK, so 0600.
+// (AID_WIFI=1010) 0660 or the framework can't read it. emOS depends on which
+// supplicant the image carries, since they run as different users — see
+// confMode, and note that 0600 there strands a FireOS 5 device on its next
+// boot.
 //
 // Safety model (the connection to the controller dies mid-change, so the
 // device owns the whole sequence):
@@ -58,6 +60,7 @@
 package wifi
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -65,7 +68,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,8 +89,15 @@ const (
 	iface          = "wlan0"
 
 	// AID_WIFI — fixed uid/gid on Android; the framework reads the conf
-	// as this user.
+	// as this user. Amazon's supplicant runs as it under emOS too, which is
+	// what confMode is about.
 	aidWifi = 1010
+
+	// emOS's own supplicant, present only in images that carry the payload's
+	// WiFi tools. Its presence is what init selects on (first_exec in
+	// emos/init/init.c), so it is also what decides who must be able to read
+	// the conf we write.
+	emosSupp = "/sbin/wpa_supplicant"
 
 	// 20s (the provisioning wizard's window) proved too tight on hardware
 	// for a network the framework hasn't joined before — autojoin's scan
@@ -110,10 +119,12 @@ type Result struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Network is one scan result row.
+// Network is one scan result row. SSID is for display; SSIDHex is the exact
+// bytes, which is what a change request sends back (see ssid.go).
 type Network struct {
-	SSID   string `json:"ssid"`
-	Signal int    `json:"signal"`
+	SSID    string `json:"ssid"`
+	SSIDHex string `json:"ssid_hex"`
+	Signal  int    `json:"signal"`
 }
 
 type marker struct {
@@ -138,6 +149,11 @@ var (
 	baseOS       = platform.Base
 	androidConfP = androidConf
 	emosConfP    = emosConf
+	emosSuppP    = emosSupp
+	// Indirected so the ownership rules are testable off-target: a test host
+	// is not root and cannot hand a file to AID_WIFI, and the uid it asks for
+	// is the whole assertion.
+	chownFile = os.Chown
 )
 
 func onEmOS() bool { return baseOS() == platform.EmOS }
@@ -220,18 +236,26 @@ func wpaCli(args ...string) (string, error) {
 	return string(out), err
 }
 
-// CurrentSSID returns the associated SSID, or "" when not associated.
+// CurrentSSID returns the associated SSID for display, or "" when not
+// associated.
 func CurrentSSID() string {
+	return SSIDText(currentSSIDBytes())
+}
+
+// currentSSIDBytes is the associated SSID's exact bytes, or nil. The status
+// line is printf_encode'd like scan_results, and only the trailing CR a line
+// can carry is stripped: spaces at either end are part of an SSID.
+func currentSSIDBytes() []byte {
 	out, _ := wpaCli("status")
 	if !strings.Contains(out, "wpa_state=COMPLETED") {
-		return ""
+		return nil
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "ssid="); ok {
-			return v
+		if v, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "ssid="); ok {
+			return UnescapeSSID(v)
 		}
 	}
-	return ""
+	return nil
 }
 
 // currentIPv4 returns the interface's IPv4 address, or "".
@@ -267,61 +291,47 @@ func Scan() ([]Network, error) {
 		return nil, fmt.Errorf("scan_results: %w", err)
 	}
 
+	return parseScan(out), nil
+}
+
+// parseScan turns scan_results into one Network per SSID, strongest AP first.
+// Keyed by the SSID's BYTES, so two names that only differ in bytes a display
+// cannot show stay two networks.
+func parseScan(out string) []Network {
 	best := map[string]int{}
 	for _, line := range strings.Split(out, "\n") {
-		// bssid \t frequency \t signal \t flags \t ssid
-		parts := strings.Split(line, "\t")
+		// bssid \t frequency \t signal \t flags \t ssid. Tabs inside an SSID
+		// arrive escaped, so the fifth field is the whole name; only a
+		// transport CR is stripped, never spaces.
+		parts := strings.Split(strings.TrimRight(line, "\r"), "\t")
 		if len(parts) < 5 {
 			continue
 		}
-		ssid := strings.TrimSpace(parts[4])
-		if ssid == "" || ssid == "SSID" {
-			continue
-		}
-		// Hidden networks: wpa_cli prints the zeroed SSID bytes as literal
-		// \xNN escapes (e.g. \x00\x00…). Unjoinable by name — drop them.
-		if hiddenSSID.MatchString(ssid) {
+		ssid := UnescapeSSID(parts[4])
+		// Hidden networks advertise an empty or all-zero SSID: unjoinable by
+		// name, so dropped.
+		if hiddenOrEmpty(ssid) {
 			continue
 		}
 		sig, err := strconv.Atoi(strings.TrimSpace(parts[2]))
 		if err != nil {
 			continue
 		}
-		if cur, ok := best[ssid]; !ok || sig > cur {
-			best[ssid] = sig
+		key := string(ssid)
+		if cur, ok := best[key]; !ok || sig > cur {
+			best[key] = sig
 		}
 	}
 	nets := make([]Network, 0, len(best))
-	for ssid, sig := range best {
-		nets = append(nets, Network{SSID: ssid, Signal: sig})
+	for key, sig := range best {
+		b := []byte(key)
+		nets = append(nets, Network{SSID: SSIDText(b), SSIDHex: hex.EncodeToString(b), Signal: sig})
 	}
 	sort.Slice(nets, func(i, j int) bool { return nets[i].Signal > nets[j].Signal })
-	return nets, nil
+	return nets
 }
 
 // ─── Change with rollback ─────────────────────────────────────────────────────
-
-// hiddenSSID matches scan_results entries that are entirely \xNN escape
-// sequences — wpa_cli's rendering of hidden/zeroed SSIDs.
-var hiddenSSID = regexp.MustCompile(`^(\\x[0-9a-fA-F]{2})+$`)
-
-// validCred matches wpaConfEscape in the provisioning wizard: a literal
-// " or \ can't be represented safely in a wpa_supplicant.conf quoted
-// string, so reject rather than mis-escape.
-var validCred = regexp.MustCompile(`["\\]`)
-
-func validate(ssid, psk string) error {
-	if ssid == "" {
-		return fmt.Errorf("empty SSID")
-	}
-	if validCred.MatchString(ssid) || validCred.MatchString(psk) {
-		return fmt.Errorf("SSID/passphrase contains a double-quote or backslash, which wpa_supplicant.conf cannot represent safely")
-	}
-	if psk != "" && (len(psk) < 8 || len(psk) > 63) {
-		return fmt.Errorf("WPA passphrase must be 8–63 characters (got %d)", len(psk))
-	}
-	return nil
-}
 
 func getprop(key, fallback string) string {
 	out, err := exec.Command("getprop", key).Output()
@@ -345,16 +355,16 @@ func getprop(key, fallback string) string {
 // built without CONFIG_WPS or CONFIG_P2P, so they are fields it cannot use. It
 // tolerates them by patch, but that patch is for confs FireOS 6 left behind, not
 // a licence to write dead lines.
-func composeConf(ssid, psk string) string {
+func composeConf(ssid []byte, psk string) string {
 	network := []string{
 		"network={",
-		fmt.Sprintf("\tssid=%q", ssid),
+		ssidLine(ssid),
 	}
 	if psk == "" {
 		network = append(network, "\tkey_mgmt=NONE")
 	} else {
 		network = append(network,
-			fmt.Sprintf("\tpsk=%q", psk),
+			pskLine(psk),
 			"\tkey_mgmt=WPA-PSK",
 		)
 	}
@@ -384,18 +394,64 @@ func composeConf(ssid, psk string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+// confMode says how tightly the conf we write on emOS may be locked down:
+// root-only when emOS's own supplicant will read it, wifi-readable when
+// Amazon's will.
+//
+// The two supplicants run as different users. Ours is started as root; Amazon's
+// drops to AID_WIFI, so a 0600 root conf is one it cannot open — it exits at
+// startup, init leaves a zombie, and the device comes up with NO network and no
+// way in but a cable. Measured on EFF 2026-09-20, after a WiFi change wrote the
+// file and the next boot tried to read it.
+//
+// Selected on the same test init uses (first_exec in emos/init/init.c), rather
+// than on the base OS: a FireOS 5 image carries no /sbin/wpa_supplicant, since
+// the payload's WiFi tools ship only in the ARM32 image, and that is exactly
+// the fleet this stranded. Drop the binary in and both halves switch together.
+func confMode() (mode os.FileMode, wifiOwned bool) {
+	if _, err := os.Stat(emosSuppP); err == nil {
+		return 0o600, false
+	}
+	return 0o660, true
+}
+
 func writeConf(content string) error {
 	_, path := confPaths()
 	if onEmOS() {
-		// 0600: no other user reads it and it holds the PSK. MkdirAll because
-		// /data/emos may not exist on a device never configured here.
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+		// No wider than the supplicant that reads it — it holds the PSK.
+		// MkdirAll because /data/emos may not exist on a device never
+		// configured here.
+		mode, wifiOwned := confMode()
+		dir, dirMode := filepath.Dir(path), os.FileMode(0o700)
+		if wifiOwned {
+			// Group-writable, like Android's /data/misc/wifi: the supplicant
+			// rewrites the conf in place on SAVE_CONFIG, which the
+			// provisioning wizard's emOS WiFi step sends after joining
+			// (dashboard.jsx, runStep 8). Traverse alone would fail that step
+			// on any device that already has a conf here.
+			dirMode = 0o770
 		}
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		if err := os.MkdirAll(dir, dirMode); err != nil {
+			return fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
-		return os.Chmod(path, 0o600)
+		if wifiOwned {
+			// An existing directory keeps its old mode through MkdirAll, and
+			// every device that has taken a WiFi change already has one at
+			// 0700.
+			if err := os.Chmod(dir, dirMode); err != nil {
+				return fmt.Errorf("chmod %s: %w", dir, err)
+			}
+			if err := chownFile(dir, 0, aidWifi); err != nil {
+				return fmt.Errorf("chown %s: %w", dir, err)
+			}
+			if err := chownFile(path, aidWifi, aidWifi); err != nil {
+				return fmt.Errorf("chown %s: %w", path, err)
+			}
+		}
+		return os.Chmod(path, mode)
 	}
 	// Traverse bit on the dir — 666 here made every file inside
 	// unopenable (provisioning finding).
@@ -403,7 +459,7 @@ func writeConf(content string) error {
 	if err := os.WriteFile(path, []byte(content), 0o660); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	if err := os.Chown(path, aidWifi, aidWifi); err != nil {
+	if err := chownFile(path, aidWifi, aidWifi); err != nil {
 		return fmt.Errorf("chown %s: %w", path, err)
 	}
 	return os.Chmod(path, 0o660)
@@ -531,15 +587,16 @@ func associated() bool {
 
 // associatedTo reports association specifically to the named network —
 // bare wpa_state=COMPLETED is satisfied by the *old* network if the
-// supplicant never actually restarted.
-func associatedTo(ssid string) bool {
-	return CurrentSSID() == ssid
+// supplicant never actually restarted. Compared as bytes.
+func associatedTo(ssid []byte) bool {
+	cur := currentSSIDBytes()
+	return cur != nil && string(cur) == string(ssid)
 }
 
 // waitForAssociation polls for association to ssid, logging the raw
 // supplicant state every 5s so a timeout in the field says what the
 // framework was doing (SCANNING vs 4WAY_HANDSHAKE vs INTERFACE_DISABLED).
-func waitForAssociation(ssid string, timeout time.Duration) bool {
+func waitForAssociation(ssid []byte, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	lastDiag := time.Now()
 	for time.Now().Before(deadline) {
@@ -555,12 +612,12 @@ func waitForAssociation(ssid string, timeout time.Duration) bool {
 					break
 				}
 			}
-			log.Printf("[wifi] waiting for association to %q — wpa_state=%s", ssid, state)
+			log.Printf("[wifi] waiting for association to %q — wpa_state=%s", SSIDText(ssid), state)
 			lastDiag = time.Now()
 		}
 		time.Sleep(time.Second)
 	}
-	log.Printf("[wifi] timed out waiting for association to %q (%s)", ssid, timeout)
+	log.Printf("[wifi] timed out waiting for association to %q (%s)", SSIDText(ssid), timeout)
 	return false
 }
 
@@ -604,7 +661,10 @@ func Commit() {
 // synchronously (call from a goroutine); connected must report whether
 // the control WebSocket is currently registered with the controller.
 // The outcome lands in TakeResult either way.
-func Change(ssid, psk string, connected func() bool) {
+func Change(ssidBytes []byte, psk string, connected func() bool) {
+	// Everything below reports and logs the display name; the bytes are what
+	// the conf and the association gate use.
+	ssid := SSIDText(ssidBytes)
 	mu.Lock()
 	if inFlight {
 		mu.Unlock()
@@ -620,7 +680,7 @@ func Change(ssid, psk string, connected func() bool) {
 		mu.Unlock()
 	}()
 
-	if err := validate(ssid, psk); err != nil {
+	if err := validate(ssidBytes, psk); err != nil {
 		setResult(Result{OK: false, SSID: ssid, Error: err.Error()})
 		return
 	}
@@ -659,12 +719,12 @@ func Change(ssid, psk string, connected func() bool) {
 		setResult(Result{OK: false, SSID: ssid, Error: reason})
 	}
 
-	if err := reloadConf(composeConf(ssid, psk)); err != nil {
+	if err := reloadConf(composeConf(ssidBytes, psk)); err != nil {
 		revert(err.Error())
 		return
 	}
 
-	if !waitForAssociation(ssid, associateTimeout) {
+	if !waitForAssociation(ssidBytes, associateTimeout) {
 		revert(fmt.Sprintf("did not associate to %q within %s (wrong passphrase or AP out of range?)", ssid, associateTimeout))
 		return
 	}

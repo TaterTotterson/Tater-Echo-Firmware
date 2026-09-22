@@ -109,7 +109,7 @@ static void run_boot(int fail_at, int start_pos)
     ledst->mode = ANIM_RUN;
     bootstep = 0;
 
-    int head_q = 0, tick = 0, still = 0;
+    int head_q = 0, still = 0;
 
     /* No wind-in to model: anim_claim waits for the orbit to reach the bottom
      * before taking the ring, so our head always starts there. The handover

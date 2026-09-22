@@ -111,6 +111,28 @@ that capability. In direct native mode a crossing starts a turn; in legacy
 mode it remains observational unless the inherited on-device-wake option is
 enabled.
 
+## amonet 2.0.0 and emOS
+
+The controlled hardware test targets **amonet-biscuit v2.0.0**, the FireOS 6
+kernel, and emOS. The inherited v2 support is part of this fork:
+
+- emOS builds a 32-bit ARM init after inspecting the Dot's own boot image.
+- The v2 bootloader starts `boot_a`, so the provisioning plan always installs
+  emOS there.
+- If the only stock image is in slot A, it is copied to slot B and verified
+  before slot A is touched.
+- The stock boot image exported by the provisioning flow is both the build
+  input and the recovery image. Keep it somewhere other than the Dot.
+- The Echo firmware and microWakeWord runtime remain ARMv7/API-22 binaries and
+  run unchanged under the 32-bit emOS environment.
+
+A complete emOS boot image cannot be prepared in advance: it contains the
+kernel and device trees escrowed from that individual Dot. After the amonet
+unlock reaches TWRP, the provisioning flow reads the stock image, builds the
+matching emOS image locally, verifies the preserved recovery copy, and only
+then writes slot A. Do not flash the standalone Tater test bundle as a boot
+image; it contains userspace files installed after emOS is running.
+
 ## Configure direct Tater mode
 
 Create `/data/local/etc/tater/native.json` on the Echo:
@@ -182,7 +204,8 @@ containing the ARM firmware, ARMv7 runtime, pinned model/manifest, and a
 bootstrap JSON template. It does not contain a permanent device credential.
 
 On one test Echo, install the firmware, native runtime/model/manifest, and the
-bootstrap JSON. Then verify in this order:
+bootstrap JSON after the amonet v2/emOS provisioning flow has completed. Then
+verify in this order:
 
 1. Pair/connect and confirm the device appears as `native:<serial>` in Tater.
 2. Press the action button and complete one voice turn.
@@ -235,6 +258,8 @@ satellites hear the same wake.
   negotiation.
 - [x] Add local URL/audio playback, timer events, pairing/provisioning, and
   hash-verified A/B OTA with automatic rollback.
+- [x] Merge amonet v2.0.0/FireOS 6 emOS support, including the verified
+  slot-A install and stock-image preservation path.
 - [ ] Measure CPU, memory, thermal behavior, false accepts per hour, recall,
   and first-word retention on real hardware before an installable release.
 

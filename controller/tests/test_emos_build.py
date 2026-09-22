@@ -14,6 +14,7 @@ instead: an ANDROID! header, an MTK-wrapped kernel of zImage + appended DTBs,
 and a raw ramdisk.
 """
 
+import re
 import hashlib
 import importlib.util
 import io
@@ -834,3 +835,117 @@ def test_the_report_names_what_went_in():
     assert info["md5"] == hashlib.md5(info["image"]).hexdigest()
     assert info["size"] == len(info["image"]) == info["size"]
     assert info["zimage_size"] > 0 and info["dtb_size"] > 0
+
+
+def test_em_wifi_rides_in_both_architectures():
+    """
+    em-wifi is the console's only way to set WiFi without the wizard, and it
+    used to be FireOS 6 only — not by decision but because it was bundled with
+    the wpa_cli prebuilt, which a FireOS 5 image deliberately omits.
+
+    The binaries must stay FireOS 6 only: init prefers /sbin/wpa_supplicant the
+    moment one exists, so shipping one to FireOS 5 would move that fleet off
+    Amazon's working supplicant as a side effect of an emOS upgrade. em-wifi
+    cannot do that — nothing execs it — so it is the one member that crosses.
+
+    Read out of the source rather than imported: em_api needs aiohttp, which
+    this suite does not have.
+
+    Found on Office, 2026-09-21: emos-v0.8 with no /sbin/em-wifi.
+    """
+    root = Path(__file__).resolve().parents[2]
+    api = (root / "controller" / "em_api.py").read_text()
+
+    m = re.search(r"EMOS_SBIN_BOTH_ARCHES = \(([^)]*)\)", api)
+    assert m, "em_api no longer declares EMOS_SBIN_BOTH_ARCHES"
+    both = set(re.findall(r'"([^"]+)"', m.group(1)))
+
+    m = re.search(r"EMOS_SBIN_ASSETS = \(([^)]*)\)", api)
+    assert m, "em_api no longer declares EMOS_SBIN_ASSETS"
+    every = set(re.findall(r'"([^"]+)"', m.group(1)))
+
+    assert "em-wifi" in both
+    for binary in ("wpa_supplicant", "wpa_cli", "busybox"):
+        assert binary not in both, (
+            f"{binary} would be installed into a FireOS 5 image, which moves "
+            f"that fleet off Amazon's supplicant as a side effect"
+        )
+    assert both <= every, (
+        "a name that is not in the payload allowlist can never be in a bundle"
+    )
+
+
+def test_em_wifi_resolves_its_tools_the_way_init_does():
+    """
+    The script and init must agree about which wpa_cli and wpa_supplicant are
+    in play, and the only way to guarantee that is the same list in the same
+    order. A hardcoded /sbin is what made em-wifi refuse on FireOS 5.
+    """
+    root = Path(__file__).resolve().parents[2]
+    script = (root / "emos" / "device" / "em-wifi").read_text()
+
+    for tool in ("wpa_cli", "wpa_supplicant"):
+        assert f"/sbin/{tool} /system/bin/{tool}" in script, (
+            f"em-wifi must try /sbin/{tool} then /system/bin/{tool}, as "
+            f"init.c's supps[]/clis[] do"
+        )
+    assert "CLI=/sbin/wpa_cli" not in script, "em-wifi hardcodes /sbin again"
+    assert "SUP=/sbin/wpa_supplicant" not in script, "em-wifi hardcodes /sbin again"
+
+    init_c = (root / "emos" / "init" / "init.c").read_text()
+    for tool in ("wpa_cli", "wpa_supplicant"):
+        assert f'"/sbin/{tool}"' in init_c and f'"/system/bin/{tool}"' in init_c, (
+            f"init.c no longer resolves {tool} this way — em-wifi mirrors it"
+        )
+
+
+def test_build_sh_installs_em_wifi_unconditionally():
+    """
+    build.sh is the local build and the controller's packer is compared against
+    it. em-wifi was installed only inside the `if [ -f "$WPA_CLI" ]` branch, so
+    a FireOS 5 build silently produced no console tool.
+    """
+    root = Path(__file__).resolve().parents[2]
+    build = (root / "emos" / "build.sh").read_text()
+
+    install = 'install -m 0755 "$HERE/device/em-wifi" "$WORK/root/sbin/em-wifi"'
+    assert install in build, "build.sh no longer installs em-wifi"
+
+    before = build.split(install)[0]
+    opened = before.count("\nif ") - before.count("\nfi")
+    assert opened == 0, (
+        "em-wifi is installed inside a conditional again — it must ride in "
+        "every image, including one built with no wpa_cli prebuilt"
+    )
+
+
+def test_em_wifi_writes_a_conf_the_wifi_user_can_read():
+    """
+    Amazon's wpa_supplicant drops to the `wifi` user (AID_WIFI, uid 1010) and
+    is what runs on a FireOS 5 image, which carries no /sbin userspace. A
+    root-owned 0600 conf is unreadable to it: it exits, init respawns it every
+    five seconds, and the device sits at boot stage 11 with a perfectly
+    correct conf and the right password.
+
+    Measured on G090LF11803611NF, 2026-09-21 — em-wifi reported the join and
+    the device dropped off the network seconds later. Root ignores
+    permissions, so one mode serves both bases.
+    """
+    root = Path(__file__).resolve().parents[2]
+    script = (root / "emos" / "device" / "em-wifi").read_text()
+
+    assert 'chmod 660 "$CONF"' in script, (
+        "the conf must be group-readable — a FireOS 5 supplicant runs as the "
+        "wifi user and cannot read a 0600 root-owned file"
+    )
+    assert "chown 1010:1010" in script, (
+        "the conf must be owned by AID_WIFI, by NUMBER — there is no "
+        "/etc/passwd on the device for `chown wifi` to resolve against"
+    )
+    # 0600 is legitimate ONLY as the fallback when chown fails. An
+    # unconditional one — a line of its own — is the bug coming back.
+    for line in script.splitlines():
+        assert line.strip() != 'chmod 600 "$CONF"', (
+            "em-wifi sets the conf 0600 unconditionally again; that mode is "
+            "only acceptable after chown has failed"
+        )

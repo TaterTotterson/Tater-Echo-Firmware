@@ -25,6 +25,7 @@ from aiohttp import web
 
 sys.path.insert(0, str(Path(__file__).parent))
 import forge
+import forge_progress
 
 LOGS = forge.DATA / "logs"
 TMP = forge.DATA / "tmp"
@@ -62,6 +63,10 @@ class Job:
         self.started = time.time()
         self.rc = None
         self.cancelled = False
+        # Build progress folded from the log a little at a time (see
+        # forge_progress), and whether a failure to do so was reported yet.
+        self.train_log = forge_progress.TrainLog()
+        self.progress_warned = False
         LOGS.mkdir(parents=True, exist_ok=True)
         self.log_path = LOGS / f"{int(self.started)}_{kind}.log"
         self._logf = open(self.log_path, "wb", buffering=0)
@@ -204,6 +209,23 @@ def _wakewords_state() -> list:
         name = cfg["model_name"]
         work = Path(cfg["output_dir"]) / name
         model = forge.MODELS / f"{name}.onnx"
+        # Only the word being built carries progress: the stage and train
+        # step from the job's log, the generate/augment ratio from its
+        # directory. None until forge.py has announced a step and the fold
+        # has caught up with the log, so nothing stale is shown as live. A
+        # failure here (log removed under the job, a hand-edited
+        # `steps: 50k`) loses the fill, not the whole poll, and is said once
+        # in the console the user is already looking at.
+        progress = None
+        if _job and _job.poll() is None and _job.kind == "build" and f"'{name}'" in _job.label:
+            try:
+                state = _job.train_log.update(_job.log_path)
+                if state and state["stage"] and not _job.train_log.lagging:
+                    progress = forge_progress.stage_progress(work, cfg, state)
+            except Exception as e:
+                if not _job.progress_warned:
+                    _job.progress_warned = True
+                    _job._note(f"\n[forge-ui] no progress for '{name}': {type(e).__name__}: {e}\n")
         words.append({
             "name": name,
             "phrases": cfg.get("target_phrase", []),
@@ -217,6 +239,7 @@ def _wakewords_state() -> list:
             "model_built": model.exists(),
             "model_size_kb": round(model.stat().st_size / 1e3) if model.exists() else None,
             "model_mtime": model.stat().st_mtime if model.exists() else None,
+            "progress": progress,
         })
     return words
 

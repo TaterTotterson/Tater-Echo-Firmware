@@ -1275,6 +1275,30 @@ static const char *busybox_path(void)
     return first_exec(c);
 }
 
+/* The device's name, as an environment entry, because mksh will not read the
+ * kernel hostname for itself — see the hostname block in main().
+ *
+ * TWO VALUES, and the difference is who is reading the prompt (Wil, 2026-09-21):
+ *
+ *   - Services get the SHORT one, and the dashboard's console is a service's
+ *     child — the EchoMuse server's. Whoever opened it clicked a device tile
+ *     to get there, so they already know which Echo this is; what the prompt
+ *     can usefully add is which userspace they are talking to, against a
+ *     FireOS device's `root@biscuit`.
+ *   - The USB serial console gets the SERIAL one. Somebody at a cable may
+ *     have three identical Echoes on the desk and no idea which one they
+ *     plugged into, which is the case the kernel hostname was set for in the
+ *     first place.
+ *
+ * Only the second matches `hostname`; that is the cost of the split and it is
+ * worth naming here, because a prompt disagreeing with `hostname` is exactly
+ * the kind of thing someone later "fixes" into one value.
+ *
+ * host_env_serial is initialised to the short form too, so anything spawned
+ * before the hostname block still answers truthfully rather than "android". */
+static const char host_env_short[] = "HOSTNAME=emos";
+static char host_env_serial[96]    = "HOSTNAME=emos";
+
 /* fork+exec, returning the pid. NULL-terminated argv, argv[0] is the path. */
 static pid_t spawn(char *const argv[])
 {
@@ -1284,7 +1308,8 @@ static pid_t spawn(char *const argv[])
          * without it the tzdata warning lands in the log rather than on a
          * terminal, two lines per exec. */
         char *envp[] = { "HOME=/", "ANDROID_ROOT=/system", "ANDROID_DATA=/data",
-                         "PATH=/sbin:/system/bin:/system/xbin", NULL };
+                         "PATH=/sbin:/system/bin:/system/xbin",
+                         (char *)host_env_short, NULL };
         int n = netlog_open();
         if (n < 0)
             n = open("/dev/null", O_RDWR);
@@ -1604,7 +1629,20 @@ static int wmt_answer_patches(int fd, const char *dir)
          * from kernel context, so a bare name is opened relative to / and
          * fails with "load file (…) fail, iRet(-1)". SET_PATCH_NAME does not
          * get prepended for us. */
-        snprintf((char *)pi.name, sizeof pi.name, "%s", full);
+        /* Truncation is CHECKED, not assumed away. pi.name is 256 bytes and
+         * `full` is built in 512, so a long enough firmware directory would
+         * hand the kernel a path that is merely a prefix — and by the note
+         * above, the kernel opens this string exactly as given. The failure
+         * is then "load file (…) fail" from kernel context and a device whose
+         * wlan0 never appears, which is a long way from a buffer size.
+         *
+         * Real paths run ~45 characters, so this cannot fire today. It is
+         * here because the cost of being wrong is an evening, and the cost of
+         * the check is a comparison. */
+        int pn = snprintf((char *)pi.name, sizeof pi.name, "%s", full);
+        if (pn < 0 || (size_t)pn >= sizeof pi.name)
+            netlog("wmt: patch path too long (%d bytes, max %d): %s\n",
+                   pn, (int)sizeof pi.name - 1, full);
         if (ioctl(fd, WMT_IOCTL_SET_PATCH_INFO, &pi) < 0)
             netlog("wmt: SET_PATCH_INFO(%d,%s) failed errno=%d\n",
                    pi.seq, names[i], errno);
@@ -2259,6 +2297,17 @@ int main(int argc, char **argv)
      */
     mkdir("/etc", 0755);
     symlink("/system/vendor", "/vendor");
+    /* Probed rather than assumed, for the reason the farm below is: the
+     * kernel firmware loader reads through this link, so losing it presents
+     * as wlan0 never appearing — a WiFi fault, three layers from a symlink.
+     * /vendor/firmware is the thing that has to resolve, and it exists on
+     * both bases (checked on FireOS 5 and 6, 2026-09-21), so it tests the
+     * link, its target and the tree behind it in one call.
+     *
+     * It cannot fail today — / is the ramdisk and build.sh creates no
+     * /vendor for EEXIST to collide with — which is exactly why it is worth
+     * one line now rather than an evening later. */
+    note("stage=vendor link=%d\n", access("/vendor/firmware", F_OK) == 0);
     DIR *ed = opendir("/system/etc");
     if (ed) {
         struct dirent *de;
@@ -2298,9 +2347,22 @@ int main(int argc, char **argv)
     /* Name the device. The kernel default is "android", so every console
      * session and every log line said root@android — which is actively
      * misleading on a device whose whole point is that Android is gone, and
-     * useless for telling two Echoes apart over USB. mksh reads gethostname()
-     * when it builds its prompt, so this has to happen before any shell is
-     * spawned, which is why it sits here rather than beside the USB gadget.
+     * useless for telling two Echoes apart over USB.
+     *
+     * SETTING THE KERNEL HOSTNAME IS NOT ENOUGH, and this used to claim it
+     * was: "mksh reads gethostname() when it builds its prompt". It does not.
+     * Android's /system/etc/mkshrc builds $HOSTNAME itself, and its two
+     * fallbacks are `getprop ro.product.device` — empty here, since emOS runs
+     * no property service — and then the LITERAL string "android". So the
+     * hostname was set correctly on every boot and every prompt still read
+     * root@android. Measured on EFF 2026-09-21: `hostname` answered
+     * em-G090LF1180440EFF while $HOSTNAME in the same shell was "android".
+     *
+     * The fix is to put HOSTNAME in the environment init hands its children,
+     * which makes mkshrc's `: ${HOSTNAME:=...}` a no-op. Both envp arrays
+     * carry it: spawn() for services — including the EchoMuse server, whose
+     * children are the dashboard's console sessions — and start_console()
+     * for the USB serial console.
      *
      * Falls back to plain "emos" when the serial cannot be read: a nameless
      * device is better than a boot that stopped over a cosmetic. */
@@ -2308,6 +2370,7 @@ int main(int argc, char **argv)
         char host[80];
         const char *sn = serialno();
         snprintf(host, sizeof host, *sn ? "em-%s" : "emos", sn);
+        snprintf(host_env_serial, sizeof host_env_serial, "HOSTNAME=%s", host);
         /* Via /proc rather than sethostname(2): bionic does not declare that
          * at API 21, and an implicit declaration in a static PID 1 is not
          * something to ship — the failure would be silent and on the device.
@@ -3052,11 +3115,15 @@ static pid_t start_console(void)
          * device unreadable. */
         char *envp[] = { "HOME=/", "TERM=vt100", "ANDROID_ROOT=/system",
                          "ANDROID_DATA=/data",
-                         "PATH=/sbin:/system/bin:/system/xbin", NULL, NULL };
+                         "PATH=/sbin:/system/bin:/system/xbin", host_env_serial,
+                         NULL, NULL };
         long tsec = console_timeout_secs();
         if (tsec > 0) {
             snprintf(tmout, sizeof tmout, "TMOUT=%ld", tsec);
-            envp[5] = tmout;
+            /* The FIRST NULL, which moved when host_env_serial was added above. A
+             * fixed index here silently drops whichever entry it lands on —
+             * the timeout or the hostname — and both fail quietly. */
+            envp[6] = tmout;
         }
         execve("/system/bin/sh", argv, envp);
         _exit(127);

@@ -8,6 +8,7 @@ walkthroughs welcome.
 |---|---|
 | [Quickstart](quickstart.md) | Zero to talking to your Dot: controller install, first-run setup, device approval, Home Assistant hookup, everyday use. |
 | [Configuration Guide](configuration.md) | Every dashboard setting explained in plain language — what it does, when to touch it, and how to tune it. Ends with [what leaves your network](configuration.md#what-leaves-your-network) — there is no telemetry, and the one outbound connection is named. |
+| [Listening and privacy](listening.md) | Exactly when audio leaves an Echo: detecting the wake word on the Echo (the default) or on the controller, what each Echo's status means, and what it is honest to claim. Also the specification the code is held to. |
 | [The Voice Pipeline, Explained](voice-pipeline.md) | How your voice travels from the microphones to Home Assistant and back, stage by stage, with the benefits and caveats of each design choice. |
 | [FAQ](faq.md) | Quick answers and workarounds for the things that come up most — rooting refusals, wizard failures, update problems, wake word tuning, privacy. Check here before filing. |
 | [User Acceptance Testing](uat.md) | A checklist for confirming EchoMuse does what it claims on your hardware, and how to report what doesn't. Includes the known faults not worth re-filing. |

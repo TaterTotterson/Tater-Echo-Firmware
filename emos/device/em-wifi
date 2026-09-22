@@ -11,10 +11,33 @@
 set -u
 CONF=/data/emos/wpa.conf
 ANDROID_CONF=/data/misc/wifi/wpa_supplicant.conf
-CLI=/sbin/wpa_cli
-SUP=/sbin/wpa_supplicant
 
-[ -x "$CLI" ] || { echo "em-wifi: $CLI is missing (older image?)"; exit 1; }
+# OURS WHEN THE IMAGE CARRIES IT, AMAZON'S OTHERWISE -- the same list, in the
+# same order, as supps[] and clis[] in init.c. This script and init must agree
+# about which binaries are in play, and the only way to guarantee that is to
+# resolve them by the same rule rather than to name one.
+#
+# It used to hardcode /sbin, which made em-wifi a FireOS 6 tool by accident: a
+# FireOS 5 image deliberately ships no /sbin userspace -- its Amazon supplicant
+# works and must not be swapped out as a side effect of an emOS upgrade -- so
+# the script refused on the larger half of the fleet, exactly where a console
+# recovery tool is most needed. Nothing here starts a supplicant init would not
+# have started; it writes the same conf and lets init's own supervision
+# restart it.
+first_exec() {
+    for c in "$@"; do
+        [ -x "$c" ] && { echo "$c"; return 0; }
+    done
+    return 1
+}
+CLI=$(first_exec /sbin/wpa_cli /system/bin/wpa_cli) || CLI=
+SUP=$(first_exec /sbin/wpa_supplicant /system/bin/wpa_supplicant) || SUP=
+
+[ -n "$CLI" ] || {
+    echo "em-wifi: no wpa_cli in /sbin or /system/bin, so WiFi cannot be set"
+    echo "from here. See /run/net.log for what the boot is doing."
+    exit 1
+}
 
 # READ from the conf the supplicant is running on, never assumed -- same rule
 # and same two spellings as wpa_ctrl_dir() in init.c and sockDir() in
@@ -59,6 +82,10 @@ fi
 # state on an unprovisioned device, where init is waiting for a conf -- start
 # one on a throwaway config; we want its radio, not its networks.
 if ! pgrep wpa_supplicant >/dev/null 2>&1; then
+    [ -n "$SUP" ] || {
+        echo "em-wifi: no supplicant running and none in /sbin or /system/bin."
+        exit 1
+    }
     mkdir -p "$CTRL"
     printf 'ctrl_interface=%s\nupdate_config=1\n' "$CTRL" > /tmp/em-wifi-scan.conf
     "$SUP" -iwlan0 -Dnl80211 -c/tmp/em-wifi-scan.conf -B >/dev/null 2>&1
@@ -69,10 +96,102 @@ echo "Scanning..."
 "$CLI" -p "$CTRL" -iwlan0 scan >/dev/null 2>&1
 sleep 4
 
-# Strongest first, one entry per SSID, unnamed networks dropped.
-"$CLI" -p "$CTRL" -iwlan0 scan_results 2>/dev/null \
-  | awk 'NR>1 && $5 != "" { if (!seen[$5]++) printf "%s\t%s\t%s\n", $3, $4, $5 }' \
-  | sort -rn | head -20 > /tmp/em-wifi-list
+# Strongest first, one entry per SSID, hidden (all-zero) and unnamed dropped.
+#
+# An SSID is any 0-32 bytes, so it is carried as HEX from here on and written
+# to the conf that way: nothing in it can then break the conf or this script.
+# scan_results is TAB-separated and prints the SSID through hostap's
+# printf_encode (`"` and `\` escaped, \e \n \r \t, \xNN for anything else
+# outside 0x20-0x7e); ssid_hex() reverses that. Splitting on whitespace
+# instead cut "My Home WiFi" to "My". Mirrors _wpaUnescape in the dashboard
+# and UnescapeSSID in the firmware. Columns out: signal, flags, hex, and the
+# name DECODED for display -- see ssid_text() below. The hex is what is
+# written to the conf; the text is only ever shown.
+"$CLI" -p "$CTRL" -iwlan0 scan_results 2>/dev/null | awk '
+    BEGIN {
+        FS = "\t"
+        for (i = 32; i < 127; i++) ord[sprintf("%c", i)] = i
+        for (i = 0; i < 256; i++) val[sprintf("%02x", i)] = i
+    }
+    # The escaped form back to the bytes it stands for, so a UTF-8 name is
+    # SHOWN as its name. Everything outside 0x20-0x7e reaches us as \xNN --
+    # which is every non-ASCII SSID -- and printing the escapes made the menu
+    # a line of hex to choose from. Measured on a live scan: a network called
+    # "(coffee) Kim'"'"'s "Coffee" Haus" listed as
+    # \xe2\x98\x95\xef\xb8\x8f Kim\xe2\x80\x99s ...
+    #
+    # awk %c is what emits a raw byte; the shell printf here does NOT
+    # interpret \xNN (probed on the device, 2026-09-21), so the decode has to
+    # happen in this stage rather than in the display loop below.
+    #
+    # Control characters stay ESCAPED on purpose. A name containing a real tab
+    # or newline would break the list file this writes, which is tab-separated
+    # and read a line at a time -- the display is not worth corrupting the
+    # selection over.
+    # Sets ssid_w as a side effect: the number of CHARACTERS in what it
+    # returns, which is what the menu has to pad by. %-32s pads by BYTES, so a
+    # UTF-8 name came out short by one column per continuation byte -- three
+    # columns for every emoji. Counted here because this is where the bytes
+    # are known; a continuation byte is 0x80-0xbf and starts no character.
+    #
+    # Codepoints, not terminal cells: a wide CJK glyph or an emoji may occupy
+    # two columns and this counts it as one. Exact width needs wcwidth, which
+    # is not available to a shell script, and being one column out beats being
+    # three.
+    function ssid_text(s,    out, i, c, n, h, b) {
+        out = ""; ssid_w = 0
+        for (i = 1; i <= length(s); i++) {
+            c = substr(s, i, 1)
+            if (c == "\\" && i < length(s)) {
+                n = substr(s, i + 1, 1); h = substr(s, i + 2, 2)
+                if (n == "x" && h ~ /^[0-9a-fA-F][0-9a-fA-F]$/) {
+                    b = val[tolower(h)]
+                    if (b >= 32 && b != 127) {
+                        out = out sprintf("%c", b)
+                        if (b < 128 || b > 191) ssid_w++
+                    } else {
+                        out = out "\\x" h
+                        ssid_w += 4
+                    }
+                    i += 3; continue
+                }
+                if (n == "\\") { out = out "\\"; ssid_w++; i++; continue }
+                if (n == "\"")  { out = out "\""; ssid_w++; i++; continue }
+                # \e \n \r \t: left as written, see above.
+                out = out c substr(s, i + 1, 1); ssid_w += 2; i++; continue
+            }
+            # Unescaped means ASCII: printf_encode escapes everything
+            # outside 0x20-0x7e, so this is always one character.
+            out = out c
+            ssid_w++
+        }
+        return out
+    }
+    function ssid_hex(s,    out, i, c, n, h) {
+        out = ""
+        for (i = 1; i <= length(s); i++) {
+            c = substr(s, i, 1)
+            if (c == "\\" && i < length(s)) {
+                n = substr(s, i + 1, 1); h = substr(s, i + 2, 2)
+                if (n == "x" && h ~ /^[0-9a-fA-F][0-9a-fA-F]$/) { out = out tolower(h); i += 3; continue }
+                if (n == "\\") { out = out "5c"; i++; continue }
+                if (n == "\"")  { out = out "22"; i++; continue }
+                if (n == "e")   { out = out "1b"; i++; continue }
+                if (n == "n")   { out = out "0a"; i++; continue }
+                if (n == "r")   { out = out "0d"; i++; continue }
+                if (n == "t")   { out = out "09"; i++; continue }
+            }
+            out = out sprintf("%02x", ord[c])
+        }
+        return out
+    }
+    NR > 1 && NF >= 5 {
+        name = $5; sub(/\r$/, "", name)
+        h = ssid_hex(name)
+        if (h == "" || h ~ /^(00)+$/ || seen[h]++) next
+        t = ssid_text(name)
+        printf "%s\t%s\t%s\t%s\t%s\n", $3, $4, h, ssid_w, t
+    }' | sort -rn | head -20 > /tmp/em-wifi-list
 
 if [ ! -s /tmp/em-wifi-list ]; then
     echo "No networks found. Is the radio up? See /run/net.log."
@@ -81,7 +200,7 @@ fi
 
 echo ""
 n=0
-while IFS="$(printf '\t')" read -r sig flags ssid; do
+while IFS="$(printf '\t')" read -r sig flags hex width ssid; do
     n=$((n + 1))
     case "$flags" in
         *SAE*) note=" (WPA3 - not supported)" ;;
@@ -89,7 +208,11 @@ while IFS="$(printf '\t')" read -r sig flags ssid; do
         *WEP*) note=" (WEP - not supported)" ;;
         *)     note=" (open)" ;;
     esac
-    printf '%2d) %-32s %4s dBm%s\n' "$n" "$ssid" "$sig" "$note"
+    # Padded by CHARACTER count from awk, never with %-32s, which counts
+    # bytes and leaves every non-ASCII name short.
+    pad=""; i=$width
+    while [ "$i" -lt 32 ]; do pad="$pad "; i=$((i + 1)); done
+    printf '%2d) %s %4s dBm%s\n' "$n" "$ssid$pad" "$sig" "$note"
 done < /tmp/em-wifi-list
 echo ""
 
@@ -101,8 +224,9 @@ esac
 
 line=$(sed -n "${choice}p" /tmp/em-wifi-list)
 [ -n "$line" ] || { echo "No such entry."; exit 1; }
-flags=$(echo "$line" | cut -f2)
-ssid=$(echo "$line" | cut -f3)
+flags=$(printf '%s\n' "$line" | cut -f2)
+ssid_hex=$(printf '%s\n' "$line" | cut -f3)
+ssid=$(printf '%s\n' "$line" | cut -f5)
 
 case "$flags" in
     *SAE*)
@@ -114,25 +238,60 @@ esac
 case "$flags" in
     *PSK*)
         printf 'Password for %s: ' "$ssid"
-        read psk
-        [ -n "$psk" ] || { echo "No password given."; exit 1; }
+        # -r: a backslash in a password is a backslash. IFS= keeps leading
+        # and trailing spaces, which a passphrase may have.
+        IFS= read -r psk
+        # WPA2 allows 8-63 printable ASCII characters, or 64 hex digits.
+        if printf '%s' "$psk" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+            psk_line="psk=$psk"
+        elif printf '%s\n' "$psk" | awk '{ exit !(length($0) >= 8 && length($0) <= 63 && $0 !~ /[^ -~]/) }'; then
+            # Quoted, and needing no escaping: wpa_supplicant ends a quoted
+            # passphrase at its LAST double quote, so `"` and `\` inside it
+            # are literal (wpa_config_parse_psk).
+            psk_line="psk=\"$psk\""
+        else
+            echo "A WiFi password is 8-63 printable characters (letters, digits,"
+            echo "spaces and punctuation), or 64 hex digits."
+            exit 1
+        fi
         keymgmt="WPA-PSK" ;;
     *)
-        psk=""
+        psk_line=""
         keymgmt="NONE" ;;
 esac
 
 mkdir -p /data/emos
+# printf '%s', never echo: nothing in a password may be read as an escape.
 {
-    echo "ctrl_interface=$CTRL"
-    echo "update_config=1"
-    echo "network={"
-    echo "        ssid=\"$ssid\""
-    [ -n "$psk" ] && echo "        psk=\"$psk\""
-    echo "        key_mgmt=$keymgmt"
-    echo "}"
+    printf 'ctrl_interface=%s\n' "$CTRL"
+    printf 'update_config=1\n'
+    printf 'network={\n'
+    printf '        ssid=%s\n' "$ssid_hex"
+    [ -n "$psk_line" ] && printf '        %s\n' "$psk_line"
+    printf '        key_mgmt=%s\n' "$keymgmt"
+    printf '}\n'
 } > "$CONF"
-chmod 600 "$CONF"
+
+# OWNED BY THE WIFI USER, NOT ROOT, and group-readable with it.
+#
+# Amazon's supplicant drops privileges to the `wifi` user (AID_WIFI, uid 1010)
+# and is what runs on a FireOS 5 image, which carries no /sbin userspace of
+# ours. A root-owned 0600 conf is unreadable to it, so it exits the moment
+# init starts it, init respawns it five seconds later, and the device sits at
+# boot stage 11 for ever -- with the conf perfectly correct and the password
+# right. Measured on G090LF11803611NF, 2026-09-21: em-wifi reported the join,
+# and the device dropped off the network seconds later.
+#
+# Root ignores permissions, so this is also correct for emOS's own supplicant
+# on FireOS 6, which runs as root -- one mode for both, rather than a rule
+# that has to work out which supplicant it is writing for. It mirrors what
+# Android's own conf carries (-rw-rw---- wifi wifi).
+#
+# By NUMBER: there is no /etc/passwd here, so `chown wifi` is not guaranteed
+# to resolve. 0600 is the fallback if chown fails, which is no worse than
+# what this line replaced.
+chmod 660 "$CONF"
+chown 1010:1010 "$CONF" 2>/dev/null || chmod 600 "$CONF"
 echo "Wrote $CONF."
 
 # init supervises the supplicant and restarts it against whatever conf is
