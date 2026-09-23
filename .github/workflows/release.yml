@@ -60,7 +60,7 @@ jobs:
             -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler -lc "cd /sdk && go build -tags server \
+            echomuse-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.BuildUnix=$build_unix' \
               -o build/server ./cmd/"
