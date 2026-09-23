@@ -204,6 +204,13 @@ target_compile_definitions(tater_mww_tflm PUBLIC
   TF_LITE_DISABLE_X86_NEON
 )
 target_compile_options(tater_mww_tflm PRIVATE
+  # TFLM is designed for exception-free embedded builds. GCC 13 otherwise
+  # treats placement-new cleanup as a reference to TFLM's deliberately
+  # private operator delete and refuses micro_allocator.cc; Android Clang and
+  # AppleClang happen not to diagnose that path. Keeping exceptions disabled
+  # makes the Linux parity build match the actual ARM runtime contract.
+  -fno-exceptions
+  -fno-rtti
   -Wno-unused-parameter
   -Wno-sign-compare
   -Wno-missing-field-initializers
