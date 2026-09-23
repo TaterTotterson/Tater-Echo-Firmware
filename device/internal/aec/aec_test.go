@@ -525,3 +525,96 @@ func TestRefSourceNamesTheLiveReference(t *testing.T) {
 		t.Fatalf("disarmed while on hardware: got %q, want \"off\"", got)
 	}
 }
+
+func TestMicrophonePathBankRetainsIndependentStates(t *testing.T) {
+	c := New()
+	c.SetParams(true, 0, 200)
+	c.SetHardwareRef(true)
+
+	c.SelectPath(0)
+	path0 := c.st
+	before, err := c.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SelectPath(4)
+	path4 := c.st
+	if path0 == nil || path4 == nil || path0 == path4 {
+		t.Fatalf("AEC paths are not independent: ch0=%p ch4=%p", path0, path4)
+	}
+	c.SelectPath(0)
+	if c.st != path0 {
+		t.Fatal("returning to ch0 discarded its learned AEC state")
+	}
+	after, err := c.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("switching paths changed the retained filter coefficients")
+	}
+}
+
+func TestInvalidMicrophonePathFallsBackToCentre(t *testing.T) {
+	c := New()
+	c.SetParams(true, 0, 200)
+	c.SelectPath(-1)
+	if c.activePath != defaultPathID || c.st != c.states[defaultPathID] {
+		t.Fatalf("invalid path selected %d, want centre ch%d", c.activePath, defaultPathID)
+	}
+}
+
+func TestInPlaceProcessingReusesOwnedBuffer(t *testing.T) {
+	c := New()
+	c.SetParams(true, 0, 200)
+	c.SetHardwareRef(true)
+	mic := toBytes(synth(FrameSize))
+	ref := toBytes(synth(FrameSize))
+	first := &mic[0]
+	out := c.ProcessWithRefInPlace(mic, ref)
+	if &out[0] != first {
+		t.Fatal("in-place AEC replaced the caller's owned buffer")
+	}
+}
+
+func TestResidualCorrelationDistinguishesEchoFromDoubleTalk(t *testing.T) {
+	ref := synth(FrameSize)
+	echo := append([]int16(nil), ref...)
+	if got := maxAbsCorrelation(echo, ref, 64); got < 0.99 {
+		t.Fatalf("aligned residual correlation %.3f, want near 1", got)
+	}
+	other := synth(FrameSize + 31)[31:]
+	// Decorrelate the deterministic generator further with alternating sign.
+	for i := range other {
+		if i%2 == 0 {
+			other[i] = -other[i]
+		}
+	}
+	if got := maxAbsCorrelation(other, ref, 64); got > 0.65 {
+		t.Fatalf("unrelated near speech correlation %.3f would trigger suppression", got)
+	}
+}
+
+func TestResidualSuppressorIsConservative(t *testing.T) {
+	c := New()
+	ref := synth(FrameSize)
+	out := append([]int16(nil), ref...)
+	for i := 0; i < 8; i++ {
+		c.suppressResidualLocked(out, ref)
+	}
+	if gain := c.residualGain[defaultPathID]; gain < 0.5 || gain >= 0.95 {
+		t.Fatalf("correlated residual gain %.3f outside conservative range", gain)
+	}
+
+	c2 := New()
+	near := synth(FrameSize + 97)[97:]
+	for i := range near {
+		if i%2 == 0 {
+			near[i] = -near[i]
+		}
+	}
+	c2.suppressResidualLocked(near, ref)
+	if gain := c2.residualGain[defaultPathID]; gain != 1 {
+		t.Fatalf("uncorrelated near speech was attenuated to %.3f", gain)
+	}
+}

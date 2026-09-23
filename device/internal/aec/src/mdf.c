@@ -1340,3 +1340,50 @@ EXPORT int em_echo_state_import(SpeexEchoState *st, const void *buf, int len)
    memcpy(st->prop, p, st->M*sizeof(spx_word16_t));
    return 0;
 }
+
+/*
+ * Drop signal history while retaining the learned acoustic path.
+ *
+ * A state bank can leave one microphone inactive for many seconds. Its W and
+ * foreground coefficients are still the right path for that microphone, but
+ * X/x, the pre/de-emphasis memories and the previous residual describe audio
+ * from the last time it ran. Feeding those into the first new frame can inject
+ * one filter-tail of an old reply. speex_echo_state_reset() is too destructive
+ * here because it also zeros the learned coefficients.
+ *
+ * Keep the exported/adaptation fields (W, foreground, prop, adapted,
+ * sum_adapt, leak/Pey/Pyy and the two-path decision statistics) and clear only
+ * input/output history and scratch derived from it. This is also the state a
+ * freshly constructed canceller has immediately before a saved path is
+ * imported.
+ */
+EXPORT void em_echo_state_clear_history(SpeexEchoState *st)
+{
+   int i, N=st->window_size, M=st->M, C=st->C, K=st->K;
+   memset(st->e, 0, C*N*sizeof(spx_word16_t));
+   memset(st->x, 0, K*N*sizeof(spx_word16_t));
+   memset(st->X, 0, K*(M+1)*N*sizeof(spx_word16_t));
+   memset(st->input, 0, C*st->frame_size*sizeof(spx_word16_t));
+   memset(st->y, 0, C*N*sizeof(spx_word16_t));
+   memset(st->last_y, 0, C*N*sizeof(spx_word16_t));
+   memset(st->Y, 0, C*N*sizeof(spx_word16_t));
+   memset(st->E, 0, C*N*sizeof(spx_word16_t));
+   memset(st->PHI, 0, N*sizeof(spx_word32_t));
+   memset(st->Rf, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   memset(st->Yf, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   memset(st->Xf, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   memset(st->Eh, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   memset(st->Yh, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   memset(st->power, 0, (st->frame_size+1)*sizeof(spx_word32_t));
+   for (i=0;i<=st->frame_size;i++)
+      st->power_1[i] = FLOAT_ONE;
+   memset(st->memX, 0, K*sizeof(spx_word16_t));
+   memset(st->memD, 0, C*sizeof(spx_word16_t));
+   memset(st->memE, 0, C*sizeof(spx_word16_t));
+   memset(st->notch_mem, 0, 2*C*sizeof(spx_mem_t));
+   memset(st->play_buf, 0, K*(PLAYBACK_DELAY+1)*st->frame_size*sizeof(spx_int16_t));
+   st->play_buf_pos = PLAYBACK_DELAY*st->frame_size;
+   st->play_buf_started = 0;
+   st->saturated = 0;
+   st->screwed_up = 0;
+}

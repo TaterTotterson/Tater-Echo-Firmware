@@ -1,6 +1,7 @@
 package aec
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -35,25 +36,44 @@ func (c *Canceller) SetStatePath(path string) {
 	c.statePath = path
 }
 
-// loadStateLocked loads the saved echo path into a freshly built
-// hardware-path filter. One small file read, once per boot.
+func (c *Canceller) statePathFor(path int) string {
+	if path == defaultPathID {
+		// Preserve the original filename for the centre mic and existing fleets.
+		return c.statePath
+	}
+	return fmt.Sprintf("%s.ch%d", c.statePath, path)
+}
+
+// loadStateLocked loads saved echo paths into the freshly built hardware-path
+// bank. Missing perimeter files are the ordinary first-boot condition.
 func (c *Canceller) loadStateLocked() {
 	if c.statePath == "" || !c.hwRef || c.st == nil {
 		return
 	}
-	b, err := os.ReadFile(c.statePath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("[aec] saved echo path unreadable, starting cold: %v", err)
+	originalPath, originalState := c.activePath, c.st
+	defer func() {
+		c.activePath, c.st = originalPath, originalState
+	}()
+	for path, state := range c.states {
+		if state == nil {
+			continue
 		}
-		return
+		c.activePath, c.st = path, state
+		filename := c.statePathFor(path)
+		b, err := os.ReadFile(filename)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("[aec] saved echo path ch%d unreadable, starting cold: %v", path, err)
+			}
+			continue
+		}
+		// importLocked, not ImportState: the lock is already held.
+		if err := c.importLocked(b); err != nil {
+			log.Printf("[aec] saved echo path ch%d refused, starting cold: %v", path, err)
+			continue
+		}
+		log.Printf("[aec] loaded the saved echo path for ch%d (%d bytes)", path, len(b))
 	}
-	// importLocked, not ImportState: the lock is already held.
-	if err := c.importLocked(b); err != nil {
-		log.Printf("[aec] saved echo path refused, starting cold: %v", err)
-		return
-	}
-	log.Printf("[aec] loaded the saved echo path (%d bytes)", len(b))
 }
 
 // maybeSaveLocked is called once per attenuation window. The export is a
@@ -63,15 +83,16 @@ func (c *Canceller) maybeSaveLocked(attDb float64, playing bool) {
 	if c.statePath == "" || !c.hwRef || !playing || attDb < saveMinDb {
 		return
 	}
-	if !c.lastSaveTry.IsZero() && time.Since(c.lastSaveTry) < saveEvery {
+	lastTry := c.lastSaveTry[c.activePath]
+	if !lastTry.IsZero() && time.Since(lastTry) < saveEvery {
 		return
 	}
-	c.lastSaveTry = time.Now()
+	c.lastSaveTry[c.activePath] = time.Now()
 	b, err := c.exportLocked()
 	if err != nil {
 		return
 	}
-	go writeState(c.statePath, b, attDb)
+	go writeState(c.statePathFor(c.activePath), b, attDb)
 }
 
 func writeState(path string, b []byte, attDb float64) {

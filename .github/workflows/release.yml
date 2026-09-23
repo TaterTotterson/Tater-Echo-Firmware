@@ -61,7 +61,9 @@ jobs:
             ./internal/actionbutton \
             ./internal/taternative \
             ./internal/wakeword/microwakeword \
+            ./internal/aec \
             ./internal/beamformer \
+            ./internal/processor \
             ./internal/server \
             ./internal/bindings/speaker
           python3 -m py_compile scripts/silent_stream_server.py

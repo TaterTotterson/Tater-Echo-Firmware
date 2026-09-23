@@ -24,8 +24,9 @@ Machine-readable target data lives in [`targets/targets.json`](targets/targets.j
 - On-device microWakeWord with live wake-word/model changes from Tater.
 - Wake audio upload for the trainer and optional second-STT wake verification.
 - User-selected wake sounds, including bundled defaults that work offline.
-- Tater-controlled LED animations, real-time direction-of-arrival, and reply
-  direction held toward the speaker.
+- Tater-controlled LED animations, confidence-calibrated seven-mic
+  direction-of-arrival, reply direction held toward the speaker, and
+  per-microphone echo-canceller state for clean beam switches.
 - ESP-parity action-button controls: hold for push-to-intercom; press five
   times, then hold the sixth press for five seconds to return to setup mode.
 - Continued conversation/reopen-mic, barge-in, synchronized stereo/group media

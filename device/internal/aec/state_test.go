@@ -1,9 +1,11 @@
 package aec
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -179,5 +181,33 @@ func TestSoftwareTapNeverSaves(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if _, err := os.Stat(path); err == nil {
 		t.Fatal("the software tap saved its filter")
+	}
+}
+
+func TestPerMicrophoneStateFilesLoadIntoMatchingPath(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "echo.bin")
+
+	warm := hwCanceller(300)
+	warm.SelectPath(2)
+	blob, err := warm.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(base+".ch2", blob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := New()
+	loaded.SetStatePath(base)
+	loaded.SetParams(true, 0, 300)
+	loaded.SetHardwareRef(true)
+	loaded.SelectPath(2)
+	got, err := loaded.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, blob) {
+		t.Fatal("saved ch2 filter was not loaded into ch2")
 	}
 }

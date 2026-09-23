@@ -1,6 +1,9 @@
 package beamformer
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // warmBeamformer returns a Beamformer with baseline warmed up and a uniform
 // noise floor, as if it had been running in a quiet room.
@@ -200,6 +203,111 @@ func TestVisualDOAAnalyzesWholeMicrophoneBatch(t *testing.T) {
 	}
 }
 
+func TestHardwareBatchAdvancesPhysicalPeriodCadence(t *testing.T) {
+	b := New()
+	b.Process(rawDirectionWindow(2, periodFrames*5, 0), -1, 1)
+
+	if b.baselineReady != 5 {
+		t.Fatalf("baseline advanced %d times for a five-period batch, want 5", b.baselineReady)
+	}
+	if b.historyCount != 5 {
+		t.Fatalf("history holds %d periods after a five-period batch, want 5", b.historyCount)
+	}
+}
+
+func TestPlaybackDoesNotEnterAmbientHistory(t *testing.T) {
+	b := New()
+	raw := rawDirectionWindow(3, periodFrames*5, 0)
+	for frame := 0; frame < periodFrames*5; frame++ {
+		off := frame*frameSize + echoRefCh*byteSample
+		raw[off+1] = 1 // non-zero loopback: speaker is active
+	}
+	b.Process(raw, -1, 1)
+
+	if b.historyCount != 0 || b.baselineReady != 0 {
+		t.Fatalf("playback contaminated ambient estimator: history=%d ready=%d",
+			b.historyCount, b.baselineReady)
+	}
+	if b.playbackReady != 5 || !b.Diagnostics().PlaybackActive {
+		t.Fatalf("playback floor did not advance for all subframes: ready=%d active=%v",
+			b.playbackReady, b.Diagnostics().PlaybackActive)
+	}
+}
+
+func TestUncertainLockStaysOnCentreMic(t *testing.T) {
+	b := warmBeamformer(1)
+	b.historyCount = historyPeriods
+	for period := range b.energyHistory {
+		for direction := range b.energyHistory[period] {
+			b.energyHistory[period][direction] = 1
+		}
+	}
+	b.Lock(true)
+	if b.lockedChannel != -1 {
+		t.Fatalf("equal scores locked to ch%d, want centre fallback", b.lockedChannel)
+	}
+}
+
+func TestSpatialScoresUseAllPerimeterMics(t *testing.T) {
+	const wanted = 2 // 90 degrees
+	b := New()
+	frames := periodFrames
+	raw := make([]byte, frames*frameSize)
+	// Deterministic broadband source with enough prefix for geometry delays.
+	source := make([]float64, frames+16)
+	seed := uint32(0x9e3779b9)
+	for i := range source {
+		seed = seed*1664525 + 1013904223
+		source[i] = float64(int32(seed)) / 2147483648.0
+	}
+	theta := candidateAngles[wanted] * math.Pi / 180
+	sx, sy := math.Sin(theta), math.Cos(theta)
+	var arrival [nDirections]float64
+	minArrival := math.MaxFloat64
+	for ch := 0; ch < nDirections; ch++ {
+		a := micAngles[ch] * math.Pi / 180
+		x, y := micRadiusMetres*math.Sin(a), micRadiusMetres*math.Cos(a)
+		arrival[ch] = -(x*sx + y*sy) * sampleRate / speedOfSound
+		if arrival[ch] < minArrival {
+			minArrival = arrival[ch]
+		}
+	}
+	for frame := 0; frame < frames; frame++ {
+		for ch := 0; ch < nDirections; ch++ {
+			delay := int(math.Round(arrival[ch] - minArrival))
+			v := int32(source[frame+8-delay] * 0x300000)
+			off := frame*frameSize + ch*byteSample
+			raw[off], raw[off+1], raw[off+2] = byte(v), byte(v>>8), byte(v>>16)
+		}
+	}
+	b.ensureAnalysisFrames(frames)
+	b.decodeChannels(raw)
+	b.bandDiff()
+	scores := b.spatialScores(0, frames)
+	got, score, confidence := bestDirection(scores)
+	if got != wanted {
+		t.Fatalf("spatial bearing=%d (%.0f°), want %d (%.0f°); scores=%v",
+			got, candidateAngles[got], wanted, candidateAngles[wanted], scores)
+	}
+	if confidence < 0.05 {
+		t.Fatalf("spatial confidence %.3f too low; scores=%v", confidence, scores)
+	}
+	if score < minSpatialScore {
+		t.Fatalf("spatial coherence %.3f below %.3f; scores=%v", score, minSpatialScore, scores)
+	}
+}
+
+func TestSpatialNoiseCannotBreakEnergyTie(t *testing.T) {
+	b := New()
+	b.trackSpeech = true
+	b.batchScores = [nDirections]float64{1, 1, 1, 1, 1, 1}
+	b.batchSpatial = [nDirections]float64{0.01, 0.02, 0.01, 0.01, 0.01, 0.01}
+	_, _, mode := b.liveDirection()
+	if mode != "batch_onset" {
+		t.Fatalf("low-coherence noise selected mode %q, want batch_onset", mode)
+	}
+}
+
 func TestUnlockedVisualDirectionUsesOnsetRatio(t *testing.T) {
 	b := warmBeamformer(1)
 	b.energyBaseline[1] = 100 // loud, steady source
@@ -315,6 +423,49 @@ func TestEchoRefReadsChannel8(t *testing.T) {
 	got := int16(uint16(out[0]) | uint16(out[1])<<8)
 	if got != 8192 {
 		t.Fatalf("EchoRef read the wrong channel or gain: got %d, want 8192", got)
+	}
+}
+
+func TestEchoRefIntoReusesCallerBuffer(t *testing.T) {
+	b := New()
+	raw := raw9(periodFrames*5, func(ch int) int32 {
+		if ch == echoRefCh {
+			return 0x123400
+		}
+		return 0
+	})
+	dst := make([]byte, 0, periodFrames*5*2)
+	out := b.EchoRefInto(raw, dst)
+	if len(out) != periodFrames*5*2 {
+		t.Fatalf("EchoRefInto length=%d, want %d", len(out), periodFrames*5*2)
+	}
+	if &out[0] != &dst[:cap(dst)][0] {
+		t.Fatal("EchoRefInto allocated despite sufficient caller capacity")
+	}
+	want := int16(0x1234)
+	if got := int16(uint16(out[0]) | uint16(out[1])<<8); got != want {
+		t.Fatalf("EchoRefInto sample=%d, want %d", got, want)
+	}
+}
+
+func BenchmarkHardwareBatch(b *testing.B) {
+	beam := New()
+	raw := rawDirectionWindow(2, periodFrames*5, 0)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		beam.Process(raw, -1, 1)
+	}
+}
+
+func BenchmarkPreparedSpatialHardwareBatch(b *testing.B) {
+	beam := New()
+	beam.PrepareSpeechLock()
+	raw := rawDirectionWindow(2, periodFrames*5, 0)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		beam.Process(raw, -1, 1)
 	}
 }
 

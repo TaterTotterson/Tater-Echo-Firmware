@@ -3587,3 +3587,55 @@ against main each time. One flake found on the way: the output chain vectors'
 float stats differ in the last bit between CI runners (11.059648197723096
 against 11.0596481977231); the audio is still compared exactly, the stats now
 to 1e-9. Nothing is released yet — an `emos-v*` tag is still owed first.
+
+## 2026-09-23 — seven-mic localisation and selected-path echo cancellation
+
+**The DOA clock now runs at the clock its constants describe.** GoTinyAlsa
+hands the mic path five 512-frame periods in one 160ms batch, but the energy
+EWMA, baseline and history had advanced only once per call. The nominal 320ms
+fast response was therefore about 1.5s, the 2s look-back was 10.2s, and warmup
+took roughly 16s. `beamformer.Process` now analyzes every physical 32ms
+subframe. A regression test pins five estimator advances per hardware batch.
+
+**All six perimeter mics now improve localisation without changing the proven
+audio-output architecture.** Per-mic ambient baselines normalise sensitivity;
+normalised small-lag correlation over all 15 mic pairs supplies a lightweight
+steered-response tie-breaker when energy is ambiguous. A confidence floor
+keeps ch6 instead of choosing ch0 from an all-equal room. Ch8-proven playback
+uses its own baseline and never enters ambient lock-back history, so a reply
+cannot become the next apparent speaker. This remains a mic selector, not a
+delay-and-sum beamformer: the 72mm-aperture result in SETUP.md still holds, and
+the spatial pass is only active for prepared listening windows. The live
+normalisation deliberately avoids guessing the undocumented `/proc/idme/miccal.*`
+blob format.
+
+**AEC now learns the acoustic path it actually processes.** One Speex state is
+retained for each real mic, selected from the beamformer's output-channel ID;
+only one state is processed per batch, so the bank costs memory rather than
+seven-times CPU. Hardware-reference learned state persists in the legacy file
+for ch6 and `.ch0`–`.ch5` siblings for perimeter mics. A conservative residual
+suppressor adds no more than 6dB and only when the post-AEC output is still
+strongly correlated with the far end. Telemetry now reports active path,
+low/speech/high-band attenuation, residual-suppressed frames, double-talk
+frames, per-channel clipping and DOA confidence. A selected state keeps its
+learned coefficients but clears stale far/near signal history first; without
+that distinction, a mic unused since the prior response could inject up to one
+64ms filter tail of old audio when selected again.
+
+**The mic hot path is smaller and time-correct.** Ch8 extraction reuses a
+scratch buffer; AEC and AGC operate in place; AGC coefficients scale with the
+number of samples so a 2560-sample call equals five period updates. A fixed
+80Hz high-pass/DC blocker now runs after AEC and before VAD/AGC. Synthetic
+tests cover real batch cadence, playback-history isolation, centre fallback,
+all-pair spatial direction, per-mic AEC state retention/persistence, residual
+double-talk protection, high-pass behaviour and batch-shape-independent AGC.
+No physical playback test was run in this pass; that remains the OTA/bench
+acceptance step.
+
+Host focused tests and race tests passed, the complete Linux
+`go test ./internal/... ./pkg/...` suite passed, and `device/compile.sh`
+produced a 32-bit ARM EABI5 binary with the pinned Android/NDK toolchain.
+On an M3 Ultra, a normal 160ms beamformer batch measured 0.041ms, the
+prepared all-pair spatial batch 0.380ms, and the five-period in-place AEC
+batch 0.479ms with zero Go allocations; those are regression baselines, not
+claims about the A53 until hardware telemetry is collected.

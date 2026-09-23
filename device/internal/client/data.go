@@ -288,6 +288,7 @@ type DataClient struct {
 	hwRefSeenSilent bool
 	hwRefSeenAudio  bool
 	hwRefOn         bool
+	echoRefScratch  []byte // reused until the synchronous AEC call returns
 
 	// hwRefMode is the operator's override, config.AecRef{Auto,HW,SW}. It
 	// is the ONE field here written from another goroutine — the control
@@ -1273,6 +1274,8 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 
 			mono, angle := d.beam.Process(raw, beamAngle, gainLin)
 			clipped := d.beam.ClippedSamples()
+			beamDiag := d.beam.Diagnostics()
+			d.aec.SelectPath(d.beam.OutputChannel())
 
 			// AEC — subtract the speaker's own output before anything
 			// measures or gates the signal. No-op while aecEnabled=false.
@@ -1286,21 +1289,30 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// governor are all bypassed. The software tap at the speaker
 			// ALSA write remains the fallback for any board where ch8 does
 			// not prove itself; see noteEchoRef for what counts as proof.
-			// Only extract when cancellation is actually armed: the AEC
-			// defaults to off, and this is an allocation and a copy per
-			// period on the deadline-bound mic goroutine.
+			// Only extract when cancellation is actually armed. EchoRefInto
+			// reuses this client's scratch buffer, but the channel walk still
+			// belongs to the deadline-bound mic goroutine.
 			var echoRef []byte
 			if d.aec.Enabled() {
-				echoRef = d.beam.EchoRef(raw)
+				echoRef = d.beam.EchoRefInto(raw, d.echoRefScratch)
+				if echoRef != nil {
+					d.echoRefScratch = echoRef
+				}
 			}
 			if echoRef != nil && d.noteEchoRef(echoRef) {
-				mono = d.aec.ProcessWithRef(mono, echoRef)
+				mono = d.aec.ProcessWithRefInPlace(mono, echoRef)
 			} else {
-				mono = d.aec.Process(mono)
+				mono = d.aec.ProcessInPlace(mono)
 			}
 
+			// Remove DC and sub-speech rumble before either VAD or AGC sees it.
+			// This mutates the batch owned by this stream; wake and turn audio
+			// therefore pass through the same stable, time-invariant filter.
+			mono = d.proc.HighPass(mono)
+
 			// ── Processing pipeline ──────────────────────────────────────
-			// VAD on raw beamformed output — pre-NS/AGC so threshold is
+			// VAD on beamformed, echo-cancelled, high-passed output — pre-AGC
+			// so threshold is
 			// consistent regardless of gain state.
 			//
 			// vadThreshold is calibrated in pre-gain (acoustic) units —
@@ -1357,8 +1369,11 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// characterised — that job is done (2026-07-07 fleet
 			// analysis) and /tmp/server.log is RAM-backed and unrotated.
 			if periodCount%3750 == 0 || (clipped != lastClipped && periodCount%100 == 0) {
-				log.Printf("[data] VAD diag: rms=%.5f threshold=%.5f gain=%ddB clipped=%d gate=%v active=%v agc=%v",
-					rms, threshold*gainLin, gainDb, clipped, speech, active, agcEnabled)
+				log.Printf("[data] VAD diag: rms=%.5f threshold=%.5f gain=%ddB clipped=%d by_ch=%v "+
+					"gate=%v active=%v agc=%v mic=ch%d doa_conf=%.2f spatial=%.2f playback=%v",
+					rms, threshold*gainLin, gainDb, clipped, d.beam.ClippedByChannel(),
+					speech, active, agcEnabled, beamDiag.OutputChannel, beamDiag.Confidence,
+					beamDiag.Spatial, beamDiag.PlaybackActive)
 				lastClipped = clipped
 			}
 			periodCount++

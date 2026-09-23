@@ -67,23 +67,35 @@ const (
 	// room. aecTailMs still sets the software tap's length, which must also
 	// cover the delay error between the speaker write and the mic batches.
 	hwTailMs = 64
+
+	// One learned acoustic path per real microphone. Only the selected state
+	// is processed, so CPU remains one canceller; the extra cost is filter
+	// memory. Switching from centre to a perimeter mic no longer asks a filter
+	// trained on a different physical path to cancel the first word.
+	aecPaths      = 7
+	defaultPathID = 6 // centre microphone
 )
 
-// Canceller is a single AEC instance shared by the speaker goroutine
-// (WriteFar) and the mic goroutine (Process). One mutex guards everything —
-// both call sites run at tens of hertz on multi-millisecond periods, so
-// contention is irrelevant next to correctness.
+// Canceller owns the retained per-microphone AEC state bank shared by the
+// speaker goroutine (WriteFar) and the mic goroutine (Process). Only the
+// selected state runs. One mutex guards everything — both call sites run at
+// tens of hertz on multi-millisecond periods, so contention is irrelevant
+// next to correctness.
 type Canceller struct {
 	mu      sync.Mutex
 	enabled bool
 	delayMs int
 	tailMs  int // configured (aecTailMs): the software tap's filter length
 
-	st       *C.SpeexEchoState
-	stTailMs int // the length st was built with: hwTailMs or tailMs
+	// st aliases states[activePath] for the processing hot path and for the
+	// existing state import/export contract.
+	st         *C.SpeexEchoState
+	states     [aecPaths]*C.SpeexEchoState
+	activePath int
+	stTailMs   int // the length st was built with: hwTailMs or tailMs
 
-	statePath   string    // saved echo path (persist.go); empty = off
-	lastSaveTry time.Time // monotonic, rate-limits maybeSaveLocked
+	statePath   string              // saved echo path (persist.go); empty = off
+	lastSaveTry [aecPaths]time.Time // monotonic, rate-limits maybeSaveLocked
 
 	// Far-end reference ring (16kHz mono), plus the 3:1 decimator carry.
 	ring  [ringCap]int16
@@ -106,10 +118,15 @@ type Canceller struct {
 	// log the actual numbers instead of inferring them controller-side.
 	// Accumulated per Process call, reported ~1/s while the reference is
 	// active (i.e. during playback), then reset.
-	statFrames int
-	statInSum  float64 // Σ mic-frame rms (pre-AEC)
-	statOutSum float64 // Σ output-frame rms (post-AEC)
-	statRefSum float64 // Σ reference-frame rms
+	statFrames               int
+	statInSum                float64    // Σ mic-frame rms (pre-AEC)
+	statOutSum               float64    // Σ output-frame rms (post-AEC)
+	statRefSum               float64    // Σ reference-frame rms
+	statInBand               [3]float64 // Σ band energy: <500Hz, 500–3000Hz, >3000Hz
+	statOutBand              [3]float64
+	doubleTalkFrames         uint64
+	residualSuppressedFrames uint64
+	residualGain             [aecPaths]float64
 
 	// Far-end telemetry: what WriteFar actually receives and pushes,
 	// counted in pushed (16kHz) samples. Logged ~1/s while the far end is
@@ -286,7 +303,37 @@ func (c *Canceller) RefSource() string {
 
 // New returns a disabled Canceller. Call SetParams (config push) to arm it.
 func New() *Canceller {
-	return &Canceller{}
+	c := &Canceller{activePath: defaultPathID}
+	for i := range c.residualGain {
+		c.residualGain[i] = 1
+	}
+	return c
+}
+
+// SelectPath chooses the learned echo path for the physical microphone that
+// produced the current mono buffer. States are retained across turns; only one
+// is processed at a time. Out-of-range ids fall back to the centre mic.
+func (c *Canceller) SelectPath(id int) {
+	if id < 0 || id >= aecPaths {
+		id = defaultPathID
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if id == c.activePath {
+		return
+	}
+	old := c.activePath
+	c.activePath = id
+	if c.states[id] == nil {
+		return
+	}
+	// The coefficients belong to this microphone and remain useful; the
+	// signal history belongs to the last time this state ran and may contain
+	// old reply audio. Clear only that history before the state becomes live.
+	C.em_echo_state_clear_history(c.states[id])
+	c.st = c.states[id]
+	c.resetStatsLocked()
+	log.Printf("[aec] acoustic path ch%d → ch%d", old, id)
 }
 
 // SetParams applies config. On the software tap, any change to delay or tail
@@ -345,14 +392,19 @@ func (c *Canceller) buildLocked() {
 	c.freeLocked()
 	c.stTailMs = c.effectiveTailLocked()
 	tailSamples := C.int(c.stTailMs * sampleRate / 1000)
-	c.st = C.speex_echo_state_init(C.int(FrameSize), tailSamples)
 	rate := C.spx_int32_t(sampleRate)
-	C.speex_echo_ctl(c.st, C.SPEEX_ECHO_SET_SAMPLING_RATE, unsafe.Pointer(&rate))
+	for path := range c.states {
+		c.states[path] = C.speex_echo_state_init(C.int(FrameSize), tailSamples)
+		C.speex_echo_ctl(c.states[path], C.SPEEX_ECHO_SET_SAMPLING_RATE, unsafe.Pointer(&rate))
+		c.residualGain[path] = 1
+	}
+	c.st = c.states[c.activePath]
+	c.resetStatsLocked()
 
 	c.micBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
 	c.refBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
 	c.outBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
-	log.Printf("[aec] enabled: frame=%d tail=%dms delay=%dms", FrameSize, c.stTailMs, c.delayMs)
+	log.Printf("[aec] enabled: frame=%d tail=%dms delay=%dms paths=%d", FrameSize, c.stTailMs, c.delayMs, aecPaths)
 }
 
 // seedRingLocked seeds the ring with the bulk delay as silence: the mic
@@ -369,13 +421,24 @@ func (c *Canceller) seedRingLocked() {
 
 func (c *Canceller) freeLocked() {
 	if c.st != nil {
-		C.speex_echo_state_destroy(c.st)
+		for path, st := range c.states {
+			if st != nil {
+				C.speex_echo_state_destroy(st)
+				c.states[path] = nil
+			}
+		}
 		c.st = nil
 		C.free(unsafe.Pointer(c.micBuf))
 		C.free(unsafe.Pointer(c.refBuf))
 		C.free(unsafe.Pointer(c.outBuf))
 		c.micBuf, c.refBuf, c.outBuf = nil, nil, nil
 	}
+}
+
+func (c *Canceller) resetStatsLocked() {
+	c.statFrames, c.statInSum, c.statOutSum, c.statRefSum = 0, 0, 0, 0
+	c.statInBand = [3]float64{}
+	c.statOutBand = [3]float64{}
 }
 
 func (c *Canceller) pushLocked(s int16) {
@@ -452,7 +515,7 @@ func (c *Canceller) WriteFar(period []byte) {
 // Hence: any size this function cannot handle is LOGGED, never silently
 // bypassed. Called from the mic goroutine.
 func (c *Canceller) Process(mono []byte) []byte {
-	return c.process(mono, nil)
+	return c.process(mono, nil, false)
 }
 
 // ProcessWithRef cancels using a far-end reference supplied by the CALLER,
@@ -469,10 +532,23 @@ func (c *Canceller) Process(mono []byte) []byte {
 // passes through uncancelled rather than being cancelled against silence —
 // which would be indistinguishable from a working AEC with nothing playing.
 func (c *Canceller) ProcessWithRef(mono, ref []byte) []byte {
-	return c.process(mono, ref)
+	return c.process(mono, ref, false)
 }
 
-func (c *Canceller) process(mono, hwref []byte) []byte {
+// ProcessWithRefInPlace is the live-pipeline form. Beamformer output is a
+// fresh buffer owned by the current batch, so reusing it for AEC output saves
+// one 5KB allocation every 160ms. ProcessWithRef keeps copy semantics for
+// callers and tests that retain the uncancelled input.
+func (c *Canceller) ProcessWithRefInPlace(mono, ref []byte) []byte {
+	return c.process(mono, ref, true)
+}
+
+// ProcessInPlace is the software-reference counterpart.
+func (c *Canceller) ProcessInPlace(mono []byte) []byte {
+	return c.process(mono, nil, true)
+}
+
+func (c *Canceller) process(mono, hwref []byte, inPlace bool) []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.enabled || c.st == nil {
@@ -503,7 +579,10 @@ func (c *Canceller) process(mono, hwref []byte) []byte {
 		return mono
 	}
 
-	out := make([]byte, len(mono))
+	out := mono
+	if !inPlace {
+		out = make([]byte, len(mono))
+	}
 	mic := unsafe.Slice((*int16)(unsafe.Pointer(c.micBuf)), FrameSize)
 	ref := unsafe.Slice((*int16)(unsafe.Pointer(c.refBuf)), FrameSize)
 	res := unsafe.Slice((*int16)(unsafe.Pointer(c.outBuf)), FrameSize)
@@ -573,6 +652,7 @@ func (c *Canceller) process(mono, hwref []byte) []byte {
 		}
 
 		C.speex_echo_cancellation(c.st, c.micBuf, c.refBuf, c.outBuf)
+		corr := c.suppressResidualLocked(res, ref)
 		for i := 0; i < FrameSize; i++ {
 			binary.LittleEndian.PutUint16(out[off+i*2:], uint16(res[i]))
 		}
@@ -588,22 +668,37 @@ func (c *Canceller) process(mono, hwref []byte) []byte {
 			c.statInSum += micRMS
 			c.statOutSum += frameRMS(res)
 			c.statRefSum += refRMS
+			inBands, outBands := threeBandEnergy(mic), threeBandEnergy(res)
+			for band := range inBands {
+				c.statInBand[band] += inBands[band]
+				c.statOutBand[band] += outBands[band]
+			}
+			if refRMS > 100 && frameRMS(res) > 500 && corr < 0.35 {
+				c.doubleTalkFrames++
+			}
 			if c.statFrames == 32 { // 32 × 32ms ≈ 1s
 				inAvg, outAvg, refAvg := c.statInSum/32, c.statOutSum/32, c.statRefSum/32
 				att := 0.0
 				if outAvg > 0 {
 					att = 20 * math.Log10(inAvg/outAvg)
 				}
+				var bandAtt [3]float64
+				for band := range bandAtt {
+					bandAtt[band] = 10 * math.Log10(math.Max(c.statInBand[band], 1e-9)/math.Max(c.statOutBand[band], 1e-9))
+				}
 				if useHW {
 					log.Printf("[aec] att=%.1fdB mic=%.0f out=%.0f ref=%.0f "+
-						"src=hw(ch8) frames=%d",
-						att, inAvg, outAvg, refAvg, c.hwFrames)
+						"bands=%.1f/%.1f/%.1f path=ch%d src=hw(ch8) frames=%d residual=%d double=%d",
+						att, inAvg, outAvg, refAvg, bandAtt[0], bandAtt[1], bandAtt[2],
+						c.activePath, c.hwFrames, c.residualSuppressedFrames, c.doubleTalkFrames)
 					c.maybeSaveLocked(att, refAvg > 100)
 				} else {
-					log.Printf("[aec] att=%.1fdB mic=%.0f out=%.0f ref=%.0f ring=%d (delay=%dms)",
-						att, inAvg, outAvg, refAvg, c.count, c.delayMs)
+					log.Printf("[aec] att=%.1fdB mic=%.0f out=%.0f ref=%.0f bands=%.1f/%.1f/%.1f "+
+						"path=ch%d ring=%d (delay=%dms) residual=%d double=%d",
+						att, inAvg, outAvg, refAvg, bandAtt[0], bandAtt[1], bandAtt[2],
+						c.activePath, c.count, c.delayMs, c.residualSuppressedFrames, c.doubleTalkFrames)
 				}
-				c.statFrames, c.statInSum, c.statOutSum, c.statRefSum = 0, 0, 0, 0
+				c.resetStatsLocked()
 			}
 		}
 	}
@@ -654,6 +749,92 @@ func frameRMS(s []int16) float64 {
 		sum += f * f
 	}
 	return math.Sqrt(sum / float64(len(s)))
+}
+
+// suppressResidualLocked applies at most 6dB of post-AEC attenuation when the
+// remaining output is still strongly correlated with the far-end reference.
+// Uncorrelated near-end speech (double-talk) stays at unity. This is purposely
+// conservative: the linear Speex filter remains the canceller; the postfilter
+// only cleans up a residual that still identifies itself as playback.
+func (c *Canceller) suppressResidualLocked(out, ref []int16) float64 {
+	if frameRMS(ref) <= 100 {
+		c.residualGain[c.activePath] += 0.05 * (1 - c.residualGain[c.activePath])
+		return 0
+	}
+	corr := maxAbsCorrelation(out, ref, 64)
+	target := 1.0
+	if corr > 0.65 {
+		target = 1 - 0.5*math.Min((corr-0.65)/0.30, 1)
+	}
+	gain := c.residualGain[c.activePath]
+	coefficient := 0.05
+	if target < gain {
+		coefficient = 0.25
+	}
+	gain += coefficient * (target - gain)
+	if gain < 0.5 {
+		gain = 0.5
+	} else if gain > 1 {
+		gain = 1
+	}
+	c.residualGain[c.activePath] = gain
+	if gain < 0.999 {
+		c.residualSuppressedFrames++
+		for i, sample := range out {
+			out[i] = int16(float64(sample) * gain)
+		}
+	}
+	return corr
+}
+
+func maxAbsCorrelation(a, b []int16, maxLag int) float64 {
+	best := 0.0
+	for lag := -maxLag; lag <= maxLag; lag++ {
+		startA, startB := 0, 0
+		if lag >= 0 {
+			startB = lag
+		} else {
+			startA = -lag
+		}
+		n := len(a) - startA
+		if m := len(b) - startB; m < n {
+			n = m
+		}
+		var ab, aa, bb float64
+		for i := 0; i < n; i++ {
+			x, y := float64(a[startA+i]), float64(b[startB+i])
+			ab += x * y
+			aa += x * x
+			bb += y * y
+		}
+		denom := math.Sqrt(aa * bb)
+		if denom > 1e-9 {
+			corr := math.Abs(ab / denom)
+			if corr > best {
+				best = corr
+			}
+		}
+	}
+	return best
+}
+
+// threeBandEnergy is lightweight telemetry, not an audio effect. Two one-pole
+// low-passes split each 32ms frame into <500Hz, 500–3000Hz and >3000Hz energy,
+// enough to distinguish bass/room-tail failures from speech-band residuals.
+func threeBandEnergy(samples []int16) (energy [3]float64) {
+	a500 := 1 - math.Exp(-2*math.Pi*500/sampleRate)
+	a3000 := 1 - math.Exp(-2*math.Pi*3000/sampleRate)
+	var lp500, lp3000 float64
+	for _, sample := range samples {
+		x := float64(sample)
+		lp500 += a500 * (x - lp500)
+		lp3000 += a3000 * (x - lp3000)
+		bands := [3]float64{lp500, lp3000 - lp500, x - lp3000}
+		for band, value := range bands {
+			energy[band] += value * value
+		}
+	}
+	return energy
 }
 
 // A saved echo path: what the canceller learned, so a restart need not learn

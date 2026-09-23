@@ -99,22 +99,25 @@ Why the gate came out (2026-07-06 rework): the VAD gate's absolute RMS threshold
 
 ```
 ALSA card 0 device 24 (9ch S24_3LE 16kHz)
-  → pcm_microphone.go subscriber channel (raw 13824-byte periods at ~31ms intervals)
+  → pcm_microphone.go subscriber channel (raw 69120-byte batches at ~160ms intervals;
+      each batch contains five physical 512-frame/32ms periods)
   → beamformer.Process(raw, beamAngle, gain)
       — unlocked (idle): always returns ch6 (centre/omni mic)
-      — smoothers still update every period (baseline stays warm;
+      — smoothers update once for each physical period inside the batch
+        (baseline stays warm;
         energy ratios are gain-invariant)
       — fixed mic gain (micGainDb, default +24dB) applied to the FULL
         24-bit sample during S16 extraction (v2.7.1) — the old path took
         the upper 2 bytes and threw away the low byte, where nearly all
         of the signal lives at this hardware's capture levels (speech
         ≈ −70dBFS raw). Clipped samples are counted and reported.
-      — returns mono S16_LE 512 samples
+      — returns mono S16_LE 2560 samples
+  → aec.ProcessWithRefInPlace(mono, ch8) — selected-mic Speex state plus
+      conservative far-correlated residual suppression (no-op when disabled)
+  → 80Hz high-pass/DC blocker (in place)
   → vadPeriodRMS(mono) — computed for the periodic diagnostic log only
       (every ~10min, or within ~16s of a clipped sample — v2.7.1);
       does NOT gate sending on this stream (v2.7.0)
-  → aec.Process(mono) — speexdsp echo cancel against the speaker's own
-      output (v2.7.3; no-op while aecEnabled=false; ~14dB when converged)
   → AGC: NEVER on the wake stream (v2.7.0 — forced off regardless of config;
       adaptive gain state on a permanent stream is a rebaselining mechanism
       by construction). agcEnabled config now applies to lock_mic turn
@@ -141,7 +144,7 @@ wake_word_listener():
   → score >= threshold → wake detected
 ```
 
-**Key: the stream runs continuously and is completely stateless — no gate, no adaptive gain, nothing that can drift with room history. OWW always sees uninterrupted audio. ch6 omni during idle. Per-room adaptation happens controller-side as a noise-floor *measurement*, consumed by endpointing — never applied to the signal.**
+**Key: the stream runs continuously with no gate or adaptive gain. The only added mic-side filter is the fixed 80Hz high-pass, whose tiny state resets with the stream and cannot rebaseline itself to the room. OWW always sees uninterrupted audio. ch6 omni during idle. Per-room adaptation happens controller-side as a noise-floor *measurement*, consumed by endpointing — never applied to the signal.**
 
 ### Wake word detected → command capture
 
@@ -250,7 +253,8 @@ Button press (clickType=138):
   → mic_stop → device stream stops
   → mic_start(lock_mic:true) → new stream with lockMic=true
       → beam.Lock(beamformingEnabled) called
-        — beamformingEnabled=true: selects perimeter mic with highest onset ratio
+        — beamformingEnabled=true: selects a confidently separated perimeter
+          mic from calibrated onset/history; otherwise remains on ch6
         — beamformingEnabled=false: Lock() no-ops, stays on ch6
       → [beam] locked to chX (Y°) onset_ratio=Z logged
   → _run_voice_locked(device, trigger_label="button")
@@ -270,10 +274,10 @@ VAD gate, preroll ring, sentinels, and (config-gated) AGC still exist.
 
 | Stage | State | Reason |
 |---|---|---|
-| RNNoise NS | **REMOVED** (2026-07-12) | Was calibrated for 48kHz, fed 16kHz — miscalibrated speech probability, degraded HF consonants. P0-3 resolved exactly as predicted here: deleted device-side, replaced by controller-side DTLN (`em_ns.py`, 16kHz-native) applied to the speech-to-text stream only, per-device `nsAsr` flag, default off. Wake stream stays raw. |
+| RNNoise NS | **REMOVED** (2026-07-12) | Was calibrated for 48kHz, fed 16kHz — miscalibrated speech probability, degraded HF consonants. P0-3 resolved exactly as predicted here: deleted device-side, replaced by controller-side DTLN (`em_ns.py`, 16kHz-native) applied to the speech-to-text stream only, per-device `nsAsr` flag, default off. Wake stream has no adaptive noise suppressor. |
 | AGC | **OFF on the wake stream, permanently** (v2.7.0 — ignores config). Config-gated on lock_mic turns only. | v2.6.5 re-enabled it after the echo fixes, but ResetAGC only runs at stream start and the wake stream never restarts — in any room with steady noise above vadThreshold, the release path walked gain up toward amplifying the noise floor (the RNNoise interlock that was meant to prevent this is dead while NS is off), then the fast attack compressed the wake word's envelope mid-utterance. Adaptive gain state on a permanent stream = rebaselining by construction. The fixed gain staging that replaced it shipped in v2.7.1: `micGainDb` (+24dB default) applied to the full 24-bit sample pre-truncation. |
 | VAD gate (wake stream) | **REMOVED** (v2.7.0) | Absolute RMS threshold can't be right in every room; OWW wants continuous audio; the gate held open by ambient noise was also what let the AGC release run continuously. Still exists on lock_mic (button) streams for endpointing. |
-| Beamforming | ON in config, **lock-back selection (v2.7.2)** | Lock is commanded at wake detection (v2.7.0, beam_lock mid-stream); detection lands 300–500ms after the wake word ends, so live onset ratios had decayed and selection was known-poor. Fixed via lock-back: a ~2s ring of per-direction period energies (frozen while locked, like the baseline); Lock() scores each direction by its top-8-period burst within the window relative to its baseline, so it selects on the recorded wake word rather than the decayed present. Unit-tested (TV-vs-decayed-speaker scenario in `beamformer_test.go`). Known caveat: TTS echo enters the ring between turns — the baseline absorbs the same energy, damping its ratio, but continuation-turn locks are the weaker case until AEC. Validate direction LED against speaker position after OTA. |
+| Beamforming | ON in config, **lock-back selection plus live spatial tie-breaker** | Lock-back scores a real ~2s ring of physical 32ms period energies, normalised by each mic's own ambient baseline. Ch8-proven playback periods use a separate playback floor and never enter ambient history. Ambiguous bearings stay on the centre mic; prepared initial/follow-up listening may use normalised time-delay evidence from all 15 perimeter-mic pairs as a localisation tie-breaker. Output remains one selected mic, not a sum. Validate confidence and direction LED against speaker position after OTA. |
 | owwSpeexNs | OFF | Available (v2.6.5, Q1): openwakeword's speexdsp suppressor, wake path only. Off by default — flip on the lounge device and A/B wake rate with TV on before fleet-wide enable. |
 | Noise floor tracking | **ON** (v2.7.0, controller) | Per-device asymmetric EWMA over the continuous wake stream. Measurement only. Consumed by the SNR-relative no-speech timeout; logged as floor= in OWW lines. |
 
@@ -735,15 +739,15 @@ Two things this does NOT fix, so do not read it as "the jack works":
 
 **VAD end signal.** When the device VAD gate closes (speech followed by `vadSilenceMs` of silence, default 900ms; button/lock_mic turns only — the wake stream is ungated), the device sends a `0x04` sentinel. The controller ends the HA audio stream if it arrives before HA's own `STT_VAD_END` — HA's VAD is the endpointing authority for wake turns; the device sentinel is what actually ends button turns. Note (v2.9.4): the gate windows now run at their configured durations — a counting bug against the mic's 160ms batch size previously made both ~5× longer than set.
 
-**Directional mic locking — onset ratio.** When the controller sends `mic_start` with `lock_mic: true` (voice turn start), the device locks to the perimeter mic with the highest onset ratio: `energySmooth[di] / energyBaseline[di]`. This selects the direction with the biggest *recent energy increase* rather than highest absolute energy, making the lock robust to continuous background noise sources (TV, fan). Two parallel smoothers: fast (α=0.9, ~320ms) and slow (α=0.995, ~10s baseline). The slow baseline is frozen while locked. The lock is idempotent across VAD oscillation. Releases on `mic_stop`.
+**Directional mic locking — calibrated onset plus confidence.** When the controller requests a speech lock, the device scores each perimeter mic against that mic's own baseline, so capsule/ADC sensitivity differences cancel. The fast (α=0.9, ~320ms) and slow (α=0.995, ~10s) estimators advance once per physical 32ms period inside each 160ms GoTinyAlsa batch. Wake locks use the top-eight-period burst from a real ~2s look-back window. If the winner is not separated from the runner-up by the confidence floor, output stays on ch6 instead of arbitrarily choosing ch0. The lock is idempotent across VAD oscillation and releases on `mic_stop`.
 
-**Direction estimation — onset ratio.** Two parallel smoothers run per direction: fast (α=0.9, ~320ms) tracking instantaneous energy, and slow (α=0.995, ~10s) tracking the background noise floor. At lock time, the direction with the highest `energySmooth / energyBaseline` ratio is selected — this is the direction with the biggest *recent energy increase* (speech onset), not the direction with the highest absolute energy (TV, fan). The slow baseline is frozen during voice turns to prevent the speaker's own voice from corrupting the noise estimate. This reliably picks the speaker direction even with a television on in the room.
+**Direction estimation — onset ratio plus spatial evidence.** Energy onset remains primary because it is cheap and robust. During prepared listening, ambiguous energy bearings are resolved with a small-lag normalised steered-response score across all 15 pairs of the six perimeter mics. Pair normalisation removes level sensitivity and the measured geometry supplies the expected fractional delays. It only chooses a bearing; it never sums the microphone signals. Ch8 playback activity selects a separate per-mic playback baseline and is excluded from ambient history, preventing TTS from becoming the next speaker direction.
 
 **LED direction overlay.** The direction arc is overlaid on the solid green listening ring during voice turns only (not during idle wake word listening). The overlay uses the controller-set base ring state rather than accumulating — each period resets to the base green and applies the direction marker fresh. Primary direction LED: bright light green (R:0 G:255 B:80). Adjacent LEDs: base green boosted by 60. The overlay stops immediately when the controller sends the thinking spinner (spinner LEDs are not solid green, so `listeningLEDs` flag goes false).
 
 **LED physical mapping.** 12 LEDs (IS31FL3236A), one either side of each perimeter mic. LED 0 is physically at 240° (just clockwise of MK5 at 210°). Volume sweep confirmed: starts at LED 0, sweeps clockwise. Offset formula: `LED = ((angle - 240 + 360) % 360) / 30`.
 
-**Audio processing pipeline.** Each 160ms mic batch of raw beamformed audio passes through: (1) speexdsp AEC (v2.7.3, when enabled) — subtracts the speaker's own output, whole mic path including the wake stream. (2) AGC (button/lock_mic turns only; never the wake stream) — targets -22dBFS RMS with fast attack (0.05) and slow release (0.005); release frozen during silence to prevent noise floor amplification. VAD decisions are made on pre-AGC audio to keep the threshold stable. Device-side RNNoise was removed 2026-07-12 — noise suppression is controller-side DTLN on the speech-to-text stream (`nsAsr` flag).
+**Audio processing pipeline.** Each 160ms mono batch passes through: (1) the Speex AEC state retained for the selected physical mic, plus a conservative far-correlated residual suppressor capped at 6dB; (2) an 80Hz high-pass/DC blocker; (3) VAD; and (4) AGC on button/`lock_mic` turns only. AGC targets -22dBFS RMS, freezes release during silence, and scales its attack/release coefficient by the number of samples so a five-period hardware batch has the same time response as five individual periods. AEC, high-pass, AGC and ch8 extraction operate in place/reused buffers on the deadline-bound mic goroutine. Device-side RNNoise was removed 2026-07-12 — noise suppression is controller-side DTLN on the speech-to-text stream (`nsAsr` flag).
 
 **Acoustic feedback prevention.** `stream_speaker` completes well ahead of actual playback (the WS write runs ~2× realtime and the device buffers ~5.5s). Without compensation, the mic would restart while the speaker is still playing, and the assistant would hear itself and trigger another turn. The controller sleeps for the remaining playback duration (plus the ~1s prime allowance) after streaming, racing `cancel_event` so barge-in cuts the wait instantly. With barge-in enabled the mic never stops at all — AEC is what keeps the live mic usable during playback.
 

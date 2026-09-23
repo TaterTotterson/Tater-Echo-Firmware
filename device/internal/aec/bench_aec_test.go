@@ -2,9 +2,18 @@ package aec
 
 import (
 	"encoding/binary"
+	"io"
+	"log"
 	"math"
 	"testing"
 )
+
+func quietBenchmark(b *testing.B) func() {
+	b.Helper()
+	w := log.Writer()
+	log.SetOutput(io.Discard)
+	return func() { log.SetOutput(w) }
+}
 
 func benchFrames(n int) ([]byte, []byte) {
 	mic := make([]byte, n*2)
@@ -18,8 +27,10 @@ func benchFrames(n int) ([]byte, []byte) {
 	return mic, ref
 }
 
-// One 512-sample (32ms) period through one canceller at the shipped tail.
-func BenchmarkCancelOnePeriod300ms(b *testing.B) {
+// One 512-sample (32ms) period through the hardware-reference canceller at
+// its shipped 64ms tail. This keeps the copy-returning public API represented.
+func BenchmarkCancelOnePeriodHardwareCopy(b *testing.B) {
+	defer quietBenchmark(b)()
 	c := New()
 	c.SetParams(true, 0, 300)
 	c.SetHardwareRef(true)
@@ -30,31 +41,31 @@ func BenchmarkCancelOnePeriod300ms(b *testing.B) {
 	}
 }
 
-func BenchmarkCancelOnePeriod150ms(b *testing.B) {
+// The live path owns its beamformer output and cancels in place.
+func BenchmarkCancelOnePeriodHardwareInPlace(b *testing.B) {
+	defer quietBenchmark(b)()
 	c := New()
-	c.SetParams(true, 0, 150)
+	c.SetParams(true, 0, 300)
 	c.SetHardwareRef(true)
 	mic, ref := benchFrames(FrameSize)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.ProcessWithRef(mic, ref)
+		c.ProcessWithRefInPlace(mic, ref)
 	}
 }
 
-// Seven cancellers, one per microphone, on the same period — the
-// "AEC before the beamformer" architecture.
-func BenchmarkCancelSevenMics300ms(b *testing.B) {
-	var cs [7]*Canceller
-	for i := range cs {
-		cs[i] = New()
-		cs[i].SetParams(true, 0, 300)
-		cs[i].SetHardwareRef(true)
-	}
-	mic, ref := benchFrames(FrameSize)
+// The actual GoTinyAlsa delivery shape: five Speex periods in one 160ms
+// batch. Seven retained mic states do not multiply processing cost because
+// only the selected path runs for a batch.
+func BenchmarkCancelHardwareBatchInPlace(b *testing.B) {
+	defer quietBenchmark(b)()
+	c := New()
+	c.SetParams(true, 0, 300)
+	c.SetHardwareRef(true)
+	mic, ref := benchFrames(5 * FrameSize)
+	c.SelectPath(2)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for _, c := range cs {
-			c.ProcessWithRef(mic, ref)
-		}
+		c.ProcessWithRefInPlace(mic, ref)
 	}
 }
