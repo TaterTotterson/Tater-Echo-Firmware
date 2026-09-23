@@ -50,6 +50,9 @@ func TestLockBackPicksPastBurst(t *testing.T) {
 		t.Fatalf("lock-back picked ch%d, want ch%d (direction 2 burst)",
 			b.lockedChannel, directionToChannel[2])
 	}
+	if angle := b.LockedAngle(); angle != candidateAngles[2] {
+		t.Fatalf("locked angle = %.0f°, want %.0f°", angle, candidateAngles[2])
+	}
 }
 
 // TestLockFallsBackToOnsetRatioWithoutHistory — fresh start: baseline warm
@@ -68,6 +71,22 @@ func TestLockFallsBackToOnsetRatioWithoutHistory(t *testing.T) {
 	}
 }
 
+func TestContinuedChatLockUsesCurrentSpeechNotPreviousHistory(t *testing.T) {
+	b := warmBeamformer(1e-6)
+	b.historyCount = historyPeriods
+	for i := 0; i < historyPeriods; i++ {
+		b.energyHistory[i][2] = 5e-4 // previous turn came from direction 2
+	}
+	b.energySmooth[4] = 3e-4 // current follow-up speech is direction 4
+
+	b.LockCurrent(true)
+
+	if b.lockedChannel != directionToChannel[4] {
+		t.Fatalf("continued lock picked ch%d, want current speech ch%d",
+			b.lockedChannel, directionToChannel[4])
+	}
+}
+
 // TestLockDisabledIsNoOp — beamforming off must leave the channel unlocked
 // (ch6 omni output path).
 func TestLockDisabledIsNoOp(t *testing.T) {
@@ -79,6 +98,9 @@ func TestLockDisabledIsNoOp(t *testing.T) {
 
 	if b.lockedChannel != -1 {
 		t.Fatalf("Lock(false) locked to ch%d, want unlocked (-1)", b.lockedChannel)
+	}
+	if angle := b.LockedAngle(); angle != -1 {
+		t.Fatalf("unlocked angle = %.0f°, want -1", angle)
 	}
 }
 
@@ -129,6 +151,152 @@ func raw9(frames int, valueFor func(ch int) int32) []byte {
 		}
 	}
 	return buf
+}
+
+func rawDirectionWindow(direction, frames, startFrame int) []byte {
+	buf := make([]byte, frames*frameSize)
+	for frame := startFrame; frame < frames; frame++ {
+		value := int32(0)
+		if frame%4 >= 2 {
+			value = 0x300000
+		} else {
+			value = -0x300000
+		}
+		base := frame*frameSize + direction*byteSample
+		buf[base] = byte(value)
+		buf[base+1] = byte(value >> 8)
+		buf[base+2] = byte(value >> 16)
+	}
+	return buf
+}
+
+func rawDirection(direction int) []byte {
+	return rawDirectionWindow(direction, periodFrames, 0)
+}
+
+func TestUnlockedFollowUpReportsVisualDirection(t *testing.T) {
+	b := New()
+	b.PrepareSpeechLock()
+	_, angle := b.Process(rawDirection(2), -1, 1)
+
+	if b.lockedChannel != -1 {
+		t.Fatalf("visual DOA unexpectedly locked audio to ch%d", b.lockedChannel)
+	}
+	if angle != candidateAngles[2] {
+		t.Fatalf("unlocked visual angle = %.0f°, want %.0f°", angle, candidateAngles[2])
+	}
+}
+
+func TestVisualDOAAnalyzesWholeMicrophoneBatch(t *testing.T) {
+	b := New()
+	b.PrepareSpeechLock()
+
+	// ALSA delivers 5 x 512-frame periods together (160ms). Speech beginning
+	// after the first 32ms must still drive this batch's real-time DOA.
+	raw := rawDirectionWindow(4, periodFrames*5, periodFrames)
+	_, angle := b.Process(raw, -1, 1)
+	if angle != candidateAngles[4] {
+		t.Fatalf("late-batch speech angle = %.0f°, want %.0f°", angle, candidateAngles[4])
+	}
+}
+
+func TestUnlockedVisualDirectionUsesOnsetRatio(t *testing.T) {
+	b := warmBeamformer(1)
+	b.energyBaseline[1] = 100 // loud, steady source
+	b.energySmooth[1] = 110
+	b.energySmooth[4] = 8 // quieter absolute level, much stronger new onset
+
+	direction, _, mode := b.liveDirection()
+	if mode != "onset_ratio" {
+		t.Fatalf("live direction mode = %q, want onset_ratio", mode)
+	}
+	if direction != 4 {
+		t.Fatalf("live direction = %d, want current onset direction 4", direction)
+	}
+}
+
+func TestImmediateLockUsesSmoothedDOA(t *testing.T) {
+	b := New()
+	for i := 0; i < 12; i++ {
+		b.Process(rawDirection(2), -1, 1)
+	}
+	b.Lock(true)
+
+	// The legacy immediate-lock path remains smoothed: one current-period
+	// winner does not displace the selected DOA and make the ring bounce.
+	_, angle := b.Process(rawDirection(5), -1, 1)
+	if angle != candidateAngles[2] {
+		t.Fatalf("single noisy period moved locked DOA to %.0f°, want %.0f°", angle, candidateAngles[2])
+	}
+
+	// It remains live rather than frozen: sustained speech from a new location
+	// eventually becomes the smoothed winner.
+	for i := 0; i < 20; i++ {
+		_, angle = b.Process(rawDirection(5), -1, 1)
+	}
+	if angle != candidateAngles[5] {
+		t.Fatalf("sustained locked DOA = %.0f°, want %.0f°", angle, candidateAngles[5])
+	}
+}
+
+func TestPrepareSpeechLockPreservesInitialDirectionEstimator(t *testing.T) {
+	b := warmBeamformer(2e-6)
+	for i := range b.energySmooth {
+		b.energySmooth[i] = float64(i + 1)
+	}
+	for i := range b.energyHistory {
+		for direction := range b.energyHistory[i] {
+			b.energyHistory[i][direction] = float64(i*nDirections + direction + 1)
+		}
+	}
+	b.historyIdx = 17
+	b.historyCount = historyPeriods
+	b.lockedChannel = directionToChannel[3]
+
+	wantSmooth := b.energySmooth
+	wantHistory := b.energyHistory
+	wantBaseline := b.energyBaseline
+	wantHistoryIdx, wantHistoryCount := b.historyIdx, b.historyCount
+	b.PrepareSpeechLock()
+
+	if b.energySmooth != wantSmooth || b.energyHistory != wantHistory || b.energyBaseline != wantBaseline ||
+		b.historyIdx != wantHistoryIdx || b.historyCount != wantHistoryCount {
+		t.Fatal("continued-chat preparation changed the estimator used by the next initial turn")
+	}
+	if b.lockedChannel != -1 {
+		t.Fatalf("continued-chat preparation left audio locked to ch%d", b.lockedChannel)
+	}
+}
+
+func TestFollowUpVisualDOAIgnoresFixedAudioPickup(t *testing.T) {
+	b := warmBeamformer(1)
+	b.PrepareSpeechLock()
+	b.energySmooth[2] = 10
+	b.LockCurrent(true)
+
+	// A fixed pickup may control the audio channel, but the reopened mic's
+	// already-validated live visual DOA must remain independent after locking.
+	_, angle := b.Process(rawDirection(5), 90, 1)
+	if angle != candidateAngles[5] {
+		t.Fatalf("fixed audio pickup replaced follow-up DOA with %.0f°, want %.0f°", angle, candidateAngles[5])
+	}
+}
+
+func TestContinuedChatDOAIgnoresRearPlaybackTail(t *testing.T) {
+	b := warmBeamformer(1)
+	b.PrepareSpeechLock()
+
+	// Reopened listening begins immediately after playback. Several rear-facing
+	// periods model the response tail leaking into the array; the first fresh
+	// speech period then comes from direction 1. Visual DOA must follow that
+	// current speech instead of remaining stuck on the playback tail.
+	for i := 0; i < 6; i++ {
+		b.Process(rawDirection(3), -1, 1)
+	}
+	_, angle := b.Process(rawDirection(1), -1, 1)
+	if angle != candidateAngles[1] {
+		t.Fatalf("continued-chat visual angle = %.0f°, want fresh speech %.0f°", angle, candidateAngles[1])
+	}
 }
 
 func TestEchoRefReadsChannel8(t *testing.T) {

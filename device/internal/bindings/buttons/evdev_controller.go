@@ -3,10 +3,10 @@ package buttons
 import (
 	"context"
 	"errors"
-	"time"
-	"github.com/wilbowes/EchoMuse/pkg/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
 	evdev "github.com/gvalkov/golang-evdev"
 	"os/exec"
+	"time"
 )
 
 const dotButton = "/dev/input/event1"

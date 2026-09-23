@@ -208,3 +208,7 @@ func (c *Client) wakeVerifierStatus() map[string]any {
 		"fail_open": c.verifyFailOpen, "last_reason": c.verifyLastReason,
 	}
 }
+
+// WakeVerifierStatus exposes a snapshot for the firmware heartbeat while the
+// internal helper remains shared with the client's own top-level diagnostics.
+func (c *Client) WakeVerifierStatus() map[string]any { return c.wakeVerifierStatus() }

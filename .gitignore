@@ -3,6 +3,7 @@
 __pycache__
 /device/build/
 /emos/build/
+/release/
 controller/.env
 controller/.venv/
 controller/data/
@@ -10,6 +11,11 @@ controller/static/vendor/
 controller/static/dashboard.js
 .claude/
 scratchpad/
+
+# Per-device stock boot images and recovery escrow. These contain Amazon code
+# read from a user's own Echo and must never be committed or published.
+device-backups/
+factory-backups/
 
 # DTLN NS models (vendored into the Docker image at build time; bare-metal
 # dev drops them here or points NS_MODEL_DIR elsewhere)

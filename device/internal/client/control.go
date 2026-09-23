@@ -17,20 +17,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/als"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/discovery"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/board"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 	"github.com/gorilla/websocket"
-	"github.com/wilbowes/EchoMuse/internal/bindings/als"
-	"github.com/wilbowes/EchoMuse/internal/clock"
-	"github.com/wilbowes/EchoMuse/internal/config"
-	"github.com/wilbowes/EchoMuse/internal/discovery"
-	"github.com/wilbowes/EchoMuse/internal/platform"
-	"github.com/wilbowes/EchoMuse/pkg/board"
-	"github.com/wilbowes/EchoMuse/pkg/buttons"
-	"github.com/wilbowes/EchoMuse/pkg/led"
 )
 
 // Version is set at build time via ldflags:
 //
-//	-ldflags "-X github.com/wilbowes/EchoMuse/internal/client.Version=v2.1.0"
+//	-ldflags "-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=v2.1.0"
 var Version = "dev"
 
 // monoEpoch anchors MonoMs. A time.Time from time.Now carries a monotonic

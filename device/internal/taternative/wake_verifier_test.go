@@ -112,3 +112,30 @@ func TestWakeHonorsBargeInSetting(t *testing.T) {
 		t.Fatal("wake did not interrupt speech while barge-in was enabled")
 	}
 }
+
+func TestTVNearbyForcesWakeVerification(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.stateMu.Lock()
+	c.settings["wake_verifier_mode"] = "off"
+	c.settings["wake_environment"] = "tv_nearby"
+	c.settings["wake_verifier_window_ms"] = 500
+	c.settings["wake_verifier_timeout_ms"] = 2000
+	c.stateMu.Unlock()
+	c.PushAudio(make([]byte, SampleRate))
+
+	if !c.Wake("hey_tater", 0.98) {
+		t.Fatal("TV-nearby wake verification was not queued")
+	}
+	frame := <-c.out
+	if frame.kind != websocket.BinaryMessage || string(frame.data[:4]) != "TWV1" {
+		t.Fatalf("TV-nearby wake bypassed STT verification: kind=%d", frame.kind)
+	}
+	if flags := binary.LittleEndian.Uint16(frame.data[6:8]); flags&wakeVerifierFlagEnforce == 0 {
+		t.Fatalf("TV-nearby verifier flags = %d, want enforced", flags)
+	}
+}

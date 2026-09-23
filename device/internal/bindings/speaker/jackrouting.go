@@ -1,6 +1,6 @@
 package speaker
 
-import "github.com/wilbowes/EchoMuse/internal/bindings/mixer"
+import "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 
 // Jack routing: the codec state each plug position needs.
 //

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/internal/platform"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
 )
 
 // onBase points the package at a temp directory and a chosen base OS, writing

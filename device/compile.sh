@@ -10,7 +10,7 @@ else
     VERSION="$GIT_VERSION"
 fi
 [ -n "$EM_EXTRA_TAGS" ] && VERSION="${VERSION}-${EM_EXTRA_TAGS// /-}"
-echo "Building EchoMuse $VERSION..."
+echo "Building Tater Echo Firmware $VERSION..."
 
 # Suppress known harmless warnings from vendored C sources:
 #   -Wno-null-dereference: rnnoise/rnn.c assert-style null checks
@@ -27,8 +27,8 @@ SUPPRESS="-Wno-deprecated-declarations -Wno-null-dereference"
 BUILD_UNIX=$(date +%s)
 BUILD_CMD="cd /sdk && mkdir -p build && go build \
     -tags \"server ${EM_EXTRA_TAGS}\" \
-    -ldflags \"-X github.com/wilbowes/EchoMuse/internal/client.Version=${VERSION} \
-               -X github.com/wilbowes/EchoMuse/internal/client.BuildUnix=${BUILD_UNIX}\" \
+    -ldflags \"-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${VERSION} \
+               -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.BuildUnix=${BUILD_UNIX}\" \
     -o build/server ./cmd/"
 
 if docker run --rm \

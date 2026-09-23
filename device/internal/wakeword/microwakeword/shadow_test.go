@@ -106,6 +106,33 @@ func TestShadowUsesSlidingWindowMean(t *testing.T) {
 	}
 }
 
+func TestShadowReportsCloseMissObservationsWithoutCrossing(t *testing.T) {
+	engine := &fakeShadowEngine{batches: [][]float32{{0.74, 0.82}}}
+	closeMisses := make(chan float32, 2)
+	s, err := NewShadowScorerWithHooks(engine, 0.90, 1, 0.70, ShadowHooks{
+		CloseMiss: func(score float32, _ time.Time) { closeMisses <- score },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Push(make([]int16, 1280))
+	for _, want := range []float32{0.74, 0.82} {
+		select {
+		case got := <-closeMisses:
+			if got != want {
+				t.Fatalf("close miss score = %.2f, want %.2f", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("close miss %.2f was not reported", want)
+		}
+	}
+	st := s.Drain()
+	if st.CloseMisses != 2 || st.Crossings != 0 {
+		t.Fatalf("unexpected close-miss stats: %+v", st)
+	}
+}
+
 func TestShadowPushBytesDecodesLittleEndian(t *testing.T) {
 	engine := &fakeShadowEngine{}
 	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)

@@ -3,6 +3,8 @@ package server
 import (
 	"math"
 	"testing"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
 
 func TestSpinFrame(t *testing.T) {
@@ -135,5 +137,175 @@ func TestMeterCurveIsVisiblyVaried(t *testing.T) {
 	// And full scale must not clip below full brightness.
 	if p := perceived(1.0); p < 0.99 {
 		t.Fatalf("peak not full brightness: %.3f", p)
+	}
+}
+
+func TestNativeAnimationFramesCoverEverySelectableEffect(t *testing.T) {
+	animations := []string{
+		"sparkle", "ping_pong", "voice_ring", "spinner", "orbit", "pulse",
+		"breathe", "comet", "dual_comet", "scanner", "ripple", "heartbeat",
+		"theater", "wave", "shimmer", "twinkle", "equalizer",
+	}
+	for _, animation := range animations {
+		t.Run(animation, func(t *testing.T) {
+			state := nativeAnimState{}
+			frame := nativeAnimationFrame(animation, 9, [3]uint8{200, 80, 20}, 0.08, 4, &state)
+			if len(frame) != 12 {
+				t.Fatalf("frame length = %d, want 12", len(frame))
+			}
+			lit := false
+			for i, pixel := range frame {
+				if pixel.ID != i {
+					t.Fatalf("pixel %d has ID %d", i, pixel.ID)
+				}
+				lit = lit || pixel.R != 0 || pixel.G != 0 || pixel.B != 0
+			}
+			if !lit {
+				t.Fatal("effect rendered a completely dark ring")
+			}
+		})
+	}
+}
+
+func TestNativeAnimationsAdvanceAndVoiceRingReacts(t *testing.T) {
+	for _, animation := range []string{"ping_pong", "spinner", "orbit", "comet", "scanner", "wave", "equalizer"} {
+		state := nativeAnimState{}
+		first := nativeAnimationFrame(animation, 0, [3]uint8{255, 90, 31}, 0, 0, &state)
+		later := nativeAnimationFrame(animation, 5, [3]uint8{255, 90, 31}, 0, 0, &state)
+		equal := true
+		for i := range first {
+			equal = equal && first[i] == later[i]
+		}
+		if equal {
+			t.Errorf("%s did not advance", animation)
+		}
+	}
+
+	darkState := nativeAnimState{}
+	loudState := nativeAnimState{}
+	quiet := nativeAnimationFrame("voice_ring", 3, [3]uint8{255, 90, 31}, 0, 2, &darkState)
+	loud := nativeAnimationFrame("voice_ring", 3, [3]uint8{255, 90, 31}, 0.12, 2, &loudState)
+	brightness := func(frame []led.Led) int {
+		total := 0
+		for _, pixel := range frame {
+			total += int(pixel.R) + int(pixel.G) + int(pixel.B)
+		}
+		return total
+	}
+	if brightness(loud) <= brightness(quiet) {
+		t.Fatalf("voice ring did not expand with audio: quiet=%d loud=%d", brightness(quiet), brightness(loud))
+	}
+}
+
+func TestDirectionalFrameIsPointedAtDOA(t *testing.T) {
+	var base [12]led.Led
+	for i := range base {
+		base[i] = led.Led{ID: i, R: 220, G: 50, B: 10}
+	}
+	frame := directionalFrame(base, 3)
+	brightness := func(pixel led.Led) int {
+		return int(pixel.R) + int(pixel.G) + int(pixel.B)
+	}
+	brightest := 0
+	for i := 1; i < len(frame); i++ {
+		if brightness(frame[i]) > brightness(frame[brightest]) {
+			brightest = i
+		}
+	}
+	if brightest != 3 {
+		t.Fatalf("brightest LED = %d, want measured DOA LED 3", brightest)
+	}
+	if brightness(frame[3]) <= brightness(frame[2]) || brightness(frame[2]) <= brightness(frame[1]) {
+		t.Fatalf("beam does not taper away from DOA: center=%d shoulder=%d tail=%d",
+			brightness(frame[3]), brightness(frame[2]), brightness(frame[1]))
+	}
+	if brightness(frame[9])*8 >= brightness(frame[3]) {
+		t.Fatalf("opposite side is too bright to read as directional: tip=%d opposite=%d",
+			brightness(frame[3]), brightness(frame[9]))
+	}
+
+	wrapped := directionalFrame(base, 11.5)
+	if brightness(wrapped[11]) != brightness(wrapped[0]) {
+		t.Fatalf("beam does not wrap evenly across LED 11/0: led11=%d led0=%d",
+			brightness(wrapped[11]), brightness(wrapped[0]))
+	}
+}
+
+func TestDirectionMovesOnFirstSpeechWithoutTeleporting(t *testing.T) {
+	s := &Server{}
+	s.listeningLEDs = true
+	s.SetDirectionObservation(330, true, true)
+	start := s.directionPosition
+
+	// A short utterance may produce only one microphone observation. It must
+	// move the beam immediately, but the per-frame cap prevents teleporting
+	// all the way across the ring on one noisy reading.
+	s.SetDirectionObservation(90, true, true)
+	first := s.directionPosition
+	if first <= start || first >= 7 {
+		t.Fatalf("first speech observation did not move smoothly: start=%.2f got=%.2f target=7", start, first)
+	}
+
+	// Sustained speech continues toward the target.
+	s.SetDirectionObservation(90, true, true)
+	if got := s.directionPosition; got <= first {
+		t.Fatalf("sustained direction did not advance: first=%.2f got=%.2f", first, got)
+	}
+}
+
+func TestDirectionalListeningWaitsForSpeech(t *testing.T) {
+	s := &Server{}
+	s.listeningLEDs = true
+
+	s.SetDirectionObservation(330, false, false)
+	if s.directionPositionKnown || s.directionSpeechStarted {
+		t.Fatal("DOA started before speech instead of retaining the neutral listening glow")
+	}
+
+	// Lenient acoustic activity starts DOA even when the strict speech gate
+	// has not asserted yet.
+	s.SetDirectionObservation(330, true, false)
+	if !s.directionPositionKnown || !s.directionSpeechStarted {
+		t.Fatal("DOA did not start when speech was detected")
+	}
+	position := s.directionPosition
+	s.SetDirectionObservation(90, false, false)
+	if s.directionPosition != position {
+		t.Fatalf("silence moved DOA from %.2f to %.2f", position, s.directionPosition)
+	}
+}
+
+func TestReplyDirectionUsesLastSpeechNotTrailingNoise(t *testing.T) {
+	s := &Server{}
+	s.listeningLEDs = true
+
+	// 330° maps to LED 3 on biscuit. Trailing no-speech observations may
+	// update the live listening animation, but must not move the reply away
+	// from the direction in which speech was actually heard.
+	for i := 0; i < 6; i++ {
+		s.SetDirectionObservation(330, true, true)
+	}
+	for i := 0; i < 6; i++ {
+		s.SetDirectionObservation(90, true, false)
+	}
+	s.endDirectionalListening()
+	if got := s.directionLEDIndex(); got != 3 {
+		t.Fatalf("reply direction = LED %d, want last speech LED 3", got)
+	}
+
+	// Once listening ends, speaker echo and room noise are not allowed to
+	// overwrite the direction remembered for the reply.
+	s.SetDirectionObservation(90, true, false)
+	if got := s.directionLEDIndex(); got != 3 {
+		t.Fatalf("reply direction moved after listening: LED %d, want 3", got)
+	}
+
+	state := nativeAnimState{}
+	frame := nativeAnimationFrame("voice_ring", 2, [3]uint8{220, 50, 10}, 0, s.directionLEDIndex(), &state)
+	brightness := func(pixel led.Led) int {
+		return int(pixel.R) + int(pixel.G) + int(pixel.B)
+	}
+	if brightness(frame[3]) <= brightness(frame[9]) {
+		t.Fatalf("reply does not point at remembered DOA: center=%d opposite=%d", brightness(frame[3]), brightness(frame[9]))
 	}
 }

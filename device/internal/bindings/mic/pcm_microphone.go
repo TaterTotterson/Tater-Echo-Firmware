@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/bindings/codec"
-	pkgmic "github.com/wilbowes/EchoMuse/pkg/mic"
 	"github.com/Binozo/GoTinyAlsa/pkg/pcm"
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/codec"
+	pkgmic "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/mic"
 )
 
 const cardNr = 0

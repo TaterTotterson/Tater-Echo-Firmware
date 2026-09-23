@@ -3192,7 +3192,7 @@ function _serverBinaryVerdict(bytes) {
     return { ok: false, reason: 'That is a program, but not a 32-bit ARM one, so it cannot run '
       + 'on an Echo. Choose the EchoMuse server binary built for the device.' };
   }
-  if (!new TextDecoder('latin1').decode(u8).includes('github.com/wilbowes/EchoMuse/')) {
+  if (!new TextDecoder('latin1').decode(u8).includes('github.com/TaterTotterson/Tater-Echo-Firmware/')) {
     return { ok: false, reason: 'That is an ARM program, but not an EchoMuse server. '
       + 'Choose the EchoMuse server binary.' };
   }

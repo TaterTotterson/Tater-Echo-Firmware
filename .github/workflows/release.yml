@@ -1,18 +1,29 @@
-name: Device Release (firmware binary)
+name: Tater Echo Firmware Release
 
-# Device firmware releases keep plain vX.Y.Z tags — the tag is embedded in
-# the binary via -ldflags and compared against firmware_ver by the OTA
-# system, so this scheme must not change. Controller releases use
-# controller-v* tags (see controller-release.yml), which don't match this
-# glob and create no GitHub Release, so OTA's release polling never sees them.
+# One annotated vX.Y.Z tag produces both artifacts for every supported target:
+#   * factory: post-amonet installer, emOS payload, and Tater userspace
+#   * ota:     the small A/B server update consumed by Tater over Wi-Fi
+# A factory archive never contains Amazon's kernel or device trees. The
+# installer builds the final image from the attached Echo's own boot partition.
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version for a non-release validation run (vX.Y.Z)'
+        required: false
+        default: 'v0.0.0-dev'
+
+env:
+  ALPINE_ARMV7_DIGEST: >-
+    sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 jobs:
-  build:
+  biscuit:
+    name: Echo Dot 2 (biscuit)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,72 +32,126 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: true   # fetches GoTinyAlsa submodule
+          submodules: true
+          fetch-depth: 0
 
-      - name: Build compiler image
+      - name: Select version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::version must look like v0.1.0"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build Android compiler image
         run: docker build -t echomuse-compiler device/compiler/
 
-      - name: Compile
+      - name: Compile Tater Echo userspace
         run: |
           mkdir -p device/build
-          docker run --rm \
-            --entrypoint bash \
+          build_unix=$(date +%s)
+          docker run --rm --entrypoint bash \
             -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler \
-            -c "cd /sdk && mkdir -p build && go build \
-              -tags server \
-              -ldflags \"-X github.com/wilbowes/EchoMuse/internal/client.Version=${{ github.ref_name }} \
-                         -X github.com/wilbowes/EchoMuse/internal/client.BuildUnix=$(date +%s)\" \
-              -o build/server \
-              ./cmd/"
+            echomuse-compiler -lc "cd /sdk && go build -tags server \
+              -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.BuildUnix=$build_unix' \
+              -o build/server ./cmd/"
 
-      - name: Verify binary
+      - name: Build ARMv7 microWakeWord runtime
+        run: device/build_microwakeword_runtime.sh
+
+      - name: Fetch pinned Hey Tater model
+        shell: bash
         run: |
-          file device/build/server
-          ls -lh device/build/server
-          # Assert the binary carries THIS tag. The previous check grepped for
-          # any version-shaped line (^v1.2.3$), which was wrong twice over: it
-          # never confirmed the version was the one being released, and it
-          # depended on string LAYOUT — Go concatenates string constants into
-          # one blob, so the version reads as "@v2.9.11" with no line break
-          # around it. Adding two unrelated constants shifted the blob and
-          # broke the release of v2.9.11 with a perfectly good binary.
-          if ! strings device/build/server | grep -qF "$GITHUB_REF_NAME"; then
-            echo "::error::binary does not contain $GITHUB_REF_NAME — ldflags did not take"
-            exit 1
-          fi
-          echo "binary carries $GITHUB_REF_NAME"
+          mkdir -p device/build/microwakeword-testdata
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV6/hey_tater.tflite \
+            -o device/build/microwakeword-testdata/hey_tater.tflite
+          echo 'd3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9  device/build/microwakeword-testdata/hey_tater.tflite' | sha256sum -c -
 
-      # Release notes come from the ANNOTATED TAG MESSAGE.
-      #
-      # The dashboard shows these to whoever is deciding whether to push
-      # firmware to a device they rely on, so they have to be written for that
-      # person: what changed, what to expect, whether anything is required of
-      # them. GitHub's generated notes are NOT added: they list every PR merged
-      # in the repo between two v* tags, most of it controller work, with
-      # "New Contributors" credits for changes that are not in the firmware.
-      #
-      # A lightweight tag has no annotation, and `%(contents)` then falls
-      # through to the commit message — so it is refused rather than published.
-      # `git tag -a --cleanup=verbatim`, always.
-      - name: Release notes from the tag annotation
+      - name: Compile emOS init32
+        run: |
+          mkdir -p emos/build
+          docker run --rm -v "${{ github.workspace }}/emos":/emos -w /emos \
+            echomuse-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
+
+      - name: Build static Wi-Fi tools
+        run: |
+          mkdir -p emos/build/wpa
+          docker run --rm -v "${{ github.workspace }}/emos":/emos \
+            -v "${{ github.workspace }}/emos/build/wpa":/out -w /tmp \
+            echomuse-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
+          cp emos/device/em-wifi emos/build/wpa/em-wifi
+
+      - name: Set up qemu for BusyBox
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Build static BusyBox and corresponding source
+        run: |
+          mkdir -p emos/build/bb
+          docker run --rm --platform linux/arm/v7 \
+            -v "${{ github.workspace }}/emos":/emos \
+            -v "${{ github.workspace }}/emos/build/bb":/out -w /tmp \
+            alpine@${{ env.ALPINE_ARMV7_DIGEST }} \
+            sh /emos/tools/build-busybox.sh /out
+
+      - name: Verify release inputs
+        shell: bash
+        run: |
+          file device/build/server device/build/microwakeword-android/libtater_microwakeword.so \
+            emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
+          file device/build/server | grep -q '32-bit.*ARM'
+          file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
+          file emos/build/init32 | grep -q '32-bit.*ARM'
+          strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
+          python3 -m unittest factory.biscuit.test_install
+
+      - name: Package factory and OTA firmware
+        run: |
+          python3 tools/package_echo_release.py \
+            --version '${{ steps.version.outputs.version }}' \
+            --target biscuit --output release
+          mkdir /tmp/tater-factory-check
+          tar -xzf release/tater-echo-biscuit-${{ steps.version.outputs.version }}-factory.tar.gz \
+            -C /tmp/tater-factory-check
+          /tmp/tater-factory-check/*/install.sh --verify-bundle
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: tater-echo-biscuit-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
+      - name: Read annotated tag notes
+        if: github.ref_type == 'tag'
+        shell: bash
         run: |
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]; then
-            echo "::error::$GITHUB_REF_NAME is a lightweight tag; it has no release notes. Re-tag with git tag -a."
+          if [[ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]]; then
+            echo "::error::$GITHUB_REF_NAME is lightweight; releases require an annotated tag"
             exit 1
           fi
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/release-notes.md
-          echo "--- notes that will be published ---"
-          cat /tmp/release-notes.md
 
-      - name: Create GitHub Release
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
-          name: EchoMuse ${{ github.ref_name }}
-          files: device/build/server
+          name: Tater Echo Firmware ${{ steps.version.outputs.version }}
+          files: release/*
           body_path: /tmp/release-notes.md
           generate_release_notes: false
         env:

@@ -24,7 +24,7 @@ build_tool() {
 
 # oww_probe is NOT a standalone module like the tools above: it imports
 # internal/wakeword and internal/wakeword/ort, and Go's internal-package rule
-# only permits that from inside github.com/wilbowes/EchoMuse. So it is part of
+# only permits that from inside github.com/TaterTotterson/Tater-Echo-Firmware. So it is part of
 # the device module and builds with the whole module mounted. No -tags server —
 # it touches no hardware bindings, only models and a fixture.
 build_module_tool() {

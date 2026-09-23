@@ -33,7 +33,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
 )
 
 const frame = 1280 // 80ms at 16kHz

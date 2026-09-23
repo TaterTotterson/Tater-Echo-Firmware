@@ -48,6 +48,7 @@ type PlayRequest struct {
 	TTSKind              string
 	StateAfter           string
 	ContinueConversation bool
+	ConversationID       string
 	Ducking              map[string]any
 }
 
@@ -75,20 +76,21 @@ type OTARequest struct {
 // Hooks bind protocol commands to the Echo hardware. Blocking playback and
 // OTA callbacks are launched outside the WebSocket reader.
 type Hooks struct {
-	Connected    func(selector string)
-	Disconnected func(error)
-	State        func(state string, payload map[string]any)
-	Settings     func(values map[string]any) (map[string]any, error)
-	Status       func() map[string]any
-	PlayVoice    func(context.Context, PlayRequest) error
-	StopVoice    func()
-	StartMedia   func(context.Context, MediaRequest) error
-	StopMedia    func(sessionID string)
-	PauseMedia   func(sessionID string)
-	ResumeMedia  func(sessionID string)
-	VolumeMedia  func(sessionID string, percent int)
-	TimerAlarm   func(active bool, timer Timer)
-	OTA          func(context.Context, OTARequest, func(status string, progress int, message string)) error
+	Connected     func(selector string)
+	Disconnected  func(error)
+	State         func(state string, payload map[string]any)
+	Settings      func(values map[string]any) (map[string]any, error)
+	Status        func() map[string]any
+	PlayWakeSound func() bool
+	PlayVoice     func(context.Context, PlayRequest) error
+	StopVoice     func()
+	StartMedia    func(context.Context, MediaRequest) error
+	StopMedia     func(sessionID string)
+	PauseMedia    func(sessionID string)
+	ResumeMedia   func(sessionID string)
+	VolumeMedia   func(sessionID string, percent int)
+	TimerAlarm    func(active bool, timer Timer)
+	OTA           func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
 type outbound struct {
@@ -132,6 +134,7 @@ type Client struct {
 
 	audioMu        sync.Mutex
 	preRoll        [][]byte
+	captureRoll    [][]byte
 	wakePreRoll    [][]byte
 	pendingAudio   [][]byte
 	voicePending   bool
@@ -147,10 +150,24 @@ type Client struct {
 	verifyFailOpen   uint64
 	verifyLastReason string
 
+	trainerMu             sync.Mutex
+	trainerHTTP           *http.Client
+	trainerUploadRunning  bool
+	trainerUploads        uint64
+	trainerUploadFailures uint64
+	trainerLastEvent      string
+	trainerLastError      string
+	trainerCloseTimer     *time.Timer
+	trainerCloseScore     float32
+	trainerCloseWord      string
+	trainerLastClose      time.Time
+
 	playMu               sync.Mutex
 	voiceCancel          context.CancelFunc
 	voiceGen             uint64
 	voiceResponsePending bool
+	pendingReopen        bool
+	pendingConversation  string
 	voiceQueue           chan queuedVoice
 	voiceStop            chan uint64
 	mediaCancel          context.CancelFunc
@@ -194,8 +211,13 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 		cfg: cfg, hooks: hooks, url: normalized,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		started: time.Now(), out: make(chan outbound, outgoingCapacity),
-		state: "idle", settings: map[string]any{"barge_in_enabled": false},
+		state: "idle", settings: map[string]any{
+			"barge_in_enabled": false,
+			"continued_chat":   true,
+		},
 		preRoll:        make([][]byte, 0, preRollChunks),
+		captureRoll:    make([][]byte, 0, trainerCaptureChunks),
+		trainerHTTP:    &http.Client{Timeout: 15 * time.Second},
 		verifyRequests: make(map[uint32]*wakeVerification),
 		voiceQueue:     make(chan queuedVoice, 32),
 		voiceStop:      make(chan uint64, 1),
@@ -208,11 +230,13 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 // DefaultCapabilities is the honest Echo feature set implemented here.
 func DefaultCapabilities() map[string]any {
 	return map[string]any{
-		"microphone": true, "speaker": true, "local_wake": true,
+		"microphone": true, "speaker": true, "led_ring": true,
+		"local_wake": true, "live_settings": true,
 		"continued_chat_reopen": true, "barge_in": true,
 		"tool_call_mode": true, "timers": true, "ota": true,
 		"persistent_media_sessions": true, "audio_session_version": 1,
 		"settings": true, "wake_verifier": true,
+		"wake_sound": true, "wake_audio_capture": true,
 	}
 }
 
@@ -373,6 +397,10 @@ func (c *Client) heartbeat(ctx context.Context) error {
 		case <-c.ctx.Done():
 			return c.ctx.Err()
 		case <-ticker.C:
+			// Keep the connection alive even when Tater has no application
+			// messages to send. The server's WebSocket ping handler replies with
+			// a pong, which extends the read deadline installed in runOnce.
+			c.enqueue(outbound{kind: websocket.PingMessage, data: []byte("tater")}, false)
 			payload := map[string]any{
 				"state": c.State(), "uptime_s": int(time.Since(c.started).Seconds()),
 				"connected": true, "audio_tx_dropped": atomic.LoadUint64(&c.audioDropped),
@@ -404,6 +432,7 @@ func (c *Client) markDisconnected(error) {
 	c.pendingAudio = nil
 	c.audioMu.Unlock()
 	c.cancelWakeVerifications()
+	c.cancelCloseMiss()
 	c.drainOutgoing()
 }
 
@@ -499,6 +528,7 @@ func (c *Client) Close() {
 		c.stopVoice()
 		c.stopMedia("")
 		c.cancelWakeVerifications()
+		c.cancelCloseMiss()
 		c.timers.Close()
 	})
 }

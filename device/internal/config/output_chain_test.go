@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/internal/outchain"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
 func push(t *testing.T, d *Device, js string) {

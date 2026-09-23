@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 )
 
 // The device went deaf on any data-plane drop the CONTROL plane survived.

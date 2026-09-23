@@ -949,3 +949,52 @@ def test_em_wifi_writes_a_conf_the_wifi_user_can_read():
             "em-wifi sets the conf 0600 unconditionally again; that mode is "
             "only acceptable after chown has failed"
         )
+
+
+def test_tater_first_boot_portal_is_opt_in_and_ap_capable():
+    """The Tater fork gets native-satellite setup without changing generic emOS.
+
+    The marker is the compatibility boundary: an existing EchoMuse deployment
+    that never installed Tater firmware must keep waiting for em-wifi exactly as
+    before. Once opted in, the AP needs CONFIG_AP in the very supplicant packed
+    into the image; a portal process by itself only produces an unreachable
+    listener on wlan0.
+    """
+    root = Path(__file__).resolve().parents[2]
+    init_c = (root / "emos" / "init" / "init.c").read_text()
+    build = (root / "emos" / "tools" / "build-wpa-supplicant.sh").read_text()
+
+    assert '#define TATER_SETUP_MARKER "/data/local/etc/tater/setup_enabled"' in init_c
+    assert "access(TATER_SETUP_MARKER, R_OK)" in init_c
+    assert '"setup-portal"' in init_c
+    assert '"--dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,1h"' in init_c
+    assert '"--address=/#/192.168.4.1"' in init_c
+    assert '"--dhcp-leasefile=/run/tater-setup.leases"' in init_c
+    assert '"--conf-file=/dev/null"' in init_c
+    assert 'CONFIG_AP=y' in build
+    assert 'wr("/dev/wmtWifi", "A")' in init_c
+    assert 'access("/sys/class/net/ap0", F_OK)' in init_c
+    assert '"-iap0"' in init_c
+    assert '"--interface=ap0"' in init_c
+    assert '"-q",\n                "-iap0"' in init_c
+
+    # Native firmware identifies first-boot setup with a warm-white twinkle;
+    # orange is reserved for a configured satellite that is disconnected.
+    assert "ANIM_SETUP" in init_c
+    assert "static void anim_setup" in init_c
+    assert "static void led_setup" in init_c
+    assert "static const unsigned char C_SETUP[3]  = { 0xFF, 0xE3, 0xB5 };" in init_c
+    assert init_c.index("led_setup();") > init_c.index("if (tater_setup_needed())")
+
+    marker_check = init_c.index("access(TATER_SETUP_MARKER, R_OK)")
+    setup_branch = init_c.index("if (tater_setup_needed())")
+    vendor_ap_mode = init_c.index('wr("/dev/wmtWifi", "A")', setup_branch)
+    setup_supplicant = init_c.index("pid_t apwpa = spawn(ap_supp)", setup_branch)
+    assert vendor_ap_mode < setup_supplicant, (
+        "the MediaTek driver must enter Soft AP mode before wpa_supplicant "
+        "asks nl80211 to start the beacon"
+    )
+    assert marker_check < setup_branch, (
+        "the setup branch must be gated by the Tater marker before it changes "
+        "the generic emOS network path"
+    )

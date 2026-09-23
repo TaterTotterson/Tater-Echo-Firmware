@@ -33,7 +33,7 @@ function check(name, cond, detail) {
   console.error(`FAIL: ${name}${detail ? `\n      ${detail}` : ""}`);
 }
 
-const MARK = new TextEncoder().encode("github.com/wilbowes/EchoMuse/internal/client");
+const MARK = new TextEncoder().encode("github.com/TaterTotterson/Tater-Echo-Firmware/internal/client");
 function elf({ cls = 1, machine = 0x28, marker = true } = {}) {
   const b = new Uint8Array(4096);
   b.set([0x7f, 0x45, 0x4c, 0x46, cls, 1, 1]);

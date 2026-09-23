@@ -22,11 +22,19 @@ const packageDownloadTimeout = 12 * time.Second
 // name is stable, path traversal is rejected by ParseManifest, and both files
 // become visible only through atomic renames.
 func InstallPackageURL(parent context.Context, manifestURL string) (string, error) {
+	return InstallPackageURLRevision(parent, manifestURL, "")
+}
+
+// InstallPackageURLRevision installs a package using Tater's model revision as
+// part of the cache identity. A trainer may publish new bytes at a stable JSON
+// URL; without the revision, a live settings push would incorrectly retain the
+// previous validated package forever.
+func InstallPackageURLRevision(parent context.Context, manifestURL, revision string) (string, error) {
 	parsed, err := validatedHTTPURL(manifestURL)
 	if err != nil {
 		return "", fmt.Errorf("microwakeword: %w", err)
 	}
-	digest := sha256.Sum256([]byte(parsed.String()))
+	digest := sha256.Sum256([]byte(parsed.String() + "\n" + strings.TrimSpace(revision)))
 	packageName := "tater_custom_" + hex.EncodeToString(digest[:8])
 	dir := PackageDir()
 	manifestPath := filepath.Join(dir, packageName+".json")

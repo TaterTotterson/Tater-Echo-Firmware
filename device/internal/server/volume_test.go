@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 	"testing"
 	"time"
 )

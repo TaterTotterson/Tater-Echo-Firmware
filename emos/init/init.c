@@ -201,6 +201,10 @@ static const unsigned char C_ORBIT[3]  = { 0x00, 0x00, 0xFF };
 static const unsigned char C_HEAD[3]   = { 0x00, 0xFF, 0xFF }; /* the orbit's head */
 static const unsigned char C_FAIL[3]   = { 0xFF, 0x00, 0x00 };
 static const unsigned char C_AMBER[3]  = { 0xFF, 0x60, 0x00 };
+/* The native satellites use warm-white twinkles for provisioning and reserve
+ * orange for a configured satellite that cannot reach Tater. Keep those two
+ * states visually distinct here too. */
+static const unsigned char C_SETUP[3]  = { 0xFF, 0xE3, 0xB5 };
 /* Cyan is already full on two channels, so the only way UP is toward white —
  * adding red is what "brighter" means once green and blue are at 0xFF. */
 static const unsigned char C_PEAK[3]   = { 0xFF, 0xFF, 0xFF };
@@ -227,7 +231,14 @@ static const unsigned char C_PEAK[3]   = { 0xFF, 0xFF, 0xFF };
 #define BREATH_MS         2400
 #define BREATH_PARKED_MS  3600
 
-enum { ANIM_RUN = 0, ANIM_FAIL, ANIM_FINISH, ANIM_OFF, ANIM_DONE };
+enum {
+    ANIM_RUN = 0,
+    ANIM_FAIL,
+    ANIM_SETUP,
+    ANIM_FINISH,
+    ANIM_OFF,
+    ANIM_DONE
+};
 
 struct ledshm {
     volatile int stage;                /* stages completed, 0..LED_N */
@@ -592,9 +603,31 @@ static void anim_handover(void)
     }
 }
 
+/* First-boot setup uses the same warm-white twinkle as Tater Native firmware.
+ * The phases and brightness levels intentionally mirror voice_pe's twinkle()
+ * renderer. That makes setup recognizable across boards while leaving orange
+ * available for the runtime's disconnected/reconnecting state. */
+static void anim_setup(int tick)
+{
+    unsigned char f[LED_N][3];
+
+    for (int p = 0; p < LED_N; p++) {
+        int phase = (p * 7 + tick * 3) % 31;
+        int level = 10;              /* 0.04 * 255 */
+        if (phase == 0)
+            level = 243;             /* 0.95 * 255 */
+        else if (phase == 1 || phase == 30)
+            level = 123;             /* 0.48 * 255 */
+        else if (phase == 2 || phase == 29)
+            level = 51;              /* 0.20 * 255 */
+        scale(f[p], C_SETUP, level);
+    }
+    led_write(f);
+}
+
 static void anim_main(void)
 {
-    int head_q = 0, still = 0;
+    int head_q = 0, still = 0, setup_tick = 0;
 
     anim_claim();
     anim_handover();
@@ -611,6 +644,11 @@ static void anim_main(void)
             anim_finale(still);
             ledst->mode = ANIM_DONE;
             _exit(0);
+        }
+        if (mode == ANIM_SETUP) {
+            anim_setup(setup_tick++);
+            usleep(TICK_MS * 1000);
+            continue;
         }
         if (mode != ANIM_FAIL) {
             int was = head_q;
@@ -707,6 +745,12 @@ static void led_fail(void)
 {
     if (ledst)
         ledst->mode = ANIM_FAIL;
+}
+
+static void led_setup(void)
+{
+    if (ledst)
+        ledst->mode = ANIM_SETUP;
 }
 
 /* Hand the ring back. Bounded: the boot is never held up by an animation. */
@@ -1452,6 +1496,28 @@ static void firewall(void)
     netlog("firewall applied status=%d\n", st);
 }
 
+/* The ordinary appliance accepts no unsolicited inbound traffic. First-boot
+ * setup is the one deliberate exception: a phone on wlan0 must be able to get
+ * a lease, resolve every captive-probe hostname to us, and load the portal.
+ * Keep the exception interface- and port-scoped; forwarding remains disabled
+ * and the setup AP never routes to another network. A clean reboot reapplies
+ * firewall() before the satellite joins the home LAN. */
+static void setup_firewall(void)
+{
+    char *fw[] = { "/system/bin/sh", "-c",
+        "iptables -F INPUT; "
+        "iptables -A INPUT -i lo -j ACCEPT; "
+        "iptables -A INPUT -i ap0 -p udp --dport 53 -j ACCEPT; "
+        "iptables -A INPUT -i ap0 -p udp --dport 67 -j ACCEPT; "
+        "iptables -A INPUT -i ap0 -p tcp --dport 80 -j ACCEPT; "
+        "iptables -A INPUT -i ap0 -p icmp -j ACCEPT; "
+        "iptables -P INPUT DROP; iptables -P FORWARD DROP; "
+        "ip6tables -F INPUT; ip6tables -A INPUT -i lo -j ACCEPT; "
+        "ip6tables -P INPUT DROP; ip6tables -P FORWARD DROP", NULL };
+    int st = run_wait(fw);
+    netlog("setup firewall applied status=%d\n", st);
+}
+
 static int ifup(const char *name)
 {
     struct ifreq ifr;
@@ -1731,6 +1797,36 @@ static int wmt_bringup(const char *patch_dir)
  * network yet. */
 #define EMOS_WPA_CONF    "/data/emos/wpa.conf"
 #define ANDROID_WPA_CONF "/data/misc/wifi/wpa_supplicant.conf"
+#define TATER_SETUP_MARKER "/data/local/etc/tater/setup_enabled"
+#define TATER_NATIVE_CONF  "/data/local/etc/tater/native.json"
+#define TATER_AP_CONF      "/run/tater-setup-ap.conf"
+
+static int file_contains(const char *path, const char *needle)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    char b[8192];
+    int n = (int)read(fd, b, sizeof b - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    b[n] = 0;
+    return strstr(b, needle) != NULL;
+}
+
+/* Only a Tater image opts into the portal by installing the marker. This keeps
+ * generic EchoMuse/emOS deployments on their existing console provisioner.
+ * Both halves must be complete: accepting an Android skeleton conf as WiFi, or
+ * a JSON file with no URL as native setup, would skip the only recovery path a
+ * new owner can reach without a cable. */
+static int tater_setup_needed(void)
+{
+    if (access(TATER_SETUP_MARKER, R_OK) != 0)
+        return 0;
+    return !file_contains(EMOS_WPA_CONF, "network={") ||
+           !file_contains(TATER_NATIVE_CONF, "\"url\"");
+}
 
 static const char *wpa_conf(void)
 {
@@ -1901,6 +1997,115 @@ static void net_main(void)
     netlog("wlan0 present=%d ifup=%d\n",
          access("/sys/class/net/wlan0", F_OK) == 0, r);
     bootstep = 9; led_step();                    /* 10: wlan0 exists */
+
+    /* Tater first-boot setup. The existing firmware binary is also the web
+     * server, so emOS adds only radio/DHCP orchestration and does not carry a
+     * second TLS/HTTP stack in its boot ramdisk.
+     *
+     * This MediaTek driver has a vendor mode gate in front of nl80211. Merely
+     * asking wpa_supplicant for mode=2 while that gate is in station mode is
+     * rejected as "Driver does not support AP mode". Writing "A" to
+     * /dev/wmtWifi is the stock kernel interface for enable=1, mode=1 (Soft
+     * AP); that creates a dedicated ap0 interface, and wpa_supplicant's normal
+     * CONFIG_AP path owns the beacon there. wlan0 never advertises AP support,
+     * even after this transition; pointing the supplicant at it is therefore a
+     * plausible-looking setup that can only sit in SCANNING forever.
+     *
+     * dnsmasq comes from the device's own FireOS system partition (its build
+     * has DHCP and wildcard DNS, but no DBus dependency). The portal writes
+     * emOS's private wpa.conf and native.json, removes any old permanent token,
+     * then SIGTERMs PID 1. The normal shutdown path syncs and remounts /data
+     * read-only before rebooting into station mode. */
+    if (tater_setup_needed()) {
+        if (!sup || access("/data/local/bin/server", X_OK) != 0) {
+            netlog("Tater setup requested but AP supplicant or firmware is absent; console fallback remains\n");
+        } else {
+            char ap_ssid[48] = "Tater-Setup-Echo";
+            const char *sn = serialno();
+            size_t snlen = strlen(sn);
+            if (snlen >= 4)
+                snprintf(ap_ssid, sizeof ap_ssid, "Tater-Setup-%s", sn + snlen - 4);
+
+            char ap_body[512];
+            snprintf(ap_body, sizeof ap_body,
+                     "ctrl_interface=/run/tater-setup-sockets\n"
+                     "ap_scan=2\n"
+                     "network={\n"
+                     "\tssid=\"%s\"\n"
+                     "\tmode=2\n"
+                     "\tfrequency=2437\n"
+                     "\tkey_mgmt=NONE\n"
+                     "}\n", ap_ssid);
+            mkdir("/run/tater-setup-sockets", 0755);
+            int af = open(TATER_AP_CONF, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+            if (af >= 0) {
+                ssize_t aw = write(af, ap_body, strlen(ap_body));
+                close(af);
+                if (aw < 0)
+                    netlog("setup AP config write failed errno=%d\n", errno);
+            } else {
+                netlog("setup AP config create failed errno=%d\n", errno);
+            }
+
+            /* Use the driver's own AP transition, not iwpriv directly. The
+             * character device also records the selected mode so a combo-chip
+             * reset can restore it; a private ioctl would leave that state as
+             * WLAN_MODE_HALT. The transition creates ap0 asynchronously,
+             * hence the bounded wait below. */
+            int apmode = wr("/dev/wmtWifi", "A");
+            for (int i = 0; i < 20 && access("/sys/class/net/ap0", F_OK); i++)
+                usleep(100000);
+            int apup = ifup("ap0");
+            netlog("setup MediaTek Soft AP mode rc=%d ifup=%d\n", apmode, apup);
+
+            snprintf(cflag, sizeof cflag, "-c%s", TATER_AP_CONF);
+            /* -q matters here: this old nl80211 driver reports every nearby
+             * management frame to the AP process, which otherwise appends
+             * "BSSID ... not our address" to /run/net.log continuously. That
+             * file lives in RAM, so harmless debug chatter becomes a slow
+             * memory leak while a device waits in setup. */
+            char *ap_supp[] = { (char *)(sup ? sup : supps[1]), "-q",
+                "-iap0", "-Dnl80211", cflag,
+                "-e/data/misc/wifi/entropy.bin", NULL };
+            pid_t apwpa = spawn(ap_supp);
+            sleep(2);
+            char *apif[] = { (char *)bbp, "ifconfig", "ap0",
+                             "192.168.4.1", "netmask", "255.255.255.0",
+                             "up", NULL };
+            int apif_st = run_wait(apif);
+            setup_firewall();
+
+            char *dns[] = { "/system/bin/dnsmasq", "-d", "--user=root",
+                "--interface=ap0", "--bind-interfaces", "--no-resolv",
+                /* FireOS's default /system/etc/dnsmasq.conf serves Amazon's
+                 * 10.201.126.x OOBE pool. Ignore it completely: two pools on
+                 * one setup AP can hand the phone an address that cannot
+                 * reach our 192.168.4.1 portal. */
+                "--conf-file=/dev/null", "--no-hosts", "--dhcp-authoritative",
+                "--dhcp-leasefile=/run/tater-setup.leases",
+                "--dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,1h",
+                "--dhcp-option=3,192.168.4.1", "--dhcp-option=6,192.168.4.1",
+                "--address=/#/192.168.4.1", NULL };
+            char *portal[] = { "/data/local/bin/server", "setup-portal", NULL };
+            pid_t dnsp = spawn(dns);
+            pid_t webp = spawn(portal);
+            led_setup();
+            netlog("Tater setup active: ssid=%s address=192.168.4.1 ifconfig=%d wpa=%d dns=%d web=%d\n",
+                   ap_ssid, apif_st, apwpa, dnsp, webp);
+            bootstep = 11; led_step();           /* 12: waiting for owner */
+
+            for (;;) {
+                pid_t d;
+                while ((d = waitpid(-1, &st, WNOHANG)) > 0) {
+                    if (launcher > 0 && d == launcher) launcher = spawn(launch);
+                    else if (d == apwpa) apwpa = spawn(ap_supp);
+                    else if (d == dnsp)  dnsp = spawn(dns);
+                    else if (d == webp)  webp = spawn(portal);
+                }
+                sleep(2);
+            }
+        }
+    }
 
     /* Supervise, driven by wlan0's carrier rather than by a fixed sequence.
      *

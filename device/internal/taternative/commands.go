@@ -43,17 +43,35 @@ func (c *Client) handle(message Envelope) {
 		case "STT_VAD_END", "STT_END":
 			c.stopVoiceCapture()
 			c.setState("thinking", payload)
-		case "INTENT_START", "INTENT_END":
+		case "INTENT_START":
+			c.setState("thinking", payload)
+		case "INTENT_END":
+			data, _ := payload["data"].(map[string]any)
+			c.setPendingReopen(
+				boolValue(data["continue_conversation"]),
+				stringValue(data["conversation_id"]),
+			)
 			c.setState("thinking", payload)
 		case "TOOL_CALL_START":
 			c.setState("tool_call", payload)
 		case "TTS_START", "TTS_END":
 			c.setState("speaking", payload)
 		case "RUN_END":
+			// playback.finished completes the old run just before a continued
+			// voice.start opens the next one. A late RUN_END from that old run
+			// must not close the newly pending/active microphone or clear its DOA
+			// listening animation.
+			if c.voiceCaptureInProgress() {
+				break
+			}
 			c.stopVoiceCapture()
-			c.setState("idle", payload)
+			if !c.playbackTurnInProgress() {
+				c.setPendingReopen(false, "")
+				c.setState("idle", payload)
+			}
 		case "ERROR":
 			c.stopVoiceCapture()
+			c.setPendingReopen(false, "")
 			c.setState("error", payload)
 		}
 	case "play.url":
@@ -61,6 +79,13 @@ func (c *Client) handle(message Envelope) {
 			URL: stringValue(payload["url"]), TTSKind: stringValue(payload["tts_kind"]),
 			StateAfter:           stringValue(payload["state_after"]),
 			ContinueConversation: boolValue(payload["continue_conversation"]),
+			ConversationID:       stringValue(payload["conversation_id"]),
+		}
+		if pending, conversationID := c.pendingReopenSnapshot(); pending {
+			req.ContinueConversation = true
+			if req.ConversationID == "" {
+				req.ConversationID = conversationID
+			}
 		}
 		if body, ok := payload["ducking"].(map[string]any); ok {
 			req.Ducking = copyMap(body)

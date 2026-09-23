@@ -103,9 +103,9 @@ func TestAFlushedStreamDoesNotLeaveEosArmedForTheNextOne(t *testing.T) {
 	s.ready(24)
 	s.take()
 
-	s.flush()                 // barge-in
-	s.drained()               // the pump loop sees the emptied channel
-	s.endStream()             // the cancelled stream's EOS finally arrives
+	s.flush()     // barge-in
+	s.drained()   // the pump loop sees the emptied channel
+	s.endStream() // the cancelled stream's EOS finally arrives
 
 	if s.eosPending.Load() {
 		t.Fatal("eosPending must not survive a flushed stream — the next " +

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
 )
 
 // The turn stream's speech gate: whether a period is speech, for the

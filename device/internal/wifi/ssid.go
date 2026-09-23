@@ -140,3 +140,31 @@ func pskLine(psk string) string {
 	}
 	return "\tpsk=\"" + psk + "\""
 }
+
+// EmOSProvisioningConfig builds the first-boot WiFi configuration written by
+// the Tater setup portal. It deliberately uses emOS's private namespace: a
+// later FireOS boot may rewrite Android's wpa_supplicant.conf, while this file
+// remains owned by the repurposed device.
+//
+// The shared validation and serializers are important here. Quotes,
+// backslashes and spaces are legal in both SSIDs and WPA2 passphrases, and a
+// second escaping implementation in the web handler would eventually accept a
+// network that the runtime could not re-open.
+func EmOSProvisioningConfig(ssid []byte, psk string) (string, error) {
+	if err := validate(ssid, psk); err != nil {
+		return "", err
+	}
+	lines := []string{
+		"ctrl_interface=/data/emos/sockets",
+		"update_config=1",
+		"network={",
+		ssidLine(ssid),
+	}
+	if psk == "" {
+		lines = append(lines, "\tkey_mgmt=NONE")
+	} else {
+		lines = append(lines, pskLine(psk), "\tkey_mgmt=WPA-PSK")
+	}
+	lines = append(lines, "\tpriority=1", "}")
+	return strings.Join(lines, "\n") + "\n", nil
+}

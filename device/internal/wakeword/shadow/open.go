@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
 )
 
 // DefaultDir is where the ONNX Runtime library and the models live on the

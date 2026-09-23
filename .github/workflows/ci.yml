@@ -132,6 +132,8 @@ jobs:
       - name: Run go test
         working-directory: device
         run: go test ./internal/... ./pkg/...
+      - name: Test factory installer safety logic
+        run: python3 -m unittest factory.biscuit.test_install
       - name: Test native microWakeWord runtime
         working-directory: device
         run: ./test_microwakeword_runtime.sh

@@ -16,13 +16,13 @@
 // a device with no Android, against a stock FireOS Dot running the same
 // firmware:
 //
-//	          stock   ours     meaning
-//	  0012      85      05     NADC clock divider, bit7 = powered
-//	  0013      83      03     MADC clock divider
-//	  0026      11      00     ADC flags: left+right converting
-//	  003f      d6      16     DAC data path, bit7/6 = left/right powered
-//	  0089      30      00     output driver power
-//	  008c/8d   08      00     HPL/HPR output mixer routing
+//	        stock   ours     meaning
+//	0012      85      05     NADC clock divider, bit7 = powered
+//	0013      83      03     MADC clock divider
+//	0026      11      00     ADC flags: left+right converting
+//	003f      d6      16     DAC data path, bit7/6 = left/right powered
+//	0089      30      00     output driver power
+//	008c/8d   08      00     HPL/HPR output mixer routing
 //
 // Applying the routes below took every one of those to stock's exact value.
 //
@@ -37,7 +37,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 )
 
 // Write sets one mixer control, found by name.

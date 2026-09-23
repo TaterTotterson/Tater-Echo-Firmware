@@ -10,17 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/beamformer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/listen"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/processor"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/mic"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 	"github.com/gorilla/websocket"
-	"github.com/wilbowes/EchoMuse/internal/aec"
-	"github.com/wilbowes/EchoMuse/internal/beamformer"
-	"github.com/wilbowes/EchoMuse/internal/config"
-	"github.com/wilbowes/EchoMuse/internal/listen"
-	"github.com/wilbowes/EchoMuse/internal/processor"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/microwakeword"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
-	"github.com/wilbowes/EchoMuse/pkg/mic"
-	"github.com/wilbowes/EchoMuse/pkg/speaker"
 )
 
 // ─── Binary frame types ───────────────────────────────────────────────────────
@@ -68,6 +68,17 @@ const (
 	// controller announcing listen_session; see docs/listening.md.
 	frameTypeListen = byte(0x07)
 )
+
+const doaActivityPreGainThreshold = 0.0001
+
+// doaActivity uses the minimum calibrated pre-gain RMS rather than a fraction
+// of the turn VAD threshold. Native mode does not receive the legacy
+// controller's tuned threshold, and its 0.004 boot default is far above the
+// measured 0.0001–0.0006 FS speech range. Scaling this floor by the current
+// fixed mic gain keeps the decision stable when gain changes.
+func doaActivity(rms, gain float64, speech bool) bool {
+	return speech || rms >= doaActivityPreGainThreshold*gain
+}
 
 // Listen states, reported to the controller as listen_state. See
 // docs/listening.md, "States an Echo can be in".
@@ -167,9 +178,10 @@ func vadPeriodRMS(mono []byte) float64 {
 
 // Beam lock request states — see DataClient.beamReq.
 const (
-	beamReqNone   int32 = 0
-	beamReqLock   int32 = 1
-	beamReqUnlock int32 = 2
+	beamReqNone         int32 = 0
+	beamReqLock         int32 = 1
+	beamReqUnlock       int32 = 2
+	beamReqLockOnSpeech int32 = 3
 )
 
 type DataClient struct {
@@ -230,7 +242,7 @@ type DataClient struct {
 	beam              *beamformer.Beamformer
 	proc              *processor.Processor
 	aec               *aec.Canceller
-	onDirectionChange func(angle float64)
+	onDirectionChange func(angle float64, activity bool, speech bool)
 	directionMu       sync.Mutex
 
 	// pcmObserver receives the exact 80 ms, post-beamforming/post-AEC PCM
@@ -547,7 +559,7 @@ func (d *DataClient) endListen(e *listen.End) {
 	}
 }
 
-func (d *DataClient) OnDirectionChanged(cb func(angle float64)) {
+func (d *DataClient) OnDirectionChanged(cb func(angle float64, activity bool, speech bool)) {
 	d.directionMu.Lock()
 	d.onDirectionChange = cb
 	d.directionMu.Unlock()
@@ -591,10 +603,31 @@ func (d *DataClient) RequestBeamLock() {
 	atomic.StoreInt32(&d.beamReq, beamReqLock)
 }
 
+// RequestBeamLockOnSpeech releases any inherited bearing, exposes live visual
+// DOA, and waits for near-end speech before choosing the audio pickup. Native
+// initial and continued-chat turns deliberately share this path so their
+// listening animations cannot diverge.
+func (d *DataClient) RequestBeamLockOnSpeech() {
+	atomic.StoreInt32(&d.beamReq, beamReqLockOnSpeech)
+}
+
 // RequestBeamUnlock asks the running mic stream to release the beam lock and
 // return to ch6 omni. Safe to call from any goroutine.
 func (d *DataClient) RequestBeamUnlock() {
 	atomic.StoreInt32(&d.beamReq, beamReqUnlock)
+}
+
+// ApplyNativeBeamState deliberately routes every native listening turn
+// through the same speech-following path. Initial wake and continued-chat
+// listening both unlock first, expose live visual DOA immediately, then choose
+// the audio pickup when near-end speech arrives.
+func (d *DataClient) ApplyNativeBeamState(state string) {
+	switch state {
+	case "listening":
+		d.RequestBeamLockOnSpeech()
+	case "idle", "error":
+		d.RequestBeamUnlock()
+	}
 }
 
 // SendBleAdverts writes one batch of scanned advertisements to the data plane
@@ -1059,6 +1092,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	var seqNum uint16
 	var periodCount uint64 // periodic RMS diagnostic
 	var lastClipped uint64 // clip count at last diag line
+	lockOnSpeech := false
 
 	// Memoized linear mic gain — recomputed only when the config dB value
 	// changes (config push mid-stream). Sentinel forces computation on the
@@ -1226,10 +1260,15 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// if beamforming is disabled in config.
 			switch atomic.SwapInt32(&d.beamReq, beamReqNone) {
 			case beamReqLock:
+				lockOnSpeech = false
 				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
 				d.beam.Lock(turnBeam)
 			case beamReqUnlock:
+				lockOnSpeech = false
 				d.beam.Unlock()
+			case beamReqLockOnSpeech:
+				lockOnSpeech = true
+				d.beam.PrepareSpeechLock()
 			}
 
 			mono, angle := d.beam.Process(raw, beamAngle, gainLin)
@@ -1283,6 +1322,11 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 					}
 				}
 			}
+			if lockOnSpeech && speech {
+				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
+				d.beam.LockCurrent(turnBeam)
+				lockOnSpeech = false
+			}
 
 			// Gate windows in units of actual iterations: the mic delivers
 			// whole ALSA-buffer batches (160ms/2560 samples — see the
@@ -1329,14 +1373,15 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			d.pipeMu.Unlock()
 			// ─────────────────────────────────────────────────────────────
 
-			// Notify direction listener — non-blocking, keep it fast.
-			// Only fire when angle is valid (beam locked).
+			// Always report the bearing with separate acoustic-activity and strict
+			// speech decisions. Quiet valid speech can start DOA without weakening
+			// the turn gate; strict speech is only reply-direction metadata.
 			if angle >= 0 {
 				d.directionMu.Lock()
 				cb := d.onDirectionChange
 				d.directionMu.Unlock()
 				if cb != nil {
-					cb(angle)
+					cb(angle, doaActivity(rms, gainLin, speech), speech)
 				}
 			}
 

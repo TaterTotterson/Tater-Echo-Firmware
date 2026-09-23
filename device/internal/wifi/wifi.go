@@ -75,7 +75,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/platform"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
 )
 
 const (

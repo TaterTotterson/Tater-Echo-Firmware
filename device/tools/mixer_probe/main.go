@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 )
 
 func main() {

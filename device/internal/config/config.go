@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wilbowes/EchoMuse/internal/outchain"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
 // Device holds all runtime-tunable parameters for this device.
@@ -41,6 +41,8 @@ type Device struct {
 	MwwSlidingWindow int
 	MwwCloseMiss     float64
 	MwwModel         string
+	MwwSensitivity   string
+	MwwEnvironment   string
 	// BargeInEnabled / BargeInThreshold mirror the controller's barge-in
 	// settings. The device needs them for on-device scoring: while the speaker
 	// is streaming, the controller lowers its wake bar to BargeInThreshold
@@ -182,6 +184,8 @@ func (d *Device) loadDefaults() {
 	d.MwwSlidingWindow = envInt("MWW_SLIDING_WINDOW", 0)
 	d.MwwCloseMiss = envFloat("MWW_CLOSE_MISS_THRESHOLD", 0)
 	d.MwwModel = envStr("MWW_MODEL", "hey_tater")
+	d.MwwSensitivity = envStr("MWW_SENSITIVITY", "normal")
+	d.MwwEnvironment = envStr("MWW_ENVIRONMENT", "balanced")
 	d.BargeInThreshold = envFloat("BARGE_IN_THRESHOLD", 0.05)
 	d.DuckDb = envFloat("DUCK_DB", -18)
 	d.AdcDigitalGain = envInt("ADC_DIGITAL_GAIN", 88)
@@ -250,6 +254,12 @@ func (d *Device) Apply(msg ConfigMessage) {
 	}
 	if msg.MwwModel != "" {
 		d.MwwModel = msg.MwwModel
+	}
+	if msg.MwwSensitivity != "" {
+		d.MwwSensitivity = msg.MwwSensitivity
+	}
+	if msg.MwwEnvironment != "" {
+		d.MwwEnvironment = msg.MwwEnvironment
 	}
 	if msg.BargeInEnabled != nil {
 		d.BargeInEnabled = *msg.BargeInEnabled
@@ -388,6 +398,8 @@ func (d *Device) Snapshot() ConfigMessage {
 		MwwSlidingWindow:   &mwwSlidingWindow,
 		MwwCloseMiss:       &mwwCloseMiss,
 		MwwModel:           d.MwwModel,
+		MwwSensitivity:     d.MwwSensitivity,
+		MwwEnvironment:     d.MwwEnvironment,
 		BargeInEnabled:     &bargeInEnabled,
 		BargeInThreshold:   d.BargeInThreshold,
 		StartupVolume:      d.StartupVolume,
@@ -431,6 +443,8 @@ type ConfigMessage struct {
 	MwwSlidingWindow *int     `json:"mwwSlidingWindow,omitempty"`
 	MwwCloseMiss     *float64 `json:"mwwCloseMissThreshold,omitempty"`
 	MwwModel         string   `json:"mwwModel,omitempty"`
+	MwwSensitivity   string   `json:"mwwSensitivity,omitempty"`
+	MwwEnvironment   string   `json:"mwwEnvironment,omitempty"`
 	// ConsolePassword is the hashed record emOS's init checks before handing
 	// over a shell on the USB serial console. A POINTER, and it has to be: an
 	// EMPTY record is the legitimate "no password" setting, so with a plain

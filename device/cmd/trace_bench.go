@@ -3,9 +3,9 @@
 package main
 
 import (
-	"github.com/wilbowes/EchoMuse/internal/bindings/speaker"
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/speaker"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
 )
 
 // Bench only: log the per-frame wake scores around every near-miss and

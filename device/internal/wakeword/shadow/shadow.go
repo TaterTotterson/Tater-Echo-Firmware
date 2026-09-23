@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
 )
 
 // queueFrames is how much audio may be in flight to the scorer goroutine.

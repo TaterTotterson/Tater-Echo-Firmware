@@ -21,12 +21,8 @@ func (c *Client) PushAudio(pcm []byte) {
 	}
 	frame := append([]byte(nil), pcm[:usable]...)
 	c.audioMu.Lock()
-	if len(c.preRoll) == cap(c.preRoll) {
-		copy(c.preRoll, c.preRoll[1:])
-		c.preRoll[len(c.preRoll)-1] = frame
-	} else {
-		c.preRoll = append(c.preRoll, frame)
-	}
+	c.preRoll = appendRollingFrame(c.preRoll, frame)
+	c.captureRoll = appendRollingFrame(c.captureRoll, frame)
 	if c.voicePending {
 		if len(c.pendingAudio) >= preRollChunks {
 			copy(c.pendingAudio, c.pendingAudio[1:])
@@ -45,6 +41,15 @@ func (c *Client) PushAudio(pcm []byte) {
 	}
 }
 
+func appendRollingFrame(frames [][]byte, frame []byte) [][]byte {
+	if len(frames) == cap(frames) {
+		copy(frames, frames[1:])
+		frames[len(frames)-1] = frame
+		return frames
+	}
+	return append(frames, frame)
+}
+
 // Wake starts a local-wake turn and snapshots the complete pre-roll ring.
 // False means the client was disconnected or another voice turn already owns
 // the pipeline.
@@ -56,16 +61,19 @@ func (c *Client) Wake(wakeWord string, score float32) bool {
 	bargeIn := boolValue(c.settings["barge_in_enabled"])
 	speaking := c.state == "speaking"
 	verifierMode := strings.ToLower(stringValue(c.settings["wake_verifier_mode"]))
+	forceVerifier := strings.EqualFold(stringValue(c.settings["wake_environment"]), "tv_nearby")
 	c.stateMu.RUnlock()
 	if speaking && !bargeIn {
 		return false
 	}
-	switch verifierMode {
-	case "observe":
+	c.cancelCloseMiss()
+	c.queueTrainerCapture("wake_detected", wakeWord, score)
+	switch {
+	case forceVerifier || verifierMode == "enforce":
+		return c.queueWakeVerification(strings.TrimSpace(wakeWord), score, true)
+	case verifierMode == "observe":
 		c.queueWakeVerification(strings.TrimSpace(wakeWord), score, false)
 		return c.startWake(wakeWord, score)
-	case "enforce":
-		return c.queueWakeVerification(strings.TrimSpace(wakeWord), score, true)
 	default:
 		return c.startWake(wakeWord, score)
 	}
@@ -75,8 +83,14 @@ func (c *Client) startWake(wakeWord string, score float32) bool {
 	// A local wake during TTS is barge-in: cancel buffered voice playback
 	// before opening the microphone turn. Persistent music stays alive and is
 	// ducked by the eventual reply.
+	bargeIn := c.State() == "speaking"
 	c.stopVoice()
-	return c.startVoice("local_wake", strings.TrimSpace(wakeWord), score, true)
+	if !bargeIn {
+		if hook := c.hooks.PlayWakeSound; hook != nil {
+			hook()
+		}
+	}
+	return c.startVoice("local_wake", strings.TrimSpace(wakeWord), "", score, true)
 }
 
 // StartButton starts a push-to-talk turn without a wake phrase.
@@ -85,14 +99,14 @@ func (c *Client) StartButton() bool {
 	// always interrupt TTS, even when hands-free barge-in is disabled.
 	c.StopCapture(true)
 	c.stopVoice()
-	return c.startVoice("button", "", 0, false)
+	return c.startVoice("button", "", "", 0, false)
 }
 
-func (c *Client) startContinued() bool {
-	return c.startVoice("continued_chat", "", 0, false)
+func (c *Client) startContinued(conversationID string) bool {
+	return c.startVoice("continued_chat", "", conversationID, 0, false)
 }
 
-func (c *Client) startVoice(source, wakeWord string, score float32, includePreRoll bool) bool {
+func (c *Client) startVoice(source, wakeWord, conversationID string, score float32, includePreRoll bool) bool {
 	if !c.connected.Load() {
 		return false
 	}
@@ -115,6 +129,9 @@ func (c *Client) startVoice(source, wakeWord string, score float32, includePreRo
 	}
 	if score > 0 {
 		payload["wake_score"] = score
+	}
+	if conversationID = strings.TrimSpace(conversationID); conversationID != "" {
+		payload["conversation_id"] = conversationID
 	}
 	if !c.sendJSON("voice.start", "", payload) {
 		c.audioMu.Lock()
@@ -171,6 +188,12 @@ func (c *Client) stopVoiceCapture() {
 	c.audioMu.Unlock()
 }
 
+func (c *Client) voiceCaptureInProgress() bool {
+	c.audioMu.Lock()
+	defer c.audioMu.Unlock()
+	return c.voicePending || c.voiceActive
+}
+
 // StopCapture closes a pending/active microphone turn and notifies Tater. It
 // is used for hardware mute and push-to-talk replacement, where merely
 // stopping ALSA would leave the server waiting for a VAD end that cannot come.
@@ -202,6 +225,29 @@ func (c *Client) queueVoice(req PlayRequest) bool {
 		log.Printf("[tater-native] voice playback queue full; dropping %q", req.URL)
 		return false
 	}
+}
+
+func (c *Client) setPendingReopen(enabled bool, conversationID string) {
+	conversationID = strings.TrimSpace(conversationID)
+	c.playMu.Lock()
+	c.pendingReopen = enabled && conversationID != ""
+	c.pendingConversation = conversationID
+	if !c.pendingReopen {
+		c.pendingConversation = ""
+	}
+	c.playMu.Unlock()
+}
+
+func (c *Client) pendingReopenSnapshot() (bool, string) {
+	c.playMu.Lock()
+	defer c.playMu.Unlock()
+	return c.pendingReopen, c.pendingConversation
+}
+
+func (c *Client) playbackTurnInProgress() bool {
+	c.playMu.Lock()
+	defer c.playMu.Unlock()
+	return c.voiceResponsePending || len(c.voiceQueue) > 0
 }
 
 func (c *Client) voiceWorker() {
@@ -241,10 +287,14 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 	ok := true
 	reason := ""
 	continueConversation := false
+	conversationID := ""
 	stateAfter := ""
 	next := first
 	for {
 		continueConversation = continueConversation || next.req.ContinueConversation
+		if value := strings.TrimSpace(next.req.ConversationID); value != "" {
+			conversationID = value
+		}
 		if value := strings.ToLower(strings.TrimSpace(next.req.StateAfter)); value != "" {
 			stateAfter = value
 		}
@@ -285,6 +335,14 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 	c.playMu.Lock()
 	current := c.voiceGen == generation && c.voiceResponsePending
 	if current {
+		if c.pendingReopen {
+			continueConversation = true
+			if conversationID == "" {
+				conversationID = c.pendingConversation
+			}
+		}
+		c.pendingReopen = false
+		c.pendingConversation = ""
 		c.voiceCancel = nil
 		c.voiceResponsePending = false
 	}
@@ -297,8 +355,23 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 		payload["error"] = reason
 	}
 	c.sendJSON("playback.finished", "", payload)
-	if continueConversation && ok {
-		c.startContinued()
+	c.stateMu.RLock()
+	continuedChatEnabled := boolValue(c.settings["continued_chat"])
+	c.stateMu.RUnlock()
+	if continueConversation && ok && continuedChatEnabled {
+		c.setState("listening", map[string]any{"source": "continued_chat"})
+		go func() {
+			timer := time.NewTimer(350 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-timer.C:
+			}
+			if !c.startContinued(conversationID) {
+				c.setState("idle", map[string]any{"continued_chat": false})
+			}
+		}()
 	} else {
 		if stateAfter == "" {
 			stateAfter = "idle"
@@ -350,6 +423,8 @@ func (c *Client) stopVoice() {
 	}
 	c.voiceGen++
 	c.voiceResponsePending = false
+	c.pendingReopen = false
+	c.pendingConversation = ""
 	c.playMu.Unlock()
 	for {
 		select {

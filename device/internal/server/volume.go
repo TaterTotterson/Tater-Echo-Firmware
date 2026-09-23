@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
 
 const (

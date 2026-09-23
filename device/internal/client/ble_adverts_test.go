@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 )
 
 // Adverts moved off the control plane because that is where liveness is
@@ -82,4 +82,3 @@ func TestTheAlwaysOnWakeStreamDoesNotHoldAdvertsBack(t *testing.T) {
 			"controller-side wake scoring that is every batch, forever")
 	}
 }
-

@@ -57,7 +57,7 @@ const (
 	// ALSA stream parameters — must match pcm_microphone.go
 	nChannels    = 9
 	sampleRate   = 16000
-	byteSample   = 3 // S24_3LE
+	byteSample   = 3                      // S24_3LE
 	frameSize    = nChannels * byteSample // 27 bytes per frame
 	periodFrames = 512
 
@@ -77,8 +77,8 @@ const (
 	echoRefCh = 8
 
 	// Smoothing constants
-	smoothAlpha   = 0.9    // fast smoother (~320ms time constant at 32ms/period)
-	baselineAlpha = 0.995  // slow smoother (~10s time constant) — tracks background noise
+	smoothAlpha   = 0.9   // fast smoother (~320ms time constant at 32ms/period)
+	baselineAlpha = 0.995 // slow smoother (~10s time constant) — tracks background noise
 
 	// Lock-back window. Controller-side wake detection lands 300–500ms
 	// after the wake word ends, by which time the fast smoother's onset
@@ -145,17 +145,22 @@ type Beamformer struct {
 	// -1 means unlocked (use live best-direction selection).
 	lockedChannel int
 
+	// visualFollowUp is true only for a continued-chat listening window. The
+	// original initial-turn DOA remains untouched: it reports smoothed energy
+	// only while audio is locked. Follow-up listening may report current-period
+	// DOA while unlocked so playback residue cannot pin the reopened ring.
+	visualFollowUp bool
+
 	// clippedSamples counts output samples clamped to int16 range by the
 	// mic gain in extractChannel. Only touched from the mic goroutine
 	// (Process and the diagnostics that read it) — no synchronisation.
 	clippedSamples uint64
 
-	// Reusable per-period analysis buffers (§3.5, 2026-07-07): decode +
-	// band-diff previously allocated ~24kB of garbage every 32ms period
-	// (~750kB/s of GC pressure on the A53) just to keep the smoothers
-	// warm. Only the analysis path reuses buffers — extractChannel still
-	// returns a fresh allocation per period because data.go's preroll
-	// ring retains those slices across periods.
+	// Reusable per-batch analysis buffers (§3.5, 2026-07-07). ALSA normally
+	// delivers five 512-frame periods together; the slices grow once to that
+	// batch size so DOA analyzes all 160ms rather than sampling only its first
+	// 32ms. extractChannel still returns a fresh allocation because data.go's
+	// preroll ring retains those slices across batches.
 	chanBuf [nDirections][]float32
 	hfBuf   [nDirections][]float32
 }
@@ -168,6 +173,18 @@ func New() *Beamformer {
 		b.hfBuf[ci] = make([]float32, periodFrames)
 	}
 	return b
+}
+
+func (b *Beamformer) ensureAnalysisFrames(frames int) {
+	for ci := 0; ci < nDirections; ci++ {
+		if cap(b.chanBuf[ci]) < frames {
+			b.chanBuf[ci] = make([]float32, frames)
+			b.hfBuf[ci] = make([]float32, frames)
+			continue
+		}
+		b.chanBuf[ci] = b.chanBuf[ci][:frames]
+		b.hfBuf[ci] = b.hfBuf[ci][:frames]
+	}
 }
 
 // Lock selects the mic with the highest energy onset relative to its noise
@@ -183,6 +200,7 @@ func New() *Beamformer {
 // if the baseline hasn't warmed up yet (~3s after start), since onset ratios
 // are meaningless when energyBaseline is near zero.
 func (b *Beamformer) Lock(enabled bool) {
+	b.visualFollowUp = false
 	if !enabled {
 		// Beamforming disabled — stay on ch6 (lockedChannel remains -1).
 		// Smoothers are still running, so if beamforming is turned on later
@@ -241,6 +259,56 @@ func (b *Beamformer) Lock(enabled bool) {
 	b.lockedChannel = directionToChannel[best]
 }
 
+// PrepareSpeechLock switches to live visual DOA while the audio path waits for
+// near-end speech. It preserves all estimator history; native initial and
+// continued-chat listening both use this same preparation path.
+func (b *Beamformer) PrepareSpeechLock() {
+	b.Unlock()
+	b.visualFollowUp = true
+}
+
+// LockCurrent selects from the current speech onset rather than wake-word
+// history. Native listening uses it for both initial and continued-chat turns
+// so the audio pickup follows the same speech that drives their live DOA.
+func (b *Beamformer) LockCurrent(enabled bool) {
+	if !enabled {
+		log.Printf("[beam] LockCurrent() called but beamforming disabled — staying on ch6 (omni)")
+		return
+	}
+	if b.lockedChannel >= 0 {
+		return
+	}
+
+	best, bestScore, mode := b.liveDirection()
+	b.lockedChannel = directionToChannel[best]
+	log.Printf("[beam] speech-locked to ch%d (%.0f°) %s=%.2f",
+		b.lockedChannel, candidateAngles[best], mode, bestScore)
+}
+
+// liveDirection returns the strongest recent acoustic onset. Once the room
+// baseline is warm, using an onset ratio rather than raw microphone energy
+// prevents a naturally hotter microphone or steady appliance from owning the
+// visual bearing. Before warm-up, raw energy is the only meaningful fallback.
+func (b *Beamformer) liveDirection() (direction int, score float64, mode string) {
+	mode = "energy"
+	score = b.energySmooth[0]
+	if b.baselineReady >= 100 {
+		mode = "onset_ratio"
+		score = b.onsetRatio(0)
+	}
+	for di := 1; di < nDirections; di++ {
+		candidate := b.energySmooth[di]
+		if b.baselineReady >= 100 {
+			candidate = b.onsetRatio(di)
+		}
+		if candidate > score {
+			score = candidate
+			direction = di
+		}
+	}
+	return direction, score, mode
+}
+
 // onsetRatio returns energySmooth[di] / energyBaseline[di].
 // High ratio = sudden energy increase = likely speech onset.
 func (b *Beamformer) onsetRatio(di int) float64 {
@@ -297,6 +365,21 @@ func (b *Beamformer) Unlock() {
 		log.Printf("[beam] unlocked from ch%d", b.lockedChannel)
 	}
 	b.lockedChannel = -1
+	b.visualFollowUp = false
+}
+
+// LockedAngle returns the physical bearing selected by the most recent Lock,
+// or -1 while the beam is unlocked. Callers serialize it with Process/Lock.
+func (b *Beamformer) LockedAngle() float64 {
+	if b.lockedChannel < 0 {
+		return -1
+	}
+	for direction, channel := range directionToChannel {
+		if channel == b.lockedChannel {
+			return candidateAngles[direction]
+		}
+	}
+	return -1
 }
 
 // Process returns mono S16_LE audio and the estimated source angle.
@@ -319,11 +402,14 @@ func (b *Beamformer) Unlock() {
 //   - Locked, steerAngle < 0 (auto): the perimeter mic selected at Lock() time.
 //
 // angle is the estimated dominant source direction (0–360°, clockwise from
-// 12 o'clock), or -1 when unlocked.
+// 12 o'clock), or -1 during ordinary unlocked wake listening. Continued-chat
+// preparation explicitly enables live visual DOA while unlocked.
 func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono []byte, angle float64) {
-	if len(raw) < periodFrames*frameSize {
+	frames := len(raw) / frameSize
+	if frames < periodFrames {
 		return b.extractChannel(raw, centreCh, gain), -1
 	}
+	b.ensureAnalysisFrames(frames)
 
 	// Always decode and update smoothers — direction estimation runs
 	// continuously regardless of BeamformingEnabled. This keeps the baseline
@@ -331,9 +417,11 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 	b.decodeChannels(raw)
 	b.bandDiff()
 	hfChannels := b.hfBuf
+	var periodEnergy [nDirections]float64
 
 	for di := range candidateAngles {
 		energy := hfEnergy(hfChannels, di)
+		periodEnergy[di] = energy
 		b.energySmooth[di] = smoothAlpha*b.energySmooth[di] + (1-smoothAlpha)*energy
 
 		// Freeze baseline during voice turns (locked) so the speaker's own
@@ -360,30 +448,48 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 		b.baselineReady++
 	}
 
-	// Unlocked: always ch6 (omni). Covers OWW listening and disabled-beamforming
-	// voice turns. No directional bias, no channel splices.
-	if b.lockedChannel < 0 {
+	// Restore the initial-turn behavior validated on the physical Echo: while
+	// unlocked, ordinary wake listening reports no DOA; once locked, its visual
+	// direction comes from the fast smoother below. Continued chat is the sole
+	// exception and can report current-period DOA before its speech lock.
+	if b.lockedChannel < 0 && !b.visualFollowUp {
 		return b.extractChannel(raw, centreCh, gain), -1
 	}
 
-	// Locked — select output channel and reported angle.
 	bestDir := 0
 	for di := 1; di < nDirections; di++ {
-		if b.energySmooth[di] > b.energySmooth[bestDir] {
+		bestEnergy := b.energySmooth[bestDir]
+		candidateEnergy := b.energySmooth[di]
+		if b.visualFollowUp {
+			bestEnergy = periodEnergy[bestDir]
+			candidateEnergy = periodEnergy[di]
+		}
+		if candidateEnergy > bestEnergy {
 			bestDir = di
 		}
 	}
+	angle = candidateAngles[bestDir]
+
+	// Unlocked: always ch6 (omni). Covers OWW listening and disabled-beamforming
+	// voice turns. No directional bias, no channel splices.
+	if b.lockedChannel < 0 {
+		return b.extractChannel(raw, centreCh, gain), angle
+	}
+
+	// Locked — select output channel and reported angle.
 
 	var ch int
 	if steerAngle >= 0 {
-		// Fixed-beam: config-driven direction, ignores energy-based lock
+		// Preserve the original initial-turn fixed-beam indicator. Follow-up
+		// visual DOA remains live and independent of its audio pickup.
 		fixedDir := nearestDirection(steerAngle)
 		ch = directionToChannel[fixedDir]
-		angle = candidateAngles[fixedDir]
+		if !b.visualFollowUp {
+			angle = candidateAngles[fixedDir]
+		}
 	} else {
 		// Auto: use the channel selected at Lock() time
 		ch = b.lockedChannel
-		angle = candidateAngles[bestDir]
 	}
 
 	return b.extractChannel(raw, ch, gain), angle
@@ -420,7 +526,7 @@ func (b *Beamformer) bandDiff() {
 // into chanBuf as float32 normalised to [-1, 1]. Reuses chanBuf across
 // periods (§3.5) — every element is overwritten, no clearing needed.
 func (b *Beamformer) decodeChannels(raw []byte) {
-	for i := 0; i < periodFrames; i++ {
+	for i := 0; i < len(b.chanBuf[0]); i++ {
 		base := i * frameSize
 		for ci := 0; ci < nDirections; ci++ {
 			offset := base + ci*byteSample

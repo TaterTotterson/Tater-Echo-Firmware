@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sync"
 
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 	"os"
 	"os/exec"
 )
@@ -52,8 +52,8 @@ func (i *I2CController) Init() error {
 		return err
 	}
 
-        // privacy_brightness may not exist on all devices — ignore error
-        _ = os.WriteFile(privacyBrightnessPath, privacyBrightnessPacket, perm)
+	// privacy_brightness may not exist on all devices — ignore error
+	_ = os.WriteFile(privacyBrightnessPath, privacyBrightnessPacket, perm)
 
 	//if err = os.WriteFile(privacyBrightnessPath, privacyBrightnessPacket, perm); err != nil {
 	//	return err
@@ -92,18 +92,18 @@ func (i *I2CController) SetLEDs(LEDs ...led.Led) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	var targetColor bytes.Buffer
-    for _, curLed := range LEDs {
-        for j, storedLed := range led.Leds {
-            if curLed.ID == storedLed.ID {
-                led.Leds[j] = curLed  // update stored with incoming
-                break
-            }
-        }
-    }
-    for _, l := range led.Leds {
-        targetColor.Write(l.BuildArgument())
-    }
-    return os.WriteFile(ledFrame, targetColor.Bytes(), perm)
+	for _, curLed := range LEDs {
+		for j, storedLed := range led.Leds {
+			if curLed.ID == storedLed.ID {
+				led.Leds[j] = curLed // update stored with incoming
+				break
+			}
+		}
+	}
+	for _, l := range led.Leds {
+		targetColor.Write(l.BuildArgument())
+	}
+	return os.WriteFile(ledFrame, targetColor.Bytes(), perm)
 }
 
 func NewDefaultController() (led.Controller, error) {

@@ -244,7 +244,7 @@ def build_ramdisk(init_binary: bytes, version: str, build_id: str = "",
         f'VERSION="{version}"\n'
         f'VERSION_ID="{version}"\n'
         f'BUILD_ID="{build_id}"\n'
-        'HOME_URL="https://github.com/wilbowes/EchoMuse"\n'
+        'HOME_URL="https://github.com/TaterTotterson/Tater-Echo-Firmware"\n'
     ).encode()
 
     out = io.BytesIO()

@@ -148,3 +148,36 @@ func TestComposeConfWritesTheSSIDAndPassphraseVerbatim(t *testing.T) {
 		t.Errorf("a 64-hex PSK must be written bare:\n%s", conf)
 	}
 }
+
+func TestEmOSProvisioningConfig(t *testing.T) {
+	got, err := EmOSProvisioningConfig([]byte(`Kim's "Coffee" Haus`), `pa"ss\word`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ctrl_interface=/data/emos/sockets",
+		`ssid="Kim's "Coffee" Haus"`,
+		`psk="pa"ss\word"`,
+		"key_mgmt=WPA-PSK",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("config missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestEmOSProvisioningConfigRejectsBadInput(t *testing.T) {
+	for _, tc := range []struct {
+		ssid string
+		psk  string
+	}{
+		{"", "password"},
+		{strings.Repeat("x", 33), "password"},
+		{"Home", "short"},
+		{"Home", "bad\npassword"},
+	} {
+		if _, err := EmOSProvisioningConfig([]byte(tc.ssid), tc.psk); err == nil {
+			t.Fatalf("EmOSProvisioningConfig(%q, %q) unexpectedly succeeded", tc.ssid, tc.psk)
+		}
+	}
+}

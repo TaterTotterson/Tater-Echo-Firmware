@@ -16,7 +16,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
 )
 
 // Record is one 80ms chunk's worth of what Python computed.

@@ -1,249 +1,157 @@
 # Tater Echo Firmware
 
-Tater Echo Firmware is an early-stage Tater-native voice satellite for rooted
-Amazon Echo Dot 2nd Generation hardware. It keeps EchoMuse's proven hardware
-support—the microphone array, hardware-aligned AEC reference, speaker, LED
-ring, buttons, and recovery-safe deployment—while moving wake detection and
-the satellite protocol onto the device in the same style as the Tater Linux
-satellites.
+[![CI](https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml)
+[![Firmware](https://img.shields.io/github/v/release/TaterTotterson/Tater-Echo-Firmware?label=firmware)](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases)
+[![License: MIT](https://img.shields.io/github/license/TaterTotterson/Tater-Echo-Firmware)](LICENSE)
 
-The first complete native path is now in-tree: on-device microWakeWord,
-acknowledged two-second pre-roll, direct Tater WebSocket transport, Tater state
-animations, local WAV/MP3 playback, persistent media controls and ducking,
-local timers, optional second-STT wake verification, live settings,
-pairing-token persistence, and hash-verified A/B OTA with the inherited
-automatic rollback supervisor. The inherited EchoMuse controller path remains
-available whenever native mode is not configured. See
-[the port and test guide](docs/tater-native-port.md) for architecture, setup,
-current validation status, and the remaining real-hardware measurements.
+Tater Echo Firmware turns supported rooted Amazon Echo hardware into a native
+Tater voice satellite. Wake detection, audio capture, playback, LEDs, device
+controls, and the Tater satellite protocol all run on the Echo—no Home
+Assistant or EchoMuse controller is required.
 
-This repository preserves EchoMuse's Git history, and its original repository
-is configured locally as the `upstream` remote. The native code is ready for a
-controlled hardware test, but not yet for a fleet rollout.
+The repository is arranged for multiple Echo models. Each target has its own
+factory path while sharing the Tater-native protocol and release format. The
+current hardware-tested target is:
 
-The current hardware-test base is **amonet-biscuit v2.0.0 with emOS**. This
-fork includes upstream's FireOS 6/32-bit emOS support and the v2-specific rule
-that emOS must be written to `boot_a` while a verified stock recovery image is
-preserved in `boot_b`. The final emOS image is assembled only after the test
-Dot's own boot image has been escrowed; the repository does not redistribute
-Amazon's kernel or device trees.
+| Target | Device | Unlock base | Factory | OTA |
+|---|---|---|---:|---:|
+| `biscuit` | Echo Dot 2nd Generation (2016) | amonet-biscuit v2.0.0 | Yes | Yes |
 
-## EchoMuse upstream overview
-
-**Turn an old Amazon Echo Dot (2nd gen) into a local voice assistant for Home Assistant.**
-
-[![CI](https://github.com/wilbowes/EchoMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/wilbowes/EchoMuse/actions/workflows/ci.yml)
-[![Firmware](https://img.shields.io/github/v/release/wilbowes/EchoMuse?filter=v*&label=firmware)](https://github.com/wilbowes/EchoMuse/releases)
-[![emOS](https://img.shields.io/github/v/release/wilbowes/EchoMuse?filter=emos-v*&label=emOS)](https://github.com/wilbowes/EchoMuse/releases)
-[![Controller](https://img.shields.io/github/v/tag/wilbowes/EchoMuse?filter=controller-v*&label=controller)](https://github.com/wilbowes/EchoMuse/pkgs/container/echomuse-controller)
-[![License: MIT](https://img.shields.io/github/license/wilbowes/EchoMuse)](LICENSE)
-
-**Join the community —
-[Discord](https://discord.gg/Bb5GfuV7Sa) ·
-[r/echomuse](https://www.reddit.com/r/echomuse/)**
-
-<!-- Demo video goes here. -->
-
-EchoMuse makes a second-hand Echo Dot a voice satellite for
-[Home Assistant](https://www.home-assistant.io/voice_control/): say the wake
-word, ask something, and hear the answer from the Dot. There is no Amazon
-account, no Alexa and no cloud service of ours. The Dot shows up in Home
-Assistant as an ordinary ESPHome voice satellite, so there is nothing extra to
-install there.
-
-## At a glance
-
-**What it is**
-
-- A replacement for the software on an **Echo Dot 2nd generation (2016)**. Its
-  microphones, speaker, LED ring and buttons all work.
-- A **controller** you run on your own network, as a Home Assistant add-on or
-  a Docker container. It detects the wake word, manages your devices and has
-  a web dashboard.
-- A way to reuse hardware that sells second-hand for very little.
-
-**What it isn't**
-
-- **Not Alexa.** No Alexa skills, shopping, calling, Drop In or Amazon
-  account. The assistant is Home Assistant's Assist, so it can do what your
-  Home Assistant can do.
-- **Not standalone.** You need a working Home Assistant with an
-  [Assist pipeline](https://www.home-assistant.io/voice_control/). Home
-  Assistant does the speech recognition, the understanding and the voice.
-- **Not ready out of the box.** The Dot needs a one-time unlock over USB with
-  R0rt1z2's tool first. Follow the instructions and it is straightforward. If
-  a step goes wrong the Dot can end up soft-bricked, and the
-  [XDA thread](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
-  covers recovering it.
-- **Not for other Echo models, yet.** Only the Echo Dot 2nd gen works today.
-  Ports to the Echo Dot 3, Echo 2 and Echo Show 8 are in progress with
-  community help.
-- **Not affiliated with Amazon.**
-
-## What you need
-
-| | |
-|---|---|
-| An Echo Dot 2nd gen | The hardware being repurposed. |
-| Home Assistant | With a working Assist pipeline. |
-| An always-on computer | Runs the controller. The Home Assistant machine itself is fine if it runs add-ons. |
-| A Linux computer (a live USB works) and a micro-USB cable, once | To unlock the Dot. The unlock does not run on macOS. |
-| Chrome or Edge, once | The setup wizard talks to the Dot over USB from the browser. |
-
-## Getting started
-
-1. **Unlock the Dot** with R0rt1z2's
-   [amonet-biscuit](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/).
-   Either version works: v1.1.0 leaves it on FireOS 5, v2.0.0 moves it to
-   FireOS 6. The [rooting guide](docs/rooting.md) explains the choice. **You
-   do this at your own risk.**
-2. **Start the controller**, as an add-on:
-
-   [![Add the EchoMuse repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fwilbowes%2FEchoMuse)
-
-   or with Docker:
-
-   ```bash
-   mkdir echomuse && cd echomuse
-   curl -O https://raw.githubusercontent.com/wilbowes/EchoMuse/main/controller/docker-compose.deploy.yml
-   curl -o .env https://raw.githubusercontent.com/wilbowes/EchoMuse/main/controller/.env.example
-   docker compose -f docker-compose.deploy.yml up -d
-   ```
-3. **Run the setup wizard** from the dashboard with the Dot plugged in over
-   USB. It installs everything and joins your WiFi. Approve the Dot in the
-   dashboard and Home Assistant discovers it.
-
-The [quickstart](docs/quickstart.md) walks through all three.
-
-### emOS or FireOS?
-
-The wizard offers two ways to run EchoMuse on the Dot:
-
-- **emOS** (the default) replaces Amazon's Android with our own small Linux
-  userspace, keeping only the Dot's kernel. It runs on FireOS 5 and FireOS 6
-  devices, and the 3.5mm jack works properly on it. The wizard keeps a copy of
-  your original boot image, and restoring it takes about ten seconds.
-- **FireOS with root** keeps Amazon's Android 5 and runs EchoMuse on top. FireOS
-  5 only. It is the older path, with the most hours behind it.
+Machine-readable target data lives in [`targets/targets.json`](targets/targets.json).
 
 ## Features
 
-- **Voice turns through Assist**, with the answer played on the Dot.
-- **Wake word on the controller or on the Dot.** By default the controller
-  listens for the wake word. The Dot can do it itself instead: switch it on
-  in the dashboard's wake word settings, for every Dot or just one. If a Dot can't (older firmware, or its wake
-  word model isn't installed yet), the controller takes over, so it never
-  goes deaf.
-- **Barge-in:** say the wake word over a reply to interrupt it.
-- **More than one Dot:** the first to hear the wake word answers and the rest
-  stay quiet.
-- **Music:** each Dot is a Home Assistant media player (media browser, Music
-  Assistant, radio). Speaking over music lowers it under the answer rather
-  than pausing it.
-- **Timers and announcements** from Home Assistant.
-- **Custom wake words** you train yourself with [`oww_forge`](oww_forge/README.md)
-  and install from the dashboard.
-- **Extras in Home Assistant:** a Bluetooth proxy per Dot (handy with
-  [Bermuda](https://github.com/agittins/bermuda)), an ambient light sensor on
-  Dots that have one, and the action button as an event you can automate.
-- **A dashboard** for setup, updates, per-device settings (EQ, LED ring, mic
-  tuning), logs and a history of voice turns.
-- **Firmware updates over WiFi**, with automatic rollback if a new version
-  fails to start. emOS itself is updated by re-running the wizard, for now
-  ([#573](https://github.com/wilbowes/EchoMuse/issues/573)).
+- On-device microWakeWord with live wake-word/model changes from Tater.
+- Wake audio upload for the trainer and optional second-STT wake verification.
+- User-selected wake sounds, including bundled defaults that work offline.
+- Tater-controlled LED animations, real-time direction-of-arrival, and reply
+  direction held toward the speaker.
+- Continued conversation/reopen-mic, barge-in, media playback, ducking, volume,
+  mute, timers, and announcements.
+- BLE presence advertisements for Tater's room-level presence system.
+- First-boot Wi-Fi and Tater pairing portal—no browser USB wizard required.
+- SHA-256 verified A/B OTA with automatic userspace rollback after fast crashes.
 
-## Privacy
+See [`docs/tater-native-port.md`](docs/tater-native-port.md) for the protocol,
+runtime layout, and detailed validation notes.
 
-- **The Echo listens for its wake word itself.** Nothing leaves it until it
-  hears the wake word. Then what you say goes to the controller on your LAN
-  and on to Home Assistant, and stops when you stop speaking. Where it goes
-  after that depends on your Assist pipeline (fully local with Whisper and
-  Piper, or a cloud service if you chose one). A false wake sends a few
-  seconds of audio you didn't mean to; that is true of every wake word
-  system, Amazon's included. [How it works](docs/listening.md).
-- **You can detect the wake word on the controller instead**, per Echo. That
-  Echo then streams its microphone to the controller all the time, on your
-  LAN and nowhere else, and the dashboard says so. Installs from before this
-  keep their existing setting until you change it (Config → Wake word
-  detection). Firmware that predates it streams in every mode and is labelled
-  that way until you update it.
-- **No telemetry.** No analytics, no install counter. The controller only
-  connects out to GitHub, to check for and download releases, and you can set
-  how often it checks ([details](docs/configuration.md#what-leaves-your-network)).
-- **The mute button is a software mute.** It silences the microphones in the
-  audio chip and EchoMuse refuses to listen while it is on, but the Dot 2 has
-  no hardware switch that disconnects them.
+## Install on an Echo Dot 2
 
-## Status and known issues
+First complete the
+[amonet-biscuit v2.0.0 unlock, FireOS 6 flash, and root steps](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/).
+Then:
 
-EchoMuse is in active development and runs daily on a small fleet. emOS is
-newer than FireOS and has fewer device-hours behind it. Open issues worth
-knowing before you start:
+1. Boot the Echo into TWRP (white LED ring) and connect USB.
+2. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz` from the
+   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases).
+3. On macOS or Linux, run:
 
-- The 3.5mm jack: unplugging can stall the microphone for about 30 seconds ([#117](https://github.com/wilbowes/EchoMuse/issues/117),
-  [#141](https://github.com/wilbowes/EchoMuse/issues/141)).
-- emOS on FireOS 6 cannot join WPA3 networks: the WiFi driver has no support
-  for it. Use WPA2 ([#536](https://github.com/wilbowes/EchoMuse/issues/536)).
-- An announcement during a ringing timer can't be heard
-  ([#373](https://github.com/wilbowes/EchoMuse/issues/373)).
+   ```bash
+   ./install.sh
+   ```
 
-Everything else is in the [issue tracker](https://github.com/wilbowes/EchoMuse/issues).
+4. After reboot, join the `Tater-Setup-XXXX` Wi-Fi network and use the captive
+   page to select Wi-Fi and pair the satellite with Tater.
 
-## Getting help
+The host only needs Python 3 and `adb`. The script refuses to proceed unless it
+sees TWRP and the Biscuit A/B partition layout, asks for an explicit `INSTALL`
+confirmation, verifies the release manifest, reads both boot slots, and reads
+back every partition write before rebooting.
 
-- **Questions and bugs about EchoMuse go to
-  [our issues](https://github.com/wilbowes/EchoMuse/issues), not to the XDA
-  thread.** The thread is for the unlock only.
-- Check the [FAQ](docs/faq.md) first.
-- Attach a support bundle (Dashboard → Support → Download bundle). It holds
-  the logs and versions we need, with transcripts, recordings and network
-  names removed.
+The archive contains **no Amazon kernel or device trees**. It builds the final
+emOS image on your computer from the attached Echo's own stock boot partition.
+A private recovery image is stored under `factory-backups/`, and stock remains
+in `boot_b`. Never publish that backup; it contains code from your device.
 
-## Documentation
+Installer details and recovery options are in
+[`factory/biscuit/README.md`](factory/biscuit/README.md).
 
-| | |
+## Releases
+
+An annotated `vX.Y.Z` tag builds two artifacts for each supported model:
+
+| Artifact | Purpose |
 |---|---|
-| [Quickstart](docs/quickstart.md) | From nothing to talking to your Dot. |
-| [Rooting](docs/rooting.md) | Unlocking the Dot, and which amonet version to use. |
-| [Configuration](docs/configuration.md) | Every setting, in plain language. |
-| [FAQ](docs/faq.md) | Common problems and their fixes. |
-| [emOS](emos/README.md) | How our own userspace on the Dot works. |
-| [How the voice pipeline works](docs/voice-pipeline.md) | The path from wake word to answer. |
-| [Device ↔ controller protocol](docs/device-controller-interface.md) | For porting EchoMuse to new hardware. |
-| [Contributing](CONTRIBUTING.md) | Building from source, tests, and how to send changes. |
-| [Engineering journal](JOURNAL.md) | How each part was worked out, including the dead ends. |
+| `tater-echo-biscuit-vX.Y.Z-factory.tar.gz` | Complete post-amonet installation and recovery bundle |
+| `tater-echo-biscuit-vX.Y.Z-ota.bin` | Device-independent Tater userspace update over Wi-Fi |
+| `firmware-manifest.json` | Target, compatibility, file sizes, and SHA-256 hashes |
+| `SHA256SUMS` | Human/tool verification of every release artifact |
 
-## How it's built
+The same build also publishes the exact BusyBox source and license inside the
+factory archive. GitHub's Actions artifact is produced for manual workflow
+runs; pushing an annotated version tag additionally creates a GitHub Release.
 
-EchoMuse is written largely with [Claude](https://www.anthropic.com/claude),
-Anthropic's AI model, directed by the maintainer. More than half
-the commits carry a `Co-Authored-By: Claude` line, and replies on our issues
-are signed "Team EchoMuse (powered by Claude)". Nothing about that is hidden.
+Example:
 
-## Credits
+```bash
+git tag -a v0.1.0 --cleanup=verbatim
+git push origin v0.1.0
+```
 
-EchoMuse would not exist without:
+The tag annotation becomes the release notes. See
+[`docs/firmware-releases.md`](docs/firmware-releases.md) for the artifact and
+OTA contract.
 
-- **R0rt1z2**, for [amonet-biscuit](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/),
-  the unlock that everything here depends on.
-- **Binozo**, for [EchoGo](https://github.com/Binozo/EchoGo), the original SDK
-  for this hardware, and [GoTinyAlsa](https://github.com/Binozo/GoTinyAlsa).
-- **Dragon863**, for [EchoCLI](https://github.com/Dragon863/EchoCLI).
-- **David Scripka**, for [openWakeWord](https://github.com/dscripka/openWakeWord).
-- **Xiph.Org**, for [SpeexDSP](https://gitlab.xiph.org/xiph/speexdsp) (the echo
-  canceller), and **Nils L. Westhausen**, for [DTLN](https://github.com/breizhn/DTLN)
-  (noise suppression).
-- **Home Assistant and ESPHome**, whose open voice stack EchoMuse plugs into.
-- Everyone who has [contributed code](https://github.com/wilbowes/EchoMuse/graphs/contributors),
-  filed issues or tested on their own hardware.
+## OTA status
 
-## Licence
+The Echo firmware side is ready for Tater-managed OTA. Tater sends an
+`ota.url` command containing the release URL, SHA-256, and size. The Echo:
 
-EchoMuse is [MIT licensed](LICENSE). It includes third-party components that
-keep their own licences, listed with their copyright notices in
-[NOTICE.md](NOTICE.md). emOS releases also ship busybox (GPL-2.0), with its
-source and licence attached to each release, and wpa_supplicant (BSD).
+1. downloads to the inactive `server_a`/`server_b` slot;
+2. verifies the exact size, SHA-256, and ELF header;
+3. atomically switches the active symlink and restarts; and
+4. rolls back after three fast startup failures.
 
-Amazon, Echo, Echo Dot, Alexa and FireOS are trademarks of Amazon.com, Inc. or
-its affiliates. EchoMuse is an independent project, not affiliated with or
-endorsed by Amazon.
+The remaining integration is in the Tater application: resolve this
+repository's `firmware-manifest.json`, select the artifact matching the Echo's
+target, and send the existing OTA command. That is intentionally the next
+step; the release contract in this repository is now stable for it.
+
+## Development
+
+Build the device firmware with the pinned Android compiler image:
+
+```bash
+docker build -t echomuse-compiler device/compiler/
+cd device
+./compile.sh
+./build_microwakeword_runtime.sh
+./test_microwakeword_runtime.sh
+```
+
+Run the Go and installer regression tests:
+
+```bash
+cd device && go test -race ./internal/taternative ./internal/wakeword/microwakeword ./internal/beamformer ./internal/server
+cd .. && python3 -m unittest factory.biscuit.test_install
+```
+
+Release builds run in GitHub Actions because emOS also needs pinned static ARM
+builds of `init32`, `wpa_supplicant`, and BusyBox.
+
+## Adding another Echo model
+
+Add target metadata to [`targets/targets.json`](targets/targets.json), a
+target-specific installer under `factory/<codename>/`, its release build job,
+and hardware-backed partition/boot tests. Do not assume another Echo shares
+Biscuit's partition map, kernel architecture, LED controller, microphone
+topology, or recovery procedure.
+
+## Upstream and license
+
+This project is derived from [EchoMuse](https://github.com/wilbowes/EchoMuse)
+and preserves its Git history. EchoMuse supplied the mature Biscuit hardware
+support, emOS boot tooling, and recovery-safe A/B userspace deployment that the
+Tater-native implementation builds on. The `upstream` Git remote remains the
+original project so relevant hardware fixes can be reviewed and merged.
+
+Credit also goes to R0rt1z2 for amonet-biscuit, Binozo for EchoGo and
+GoTinyAlsa, Dragon863 for EchoCLI, the microWakeWord and TensorFlow Lite
+Micro projects, Xiph.Org for SpeexDSP, and every EchoMuse contributor and
+hardware tester.
+
+The repository is [MIT licensed](LICENSE), with third-party terms documented
+in [NOTICE.md](NOTICE.md). BusyBox is GPL-2.0; each factory release includes
+the exact corresponding source, license, and build script. Amazon, Echo, Echo
+Dot, Alexa, and FireOS are trademarks of Amazon.com, Inc. or its affiliates.
+This project is independent and is not affiliated with or endorsed by Amazon.

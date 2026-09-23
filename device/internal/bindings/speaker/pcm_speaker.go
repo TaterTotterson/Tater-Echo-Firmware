@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/bindings/codec"
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
-	"github.com/wilbowes/EchoMuse/internal/outchain"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/codec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 
 	"github.com/Binozo/GoTinyAlsa/pkg/pcm"
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
@@ -22,7 +22,7 @@ import (
 
 // cardNr/deviceNr live in pcmstatus.go so the host test can pin them against
 // the status path — this file is ARM-only (build tag `server`).
-const periodSize  = 2048
+const periodSize = 2048
 
 // The hardware tier: what ALSA holds ahead of the DAC. It is sized ONLY for
 // this loop's scheduling lateness — WiFi is the deep queue's job — and every
@@ -572,6 +572,24 @@ func (p *PcmSpeaker) VoiceAudible(hold time.Duration) bool {
 	return p.voice.playedWithin(time.Now(), hold)
 }
 
+// WaitVoiceIdle blocks until all queued voice audio has actually left the
+// speaker. PumpPeriod only waits for room in the deep queue, so returning as
+// soon as the final period is queued can precede the audible end by several
+// seconds. The small hold also covers the final ~85ms already handed to ALSA.
+func (p *PcmSpeaker) WaitVoiceIdle(ctx context.Context) error {
+	const hardwareDrainHold = 150 * time.Millisecond
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for p.VoiceAudible(hardwareDrainHold) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
 // MusicAudible is VoiceAudible for the music plane.
 func (p *PcmSpeaker) MusicAudible(hold time.Duration) bool {
 	return p.music.playedWithin(time.Now(), hold)
@@ -587,15 +605,15 @@ func (p *PcmSpeaker) EndStream() { p.voice.endStream() }
 func (p *PcmSpeaker) EndMusicStream() { p.music.endStream() }
 
 // Flush cuts a playing VOICE stream immediately (barge-in). Two parts:
-//   1. Drain the buffer — kills up to ~5.5s already queued on-device.
-//   2. Arm discarding (if a stream is mid-flight) — subsequent periods of
-//      this stream are dropped until its EOS arrives. Necessary because the
-//      controller writes the whole response into the WebSocket ahead of
-//      playback: at barge time the rest of the stream is already in TCP
-//      buffers and would refill the channel right after the drain (the
-//      pre-2026-07-08 version drained only, and playback resumed after a
-//      ~1.3s skip). The controller sends the EOS on the cancel path too, so
-//      the discard always terminates.
+//  1. Drain the buffer — kills up to ~5.5s already queued on-device.
+//  2. Arm discarding (if a stream is mid-flight) — subsequent periods of
+//     this stream are dropped until its EOS arrives. Necessary because the
+//     controller writes the whole response into the WebSocket ahead of
+//     playback: at barge time the rest of the stream is already in TCP
+//     buffers and would refill the channel right after the drain (the
+//     pre-2026-07-08 version drained only, and playback resumed after a
+//     ~1.3s skip). The controller sends the EOS on the cancel path too, so
+//     the discard always terminates.
 //
 // Up to alsaBufferFrames (~85ms) already handed to the hardware
 // still play — cutting those needs a stream restart, which costs more in

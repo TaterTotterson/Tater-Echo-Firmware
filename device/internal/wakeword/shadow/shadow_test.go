@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
 )
 
 // fakeInferer stands in for ONNX Runtime: it returns correctly shaped tensors

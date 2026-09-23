@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
 )
 
 // Needs the runtime and openwakeword's silero_vad.onnx, so it skips without:

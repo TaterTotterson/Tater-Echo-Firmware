@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	internalLed "github.com/wilbowes/EchoMuse/internal/bindings/led"
-	"github.com/wilbowes/EchoMuse/pkg/buttons"
-	"github.com/wilbowes/EchoMuse/pkg/led"
-	"github.com/wilbowes/EchoMuse/pkg/mic"
-	"github.com/wilbowes/EchoMuse/pkg/speaker"
+	internalLed "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/mic"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 	"golang.org/x/sys/unix"
 )
 
@@ -58,6 +58,29 @@ type Server struct {
 	// audioLevel holds the live speaker RMS as float64 bits — written by
 	// the speaker's ALSA pump via SetAudioLevel, read by the meter anim.
 	audioLevel atomic.Uint64
+
+	// directionAngle is the most recent beamformer bearing. Listening uses
+	// it for the directional marker; voice_ring reuses it so a response can
+	// bloom from the direction in which the user spoke.
+	directionAngle atomic.Uint64
+	directionKnown atomic.Bool
+	// directionPosition is the smoothed LED-space bearing used only for the
+	// listening visual. Guarded by baseLEDsMu with the base frame it paints.
+	directionPosition      float64
+	directionPositionKnown bool
+	// directionTarget is the latest acoustic bearing. Movement begins on its
+	// first observation so short phrases are visible, while interpolation and
+	// a per-frame step cap prevent a noisy sample teleporting across the ring.
+	directionTarget      int
+	directionTargetKnown bool
+	// lastSpeechPosition is the smoothed bearing from the most recent period
+	// classified as near-end speech. Trailing silence/noise may move the live
+	// listening beam but cannot choose the subsequent reply animation.
+	lastSpeechPosition      float64
+	lastSpeechPositionKnown bool
+	directionSpeechStarted  bool
+	replyDirection          int
+	replyDirectionKnown     bool
 
 	// volumeSeeded is true once the device has an authoritative volume this
 	// run: seeded from the controller's stored startupVolume on the first
@@ -327,23 +350,73 @@ func (s *Server) LEDModeSystem() { s.SetLEDMode(ledModeSystem) }
 // LEDModeDirection releases the LED ring back to the beamformer arc.
 func (s *Server) LEDModeDirection() { s.SetLEDMode(ledModeDirection) }
 
-// SetDirectionLEDs overlays a direction marker onto the current LED ring state.
+// SetDirectionLEDs overlays a direction marker and treats it as speech. Kept
+// as the simple API for callers/tests without VAD metadata.
 func (s *Server) SetDirectionLEDs(angleDeg float64) {
+	s.SetDirectionObservation(angleDeg, true, true)
+}
+
+// SetDirectionObservation overlays a live DOA marker. activity is a lenient
+// acoustic threshold used to leave the neutral glow; speech is the stricter
+// turn-gate decision used only for reply-direction memory.
+func (s *Server) SetDirectionObservation(angleDeg float64, activity, speech bool) {
 	if angleDeg < 0 {
 		return
 	}
 	// Same paint suppressions as SetLEDs: the volume arc owns the ring for
 	// its display window, and the mute ring is device-sovereign.
-	if s.volume.DisplayActive() || s.mute.IsMuted() {
+	if (s.volume != nil && s.volume.DisplayActive()) || (s.mute != nil && s.mute.IsMuted()) {
 		return
 	}
 
 	s.baseLEDsMu.Lock()
-	listening := s.listeningLEDs
-	s.baseLEDsMu.Unlock()
-	if !listening {
+	if !s.listeningLEDs {
+		s.baseLEDsMu.Unlock()
 		return
 	}
+	// Match the other native satellites: the solid listening colour owns the
+	// ring until near-end speech is heard. During pauses, hold the last beam
+	// instead of letting room noise make it wander.
+	if !activity {
+		s.baseLEDsMu.Unlock()
+		return
+	}
+	s.directionSpeechStarted = true
+	const ledOffset = 240.0
+	target := math.Mod(angleDeg-ledOffset+360, 360) / 30
+	targetIndex := int(math.Floor(target+0.5)) % 12
+	if !s.directionPositionKnown {
+		s.directionPosition = target
+		s.directionPositionKnown = true
+		s.directionTarget = targetIndex
+		s.directionTargetKnown = true
+	} else {
+		s.directionTarget = targetIndex
+		s.directionTargetKnown = true
+
+		delta := float64(s.directionTarget) - s.directionPosition
+		if delta > 6 {
+			delta -= 12
+		} else if delta < -6 {
+			delta += 12
+		}
+		step := delta * 0.65
+		if step > 1.5 {
+			step = 1.5
+		} else if step < -1.5 {
+			step = -1.5
+		}
+		s.directionPosition = math.Mod(s.directionPosition+step+12, 12)
+	}
+	position := s.directionPosition
+	if speech {
+		s.lastSpeechPosition = position
+		s.lastSpeechPositionKnown = true
+	}
+	base := s.baseLEDs
+	s.baseLEDsMu.Unlock()
+	s.directionAngle.Store(math.Float64bits(angleDeg))
+	s.directionKnown.Store(true)
 
 	s.ledMu.Lock()
 	lc := s.ledController
@@ -352,53 +425,98 @@ func (s *Server) SetDirectionLEDs(angleDeg float64) {
 		return
 	}
 
-	const (
-		nLEDs     = 12
-		ledOffset = 240
-	)
-
-	normAngle := int(math.Round(angleDeg/30)) * 30
-	primary := ((normAngle - ledOffset + 360) % 360) / 30 % nLEDs
-	secondary := (primary + 1) % nLEDs
-	tertiary := (primary + nLEDs - 1) % nLEDs
-
-	s.baseLEDsMu.Lock()
-	base := s.baseLEDs
-	s.baseLEDsMu.Unlock()
-
-	leds := make([]led.Led, nLEDs)
-	for i := range leds {
-		leds[i] = base[i]
-		leds[i].ID = i
-	}
-
-	// Scene-agnostic highlight: brighten the base ring colour toward white
-	// rather than painting hardcoded green — the listening ring can be any
-	// colour now (LED scenes), and a green marker on e.g. a crimson ring
-	// read as a glitch. Primary gets a strong lift, neighbours a soft one.
-	brighten := func(l led.Led, add int) led.Led {
-		l.R = clampAdd(l.R, add)
-		l.G = clampAdd(l.G, add)
-		l.B = clampAdd(l.B, add)
-		return l
-	}
-	leds[primary] = brighten(base[primary], 150)
-	leds[secondary] = brighten(base[secondary], 60)
-	leds[tertiary] = brighten(base[tertiary], 60)
-	leds[primary].ID, leds[secondary].ID, leds[tertiary].ID = primary, secondary, tertiary
+	leds := directionalFrame(base, position)
 
 	if err := lc.SetLEDs(leds...); err != nil {
 		log.Printf("SetDirectionLEDs error: %v", err)
 	}
 }
 
-// clampAdd adds delta to v, clamping to 255.
-func clampAdd(v uint8, delta int) uint8 {
-	result := int(v) + delta
-	if result > 255 {
-		return 255
+// directionalFrame turns the selected listening colour into a narrow beam:
+// a warm-white tip at the measured bearing, two coloured shoulder pixels,
+// and only a dim ownership glow elsewhere. Unlike the previous three-pixel
+// highlight over a fully lit ring, the direction is legible across the room.
+func directionalFrame(base [12]led.Led, position float64) []led.Led {
+	frame := make([]led.Led, 12)
+	for i := range frame {
+		pixel := base[i]
+		brightness := math.Max(float64(pixel.R), math.Max(float64(pixel.G), float64(pixel.B))) / 255
+		distance := ringDistance(float64(i), position)
+		beam := math.Max(0, 1-distance/3.2)
+		colorLevel := 0.035 + beam*0.55
+		tip := math.Max(0, 1-distance/1.15) * 0.72 * brightness
+		frame[i] = led.Led{
+			ID: i,
+			R:  clampChannel(float64(pixel.R)*colorLevel + 255*tip),
+			G:  clampChannel(float64(pixel.G)*colorLevel + 240*tip),
+			B:  clampChannel(float64(pixel.B)*colorLevel + 170*tip),
+		}
 	}
-	return uint8(result)
+	return frame
+}
+
+func (s *Server) directionLEDIndex() int {
+	s.baseLEDsMu.Lock()
+	if s.replyDirectionKnown {
+		index := s.replyDirection
+		s.baseLEDsMu.Unlock()
+		return index
+	}
+	if s.directionPositionKnown {
+		index := int(math.Floor(s.directionPosition+0.5)) % 12
+		s.baseLEDsMu.Unlock()
+		return index
+	}
+	s.baseLEDsMu.Unlock()
+	if !s.directionKnown.Load() {
+		return 0
+	}
+	const ledOffset = 240
+	angle := math.Float64frombits(s.directionAngle.Load())
+	normalized := int(math.Round(angle/30)) * 30
+	return ((normalized - ledOffset + 360) % 360) / 30 % 12
+}
+
+// Direction returns the latest live beamformer bearing.
+func (s *Server) Direction() (float64, bool) {
+	if !s.directionKnown.Load() {
+		return 0, false
+	}
+	return math.Float64frombits(s.directionAngle.Load()), true
+}
+
+// ClearDirection marks the previous turn's bearing stale and resets the
+// smoothing anchor so the next person is shown immediately rather than
+// animating around the ring from an old room position.
+func (s *Server) ClearDirection() {
+	s.directionKnown.Store(false)
+	s.baseLEDsMu.Lock()
+	s.directionPositionKnown = false
+	s.directionTargetKnown = false
+	s.directionTarget = 0
+	s.lastSpeechPosition = 0
+	s.lastSpeechPositionKnown = false
+	s.directionSpeechStarted = false
+	s.replyDirectionKnown = false
+	s.replyDirection = 0
+	s.baseLEDsMu.Unlock()
+}
+
+// endDirectionalListening freezes the accumulated turn direction without
+// clearing it. Reply animations consume that memory after listening ends.
+func (s *Server) endDirectionalListening() {
+	s.baseLEDsMu.Lock()
+	if s.lastSpeechPositionKnown {
+		s.replyDirection = int(math.Floor(s.lastSpeechPosition+0.5)) % 12
+		s.replyDirectionKnown = true
+	} else if s.directionPositionKnown {
+		// Fail open for rooms where the local VAD never asserts: preserve the
+		// direction the user actually saw rather than defaulting to LED zero.
+		s.replyDirection = int(math.Floor(s.directionPosition+0.5)) % 12
+		s.replyDirectionKnown = true
+	}
+	s.listeningLEDs = false
+	s.baseLEDsMu.Unlock()
 }
 
 // SetLEDs applies LED state directly — called by the controller client.
@@ -434,12 +552,27 @@ func (s *Server) SetLEDs(leds []led.Led, listeningHint *bool) {
 		}
 	}
 	s.baseLEDsMu.Lock()
+	wasListening := s.listeningLEDs
 	for _, l := range leds {
 		if l.ID >= 0 && l.ID < 12 {
 			s.baseLEDs[l.ID] = l
 		}
 	}
 	s.listeningLEDs = listeningRing
+	if listeningRing && !wasListening {
+		// A new listening state is a new turn, including the microphone reopen
+		// after a continued-chat reply. Start it without the previous user's
+		// bearing; the first fresh DOA sample paints immediately.
+		s.directionKnown.Store(false)
+		s.directionPositionKnown = false
+		s.directionTargetKnown = false
+		s.directionTarget = 0
+		s.lastSpeechPosition = 0
+		s.lastSpeechPositionKnown = false
+		s.directionSpeechStarted = false
+		s.replyDirectionKnown = false
+		s.replyDirection = 0
+	}
 	s.baseLEDsMu.Unlock()
 	if suppressPaint(s.volume.DisplayActive(), s.mute.IsMuted(), s.LinkDown()) {
 		return

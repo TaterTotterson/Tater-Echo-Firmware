@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 	"github.com/gorilla/websocket"
-	"github.com/wilbowes/EchoMuse/internal/aec"
 )
 
 // The fake mic is loud and patterned, which the RMS threshold calls speech —

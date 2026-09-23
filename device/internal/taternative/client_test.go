@@ -3,6 +3,7 @@ package taternative
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -174,5 +175,203 @@ func TestVoiceSegmentsPlayInOrderAndFinishOnce(t *testing.T) {
 		case <-deadline.C:
 			t.Fatalf("timed out; playback.finished count = %d", completions)
 		}
+	}
+}
+
+func TestIntentEndContinuationReopensAfterPlayback(t *testing.T) {
+	played := make(chan PlayRequest, 1)
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		PlayVoice: func(_ context.Context, req PlayRequest) error {
+			played <- req
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{
+		"event": "INTENT_END",
+		"data": map[string]any{
+			"continue_conversation": true,
+			"conversation_id":       "conversation-1",
+		},
+	}})
+	c.handle(Envelope{Type: "play.url", Payload: map[string]any{
+		"url": "https://audio.test/follow-up.wav",
+	}})
+
+	select {
+	case req := <-played:
+		if !req.ContinueConversation || req.ConversationID != "conversation-1" {
+			t.Fatalf("play request continuation = %t, conversation = %q", req.ContinueConversation, req.ConversationID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow-up response did not play")
+	}
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case frame := <-c.out:
+			if frame.kind != websocket.TextMessage {
+				continue
+			}
+			var message Envelope
+			if err := json.Unmarshal(frame.data, &message); err != nil {
+				t.Fatal(err)
+			}
+			if message.Type != "voice.start" {
+				continue
+			}
+			if source := stringValue(message.Payload["source"]); source != "continued_chat" {
+				t.Fatalf("voice.start source = %q", source)
+			}
+			if conversationID := stringValue(message.Payload["conversation_id"]); conversationID != "conversation-1" {
+				t.Fatalf("voice.start conversation_id = %q", conversationID)
+			}
+			return
+		case <-deadline.C:
+			t.Fatal("continued-chat voice.start was not sent")
+		}
+	}
+}
+
+func TestContinuedChatSettingPreventsMicrophoneReopen(t *testing.T) {
+	played := make(chan PlayRequest, 1)
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		PlayVoice: func(_ context.Context, req PlayRequest) error {
+			played <- req
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.stateMu.Lock()
+	c.settings["continued_chat"] = false
+	c.stateMu.Unlock()
+
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{
+		"event": "INTENT_END",
+		"data": map[string]any{
+			"continue_conversation": true,
+			"conversation_id":       "conversation-1",
+		},
+	}})
+	c.handle(Envelope{Type: "play.url", Payload: map[string]any{
+		"url": "https://audio.test/no-follow-up.wav",
+	}})
+	select {
+	case <-played:
+	case <-time.After(2 * time.Second):
+		t.Fatal("response did not play")
+	}
+
+	deadline := time.NewTimer(ttsSegmentGrace + 500*time.Millisecond)
+	defer deadline.Stop()
+	for {
+		select {
+		case frame := <-c.out:
+			if frame.kind != websocket.TextMessage {
+				continue
+			}
+			var message Envelope
+			if err := json.Unmarshal(frame.data, &message); err != nil {
+				t.Fatal(err)
+			}
+			if message.Type == "voice.start" {
+				t.Fatal("continued-chat voice.start was sent while the setting was disabled")
+			}
+		case <-deadline.C:
+			if got := c.State(); got != "idle" {
+				t.Fatalf("state = %q, want idle", got)
+			}
+			return
+		}
+	}
+}
+
+func TestLateRunEndDoesNotClobberContinuedListening(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+
+	if !c.startContinued("conversation-1") {
+		t.Fatal("continued-chat voice.start was not accepted")
+	}
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{"event": "RUN_END"}})
+
+	if got := c.State(); got != "listening" {
+		t.Fatalf("state after late RUN_END = %q, want listening", got)
+	}
+	if !c.voiceCaptureInProgress() {
+		t.Fatal("late RUN_END closed the continued-chat microphone")
+	}
+
+	// The RUN_END for the continued run itself arrives after STT_END has
+	// closed capture and should still return the device to idle normally.
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{"event": "STT_END"}})
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{"event": "RUN_END"}})
+	if got := c.State(); got != "idle" {
+		t.Fatalf("completed continued run state = %q, want idle", got)
+	}
+}
+
+func TestHeartbeatQueuesWebSocketPingAndStatus(t *testing.T) {
+	c, err := New(Config{
+		URL: "ws://tater.test", DeviceID: "echo-test", Heartbeat: time.Millisecond,
+	}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.heartbeat(ctx) }()
+
+	seenPing := false
+	seenStatus := false
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for !seenPing || !seenStatus {
+		select {
+		case frame := <-c.out:
+			switch frame.kind {
+			case websocket.PingMessage:
+				seenPing = true
+			case websocket.TextMessage:
+				var message Envelope
+				if err := json.Unmarshal(frame.data, &message); err != nil {
+					t.Fatal(err)
+				}
+				if message.Type == "status" {
+					seenStatus = true
+				}
+			}
+		case <-deadline.C:
+			t.Fatalf("heartbeat frames missing: ping=%t status=%t", seenPing, seenStatus)
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("heartbeat returned %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not stop after cancellation")
 	}
 }

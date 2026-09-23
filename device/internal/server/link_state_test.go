@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
 
 // A muted device that lost its controller sat there showing the red mute

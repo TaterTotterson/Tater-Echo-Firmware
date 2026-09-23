@@ -4,9 +4,9 @@ import (
 	"log"
 	"sync"
 
-	internalLed "github.com/wilbowes/EchoMuse/internal/bindings/led"
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	internalLed "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
 
 type muteController struct {

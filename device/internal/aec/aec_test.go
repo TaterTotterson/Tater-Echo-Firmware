@@ -451,9 +451,9 @@ func TestPlaybackLevelScaleIsTheCodecLaw(t *testing.T) {
 		level int
 		want  float64
 	}{
-		{127, 1.0},      // unity
-		{87, 0.1},       // -20dB
-		{47, 0.01},      // -40dB, the button floor
+		{127, 1.0}, // unity
+		{87, 0.1},  // -20dB
+		{47, 0.01}, // -40dB, the button floor
 	} {
 		c.SetPlaybackLevel(tc.level)
 		if math.Abs(c.refScale-tc.want) > tc.want*0.001 {

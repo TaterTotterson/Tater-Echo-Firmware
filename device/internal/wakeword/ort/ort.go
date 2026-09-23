@@ -34,7 +34,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
 )
 
 // Tensor shapes, fixed by the openWakeWord model exports.

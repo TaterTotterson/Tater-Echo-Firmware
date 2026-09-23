@@ -103,11 +103,11 @@ type audioStream struct {
 
 	// ── consumption-side accounting, pump-loop-local by contract ──────────
 	// Only the ALSA goroutine touches these, so they need no synchronisation.
-	playing      bool // mid-stream from the consumer's point of view
-	periods      uint64
-	underruns    uint64
-	minDepth     int   // -1 = nothing consumed yet this stream
-	firstPumpNs  int64 // first period actually played this stream
+	playing     bool // mid-stream from the consumer's point of view
+	periods     uint64
+	underruns   uint64
+	minDepth    int   // -1 = nothing consumed yet this stream
+	firstPumpNs int64 // first period actually played this stream
 }
 
 func newAudioStream(depth int, deadCh <-chan struct{}) *audioStream {

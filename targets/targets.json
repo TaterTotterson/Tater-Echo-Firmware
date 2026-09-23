@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "targets": {
+    "biscuit": {
+      "display_name": "Amazon Echo Dot 2nd Generation (2016)",
+      "amazon_codename": "biscuit",
+      "cpu": "armv7a",
+      "unlock": "amonet-biscuit-v2.0.0",
+      "factory_install": true,
+      "ota": true,
+      "factory_installer": "factory/biscuit/install.py",
+      "status": "hardware-tested"
+    }
+  }
+}

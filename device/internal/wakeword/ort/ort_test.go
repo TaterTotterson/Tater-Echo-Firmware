@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/fixture"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/ort"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/fixture"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
 )
 
 // These tests need the ONNX Runtime library and the three model files, none of

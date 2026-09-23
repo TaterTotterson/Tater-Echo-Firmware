@@ -6,12 +6,55 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 	"github.com/gorilla/websocket"
-	"github.com/wilbowes/EchoMuse/internal/aec"
 )
+
+func TestBeamLockOnSpeechRequestReplacesImmediateLock(t *testing.T) {
+	d := &DataClient{}
+	d.RequestBeamLock()
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqLock {
+		t.Fatalf("immediate beam request = %d, want %d", got, beamReqLock)
+	}
+	d.RequestBeamLockOnSpeech()
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqLockOnSpeech {
+		t.Fatalf("continued-chat beam request = %d, want %d", got, beamReqLockOnSpeech)
+	}
+	d.RequestBeamUnlock()
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqUnlock {
+		t.Fatalf("unlock beam request = %d, want %d", got, beamReqUnlock)
+	}
+}
+
+func TestNativeListeningStateAlwaysUsesSpeechLock(t *testing.T) {
+	d := &DataClient{}
+	d.ApplyNativeBeamState("listening")
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqLockOnSpeech {
+		t.Fatalf("native listening request = %d, want speech lock %d", got, beamReqLockOnSpeech)
+	}
+
+	d.ApplyNativeBeamState("idle")
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqUnlock {
+		t.Fatalf("native idle request = %d, want unlock %d", got, beamReqUnlock)
+	}
+}
+
+func TestDOAActivityDoesNotRequireStrictSpeechGate(t *testing.T) {
+	const gain = 15.85 // +24dB default
+	if !doaActivity(0.002, gain, false) {
+		t.Fatal("quiet acoustic activity did not start DOA below the strict speech threshold")
+	}
+	if doaActivity(0.001, gain, false) {
+		t.Fatal("sub-threshold room noise started DOA")
+	}
+	if !doaActivity(0, gain, true) {
+		t.Fatal("strict speech decision did not start DOA")
+	}
+}
 
 // fanoutMic is a minimal mic.Subscribable: a background pump broadcasts raw
 // 9ch S24_3LE periods to every subscriber until closed, mimicking

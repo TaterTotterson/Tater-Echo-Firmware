@@ -54,6 +54,8 @@ type ScorerOverrides struct {
 	Threshold          float32
 	SlidingWindow      int
 	CloseMissThreshold float32
+	Sensitivity        string
+	Environment        string
 }
 
 // OpenShadow validates a model package, opens its native engine, and starts a
@@ -66,17 +68,39 @@ func OpenShadow(packageName string, thresholdOverride float32,
 // OpenShadowTuned is OpenShadow with live threshold/window/close-miss tuning.
 func OpenShadowTuned(packageName string, overrides ScorerOverrides,
 	onCross func(score float32, at time.Time)) (*ShadowScorer, error) {
+	return OpenShadowTunedWithHooks(packageName, overrides, ShadowHooks{Cross: onCross})
+}
+
+// ReadPackageManifest returns the validated manifest for an installed model.
+// Native integrations use its wake_word and label when reporting a custom
+// detector rather than hard-coding the built-in phrase.
+func ReadPackageManifest(packageName string) (Manifest, error) {
+	dir := PackageDir()
+	manifestName, err := ManifestFilename(packageName)
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifestPath := filepath.Join(dir, manifestName)
+	raw, err := readLimited(manifestPath, maxManifestBytes)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("microwakeword: read manifest %s: %w", manifestPath, err)
+	}
+	manifest, err := ParseManifest(raw)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+// OpenShadowTunedWithHooks opens a scorer with crossing and close-miss hooks.
+func OpenShadowTunedWithHooks(packageName string, overrides ScorerOverrides,
+	hooks ShadowHooks) (*ShadowScorer, error) {
 	dir := PackageDir()
 	manifestName, err := ManifestFilename(packageName)
 	if err != nil {
 		return nil, err
 	}
-	manifestPath := filepath.Join(dir, manifestName)
-	raw, err := readLimited(manifestPath, maxManifestBytes)
-	if err != nil {
-		return nil, fmt.Errorf("microwakeword: read manifest %s: %w", manifestPath, err)
-	}
-	manifest, err := ParseManifest(raw)
+	manifest, err := ReadPackageManifest(packageName)
 	if err != nil {
 		return nil, err
 	}
@@ -127,15 +151,17 @@ func OpenShadowTuned(packageName string, overrides ScorerOverrides,
 	if err != nil {
 		return nil, err
 	}
-	scorer, err := NewShadowScorer(engine, settings.Threshold,
-		settings.SlidingWindow, settings.CloseMissThreshold, onCross)
+	policy := MakeDetectionPolicy(overrides.Sensitivity, overrides.Environment,
+		settings.Threshold, settings.SlidingWindow)
+	scorer, err := NewShadowScorerWithPolicy(engine, settings.SlidingWindow,
+		settings.CloseMissThreshold, policy, hooks)
 	if err != nil {
 		_ = engine.Close()
 		return nil, err
 	}
-	scorer.info = fmt.Sprintf("%s, package %s, threshold %.3f, window %d",
+	scorer.info = fmt.Sprintf("%s, package %s, threshold %.3f, window %d, profile %s",
 		engine.Info(), strings.TrimSuffix(manifestName, filepath.Ext(manifestName)),
-		settings.Threshold, settings.SlidingWindow)
+		policy.Threshold, settings.SlidingWindow, policy.Profile)
 	return scorer, nil
 }
 

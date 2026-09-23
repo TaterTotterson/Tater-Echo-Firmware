@@ -61,12 +61,17 @@ type ShadowStats struct {
 type ShadowScorer struct {
 	engine Engine
 
-	threshold float32
-	closeMiss float32
-	window    int
-	refract   time.Duration
-	onCross   func(score float32, at time.Time)
-	info      string
+	threshold        float32
+	peakThreshold    float32
+	closeMiss        float32
+	window           int
+	minActiveWindows int
+	minRiseScore     float32
+	profile          string
+	refract          time.Duration
+	onCross          func(score float32, at time.Time)
+	onCloseMiss      func(score float32, at time.Time)
+	info             string
 
 	ch   chan shadowChunk
 	quit chan struct{}
@@ -94,30 +99,74 @@ type ShadowScorer struct {
 // crossing only; deciding to start a turn is intentionally outside this type.
 func NewShadowScorer(engine Engine, threshold float32, windowSize int,
 	closeMiss float32, onCross func(score float32, at time.Time)) (*ShadowScorer, error) {
+	return NewShadowScorerWithHooks(engine, threshold, windowSize, closeMiss, ShadowHooks{Cross: onCross})
+}
+
+// ShadowHooks exposes detector events without coupling the scorer to Tater's
+// transport. CloseMiss may be called for several adjacent probability windows;
+// consumers are responsible for collapsing one utterance into one report.
+type ShadowHooks struct {
+	Cross     func(score float32, at time.Time)
+	CloseMiss func(score float32, at time.Time)
+}
+
+// NewShadowScorerWithHooks is NewShadowScorer with close-miss observations.
+func NewShadowScorerWithHooks(engine Engine, threshold float32, windowSize int,
+	closeMiss float32, hooks ShadowHooks) (*ShadowScorer, error) {
+	policy := DetectionPolicy{
+		Profile: "legacy", Threshold: threshold, MinimumRiseScore: -1,
+		Refractory: DefaultShadowRefractory,
+	}
+	return newShadowScorer(engine, windowSize, closeMiss, policy, hooks, true)
+}
+
+// NewShadowScorerWithPolicy applies Tater's full room-profile acceptance
+// policy while preserving the same asynchronous queue and event hooks.
+func NewShadowScorerWithPolicy(engine Engine, windowSize int, closeMiss float32,
+	policy DetectionPolicy, hooks ShadowHooks) (*ShadowScorer, error) {
+	return newShadowScorer(engine, windowSize, closeMiss, policy, hooks, false)
+}
+
+func newShadowScorer(engine Engine, windowSize int, closeMiss float32,
+	policy DetectionPolicy, hooks ShadowHooks, requireCloseBelowThreshold bool) (*ShadowScorer, error) {
 	if engine == nil {
 		return nil, fmt.Errorf("microwakeword: shadow engine is required")
 	}
-	if threshold <= 0 || threshold > 1 {
-		return nil, fmt.Errorf("microwakeword: shadow threshold must be in (0, 1], got %g", threshold)
+	if policy.Threshold <= 0 || policy.Threshold > 1 {
+		return nil, fmt.Errorf("microwakeword: shadow threshold must be in (0, 1], got %g", policy.Threshold)
 	}
 	if windowSize < 1 || windowSize > 100 {
 		return nil, fmt.Errorf("microwakeword: shadow window must be between 1 and 100, got %d", windowSize)
 	}
-	if closeMiss < 0 || closeMiss > threshold {
-		return nil, fmt.Errorf("microwakeword: shadow close-miss threshold must be in [0, %g], got %g", threshold, closeMiss)
+	if closeMiss < 0 || closeMiss > 1 || (requireCloseBelowThreshold && closeMiss > policy.Threshold) {
+		return nil, fmt.Errorf("microwakeword: shadow close-miss threshold is invalid for wake threshold %g: %g", policy.Threshold, closeMiss)
+	}
+	if policy.PeakThreshold <= 0 {
+		policy.PeakThreshold = policy.Threshold
+	}
+	if policy.Refractory <= 0 {
+		policy.Refractory = DefaultShadowRefractory
+	}
+	if policy.MinimumActiveWindow < 0 || policy.MinimumActiveWindow > windowSize {
+		return nil, fmt.Errorf("microwakeword: active-window requirement must be between 0 and %d", windowSize)
 	}
 
 	s := &ShadowScorer{
-		engine:    engine,
-		threshold: threshold,
-		closeMiss: closeMiss,
-		window:    windowSize,
-		refract:   DefaultShadowRefractory,
-		onCross:   onCross,
-		info:      engine.Info(),
-		ch:        make(chan shadowChunk, ShadowQueueChunks),
-		quit:      make(chan struct{}),
-		done:      make(chan struct{}),
+		engine:           engine,
+		threshold:        policy.Threshold,
+		peakThreshold:    policy.PeakThreshold,
+		closeMiss:        closeMiss,
+		window:           windowSize,
+		minActiveWindows: policy.MinimumActiveWindow,
+		minRiseScore:     policy.MinimumRiseScore,
+		profile:          policy.Profile,
+		refract:          policy.Refractory,
+		onCross:          hooks.Cross,
+		onCloseMiss:      hooks.CloseMiss,
+		info:             engine.Info(),
+		ch:               make(chan shadowChunk, ShadowQueueChunks),
+		quit:             make(chan struct{}),
+		done:             make(chan struct{}),
 	}
 	s.generation.Store(1)
 	go s.run()
@@ -327,27 +376,53 @@ func (s *ShadowScorer) run() {
 				s.mu.Unlock()
 				continue
 			}
-			var sum float32
+			var sum, peak float32
+			activeWindows := 0
 			for _, score := range scores {
 				sum += score
+				if score > peak {
+					peak = score
+				}
+				if score >= s.threshold {
+					activeWindows++
+				}
 			}
 			mean := sum / float32(s.window)
 			if mean > s.stats.MaxScore {
 				s.stats.MaxScore = mean
 			}
 			now := time.Now()
-			crossed := mean >= s.threshold && now.Sub(s.lastCross) >= s.refract
+			edgeCount := len(scores) / 2
+			rise := float32(0)
+			if edgeCount > 0 {
+				var early, late float32
+				for index := 0; index < edgeCount; index++ {
+					early += scores[index]
+					late += scores[len(scores)-edgeCount+index]
+				}
+				rise = late/float32(edgeCount) - early/float32(edgeCount)
+			}
+			policyMatched := mean >= s.threshold && peak >= s.peakThreshold && rise >= s.minRiseScore
+			if s.minActiveWindows > 0 {
+				policyMatched = policyMatched && activeWindows >= s.minActiveWindows
+			}
+			crossed := policyMatched && now.Sub(s.lastCross) >= s.refract
+			closeMissed := false
 			if crossed {
 				s.stats.Crossings++
 				s.lastCross = now
 			} else if s.closeMiss > 0 && mean >= s.closeMiss && mean < s.threshold {
 				s.stats.CloseMisses++
+				closeMissed = true
 			}
 			s.ready = true
 			s.mu.Unlock()
 
 			if crossed && s.onCross != nil {
 				s.onCross(mean, chunk.capturedAt)
+			}
+			if closeMissed && s.onCloseMiss != nil {
+				s.onCloseMiss(mean, chunk.capturedAt)
 			}
 		}
 	}

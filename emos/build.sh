@@ -151,7 +151,7 @@ PRETTY_NAME="emOS $EMOS_VERSION"
 VERSION="$EMOS_VERSION"
 VERSION_ID="$EMOS_VERSION"
 BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)"
-HOME_URL="https://github.com/wilbowes/EchoMuse"
+HOME_URL="https://github.com/TaterTotterson/Tater-Echo-Firmware"
 OSREL
 install -m 0755 "$WORK/init" "$WORK/root/init"
 ( cd "$WORK/root" && find . | cpio -o -H newc 2>/dev/null | gzip -9 ) > "$WORK/ramdisk.gz"

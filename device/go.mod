@@ -1,4 +1,4 @@
-module github.com/wilbowes/EchoMuse
+module github.com/TaterTotterson/Tater-Echo-Firmware
 
 go 1.24.0
 

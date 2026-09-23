@@ -21,36 +21,37 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wilbowes/EchoMuse/internal/aec"
-	"github.com/wilbowes/EchoMuse/internal/bindings/als"
-	internalbuttons "github.com/wilbowes/EchoMuse/internal/bindings/buttons"
-	"github.com/wilbowes/EchoMuse/internal/bindings/jack"
-	"github.com/wilbowes/EchoMuse/internal/bindings/mic"
-	"github.com/wilbowes/EchoMuse/internal/bindings/mixer"
-	"github.com/wilbowes/EchoMuse/internal/bindings/speaker"
-	"github.com/wilbowes/EchoMuse/internal/bluetooth"
-	"github.com/wilbowes/EchoMuse/internal/client"
-	"github.com/wilbowes/EchoMuse/internal/config"
-	"github.com/wilbowes/EchoMuse/internal/listen"
-	"github.com/wilbowes/EchoMuse/internal/platform"
-	"github.com/wilbowes/EchoMuse/internal/server"
-	"github.com/wilbowes/EchoMuse/internal/taternative"
-	"github.com/wilbowes/EchoMuse/internal/wakeword"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/microwakeword"
-	"github.com/wilbowes/EchoMuse/internal/wakeword/shadow"
-	"github.com/wilbowes/EchoMuse/internal/wifi"
-	"github.com/wilbowes/EchoMuse/pkg/board"
-	pkgbuttons "github.com/wilbowes/EchoMuse/pkg/buttons"
-	"github.com/wilbowes/EchoMuse/pkg/led"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/als"
+	internalbuttons "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/jack"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mic"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/speaker"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bluetooth"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/client"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/listen"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/server"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/taternative"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wifi"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/board"
+	pkgbuttons "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
 
 const usage = `usage: server [command]
 
-With no command, runs the EchoMuse device daemon (normally started by
+With no command, runs the Tater Echo device daemon (normally started by
 start_server.sh, which restarts it; do not run a second copy by hand).
 
   version         print the firmware version and build time
   platform-init   apply the board's platform settings, for emOS's boot
+  setup-portal    serve the emOS first-boot captive portal on port 80
   help            this text
 `
 
@@ -63,12 +64,17 @@ func main() {
 		switch os.Args[1] {
 		case "platform-init":
 			os.Exit(platformInit())
+		case "setup-portal":
+			if err := taternative.RunSetupPortal(taternative.SetupPortalOptions{}); err != nil {
+				log.Fatalf("Tater setup portal: %v", err)
+			}
+			os.Exit(0)
 		case "version", "--version", "-v":
 			built := "unknown"
 			if sec, err := strconv.ParseInt(client.BuildUnix, 10, 64); err == nil {
 				built = time.Unix(sec, 0).UTC().Format(time.RFC3339)
 			}
-			fmt.Printf("EchoMuse %s (built %s)\n", client.Version, built)
+			fmt.Printf("Tater Echo Firmware %s (built %s)\n", client.Version, built)
 			os.Exit(0)
 		case "help", "--help", "-h":
 			fmt.Print(usage)
@@ -79,7 +85,7 @@ func main() {
 		}
 	}
 	log.SetOutput(os.Stdout)
-	log.Printf("EchoMuse %s starting", client.Version)
+	log.Printf("Tater Echo Firmware %s starting", client.Version)
 
 	deviceID := client.GetSerialNo()
 	log.Printf("Device ID: %s", deviceID)
@@ -181,8 +187,8 @@ func main() {
 	applyAecConfig(canceller, dataClient)        // arm from env defaults before any config push
 
 	// Direction callback — update LED ring to show estimated source angle
-	dataClient.OnDirectionChanged(func(angle float64) {
-		s.SetDirectionLEDs(angle)
+	dataClient.OnDirectionChanged(func(angle float64, activity bool, speech bool) {
+		s.SetDirectionObservation(angle, activity, speech)
 	})
 	controlClient := client.NewControlClient(
 		deviceID,
@@ -448,28 +454,46 @@ func main() {
 				}
 			},
 			State: func(state string, _ map[string]any) {
-				s.StartAnim(nativeStateAnimation(state))
-				if state == "listening" {
-					dataClient.RequestBeamLock()
-				} else if state == "idle" || state == "error" {
-					dataClient.RequestBeamUnlock()
+				dataClient.ApplyNativeBeamState(state)
+				if state == "idle" || state == "error" {
+					s.ClearDirection()
 				}
+				s.StartAnim(nativeStateAnimation(state))
 			},
 			Settings: func(values map[string]any) (map[string]any, error) {
-				applied, err := applyTaterSettings(values, s, canceller, dataClient)
-				applyMWWConfig(dataClient, nil, func(score float32, _ time.Time) bool {
-					return nativeClient != nil && nativeClient.Wake("hey_tater", score)
-				})
+				applied, err := applyTaterSettings(values, s, canceller, dataClient, nativePlayer)
+				applyMWWConfig(dataClient, nil,
+					func(wakeWord string, score float32, _ time.Time) bool {
+						return nativeClient != nil && nativeClient.Wake(wakeWord, score)
+					},
+					func(wakeWord string, score float32, _ time.Time) {
+						if nativeClient != nil {
+							nativeClient.CloseMiss(wakeWord, score)
+						}
+					})
 				return applied, err
 			},
 			Status: func() map[string]any {
-				return map[string]any{
+				wakeEngine := mwwNativeStatus()
+				for key, value := range nativePlayer.WakeSoundStatus() {
+					wakeEngine[key] = value
+				}
+				if nativeClient != nil {
+					wakeEngine["capture"] = nativeClient.TrainerStatus()
+					wakeEngine["verifier"] = nativeClient.WakeVerifierStatus()
+				}
+				status := map[string]any{
 					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
 					"muted":          s.IsMuted(),
-					"wake_engine":    map[string]any{"name": "micro_wake_word", "model": config.Get().Snapshot().MwwModel},
+					"wake_engine":    wakeEngine,
 				}
+				if angle, ok := s.Direction(); ok {
+					status["doa_deg"] = math.Round(angle*10) / 10
+				}
+				return status
 			},
-			PlayVoice: nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
+			PlayWakeSound: nativePlayer.PlayWakeSound,
+			PlayVoice:     nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
 			StartMedia:  nativePlayer.PlayMedia,
 			StopMedia:   func(string) { nativePlayer.StopMedia() },
 			PauseMedia:  func(string) { nativePlayer.PauseMedia() },
@@ -493,9 +517,13 @@ func main() {
 			log.Fatalf("Tater native configuration invalid: %v", nativeErr)
 		}
 		dataClient.OnPCM(nativeClient.PushAudio)
-		applyMWWConfig(dataClient, nil, func(score float32, _ time.Time) bool {
-			return nativeClient.Wake("hey_tater", score)
-		})
+		applyMWWConfig(dataClient, nil,
+			func(wakeWord string, score float32, _ time.Time) bool {
+				return nativeClient.Wake(wakeWord, score)
+			},
+			func(wakeWord string, score float32, _ time.Time) {
+				nativeClient.CloseMiss(wakeWord, score)
+			})
 		s.SetLinkDown(true)
 		pulseCtx, cancel := context.WithCancel(ctx)
 		pulseCancel, pulseKind = cancel, "orange"
@@ -622,7 +650,7 @@ func main() {
 		applyAecConfig(canceller, dataClient)
 		applyBleConfig(bleScanner)
 		applyShadowConfig(dataClient, controlClient, pcmSpeaker, s)
-		applyMWWConfig(dataClient, controlClient, nil)
+		applyMWWConfig(dataClient, controlClient, nil, nil)
 		syncListenState(dataClient, controlClient, false)
 	})
 
@@ -1305,21 +1333,69 @@ var shadowState struct {
 // expensive than changing a scalar: it reloads the TFLM model and discards its
 // streaming state, so only an actual enable/model/threshold change does it.
 var mwwShadowState struct {
+	sync.RWMutex
 	enabled       bool
+	ready         bool
 	model         string
+	wakeWord      string
+	label         string
+	source        string
+	sensitivity   string
+	environment   string
 	threshold     float64
 	slidingWindow int
 	closeMiss     float64
 	lastErr       string
 }
 
+func setMWWState(enabled, ready bool, model, wakeWord, label, source, sensitivity, environment string,
+	threshold float64, slidingWindow int, closeMiss float64, lastErr string) {
+	mwwShadowState.Lock()
+	mwwShadowState.enabled = enabled
+	mwwShadowState.ready = ready
+	mwwShadowState.model = model
+	mwwShadowState.wakeWord = wakeWord
+	mwwShadowState.label = label
+	mwwShadowState.source = source
+	mwwShadowState.sensitivity = sensitivity
+	mwwShadowState.environment = environment
+	mwwShadowState.threshold = threshold
+	mwwShadowState.slidingWindow = slidingWindow
+	mwwShadowState.closeMiss = closeMiss
+	mwwShadowState.lastErr = lastErr
+	mwwShadowState.Unlock()
+}
+
+func mwwNativeStatus() map[string]any {
+	mwwShadowState.RLock()
+	defer mwwShadowState.RUnlock()
+	return map[string]any{
+		"name":                 "micro_wake_word",
+		"ready":                mwwShadowState.ready,
+		"model":                mwwShadowState.model,
+		"active_wake_word":     mwwShadowState.wakeWord,
+		"active_wake_label":    mwwShadowState.label,
+		"active_model_source":  mwwShadowState.source,
+		"sensitivity":          mwwShadowState.sensitivity,
+		"environment":          mwwShadowState.environment,
+		"threshold":            mwwShadowState.threshold,
+		"sliding_window":       mwwShadowState.slidingWindow,
+		"close_miss_threshold": mwwShadowState.closeMiss,
+		"last_error":           mwwShadowState.lastErr,
+	}
+}
+
 // applyMWWConfig manages the Tater microWakeWord scorer. It is observational
 // when onWake is nil (legacy controller mode) and opens native voice turns
 // when direct Tater mode supplies the callback.
-func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient, onWake func(float32, time.Time) bool) {
+func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
+	onWake func(string, float32, time.Time) bool,
+	onCloseMiss func(string, float32, time.Time)) {
 	snap := config.Get().Snapshot()
 	enabled := snap.MwwShadowEnabled != nil && *snap.MwwShadowEnabled
 	model := snap.MwwModel
+	sensitivity := snap.MwwSensitivity
+	environment := snap.MwwEnvironment
 	threshold := float64(0)
 	if snap.MwwThreshold != nil {
 		threshold = *snap.MwwThreshold
@@ -1338,28 +1414,41 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient, onWake func
 			dc.SetMWWShadowScorer(nil)
 			log.Printf("[mww-shadow] disabled")
 		}
-		mwwShadowState.enabled = false
-		mwwShadowState.model = model
-		mwwShadowState.threshold = threshold
-		mwwShadowState.slidingWindow = slidingWindow
-		mwwShadowState.closeMiss = closeMiss
-		mwwShadowState.lastErr = ""
+		setMWWState(false, false, model, "", "", "", sensitivity, environment,
+			threshold, slidingWindow, closeMiss, "")
 		return
 	}
 
-	if dc.MWWShadowScorer() != nil && mwwShadowState.enabled &&
-		mwwShadowState.model == model && mwwShadowState.threshold == threshold &&
-		mwwShadowState.slidingWindow == slidingWindow && mwwShadowState.closeMiss == closeMiss {
+	mwwShadowState.RLock()
+	same := mwwShadowState.enabled && mwwShadowState.model == model &&
+		mwwShadowState.sensitivity == sensitivity && mwwShadowState.environment == environment &&
+		mwwShadowState.threshold == threshold && mwwShadowState.slidingWindow == slidingWindow &&
+		mwwShadowState.closeMiss == closeMiss
+	previousErr := mwwShadowState.lastErr
+	mwwShadowState.RUnlock()
+	if dc.MWWShadowScorer() != nil && same {
 		return
 	}
+	manifest, manifestErr := microwakeword.ReadPackageManifest(model)
+	wakeWord, label, source := "hey_tater", "Hey Tater", "embedded"
+	if manifestErr == nil {
+		wakeWord = strings.TrimSpace(manifest.WakeWord)
+		label = strings.TrimSpace(manifest.Label)
+		if label == "" {
+			label = wakeWord
+		}
+		if model != microwakeword.DefaultPackage {
+			source = "custom"
+		}
+	}
 
-	sc, err := microwakeword.OpenShadowTuned(model, microwakeword.ScorerOverrides{
+	sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
 		Threshold: float32(threshold), SlidingWindow: slidingWindow,
-		CloseMissThreshold: float32(closeMiss),
-	},
-		func(score float32, at time.Time) {
+		CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
+	}, microwakeword.ShadowHooks{
+		Cross: func(score float32, at time.Time) {
 			ageMs := time.Since(at).Milliseconds()
-			if onWake != nil && onWake(score, at) {
+			if onWake != nil && onWake(wakeWord, score, at) {
 				log.Printf("[mww] local wake score=%.3f age=%dms — native wake claimed", score, ageMs)
 				return
 			}
@@ -1367,28 +1456,26 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient, onWake func
 			if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
 				cc.SendMWWShadowCross(score, ageMs)
 			}
-		})
+		},
+		CloseMiss: func(score float32, at time.Time) {
+			if onCloseMiss != nil {
+				onCloseMiss(wakeWord, score, at)
+			}
+		},
+	})
 	if err != nil {
-		if msg := err.Error(); msg != mwwShadowState.lastErr {
-			mwwShadowState.lastErr = msg
+		if msg := err.Error(); msg != previousErr {
 			log.Printf("[mww-shadow] not started: %v", err)
 		}
 		dc.SetMWWShadowScorer(nil)
-		mwwShadowState.enabled = true
-		mwwShadowState.model = model
-		mwwShadowState.threshold = threshold
-		mwwShadowState.slidingWindow = slidingWindow
-		mwwShadowState.closeMiss = closeMiss
+		setMWWState(true, false, model, wakeWord, label, source, sensitivity, environment,
+			threshold, slidingWindow, closeMiss, err.Error())
 		return
 	}
 
 	dc.SetMWWShadowScorer(sc)
-	mwwShadowState.enabled = true
-	mwwShadowState.model = model
-	mwwShadowState.threshold = threshold
-	mwwShadowState.slidingWindow = slidingWindow
-	mwwShadowState.closeMiss = closeMiss
-	mwwShadowState.lastErr = ""
+	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
+		threshold, slidingWindow, closeMiss, "")
 	mode := "shadow/report-only"
 	if onWake != nil {
 		mode = "active native wake"
@@ -1503,13 +1590,19 @@ func applyNativeVisualSettings(values, applied map[string]any) {
 
 // applyTaterSettings maps Tater's native settings vocabulary onto the
 // firmware's existing runtime configuration and hardware controllers.
-func applyTaterSettings(values map[string]any, srv *server.Server, canceller *aec.Canceller, dc *client.DataClient) (map[string]any, error) {
+func applyTaterSettings(values map[string]any, srv *server.Server, canceller *aec.Canceller,
+	dc *client.DataClient, player *taternative.LocalPlayer) (map[string]any, error) {
 	applied := make(map[string]any, len(values))
 	for key, value := range values {
 		applied[key] = value
 	}
 	msg := config.ConfigMessage{}
 	applyNativeVisualSettings(values, applied)
+	if player != nil {
+		if err := player.ConfigureWakeSound(values); err != nil {
+			return applied, err
+		}
+	}
 
 	if value, ok := values["volume_percent"]; ok {
 		percent := int(math.Round(nativeNumber(value, float64(deviceVolumePercent(srv.VolumeLevel())))))
@@ -1545,6 +1638,26 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		msg.MwwCloseMiss = &threshold
 		applied["close_miss_threshold"] = threshold
 	}
+	if value, ok := values["wake_sensitivity"]; ok {
+		sensitivity := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		switch sensitivity {
+		case "conservative", "normal", "high":
+		default:
+			return applied, fmt.Errorf("unsupported wake_sensitivity %q", sensitivity)
+		}
+		msg.MwwSensitivity = sensitivity
+		applied["wake_sensitivity"] = sensitivity
+	}
+	if value, ok := values["wake_environment"]; ok {
+		environment := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		switch environment {
+		case "balanced", "tv_nearby", "strict", "far_field":
+		default:
+			return applied, fmt.Errorf("unsupported wake_environment %q", environment)
+		}
+		msg.MwwEnvironment = environment
+		applied["wake_environment"] = environment
+	}
 	if value, ok := values["wake_engine"]; ok {
 		engine := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
 		switch engine {
@@ -1562,7 +1675,11 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 			wakeWord = "hey_tater"
 		}
 		if wakeWord == "custom_url" {
-			packageName, err := microwakeword.InstallPackageURL(context.Background(), strings.TrimSpace(fmt.Sprint(values["wake_word_url"])))
+			packageName, err := microwakeword.InstallPackageURLRevision(
+				context.Background(),
+				strings.TrimSpace(fmt.Sprint(values["wake_word_url"])),
+				strings.TrimSpace(fmt.Sprint(values["wake_model_revision"])),
+			)
 			if err != nil {
 				return applied, err
 			}
@@ -1613,32 +1730,31 @@ func nativeStateAnimation(state string) server.AnimSpec {
 	tool, replying := nativeVisuals.tool, nativeVisuals.replying
 	nativeVisuals.RUnlock()
 	visual := func(name, fallback string) string {
-		switch strings.ToLower(strings.TrimSpace(name)) {
-		case "solid", "directional":
-			return "solid"
-		case "pulse", "breathe", "heartbeat", "ripple":
-			return "pulse"
-		case "voice_ring", "equalizer":
-			return "meter"
-		case "sparkle", "ping_pong", "spinner", "orbit", "comet", "dual_comet", "scanner":
-			return "spin"
-		case "theater", "wave", "shimmer", "twinkle":
-			return "rotate"
+		name = strings.ToLower(strings.TrimSpace(name))
+		switch name {
+		case "directional", "sparkle", "ping_pong", "voice_ring", "spinner", "orbit",
+			"pulse", "breathe", "comet", "dual_comet", "scanner", "ripple",
+			"heartbeat", "theater", "wave", "shimmer", "twinkle", "equalizer", "solid":
+			return name
 		default:
 			return fallback
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "listening":
-		return server.AnimSpec{Pattern: visual(listening, "solid"), Colors: [][3]uint8{color}, Listening: true, PeriodMs: 80, TTLSec: 30}
+		pattern := visual(listening, "directional")
+		if pattern == "directional" {
+			return server.AnimSpec{Pattern: "solid", Colors: [][3]uint8{color}, Listening: true, TTLSec: 30}
+		}
+		return server.AnimSpec{Pattern: pattern, Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 30}
 	case "thinking":
-		return server.AnimSpec{Pattern: visual(thinking, "spin"), Colors: [][3]uint8{color, scaleNativeColor(color, 0.28)}, PeriodMs: 80, TTLSec: 135}
+		return server.AnimSpec{Pattern: visual(thinking, "sparkle"), Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 135}
 	case "tool_call":
-		return server.AnimSpec{Pattern: visual(tool, "rotate"), Colors: [][3]uint8{color, {160, 35, 220}, {30, 5, 60}}, PeriodMs: 70, TTLSec: 135}
+		return server.AnimSpec{Pattern: visual(tool, "ping_pong"), Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 135}
 	case "speaking", "playing":
-		return server.AnimSpec{Pattern: visual(replying, "meter"), Colors: [][3]uint8{color}, TTLSec: 180}
+		return server.AnimSpec{Pattern: visual(replying, "voice_ring"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
 	case "error":
-		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 900, TTLSec: 10}
+		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 38, TTLSec: 10}
 	default:
 		return server.AnimSpec{Pattern: "off"}
 	}
@@ -1653,7 +1769,7 @@ func scaleNativeColor(color [3]uint8, scale float64) [3]uint8 {
 }
 
 func nativeTimerAnimation() server.AnimSpec {
-	return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{255, 80, 0}}, PeriodMs: 650}
+	return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{255, 80, 0}}, PeriodMs: 27}
 }
 
 // applyShadowConfig starts, stops or re-points on-device wake word scoring from

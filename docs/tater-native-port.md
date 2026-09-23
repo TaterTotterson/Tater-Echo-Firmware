@@ -20,6 +20,7 @@ Echo 7-mic capture
     -> mono 16 kHz S16 PCM
          |-> TFLM microfrontend -> microWakeWord model -> wake event
          |-> 2-second PCM pre-roll ring
+         |-> 3-second trainer/close-miss capture ring
          `-> Tater-native voice stream after wake acknowledgement
 
 Tater server -> response audio / timer events / LED state -> Echo hardware
@@ -135,6 +136,25 @@ image; it contains userspace files installed after emOS is running.
 
 ## Configure direct Tater mode
 
+### First-boot setup hotspot
+
+The Tater Echo build installs `/data/local/etc/tater/setup_enabled`. When emOS
+finds that marker without both a complete private Wi-Fi configuration and a
+native Tater configuration, it starts an open setup network named
+`Tater-Setup-XXXX`. Connect a phone or computer and use the captive portal (or
+open `http://192.168.4.1`) to enter:
+
+- the 2.4 GHz Wi-Fi SSID and password;
+- the Tater LAN URL;
+- the six-digit code from **Satellites → Add Satellite**;
+- the Echo's display name and room.
+
+The portal writes `/data/emos/wpa.conf` and the native bootstrap atomically,
+removes any credential belonging to an earlier pairing, and asks emOS PID 1 to
+perform its normal synced, read-only-remount reboot. The next boot joins the
+home network, redeems the code, and stores the permanent device token. Generic
+EchoMuse/emOS installs without the marker retain the USB `em-wifi` flow.
+
 Create `/data/local/etc/tater/native.json` on the Echo:
 
 ```json
@@ -165,10 +185,21 @@ voice-turn test if those assets are not present yet.
   16 kHz PCM streaming.
 - Built-in `hey_tater` plus bounded, validated, atomically cached custom
   microWakeWord manifest/model URLs from Tater's trainer/catalog workflow.
+  Tater model revisions invalidate the URL cache live, and the manifest's real
+  wake phrase is reported with the turn instead of being hard-coded.
+- The same sensitivity and room profiles as the ESP32 satellites, including
+  strict/far-field acceptance policy and mandatory STT verification for the
+  TV-nearby profile.
 - Action-button turns, continued-chat reopen, barge-in, mute sovereignty, and
   volume reporting.
 - Optional observe/enforce second-STT wake verification using Tater's `TWV1`
   PCM packet, with bounded capture, timeout fail-open, and verifier telemetry.
+- Optional good-wake and debounced close-miss uploads to the configured Tater
+  trainer, using the existing raw-PCM upload contract and `trainer.local`
+  resolution through the paired Tater host.
+- Live built-in/custom wake-sound selection. Sounds are downloaded away from
+  the audio loop, decoded and cached on-device, played locally without delaying
+  `voice.start`, and suppressed during reply barge-in.
 - Tater listening/thinking/tool/speaking/idle states on the local LED engine.
 - TTS/announcement WAV and MP3 URL playback at the Echo's 48 kHz wire rate.
 - Persistent media start/stop/pause/resume/volume/loop and response ducking.
@@ -215,14 +246,18 @@ verify in this order:
    verify duck/restore.
 5. Exercise wake-verifier observe and enforce modes, including one rejection
    and one server-unavailable timeout to confirm fail-open behavior.
-6. Change volume and wake/AEC settings in Tater and reboot to verify persistence.
-7. Create, cancel, snooze, and allow a timer to ring; stop it locally.
-8. Play WAV and MP3 media; exercise pause/resume/volume/loop.
-9. Mute during idle and during a turn; confirm no PCM leaves the device and the
+6. Change the wake word, revision, sound, sensitivity/environment, and all four
+   LED animations live; verify no service/device reboot is needed.
+7. Enable good-wake and close-miss trainer capture and confirm both raw clips
+   arrive with the Echo name, wake phrase, score, and event type.
+8. Change volume and wake/AEC settings in Tater and reboot to verify persistence.
+9. Create, cancel, snooze, and allow a timer to ring; stop it locally.
+10. Play WAV and MP3 media; exercise pause/resume/volume/loop.
+11. Mute during idle and during a turn; confirm no PCM leaves the device and the
    red hardware mute indicators survive reconnect/reboot.
-10. Run a native OTA and deliberately test a non-starting build once to confirm
+12. Run a native OTA and deliberately test a non-starting build once to confirm
    the supervisor returns to the previous slot.
-11. Leave shadow telemetry running for an extended room trial and record CPU,
+13. Leave shadow telemetry running for an extended room trial and record CPU,
     RSS, temperature, false accepts/hour, recall, and first-word retention.
 
 ## Wake-to-stream sequencing

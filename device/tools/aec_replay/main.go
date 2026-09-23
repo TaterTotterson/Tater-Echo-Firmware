@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wilbowes/EchoMuse/internal/aec"
-	"github.com/wilbowes/EchoMuse/internal/beamformer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/beamformer"
 )
 
 const (
