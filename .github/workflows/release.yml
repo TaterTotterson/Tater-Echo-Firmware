@@ -113,9 +113,23 @@ jobs:
             emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
           file device/build/server | grep -q '32-bit.*ARM'
           file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
-          file emos/build/init32 | grep -q '32-bit.*ARM'
+          file emos/build/init32 | grep -q '32-bit LSB executable, ARM'
+          file emos/build/init32 | grep -q 'statically linked'
+          file emos/build/wpa/wpa_supplicant | grep -q '32-bit LSB executable, ARM'
+          file emos/build/wpa/wpa_supplicant | grep -q 'statically linked'
+          file emos/build/bb/busybox | grep -q '32-bit LSB executable, ARM'
+          file emos/build/bb/busybox | grep -q 'statically linked'
           strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
           python3 -m unittest factory.biscuit.test_install
+
+      - name: Exercise emOS invariants
+        run: |
+          cc -O2 -Wall -o /tmp/ringsim emos/init/ringsim.c -lm
+          /tmp/ringsim --check
+          for check in pwcheck tmoutcheck wpacheck cmdlinecheck serialcheck; do
+            cc -O2 -o "/tmp/$check" "emos/init/$check.c"
+            "/tmp/$check"
+          done
 
       - name: Package factory and OTA firmware
         run: |

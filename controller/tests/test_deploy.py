@@ -10,6 +10,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 CONTROLLER = Path(__file__).resolve().parents[1]
 
 
@@ -149,11 +151,15 @@ def test_addon_image_is_published_not_built_on_the_user_machine():
     and the update notice goes quiet. The arch list must also stay within
     what controller-release.yml actually publishes.
     """
+    legacy_workflow = CONTROLLER.parent / ".github/workflows/controller-release.yml"
+    if not legacy_workflow.exists():
+        pytest.skip("Tater Echo Firmware does not publish the legacy controller add-on")
+
     config = (CONTROLLER / "config.yaml").read_text()
     assert re.search(r"^image:\s*\S+", config, re.M), \
         "config.yaml must pull the published image, not build on the user's machine"
 
-    workflow = (CONTROLLER.parent / ".github/workflows/controller-release.yml").read_text()
+    workflow = legacy_workflow.read_text()
     platforms = re.search(r"platforms:\s*(\S+)", workflow)
     assert platforms, "controller-release.yml no longer declares platforms"
     published = platforms.group(1)
@@ -2628,6 +2634,10 @@ def test_the_emos_and_firmware_release_namespaces_cannot_select_each_other():
     failure if it broke would be the OTA offering an aarch64 init to a fleet
     of armv7a devices as a firmware update.
     """
+    legacy_workflow = CONTROLLER.parent / ".github/workflows/emos-release.yml"
+    if not legacy_workflow.exists():
+        pytest.skip("Tater factory releases bundle emOS under the firmware tag")
+
     src = (CONTROLLER / "em_api.py").read_text()
 
     fw = _strip_prose(_fn_body(src, "_fetch_latest_release"))
@@ -2638,7 +2648,7 @@ def test_the_emos_and_firmware_release_namespaces_cannot_select_each_other():
     assert 'startswith("emos-v")' in emos and '"init"' in emos, \
         "the emOS poll must select on an emos-v* tag AND an init asset"
 
-    workflow = (CONTROLLER.parent / ".github" / "workflows" / "emos-release.yml").read_text()
+    workflow = legacy_workflow.read_text()
     assert "'emos-v*'" in workflow, "the emOS release workflow must fire on emos-v* tags"
     fw_workflow = (CONTROLLER.parent / ".github" / "workflows" / "release.yml").read_text()
     assert "'v*'" in fw_workflow
@@ -2706,11 +2716,14 @@ def test_the_busybox_build_can_satisfy_the_gpl_obligation():
     assert "diff -rq" in body, \
         "the build must prove the tree it compiled matches the published tarball"
 
-    # The release gate, which fails the publish rather than the build.
-    wf = (CONTROLLER.parent / ".github" / "workflows"
-          / "emos-release.yml").read_text()
-    assert "busybox-LICENSE" in wf and "busybox-$BB_VER.tar.bz2" in wf, \
-        "the release must verify both GPL assets exist before publishing"
+    # The Tater release packer puts both into the factory archive, while the
+    # workflow gates publishing on that packer succeeding.
+    packer = (CONTROLLER.parent / "tools" / "package_echo_release.py").read_text()
+    wf = (CONTROLLER.parent / ".github" / "workflows" / "release.yml").read_text()
+    assert "busybox-LICENSE" in packer and "busybox-*.tar.bz2" in packer, \
+        "the factory archive must carry both GPL assets"
+    assert "package_echo_release.py" in wf, \
+        "the release must run the checked factory packer before publishing"
 
 
 def test_the_emos_release_workflow_asserts_what_it_publishes():
@@ -2721,13 +2734,11 @@ def test_the_emos_release_workflow_asserts_what_it_publishes():
     Read as YAML, not grepped: the old substring check pinned the FORMATTING of a
     one-item list, so adding an asset broke a test with no opinion about it.
     """
-    import yaml
-    path = CONTROLLER.parent / ".github" / "workflows" / "emos-release.yml"
+    path = CONTROLLER.parent / ".github" / "workflows" / "release.yml"
     wf = path.read_text()
-    assert "ARM aarch64" in wf, "the release must assert the init is aarch64"
     assert "32-bit LSB executable, ARM" in wf, \
         "the release must assert init32 is a 32-bit ARM binary"
-    assert "statically linked" in wf, "the release must assert the inits are static"
+    assert "statically linked" in wf, "the release must assert init32 is static"
     # All four off-target checks run against the source being published. Each
     # one drives a parser or an invariant whose failure is silent on hardware.
     for check in ("ringsim --check", "pwcheck", "tmoutcheck", "wpacheck",
@@ -2735,59 +2746,15 @@ def test_the_emos_release_workflow_asserts_what_it_publishes():
         assert check in wf, f"the release must run {check}"
     # The bundle is what carries everything but the compat init, so a release
     # that skipped building it would publish an empty-handed payload.
-    assert "make-payload-bundle.py" in wf, \
-        "the release must build the payload bundle"
-    for f in ("init32", "wpa_supplicant", "wpa_cli", "em-wifi"):
-        assert f in wf, f"{f} must go into the bundle"
-
-    published = set()
-    for job in yaml.safe_load(wf)["jobs"].values():
-        for step in job["steps"]:
-            files = (step.get("with") or {}).get("files")
-            if files:
-                published |= {f.strip() for f in files.split("\n") if f.strip()}
-
-    # Pinned as an exact SET, so adding an asset is a deliberate edit here. The
-    # invariant is that we have the RIGHT to redistribute everything in it: two
-    # inits (one per kernel architecture) and emOS's own userspace, which is
-    # hostap under BSD, libnl-tiny under LGPL, busybox under GPL-2.0 and our own
-    # shell script.
-    #
-    # The two busybox-* assets are the GPL-2.0 OBLIGATION, not extras. §3(a) wants
-    # the corresponding source to accompany the binary, so the verified upstream
-    # tarball and the licence text are published beside it — a link to busybox.net
-    # would leave compliance depending on a third party's server. Dropping either
-    # ships GPL-2.0 object code with no source, which is why they are pinned here
-    # rather than left to the release step.
-    #
-    # A BOOT IMAGE MUST NEVER APPEAR. It carries the device's own kernel and
-    # DTBs, so publishing one would redistribute Amazon's code — the image is
-    # assembled on the user's side from the partition they read off their device.
-    assert published == {"emos/build/init", "emos/build/emos-payload.zip",
-                         "emos/build/bb/busybox-*.tar.bz2",
-                         "emos/build/bb/busybox-LICENSE"}, (
-        f"the published set changed — got {sorted(published)}. Everything here "
-        f"must be redistributable by us, and a boot image must never be among "
-        f"it. The loose `init` is not redundant: _fetch_latest_emos_release "
-        f"matches it by exact name, so dropping it strands every fielded "
-        f"controller. The busybox source and licence are a GPL-2.0 obligation.")
-    assert not any(".img" in f or "boot" in f.rsplit("/", 1)[-1]
-                   for f in published), (
-        "an image or boot partition must never be a release asset — it carries "
-        "the device's own kernel and DTBs")
-    # `init` keeps that exact name. The controller selects release assets by
-    # exact name, so renaming it strands every controller already in the field
-    # looking for it — which is why the second init was ADDED as `init32`
-    # rather than the pair being renamed to `init-arm64`/`init-arm`.
-    api = (CONTROLLER / "em_api.py").read_text()
-    mapping = api[api.index("EMOS_INIT_ASSETS = {"):]
-    mapping = mapping[:mapping.index("}") + 1]
-    assert '"init"' in mapping and '"init32"' in mapping, (
-        f"the arch-to-asset map must name the published assets, got: {mapping}")
-    # init32 is not a published asset any more — it travels inside the bundle,
-    # which the step check above pins.
-    assert "emos/build/init" in published, \
-        "the compat init must still be published loose"
+    assert "package_echo_release.py" in wf, \
+        "the release must build the factory and OTA artifacts"
+    packer = (CONTROLLER.parent / "tools" / "package_echo_release.py").read_text()
+    for f in ("init32", "wpa_supplicant", "wpa_cli", "em-wifi", "busybox"):
+        assert f in packer, f"{f} must go into the factory bundle"
+    assert "em_emos_build.py" in packer, \
+        "the user-side packer must travel in the factory bundle"
+    assert "boot.img" not in packer, \
+        "a prebuilt boot image must never be a release input"
 
 
 def test_the_init_architecture_is_decided_where_the_reference_is():
