@@ -3,6 +3,7 @@ package microwakeword
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
 )
 
 const packageDownloadTimeout = 12 * time.Second
@@ -45,7 +48,7 @@ func InstallPackageURLRevision(parent context.Context, manifestURL, revision str
 
 	ctx, cancel := context.WithTimeout(parent, packageDownloadTimeout)
 	defer cancel()
-	client := &http.Client{Timeout: packageDownloadTimeout}
+	client := packageHTTPClient(packageDownloadTimeout)
 	manifestBody, finalManifestURL, err := downloadPackageFile(ctx, client, parsed.String(), maxManifestBytes)
 	if err != nil {
 		return "", err
@@ -86,6 +89,19 @@ func InstallPackageURLRevision(parent context.Context, manifestURL, revision str
 		return "", err
 	}
 	return packageName, nil
+}
+
+func packageHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tlsConfig := transport.TLSClientConfig
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+	}
+	tlsConfig.Time = clock.VerificationNow
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func validatedHTTPURL(raw string) (*url.URL, error) {

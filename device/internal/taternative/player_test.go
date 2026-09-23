@@ -139,6 +139,32 @@ func TestPlayVoiceWaitsForAudibleDrain(t *testing.T) {
 	}
 }
 
+func TestPlayEmbeddedSetupSoundWaitsForAudibleDrain(t *testing.T) {
+	speaker := newDrainTestSpeaker()
+	player := NewLocalPlayer(speaker)
+	done := make(chan error, 1)
+	go func() {
+		done <- player.PlayEmbeddedSound(context.Background(), "short-definite-fart")
+	}()
+	select {
+	case <-speaker.waiting:
+	case <-time.After(time.Second):
+		t.Fatal("embedded setup sound never reached audible-drain wait")
+	}
+	if !speaker.pumpCalled {
+		t.Fatal("embedded setup sound was not queued")
+	}
+	close(speaker.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("embedded setup sound did not finish")
+	}
+}
+
 func testMonoWAV(rate int, samples []int16) []byte {
 	data := make([]byte, len(samples)*2)
 	for index, sample := range samples {

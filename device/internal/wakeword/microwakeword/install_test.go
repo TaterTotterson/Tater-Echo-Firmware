@@ -7,8 +7,30 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
 )
+
+func TestPackageHTTPClientUsesBuildTimeTLSFloor(t *testing.T) {
+	previous := clock.BuildUnix
+	t.Cleanup(func() { clock.BuildUnix = previous })
+	// A build timestamp ahead of the test host simulates an Echo whose wall
+	// clock is years behind the firmware it is running.
+	built := time.Now().Add(time.Hour).Truncate(time.Second)
+	clock.BuildUnix = strconv.FormatInt(built.Unix(), 10)
+
+	client := packageHTTPClient(time.Second)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || transport.TLSClientConfig.Time == nil {
+		t.Fatal("wake-model HTTP client has no TLS verification clock")
+	}
+	if got := transport.TLSClientConfig.Time(); !got.Equal(built) {
+		t.Fatalf("TLS verification time = %s, want build floor %s", got, built)
+	}
+}
 
 func TestInstallPackageURLDownloadsValidatedAtomicPackage(t *testing.T) {
 	dir := t.TempDir()

@@ -385,3 +385,23 @@ func TestHeartbeatQueuesWebSocketPingAndStatus(t *testing.T) {
 		t.Fatal("heartbeat did not stop after cancellation")
 	}
 }
+
+func TestAudioDroppedCounterUsesAlignedAtomic(t *testing.T) {
+	var c Client
+	const workers = 8
+	const increments = 1000
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range increments {
+				c.audioDropped.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got, want := c.audioDropped.Load(), uint64(workers*increments); got != want {
+		t.Fatalf("audio dropped count = %d, want %d", got, want)
+	}
+}

@@ -155,6 +155,23 @@ perform its normal synced, read-only-remount reboot. The next boot joins the
 home network, redeems the code, and stores the permanent device token. Generic
 EchoMuse/emOS installs without the marker retain the USB `em-wifi` flow.
 
+### Return to setup mode
+
+The native Echo uses the same physical recovery gesture as the ESP
+satellites:
+
+1. Press the action button five times quickly.
+2. On the sixth press, keep holding for five seconds.
+3. The ring shows click progress and then drains through the hold countdown.
+4. A green ring and the same bundled confirmation sound as the ESP firmware
+   confirm the reset; the Echo reboots into the white setup state and
+   advertises `Tater-Setup-XXXX` again.
+
+This removes the private emOS Wi-Fi file, native bootstrap, and permanent
+device token. It does not remove or roll back the firmware. The same reset
+path handles Tater's **Enter setup mode** command, so remote and physical
+recovery cannot drift apart.
+
 Create `/data/local/etc/tater/native.json` on the Echo:
 
 ```json
@@ -190,8 +207,8 @@ voice-turn test if those assets are not present yet.
 - The same sensitivity and room profiles as the ESP32 satellites, including
   strict/far-field acceptance policy and mandatory STT verification for the
   TV-nearby profile.
-- Action-button turns, continued-chat reopen, barge-in, mute sovereignty, and
-  volume reporting.
+- Hold-to-intercom action-button turns, physical setup recovery,
+  continued-chat reopen, barge-in, mute sovereignty, and volume reporting.
 - Optional observe/enforce second-STT wake verification using Tater's `TWV1`
   PCM packet, with bounded capture, timeout fail-open, and verifier telemetry.
 - Optional good-wake and debounced close-miss uploads to the configured Tater
@@ -203,6 +220,20 @@ voice-turn test if those assets are not present yet.
 - Tater listening/thinking/tool/speaking/idle states on the local LED engine.
 - TTS/announcement WAV and MP3 URL playback at the Echo's 48 kHz wire rate.
 - Persistent media start/stop/pause/resume/volume/loop and response ducking.
+- Tater audio-session v4 synchronized playback: prepare/commit starts on the
+  Echo's monotonic clock, left/right/mono source routing for stereo pairs,
+  one-second DAC-consumption playhead telemetry with hardware-buffer latency,
+  gradual rate-slew correction, and underrun/rejoin telemetry. Media is
+  decoded into a bounded disk-backed PCM spool while it downloads, so long
+  tracks do not expand into song-sized RAM allocations. This enables
+  Echo-to-Echo and mixed native-satellite music groups through Tater.
+- Synchronized TTS overlays over persistent music with local ducking and
+  `audio.overlay.started`/`finished` lifecycle events. Tater's buffered audio
+  scenes use the same background session plus overlay path; the direct
+  `audio.scene.start` compatibility command is also supported. Duck attack,
+  release, and final background fade are sample-counted in the DAC mixer, so
+  the requested millisecond duration is preserved across ALSA buffer
+  boundaries instead of being rounded to a fixed-period fade.
 - Multiple local timers with arm/list/cancel/clear/snooze/ring events.
 - Live wake threshold/window/close-miss tuning, AEC, barge-in, volume, LED
   color/brightness, and animation settings (the Echo maps Tater's richer
@@ -212,10 +243,11 @@ voice-turn test if those assets are not present yet.
 - Five-second status heartbeats with volume, mute, timers, wake engine,
   connection state, uptime, and audio-drop counters.
 
-Synchronized stereo/group playback, audio-scene mixing, TTS overlays, and
-motion are not advertised by this Echo client. Tater therefore falls back to
-the supported single-device playback path instead of sending commands the
-hardware client cannot honor.
+Motion is not advertised by this Echo client. Audio scenes, synchronized TTS
+overlays, gradual rate slewing, and underrun rejoin are advertised only because
+the corresponding local implementations and protocol regression tests are
+present. The decoder caps compressed input at 64 MiB and decoded PCM spools at
+256 MiB; temporary spools are removed when a session finishes or is stopped.
 
 ## Test sequence
 
@@ -223,7 +255,7 @@ Host and cross-build checks:
 
 ```bash
 cd device
-go test -race ./internal/taternative ./internal/wakeword/microwakeword ./internal/config
+go test -race ./internal/actionbutton ./internal/taternative ./internal/wakeword/microwakeword ./internal/config
 ./test_microwakeword_runtime.sh
 ./compile.sh
 ./build_microwakeword_runtime.sh
@@ -234,12 +266,26 @@ The packaging command produces a checksummed test directory and `.tar.gz`
 containing the ARM firmware, ARMv7 runtime, pinned model/manifest, and a
 bootstrap JSON template. It does not contain a permanent device credential.
 
+For an on-device transport/rejoin check that cannot make audible output, start
+the all-zero diagnostic stream on the Tater host:
+
+```bash
+python3 device/scripts/silent_stream_server.py --port 8765
+```
+
+`/stall.wav` sends a bounded prebuffer, deliberately stalls for eight seconds,
+then resumes. Start it through Tater at volume zero and confirm the Echo reports
+one underrun followed by one rejoin and returns to `rebuffering: false`.
+`/short.wav` and `/background.wav` support silent overlay/scene stress checks.
+The PCM samples themselves are all zero as a second safety layer.
+
 On one test Echo, install the firmware, native runtime/model/manifest, and the
 bootstrap JSON after the amonet v2/emOS provisioning flow has completed. Then
 verify in this order:
 
 1. Pair/connect and confirm the device appears as `native:<serial>` in Tater.
-2. Press the action button and complete one voice turn.
+2. Hold the action button, speak an intercom message, and release; confirm it
+   is broadcast through Tater.
 3. Say “Hey Tater”; verify the listening ring moves immediately and the first
    command word is present in STT.
 4. Wake during TTS to verify barge-in, then wake while music is playing to
@@ -253,6 +299,8 @@ verify in this order:
 8. Change volume and wake/AEC settings in Tater and reboot to verify persistence.
 9. Create, cancel, snooze, and allow a timer to ring; stop it locally.
 10. Play WAV and MP3 media; exercise pause/resume/volume/loop.
+11. Press the action button five times, hold the sixth press for five seconds,
+    and confirm the Echo returns to `Tater-Setup-XXXX` without USB recovery.
 11. Mute during idle and during a turn; confirm no PCM leaves the device and the
    red hardware mute indicators survive reconnect/reboot.
 12. Run a native OTA and deliberately test a non-starting build once to confirm

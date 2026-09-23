@@ -27,10 +27,37 @@
 package clock
 
 import (
+	"strconv"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
+
+// BuildUnix is the firmware build timestamp, injected by compile.sh. It is a
+// trustworthy lower bound for TLS verification when an Echo boots with its
+// wall clock reset to 2010.
+var BuildUnix = ""
+
+// VerificationTime clamps an untrusted device clock to the firmware build
+// time. Public HTTPS downloads need this before Tater's handshake can correct
+// CLOCK_REALTIME from its own timestamp.
+func VerificationTime(now time.Time) time.Time {
+	if BuildUnix == "" {
+		return now
+	}
+	seconds, err := strconv.ParseInt(BuildUnix, 10, 64)
+	if err != nil {
+		return now
+	}
+	built := time.Unix(seconds, 0)
+	if now.Before(built) {
+		return built
+	}
+	return now
+}
+
+// VerificationNow returns the clock used for TLS certificate validity.
+func VerificationNow() time.Time {
+	return VerificationTime(time.Now())
+}
 
 // StepThreshold is how wrong the clock has to be before we touch it.
 //
@@ -63,15 +90,4 @@ func ShouldStep(deviceNow time.Time, serverUnixMs int64) bool {
 		drift = -drift
 	}
 	return drift >= StepThreshold
-}
-
-// Step sets CLOCK_REALTIME to serverUnixMs.
-//
-// clock_settime rather than settimeofday: arm64 is a 64-bit-time-only
-// architecture and does not implement the settimeofday syscall at all, so the
-// obvious call is one that compiles everywhere and fails on the hardware we
-// ship to.
-func Step(serverUnixMs int64) error {
-	ts := unix.NsecToTimespec(serverUnixMs * int64(time.Millisecond))
-	return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
 }

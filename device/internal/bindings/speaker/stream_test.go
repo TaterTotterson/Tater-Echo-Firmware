@@ -207,3 +207,27 @@ func TestNothingPlayedIsNotAudible(t *testing.T) {
 		t.Fatal("a plane that never played must not hold the barge bar down")
 	}
 }
+
+func TestRendererTelemetryCountsConsumedStereoFramesAndUnderruns(t *testing.T) {
+	s, _ := newTestStream(4)
+	period := make([]byte, 8) // two stereo S16 frames
+	if _, err := s.pump(period, 4); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ready(1) {
+		t.Fatal("test period did not become ready")
+	}
+	s.take()
+	if got := s.renderedFrames.Load(); got != 2 {
+		t.Fatalf("rendered frames = %d, want 2", got)
+	}
+	if s.firstTakeNs.Load() <= 0 {
+		t.Fatal("first renderer timestamp was not captured")
+	}
+	if st := s.drained(); st != nil {
+		t.Fatal("mid-stream drain should be an underrun")
+	}
+	if got := s.underrunEvents.Load(); got != 1 {
+		t.Fatalf("renderer underrun events = %d, want 1", got)
+	}
+}

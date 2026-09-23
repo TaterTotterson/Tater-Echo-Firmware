@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -27,7 +26,7 @@ func (c *Client) PushAudio(pcm []byte) {
 		if len(c.pendingAudio) >= preRollChunks {
 			copy(c.pendingAudio, c.pendingAudio[1:])
 			c.pendingAudio[len(c.pendingAudio)-1] = frame
-			atomic.AddUint64(&c.audioDropped, 1)
+			c.audioDropped.Add(1)
 		} else {
 			c.pendingAudio = append(c.pendingAudio, frame)
 		}
@@ -102,6 +101,16 @@ func (c *Client) StartButton() bool {
 	return c.startVoice("button", "", "", 0, false)
 }
 
+// StartIntercom opens the same press-and-hold broadcast turn as the ESP
+// satellites. Tater recognizes the synthetic wake phrase and routes the
+// captured audio through its native intercom flow; Release calls StopCapture
+// with abort=false so the completed recording is processed and broadcast.
+func (c *Client) StartIntercom() bool {
+	c.StopCapture(true)
+	c.stopVoice()
+	return c.startVoice("center_button_hold", "push to intercom", "", 0, false)
+}
+
 func (c *Client) startContinued(conversationID string) bool {
 	return c.startVoice("continued_chat", "", conversationID, 0, false)
 }
@@ -117,6 +126,7 @@ func (c *Client) startVoice(source, wakeWord, conversationID string, score float
 		return false
 	}
 	c.voicePending = true
+	c.voiceStopAfterAck = false
 	c.pendingAudio = nil
 	c.wakePreRoll = nil
 	if includePreRoll {
@@ -162,6 +172,7 @@ func (c *Client) handleVoiceStartAck(payload map[string]any) {
 	c.voicePending = false
 	if !boolValue(payload["ok"]) {
 		c.voiceActive = false
+		c.voiceStopAfterAck = false
 		c.wakePreRoll = nil
 		c.pendingAudio = nil
 		c.audioMu.Unlock()
@@ -170,6 +181,8 @@ func (c *Client) handleVoiceStartAck(payload map[string]any) {
 		return
 	}
 	c.voiceActive = true
+	stopAfterAck := c.voiceStopAfterAck
+	c.voiceStopAfterAck = false
 	frames := append(cloneFrames(c.wakePreRoll), cloneFrames(c.pendingAudio)...)
 	c.wakePreRoll = nil
 	c.pendingAudio = nil
@@ -177,12 +190,19 @@ func (c *Client) handleVoiceStartAck(payload map[string]any) {
 	for _, frame := range frames {
 		c.sendBinary(frame)
 	}
+	if stopAfterAck {
+		// A short press-to-talk message may end before the voice.start round
+		// trip completes. Flush every queued PCM frame first, then place the
+		// non-abort stop behind them on the same ordered writer queue.
+		c.StopCapture(false)
+	}
 }
 
 func (c *Client) stopVoiceCapture() {
 	c.audioMu.Lock()
 	c.voicePending = false
 	c.voiceActive = false
+	c.voiceStopAfterAck = false
 	c.wakePreRoll = nil
 	c.pendingAudio = nil
 	c.audioMu.Unlock()
@@ -200,8 +220,16 @@ func (c *Client) voiceCaptureInProgress() bool {
 func (c *Client) StopCapture(abort bool) bool {
 	c.audioMu.Lock()
 	active := c.voicePending || c.voiceActive
+	if c.voicePending && !abort {
+		// Do not discard a short intercom message just because the user
+		// released before Tater's start acknowledgement returned.
+		c.voiceStopAfterAck = true
+		c.audioMu.Unlock()
+		return true
+	}
 	c.voicePending = false
 	c.voiceActive = false
+	c.voiceStopAfterAck = false
 	c.wakePreRoll = nil
 	c.pendingAudio = nil
 	c.audioMu.Unlock()
@@ -462,15 +490,17 @@ func (c *Client) startMedia(req MediaRequest) {
 	c.playMu.Lock()
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.mediaCancel = cancel
+	c.mediaCtx = ctx
 	c.mediaGen++
 	generation := c.mediaGen
 	c.mediaID = req.SessionID
 	c.mediaGroup = req.GroupID
+	c.mediaChannel = normalizedMediaChannel(req.Channel)
 	c.playMu.Unlock()
 
 	payload := map[string]any{
 		"session_id": req.SessionID, "group_id": req.GroupID, "ok": true,
-		"channel": "stereo", "sample_rate_hz": 48000,
+		"channel": normalizedMediaChannel(req.Channel), "sample_rate_hz": playbackRate,
 	}
 	c.sendJSON("media.session.started", "", payload)
 	c.setState("playing", payload)
@@ -486,8 +516,10 @@ func (c *Client) startMedia(req MediaRequest) {
 	current := c.mediaGen == generation
 	if current {
 		c.mediaCancel = nil
+		c.mediaCtx = nil
 		c.mediaID = ""
 		c.mediaGroup = ""
+		c.mediaChannel = ""
 	}
 	c.playMu.Unlock()
 	if !current {
@@ -499,6 +531,152 @@ func (c *Client) startMedia(req MediaRequest) {
 	}
 	c.sendJSON("media.session.finished", "", finished)
 	c.setState("idle", finished)
+}
+
+func (c *Client) prepareMedia(replyTo string, req MediaRequest) {
+	c.stopMedia("")
+	c.playMu.Lock()
+	ctx, cancel := context.WithCancel(c.ctx)
+	c.mediaCancel = cancel
+	c.mediaCtx = ctx
+	c.mediaGen++
+	generation := c.mediaGen
+	c.mediaID = req.SessionID
+	c.mediaGroup = req.GroupID
+	c.mediaChannel = normalizedMediaChannel(req.Channel)
+	c.playMu.Unlock()
+
+	prepared := MediaPreparation{SampleRateHz: playbackRate}
+	var err error
+	if hook := c.hooks.PrepareMedia; hook != nil {
+		prepared, err = hook(ctx, req)
+	} else {
+		err = errors.New("synchronized media preparation unavailable")
+	}
+
+	c.playMu.Lock()
+	current := c.mediaGen == generation && c.mediaID == req.SessionID
+	if err != nil && current {
+		if c.mediaCancel != nil {
+			c.mediaCancel()
+		}
+		c.mediaCancel = nil
+		c.mediaCtx = nil
+		c.mediaID = ""
+		c.mediaGroup = ""
+		c.mediaChannel = ""
+	}
+	c.playMu.Unlock()
+	if !current {
+		return
+	}
+	payload := map[string]any{
+		"reply_to": replyTo, "ok": err == nil,
+		"session_id": req.SessionID, "group_id": req.GroupID,
+		"buffered_frames":       prepared.BufferedFrames,
+		"sample_rate_hz":        prepared.SampleRateHz,
+		"output_latency_frames": prepared.OutputLatencyFrames,
+		"satellite_time_us":     monotonicMicros(),
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	c.sendJSON("media.session.prepare.result", "", payload)
+}
+
+func (c *Client) commitMedia(replyTo, sessionID string, startAtUS int64) {
+	c.playMu.Lock()
+	ctx := c.mediaCtx
+	generation := c.mediaGen
+	groupID := c.mediaGroup
+	channel := c.mediaChannel
+	valid := sessionID != "" && sessionID == c.mediaID && ctx != nil
+	c.playMu.Unlock()
+	if !valid {
+		c.sendJSON("media.session.commit.result", "", map[string]any{
+			"reply_to": replyTo, "ok": false, "error": "prepared media session not found",
+		})
+		return
+	}
+	hook := c.hooks.CommitMedia
+	if hook == nil {
+		c.sendJSON("media.session.commit.result", "", map[string]any{
+			"reply_to": replyTo, "ok": false, "error": "synchronized media commit unavailable",
+		})
+		return
+	}
+	report := func(event MediaPlaybackEvent) {
+		c.playMu.Lock()
+		current := c.mediaGen == generation && c.mediaID == sessionID
+		c.playMu.Unlock()
+		if !current {
+			return
+		}
+		if event.Kind == "started" {
+			payload := map[string]any{
+				"session_id": sessionID, "group_id": groupID,
+				"channel": channel, "sample_rate_hz": playbackRate,
+				"scheduled_start_us": event.ScheduledStartUS,
+				"actual_start_us":    event.ActualStartUS,
+				"late_by_us":         maxInt64(0, event.ActualStartUS-event.ScheduledStartUS),
+			}
+			c.sendJSON("media.session.started", "", payload)
+			c.setState("playing", payload)
+			return
+		}
+		if event.Kind == "playhead" {
+			c.sendJSON("media.session.playhead", "", map[string]any{
+				"session_id": sessionID, "group_id": groupID, "channel": channel,
+				"sample_rate_hz":             playbackRate,
+				"source_frames":              event.SourceFrames,
+				"rendered_frames":            event.RenderedFrames,
+				"output_frames":              event.OutputFrames,
+				"output_latency_frames":      event.OutputLatencyFrames,
+				"buffered_frames":            event.BufferedFrames,
+				"satellite_time_us":          event.SatelliteTimeUS,
+				"scheduled_start_us":         event.ScheduledStartUS,
+				"correction_frames":          event.CorrectionFrames,
+				"rebuffering":                event.Rebuffering,
+				"underrun_events":            event.UnderrunEvents,
+				"overlay_underrun_events":    event.OverlayUnderrunEvents,
+				"background_underrun_events": event.BackgroundUnderrunEvents,
+				"foreground_underrun_events": event.ForegroundUnderrunEvents,
+				"rejoin_count":               event.RejoinCount,
+				"rejoin_frames":              event.RejoinFrames,
+			})
+		}
+	}
+	done, err := hook(ctx, sessionID, startAtUS, report)
+	result := map[string]any{"reply_to": replyTo, "ok": err == nil}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	c.sendJSON("media.session.commit.result", "", result)
+	if err != nil || done == nil {
+		return
+	}
+	go func() {
+		err := <-done
+		c.playMu.Lock()
+		current := c.mediaGen == generation && c.mediaID == sessionID
+		if current {
+			c.mediaCancel = nil
+			c.mediaCtx = nil
+			c.mediaID = ""
+			c.mediaGroup = ""
+			c.mediaChannel = ""
+		}
+		c.playMu.Unlock()
+		if !current {
+			return
+		}
+		payload := map[string]any{"session_id": sessionID, "group_id": groupID, "ok": err == nil}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			payload["reason"] = err.Error()
+		}
+		c.sendJSON("media.session.finished", "", payload)
+		c.setState("idle", payload)
+	}()
 }
 
 func (c *Client) stopMedia(requested string) {
@@ -514,8 +692,10 @@ func (c *Client) stopMedia(requested string) {
 		c.mediaCancel = nil
 	}
 	c.mediaGen++
+	c.mediaCtx = nil
 	c.mediaID = ""
 	c.mediaGroup = ""
+	c.mediaChannel = ""
 	c.playMu.Unlock()
 	if active != "" && c.hooks.StopMedia != nil {
 		c.hooks.StopMedia(active)
@@ -525,4 +705,11 @@ func (c *Client) stopMedia(requested string) {
 			"session_id": active, "group_id": group, "ok": true, "stopped": true,
 		})
 	}
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
 }

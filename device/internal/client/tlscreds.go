@@ -6,10 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
 	"github.com/gorilla/websocket"
 )
 
@@ -33,13 +33,6 @@ const (
 	tlsServerName = "echomuse-controller"
 )
 
-// BuildUnix is the firmware build timestamp (seconds since epoch), set at
-// build time via ldflags — see device/compile.sh. It floors the TLS
-// verification clock: an Echo fresh off a reboot can sit at a bogus date
-// until Android's NTP syncs, and a strict NotBefore check would then
-// brick the connection that time sync itself may depend on.
-var BuildUnix = ""
-
 type linkCreds struct {
 	tlsConf *tls.Config // nil — no CA on disk, plain ws
 	token   string      // "" — no token on disk
@@ -59,7 +52,7 @@ func loadLinkCreds() linkCreds {
 				RootCAs:    pool,
 				ServerName: tlsServerName,
 				MinVersion: tls.VersionTLS12,
-				Time:       tlsNow,
+				Time:       clock.VerificationNow,
 			}
 		}
 	}
@@ -88,20 +81,4 @@ func (c linkCreds) dialer() websocket.Dialer {
 		HandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:  c.tlsConf,
 	}
-}
-
-// tlsNow is the verification clock for cert validity: never earlier than
-// the firmware build time. The controller additionally backdates its certs
-// 10 years (see em_pki.py), so between the two, a wrong device clock in
-// either direction cannot strand the device off the network.
-func tlsNow() time.Time {
-	now := time.Now()
-	if BuildUnix != "" {
-		if sec, err := strconv.ParseInt(BuildUnix, 10, 64); err == nil {
-			if bt := time.Unix(sec, 0); now.Before(bt) {
-				return bt
-			}
-		}
-	}
-	return now
 }

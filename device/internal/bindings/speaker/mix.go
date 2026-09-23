@@ -29,34 +29,17 @@ import "math"
 // would leave a stream that is nominally not ducked very slightly altered.
 const unityGain int32 = 1 << 15
 
-// duckRampPeriods — periods taken to traverse the FULL gain range. A period
-// is ~42.7ms, so 4 gives a ~170ms ramp for a duck from unity to silence, and
-// proportionally less for a shallower one. Fast enough that the duck lands
-// with the wake word, slow enough to be a fade rather than a step: stepping
-// the gain at a period boundary is an audible click, landing on exactly the
-// transition the user is listening to.
-//
-// A CONSTANT SLEW, not a proportional one. `(target-gain)/n` per period is
-// an exponential approach: 4 is then a time constant, not a duration, and
-// the gain crawls the last few percent for over a second — measured at 31
-// periods (1.3s) to settle, against the 170ms this comment used to claim.
-//
-// Now 1 (2026-09-22): the duck has to land with the listening ring, which the
-// device lights at its own wake crossing, and four periods put ~150ms of ramp
-// on top of the hardware buffer. The gain is still interpolated per SAMPLE
-// across the one period, so it remains a 43ms fade rather than a step.
-const duckRampPeriods = 1
-
-// rampStep is the most the gain may move in one period.
-const rampStep = unityGain / duckRampPeriods
-
 // Mixer combines the voice and music streams for one output period.
 //
 // Single-consumer by contract: only the ALSA write goroutine touches it, so
 // nothing here is synchronised. The gain TARGET is set from elsewhere and is
 // the one field that needs atomicity — it lives in PcmSpeaker, not here.
 type Mixer struct {
-	gain int32 // current, Q15, ramps toward the target
+	gain            int32 // current, Q15
+	rampStart       int32
+	rampTarget      int32
+	rampFramesTotal int64
+	rampFramesDone  int64
 }
 
 // DuckGain converts decibels of attenuation to Q15.
@@ -79,7 +62,27 @@ func (m *Mixer) Gain() int32 { return m.gain }
 
 // SetGainImmediate jumps the ramp to a value. Used at stream start, where
 // there is no audio to click.
-func (m *Mixer) SetGainImmediate(g int32) { m.gain = g }
+func (m *Mixer) SetGainImmediate(g int32) {
+	m.gain = g
+	m.rampStart = g
+	m.rampTarget = g
+	m.rampFramesTotal = 0
+	m.rampFramesDone = 0
+}
+
+// SetRamp schedules an exact sample-counted gain transition. It is called by
+// the ALSA goroutine when it observes a new atomic duck request, so all mixer
+// state remains single-consumer and race-free.
+func (m *Mixer) SetRamp(target int32, frames int64) {
+	if frames <= 0 || target == m.gain {
+		m.SetGainImmediate(target)
+		return
+	}
+	m.rampStart = m.gain
+	m.rampTarget = target
+	m.rampFramesTotal = frames
+	m.rampFramesDone = 0
+}
 
 // Mix produces one output period from whichever streams have audio.
 //
@@ -90,42 +93,63 @@ func (m *Mixer) SetGainImmediate(g int32) { m.gain = g }
 // Returns the buffer to write, or nil when there is nothing to play (the
 // caller pumps silence, which is what paces this loop).
 func (m *Mixer) Mix(voice, music []byte, target int32) []byte {
+	frames := len(voice) / 4
+	if len(music)/4 > frames {
+		frames = len(music) / 4
+	}
+	if frames == 0 {
+		frames = 1
+	}
+	if target != m.rampTarget {
+		m.SetRamp(target, int64(frames))
+	}
+	return m.mixConfigured(voice, music, frames)
+}
+
+// MixConfigured uses the envelope previously selected with SetRamp. The
+// caller supplies clockFrames because silence still advances a timed ramp.
+func (m *Mixer) MixConfigured(voice, music []byte, clockFrames int) []byte {
+	if clockFrames <= 0 {
+		clockFrames = 1
+	}
+	return m.mixConfigured(voice, music, clockFrames)
+}
+
+func (m *Mixer) mixConfigured(voice, music []byte, clockFrames int) []byte {
 	switch {
 	case voice == nil && music == nil:
-		// Still settle the ramp: a duck requested while nothing is playing
-		// must not be waiting, half-applied, for the next period of audio.
-		m.stepGain(target)
+		m.advanceGain(int64(clockFrames))
 		return nil
 
 	case music == nil:
 		// Voice alone is never ducked — it is the thing being listened to.
-		m.stepGain(target)
+		m.advanceGain(int64(clockFrames))
 		return voice
 
 	case voice == nil:
-		m.applyGain(music, target)
+		m.applyConfiguredGain(music)
 		return music
 
 	default:
-		m.applyGain(music, target)
+		m.applyConfiguredGain(music)
 		mixInto(voice, music)
 		return voice
 	}
 }
 
-// stepGain moves the current gain one period toward the target, by at most
-// rampStep. Clamped rather than divided, so it always arrives exactly.
-func (m *Mixer) stepGain(target int32) {
-	switch {
-	case m.gain < target:
-		if m.gain += rampStep; m.gain > target {
-			m.gain = target
-		}
-	case m.gain > target:
-		if m.gain -= rampStep; m.gain < target {
-			m.gain = target
-		}
+func (m *Mixer) advanceGain(frames int64) {
+	if m.rampFramesTotal <= 0 || m.rampFramesDone >= m.rampFramesTotal {
+		m.gain = m.rampTarget
+		return
 	}
+	m.rampFramesDone += frames
+	if m.rampFramesDone >= m.rampFramesTotal {
+		m.rampFramesDone = m.rampFramesTotal
+		m.gain = m.rampTarget
+		return
+	}
+	delta := int64(m.rampTarget - m.rampStart)
+	m.gain = m.rampStart + int32(delta*m.rampFramesDone/m.rampFramesTotal)
 }
 
 // applyGain scales a period, ramping across it sample by sample.
@@ -134,19 +158,23 @@ func (m *Mixer) stepGain(target int32) {
 // boundary is a step discontinuity, which is a click. Interpolating across
 // the period turns the same change into a fade.
 func (m *Mixer) applyGain(buf []byte, target int32) {
-	start := m.gain
-	m.stepGain(target)
-	end := m.gain
-
 	frames := len(buf) / 4 // stereo S16
 	if frames == 0 {
 		return
 	}
+	if target != m.rampTarget {
+		m.SetRamp(target, int64(frames))
+	}
+	m.applyConfiguredGain(buf)
+}
+
+func (m *Mixer) applyConfiguredGain(buf []byte) {
+	frames := len(buf) / 4
+	if frames == 0 {
+		return
+	}
 	for i := 0; i < frames; i++ {
-		g := start
-		if end != start {
-			g = start + (end-start)*int32(i)/int32(frames)
-		}
+		g := m.gain
 		// L and R are duplicates on this hardware, but scale both rather
 		// than assuming it — the assumption is one refactor away from being
 		// silently wrong, and the cost is one multiply.
@@ -157,6 +185,7 @@ func (m *Mixer) applyGain(buf []byte, target int32) {
 			buf[off] = byte(uint16(s) & 0xff)
 			buf[off+1] = byte(uint16(s) >> 8)
 		}
+		m.advanceGain(1)
 	}
 }
 

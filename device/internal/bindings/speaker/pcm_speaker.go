@@ -15,6 +15,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/codec"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
+	pkgspeaker "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 
 	"github.com/Binozo/GoTinyAlsa/pkg/pcm"
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
@@ -98,8 +99,10 @@ type PcmSpeaker struct {
 	// turn, Q15. Written from the control plane (SetDuck) and read by the
 	// ALSA goroutine every period, hence atomic; the ramp toward it lives in
 	// the Mixer, which is single-consumer and needs no synchronisation.
-	duckTarget atomic.Int32
-	mixer      Mixer
+	duckTarget     atomic.Int32
+	duckRampFrames atomic.Int64
+	duckRevision   atomic.Uint64
+	mixer          Mixer
 
 	// chain is the output chain (EQ, bass guard, limiter), run on the MIX,
 	// after the duck and before the taps and the DAC. Inactive until the
@@ -157,6 +160,8 @@ func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeake
 	s.voice = newAudioStream(audioChanDepth, s.deadCh)
 	s.music = newAudioStream(audioChanDepth, s.deadCh)
 	s.duckTarget.Store(unityGain)
+	s.duckRampFrames.Store(periodSize)
+	s.duckRevision.Store(1)
 	s.mixer.SetGainImmediate(unityGain)
 	if err := s.Init(); err != nil {
 		return nil, err
@@ -372,6 +377,7 @@ func (p *PcmSpeaker) WatchJackRouting(ctx context.Context) {
 func (p *PcmSpeaker) silenceLoop() {
 	defer close(p.deadCh)
 	var meter writeLoopMeter // bench builds only; empty otherwise
+	var duckRevision uint64
 	for {
 		select {
 		case <-p.stopCh:
@@ -399,7 +405,11 @@ func (p *PcmSpeaker) silenceLoop() {
 			level = periodRMS(voice)
 		}
 
-		out := p.mixer.Mix(voice, music, p.duckTarget.Load())
+		if revision := p.duckRevision.Load(); revision != duckRevision {
+			p.mixer.SetRamp(p.duckTarget.Load(), p.duckRampFrames.Load())
+			duckRevision = revision
+		}
+		out := p.mixer.MixConfigured(voice, music, periodSize)
 		process := out != nil
 		if out == nil {
 			out = silencePeriod
@@ -526,7 +536,19 @@ func (p *PcmSpeaker) PumpMusic(data []byte) error {
 // applied at once, because a gain step at a period boundary is a click — and
 // it would land on exactly the moment the user started speaking.
 func (p *PcmSpeaker) SetDuck(db float64) {
+	p.SetDuckRamp(db, time.Duration(periodSize)*time.Second/48000)
+}
+
+// SetDuckRamp changes music gain over the exact requested renderer duration.
+// The request is atomic and the ALSA goroutine owns the envelope itself.
+func (p *PcmSpeaker) SetDuckRamp(db float64, duration time.Duration) {
+	frames := int64(math.Round(duration.Seconds() * 48000))
+	if duration > 0 && frames < 1 {
+		frames = 1
+	}
+	p.duckRampFrames.Store(frames)
 	p.duckTarget.Store(DuckGain(db))
+	p.duckRevision.Add(1)
 }
 
 // SetOutputChain sets the output chain's configuration; it lands on the next
@@ -590,9 +612,39 @@ func (p *PcmSpeaker) WaitVoiceIdle(ctx context.Context) error {
 	return nil
 }
 
+// WaitMusicIdle is the music-plane equivalent used by synchronized sessions.
+// Completion must describe audible drain, not merely that the decoded file was
+// copied into the Echo's deep queue.
+func (p *PcmSpeaker) WaitMusicIdle(ctx context.Context) error {
+	const hardwareDrainHold = 150 * time.Millisecond
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for p.MusicAudible(hardwareDrainHold) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
 // MusicAudible is VoiceAudible for the music plane.
 func (p *PcmSpeaker) MusicAudible(hold time.Duration) bool {
 	return p.music.playedWithin(time.Now(), hold)
+}
+
+// MusicPlaybackStatus exposes the music plane's real consumption clock. The
+// deep queue is intentionally several seconds long, so producer/decoder byte
+// counts are not a usable synchronization clock.
+func (p *PcmSpeaker) MusicPlaybackStatus() pkgspeaker.MusicPlaybackStatus {
+	return pkgspeaker.MusicPlaybackStatus{
+		RenderedFrames:        p.music.renderedFrames.Load(),
+		BufferedFrames:        len(p.music.ch) * periodSize,
+		OutputLatencyFrames:   alsaBufferFrames,
+		FirstRenderedUnixNano: p.music.firstTakeNs.Load(),
+		UnderrunEvents:        p.music.underrunEvents.Load(),
+	}
 }
 
 // EndStream marks the in-flight voice stream complete (0x03). Always arrives

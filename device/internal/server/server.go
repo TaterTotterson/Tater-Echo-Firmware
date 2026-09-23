@@ -55,6 +55,11 @@ type Server struct {
 	// compound decision with anything else it guards. See SetLinkDown.
 	linkDown atomic.Bool
 
+	// setupFeedback temporarily owns the ring while the local six-press
+	// recovery gesture is in progress. Controller animations keep updating
+	// baseLEDs underneath it and resume as soon as the gesture is cancelled.
+	setupFeedback atomic.Bool
+
 	// audioLevel holds the live speaker RMS as float64 bits — written by
 	// the speaker's ALSA pump via SetAudioLevel, read by the meter anim.
 	audioLevel atomic.Uint64
@@ -363,6 +368,9 @@ func (s *Server) SetDirectionObservation(angleDeg float64, activity, speech bool
 	if angleDeg < 0 {
 		return
 	}
+	if s.setupFeedback.Load() {
+		return
+	}
 	// Same paint suppressions as SetLEDs: the volume arc owns the ring for
 	// its display window, and the mute ring is device-sovereign.
 	if (s.volume != nil && s.volume.DisplayActive()) || (s.mute != nil && s.mute.IsMuted()) {
@@ -574,6 +582,9 @@ func (s *Server) SetLEDs(leds []led.Led, listeningHint *bool) {
 		s.replyDirection = 0
 	}
 	s.baseLEDsMu.Unlock()
+	if s.setupFeedback.Load() {
+		return
+	}
 	if suppressPaint(s.volume.DisplayActive(), s.mute.IsMuted(), s.LinkDown()) {
 		return
 	}
@@ -602,6 +613,9 @@ func suppressPaint(volumeActive, muted, linkDown bool) bool {
 
 // paintBaseLEDs paints the ring from the stored controller state.
 func (s *Server) paintBaseLEDs() {
+	if s.setupFeedback.Load() {
+		return
+	}
 	s.ledMu.Lock()
 	lc := s.ledController
 	s.ledMu.Unlock()
@@ -618,5 +632,67 @@ func (s *Server) paintBaseLEDs() {
 	}
 	if err := lc.SetLEDs(leds...); err != nil {
 		log.Printf("SetLEDs error: %v", err)
+	}
+}
+
+// ShowSetupResetClicks paints the five-click arming progress locally. It does
+// not overwrite baseLEDs, so cancelling the sequence restores the current
+// controller animation instead of a stale idle frame.
+func (s *Server) ShowSetupResetClicks(count, total int) {
+	if total <= 0 {
+		return
+	}
+	count = max(0, min(count, total))
+	lit := (count*12 + total - 1) / total
+	s.setupFeedback.Store(true)
+	s.paintSetupFeedback(lit, led.Led{R: 255, G: 72, B: 0})
+}
+
+// ShowSetupResetCountdown drains the orange ring during the sixth hold.
+func (s *Server) ShowSetupResetCountdown(remaining, total int) {
+	if total <= 0 {
+		return
+	}
+	remaining = max(0, min(remaining, total))
+	lit := (remaining*12 + total - 1) / total
+	s.setupFeedback.Store(true)
+	s.paintSetupFeedback(lit, led.Led{R: 255, G: 72, B: 0})
+}
+
+// ShowSetupResetSuccess confirms the reset before emOS reboots into its white
+// setup-mode animation and Tater-Setup-XXXX hotspot.
+func (s *Server) ShowSetupResetSuccess() {
+	s.setupFeedback.Store(true)
+	s.paintSetupFeedback(12, led.Led{R: 42, G: 220, B: 132})
+}
+
+// ClearSetupResetFeedback hands the ring back to mute/controller/link state.
+func (s *Server) ClearSetupResetFeedback() {
+	if !s.setupFeedback.Swap(false) {
+		return
+	}
+	if s.mute != nil && s.mute.IsMuted() && !s.LinkDown() {
+		s.RestoreMuteRing()
+		return
+	}
+	s.paintBaseLEDs()
+}
+
+func (s *Server) paintSetupFeedback(lit int, color led.Led) {
+	s.ledMu.Lock()
+	lc := s.ledController
+	s.ledMu.Unlock()
+	if lc == nil {
+		return
+	}
+	frame := make([]led.Led, 12)
+	for i := range frame {
+		frame[i] = led.Led{ID: i, R: 4, G: 1, B: 0}
+		if i < lit {
+			frame[i].R, frame[i].G, frame[i].B = color.R, color.G, color.B
+		}
+	}
+	if err := lc.SetLEDs(frame...); err != nil {
+		log.Printf("setup feedback LEDs: %v", err)
 	}
 }

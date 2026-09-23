@@ -1,5 +1,17 @@
 package speaker
 
+// MusicPlaybackStatus is optional renderer telemetry implemented by hardware
+// speakers that can expose their actual music-plane consumption. It lets a
+// synchronized player report the DAC-side clock instead of bytes decoded or
+// queued several seconds ahead of what is audible.
+type MusicPlaybackStatus struct {
+	RenderedFrames        uint64
+	BufferedFrames        int
+	OutputLatencyFrames   int
+	FirstRenderedUnixNano int64
+	UnderrunEvents        uint64
+}
+
 type Speaker interface {
 	Init() error
 	PumpPeriod(data []byte) error

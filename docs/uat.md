@@ -259,6 +259,37 @@ never comes back up; or a duck that leaves music permanently quiet.
 **Flag:** The answer continuing to the end; or the new turn being refused.
 Give the Activity outcome for the second turn.
 
+### E5 · Long-track memory stays bounded
+**Do:** Play a track at least ten minutes long. While it plays, open the
+satellite diagnostics and watch process memory.
+**Expect:** Playback begins after its prebuffer and memory stays roughly flat;
+the full decoded track is not retained in RAM.
+**Flag:** Memory growing with the duration of the track, a restart, or an
+out-of-memory reconnect.
+
+### E6 · Synchronized reply over a stereo/group session
+**Do:** Start synchronized music on two native satellites, then ask for a
+spoken reply routed to that group.
+**Expect:** Both members begin the reply together, music ducks without pausing,
+and both report the same overlay finishing before music returns to full level.
+**Flag:** A reply beginning on one member noticeably earlier, music stopping,
+or one member remaining ducked.
+
+### E7 · Drift correction is inaudible
+**Do:** Leave a mixed-hardware synchronized group playing for at least ten
+minutes and move between the speakers.
+**Expect:** The image stays centered without clicks, abrupt skips, or repeated
+words/notes while small rate corrections are applied.
+**Flag:** Phase wandering, clicks at correction time, or a sudden jump during
+normal drift repair.
+
+### E8 · Underrun rejoins the group
+**Do:** Briefly degrade or interrupt Wi-Fi to one group member, then restore it.
+**Expect:** That member reports rebuffering, rejoins near the shared audible
+timeline with a short fade, and remains synchronized.
+**Flag:** Playback restarting from the stale position, never rejoining, or a
+loud click on recovery.
+
 ---
 
 ## F — Timers and alarms
@@ -293,10 +324,20 @@ level.
 
 ## G — Buttons and LEDs
 
-### G1 · Action button starts a turn
-**Do:** Tap the dot button.
-**Expect:** Same behaviour as a wake word.
-**Flag:** No response, or a delayed one.
+### G1 · Action-button intercom
+**Do:** Hold the dot button for at least 600 ms, speak, then release it.
+**Expect:** Listening starts while the button is held; release completes and
+broadcasts the message through Tater intercom.
+**Flag:** Listening starts on a tap, starts only after release, or continues
+recording after release.
+
+### G1a · Physical setup recovery
+**Do:** Press the dot button five times quickly, then hold the sixth press for
+five seconds.
+**Expect:** The ring shows click progress and a hold countdown, confirms green,
+plays the setup-reset sound, then reboots into the `Tater-Setup-XXXX` hotspot.
+**Flag:** Intercom starts during the sixth hold, provisioning survives, or USB
+is required to reach setup again.
 
 ### G2 · Mute is real
 **Do:** Press mute. Try the wake word. Try the action button.

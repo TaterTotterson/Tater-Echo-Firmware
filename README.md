@@ -26,7 +26,11 @@ Machine-readable target data lives in [`targets/targets.json`](targets/targets.j
 - User-selected wake sounds, including bundled defaults that work offline.
 - Tater-controlled LED animations, real-time direction-of-arrival, and reply
   direction held toward the speaker.
-- Continued conversation/reopen-mic, barge-in, media playback, ducking, volume,
+- ESP-parity action-button controls: hold for push-to-intercom; press five
+  times, then hold the sixth press for five seconds to return to setup mode.
+- Continued conversation/reopen-mic, barge-in, synchronized stereo/group media
+  playback, disk-backed streaming, rate-slew/rejoin correction, synchronized
+  TTS overlays and audio scenes, local music ducking, volume,
   mute, timers, and announcements.
 - BLE presence advertisements for Tater's room-level presence system.
 - First-boot Wi-Fi and Tater pairing portal—no browser USB wizard required.
@@ -102,10 +106,10 @@ The Echo firmware side is ready for Tater-managed OTA. Tater sends an
 3. atomically switches the active symlink and restarts; and
 4. rolls back after three fast startup failures.
 
-The remaining integration is in the Tater application: resolve this
-repository's `firmware-manifest.json`, select the artifact matching the Echo's
-target, and send the existing OTA command. That is intentionally the next
-step; the release contract in this repository is now stable for it.
+Tater resolves this repository's `firmware-manifest.json`, selects the artifact
+matching the Echo's `biscuit` target, and sends the existing OTA command. Echo
+updates therefore appear alongside the other native-satellite updates in the
+Tater application.
 
 ## Development
 
@@ -122,7 +126,7 @@ cd device
 Run the Go and installer regression tests:
 
 ```bash
-cd device && go test -race ./internal/taternative ./internal/wakeword/microwakeword ./internal/beamformer ./internal/server
+cd device && go test -race ./internal/actionbutton ./internal/taternative ./internal/wakeword/microwakeword ./internal/beamformer ./internal/server
 cd .. && python3 -m unittest factory.biscuit.test_install
 ```
 

@@ -1,6 +1,7 @@
 package clock
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -88,5 +89,21 @@ func TestBootClockIsStepped(t *testing.T) {
 	// ...and once corrected, the next ack must leave it alone.
 	if ShouldStep(real, ms(real)) {
 		t.Fatal("a correct clock must not be stepped again")
+	}
+}
+
+func TestVerificationTimeFloorsBogusBootClock(t *testing.T) {
+	previous := BuildUnix
+	t.Cleanup(func() { BuildUnix = previous })
+	built := time.Date(2026, 9, 23, 8, 15, 0, 0, time.UTC)
+	BuildUnix = strconv.FormatInt(built.Unix(), 10)
+	boot := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	if got := VerificationTime(boot); !got.Equal(built) {
+		t.Fatalf("verification time = %s, want build floor %s", got, built)
+	}
+	current := built.Add(24 * time.Hour)
+	if got := VerificationTime(current); !got.Equal(current) {
+		t.Fatalf("verification time = %s, want current time %s", got, current)
 	}
 }

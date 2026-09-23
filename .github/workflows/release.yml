@@ -48,6 +48,24 @@ jobs:
             echo "::error::version must look like v0.1.0"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+
+      - name: Run firmware regression tests
+        run: |
+          cd device
+          go test -race \
+            ./internal/actionbutton \
+            ./internal/taternative \
+            ./internal/wakeword/microwakeword \
+            ./internal/beamformer \
+            ./internal/server \
+            ./internal/bindings/speaker
+          python3 -m py_compile scripts/silent_stream_server.py
+
       - name: Build Android compiler image
         run: docker build -t echomuse-compiler device/compiler/
 
@@ -62,7 +80,7 @@ jobs:
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
             echomuse-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
-                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.BuildUnix=$build_unix' \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
               -o build/server ./cmd/"
 
       - name: Build ARMv7 microWakeWord runtime

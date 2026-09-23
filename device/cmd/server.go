@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/actionbutton"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/als"
 	internalbuttons "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/buttons"
@@ -30,6 +31,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/speaker"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bluetooth"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/client"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/listen"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
@@ -71,7 +73,7 @@ func main() {
 			os.Exit(0)
 		case "version", "--version", "-v":
 			built := "unknown"
-			if sec, err := strconv.ParseInt(client.BuildUnix, 10, 64); err == nil {
+			if sec, err := strconv.ParseInt(clock.BuildUnix, 10, 64); err == nil {
 				built = time.Unix(sec, 0).UTC().Format(time.RFC3339)
 			}
 			fmt.Printf("Tater Echo Firmware %s (built %s)\n", client.Version, built)
@@ -175,6 +177,61 @@ func main() {
 	nativeMode := nativeURL != ""
 	var nativeClient *taternative.Client
 	var nativePlayer *taternative.LocalPlayer
+	resetToSetup := func(source string, playSound bool) error {
+		log.Printf("[tater-native] setup reset requested by %s", source)
+		if nativeClient != nil {
+			nativeClient.StopCapture(true)
+		}
+		if nativePlayer != nil {
+			nativePlayer.StopVoice()
+			nativePlayer.StopMedia()
+			nativePlayer.SetTimerAlarm(false)
+		}
+		s.ShowSetupResetSuccess()
+		if playSound && nativePlayer != nil {
+			soundCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if err := nativePlayer.PlayEmbeddedSound(soundCtx, "short-definite-fart"); err != nil && soundCtx.Err() == nil {
+				log.Printf("[tater-native] setup reset sound failed: %v", err)
+			}
+			cancel()
+		}
+		if err := taternative.ResetToSetup(taternative.SetupResetOptions{}); err != nil {
+			s.ClearSetupResetFeedback()
+			s.StartAnim(nativeStateAnimation("error"))
+			return err
+		}
+		return nil
+	}
+	actionGesture := actionbutton.New(actionbutton.Config{}, actionbutton.Callbacks{
+		StartIntercom: func() bool {
+			if nativeClient == nil || s.LinkDown() {
+				log.Println("[tater-native] intercom hold ignored — no Tater session")
+				return false
+			}
+			if s.IsMuted() {
+				log.Println("[tater-native] intercom hold suppressed — muted")
+				return false
+			}
+			s.ClearSetupResetFeedback()
+			s.CancelVolumeDisplay()
+			log.Println("[tater-native] action button hold: intercom voice.start")
+			return nativeClient.StartIntercom()
+		},
+		StopIntercom: func() {
+			if nativeClient != nil {
+				log.Println("[tater-native] action button release: intercom voice.stop")
+				nativeClient.StopCapture(false)
+			}
+		},
+		ShowClicks:    s.ShowSetupResetClicks,
+		ShowCountdown: s.ShowSetupResetCountdown,
+		ClearFeedback: s.ClearSetupResetFeedback,
+		SetupComplete: func() {
+			if err := resetToSetup("action button gesture", true); err != nil {
+				log.Printf("[tater-native] physical setup reset failed: %v", err)
+			}
+		},
+	})
 	if nativeMode {
 		// Direct-native mode always needs the local detector. The incoming
 		// settings frame may refine model/threshold after hello.
@@ -308,6 +365,17 @@ func main() {
 	// Button events — forward to controller via control plane
 	_, err = buttonController.SubscribeToButton(func(event pkgbuttons.ButtonClickEvent) {
 		log.Printf("Button event: clickType=%d down=%v", event.ClickType, event.Down)
+		// Direct-native Echo firmware recognizes these gestures locally, just
+		// like the ESP firmware. Setup recovery must keep working while Tater
+		// or Wi-Fi is unavailable, so this deliberately runs before LinkDown.
+		if nativeMode && event.ClickType == pkgbuttons.DotClick {
+			if event.Down {
+				actionGesture.Press()
+			} else {
+				actionGesture.Release()
+			}
+			return
+		}
 		// Inert without a controller session: the dot cannot start a turn
 		// with nothing to send it to, and the ring flash CancelVolumeDisplay
 		// produces would acknowledge a press that achieves nothing. Dropped
@@ -336,14 +404,6 @@ func main() {
 		// event the controller actually starts a turn on.
 		if event.ClickType == pkgbuttons.DotClick && !event.Down {
 			s.CancelVolumeDisplay()
-			if nativeClient != nil {
-				if event.Muted {
-					log.Println("[tater-native] action button voice turn suppressed — muted")
-					return
-				}
-				nativeClient.StartButton()
-				return
-			}
 		}
 		controlClient.SendButton(event)
 	})
@@ -482,10 +542,20 @@ func main() {
 					wakeEngine["capture"] = nativeClient.TrainerStatus()
 					wakeEngine["verifier"] = nativeClient.WakeVerifierStatus()
 				}
+				var memory runtime.MemStats
+				runtime.ReadMemStats(&memory)
 				status := map[string]any{
 					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
 					"muted":          s.IsMuted(),
 					"wake_engine":    wakeEngine,
+					"memory": map[string]any{
+						"heap_alloc_kb": memory.HeapAlloc / 1024,
+						"heap_sys_kb":   memory.HeapSys / 1024,
+						"stack_sys_kb":  memory.StackSys / 1024,
+						"rss_kb":        selfRSSKb(),
+						"goroutines":    runtime.NumGoroutine(),
+						"num_gc":        memory.NumGC,
+					},
 				}
 				if angle, ok := s.Direction(); ok {
 					status["doa_deg"] = math.Round(angle*10) / 10
@@ -494,11 +564,16 @@ func main() {
 			},
 			PlayWakeSound: nativePlayer.PlayWakeSound,
 			PlayVoice:     nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
-			StartMedia:  nativePlayer.PlayMedia,
-			StopMedia:   func(string) { nativePlayer.StopMedia() },
-			PauseMedia:  func(string) { nativePlayer.PauseMedia() },
-			ResumeMedia: func(string) { nativePlayer.ResumeMedia() },
-			VolumeMedia: func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
+			PlayOverlay:  nativePlayer.PlayOverlay,
+			PlayScene:    nativePlayer.PlayScene,
+			StartMedia:   nativePlayer.PlayMedia,
+			PrepareMedia: nativePlayer.PrepareMedia,
+			CommitMedia:  nativePlayer.CommitMedia,
+			AdjustMedia:  nativePlayer.AdjustMedia,
+			StopMedia:    func(string) { nativePlayer.StopMedia() },
+			PauseMedia:   func(string) { nativePlayer.PauseMedia() },
+			ResumeMedia:  func(string) { nativePlayer.ResumeMedia() },
+			VolumeMedia:  func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
 			TimerAlarm: func(active bool, _ taternative.Timer) {
 				nativePlayer.SetTimerAlarm(active)
 				if active {
@@ -511,7 +586,8 @@ func main() {
 					s.StartAnim(nativeStateAnimation(state))
 				}
 			},
-			OTA: otaInstaller.Install,
+			SetupReset: func() error { return resetToSetup("Tater command", false) },
+			OTA:        otaInstaller.Install,
 		})
 		if nativeErr != nil {
 			log.Fatalf("Tater native configuration invalid: %v", nativeErr)

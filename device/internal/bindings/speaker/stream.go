@@ -100,6 +100,11 @@ type audioStream struct {
 	// the mic side reads it (playedWithin) to know whether sound is coming
 	// out, which isActive cannot say once a stream has fully arrived.
 	lastTakeNs atomic.Int64
+	// Renderer-clock telemetry is cumulative within the current stream and
+	// reset by the producer when the first period of a new stream arrives.
+	renderedFrames atomic.Uint64
+	firstTakeNs    atomic.Int64
+	underrunEvents atomic.Uint64
 
 	// ── consumption-side accounting, pump-loop-local by contract ──────────
 	// Only the ALSA goroutine touches these, so they need no synchronisation.
@@ -141,6 +146,9 @@ func (s *audioStream) pump(period []byte, wireBytes int) (bool, error) {
 		s.recvFirstNs.Store(now)
 		s.recvMaxGapNs.Store(0)
 		s.recvBytes.Store(0)
+		s.renderedFrames.Store(0)
+		s.firstTakeNs.Store(0)
+		s.underrunEvents.Store(0)
 	} else if last := s.recvLastNs.Load(); last > 0 {
 		if gap := now - last; gap > s.recvMaxGapNs.Load() {
 			s.recvMaxGapNs.Store(gap)
@@ -248,7 +256,11 @@ func (s *audioStream) take() []byte {
 	case period := <-s.ch:
 		s.playing = true
 		s.periods++
-		s.lastTakeNs.Store(time.Now().UnixNano())
+		now := time.Now().UnixNano()
+		s.lastTakeNs.Store(now)
+		s.firstTakeNs.CompareAndSwap(0, now)
+		// audioStream stores stereo S16 periods after PcmSpeaker.toStereo.
+		s.renderedFrames.Add(uint64(len(period) / 4))
 		// Buffer margin: occupancy remaining *after* taking this period.
 		// len() on a channel is O(1); no allocation, no log.
 		//
@@ -286,6 +298,7 @@ func (s *audioStream) drained() *StreamStats {
 		// a silence gap is being injected — the audible stutter on weak WiFi
 		// links. One count per drain event, not per silence period.
 		s.underruns++
+		s.underrunEvents.Add(1)
 		return nil
 	}
 	// Natural end of stream, or a flush (which sets eosPending so its drain

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
 	"github.com/gorilla/websocket"
 )
 
@@ -53,11 +54,47 @@ type PlayRequest struct {
 	Ducking              map[string]any
 }
 
+// OverlayRequest is a synchronized foreground/TTS layer rendered over an
+// already active persistent media session.
+type OverlayRequest struct {
+	OverlayID             string
+	GroupID               string
+	URL                   string
+	Kind                  string
+	VolumePercent         int
+	DuckingTargetPercent  int
+	DuckingAttack         time.Duration
+	DuckingRelease        time.Duration
+	StopMediaWhenFinished bool
+	BackgroundFadeOut     time.Duration
+	StartAtUS             int64
+	ContinueConversation  bool
+	ConversationID        string
+}
+
+// SceneRequest is the standalone foreground/background scene command. New
+// Tater controllers normally compose this from a buffered media session plus
+// an overlay, but the direct command remains supported for compatibility.
+type SceneRequest struct {
+	SceneID                 string
+	ForegroundURL           string
+	ForegroundKind          string
+	ForegroundVolumePercent int
+	BackgroundURL           string
+	BackgroundVolumePercent int
+	BackgroundLoop          bool
+	DuckingTargetPercent    int
+	DuckingAttack           time.Duration
+	DuckingRelease          time.Duration
+	BackgroundFadeOut       time.Duration
+}
+
 // MediaRequest is a persistent music session.
 type MediaRequest struct {
 	SessionID       string
 	GroupID         string
 	URL             string
+	Channel         string
 	VolumePercent   int
 	StartPositionMS int
 	Loop            bool
@@ -65,6 +102,41 @@ type MediaRequest struct {
 	Title           string
 	Artist          string
 	Album           string
+}
+
+// MediaPreparation describes a locally decoded session that is ready for a
+// synchronized commit. Echo playback is mono at the speaker, but Channel
+// selects which side of a stereo source is rendered by this member.
+type MediaPreparation struct {
+	BufferedFrames      int
+	SampleRateHz        int
+	OutputLatencyFrames int
+}
+
+// MediaPlaybackEvent carries the synchronized session clock and playhead
+// reports emitted by LocalPlayer after a prepared session is committed.
+type MediaPlaybackEvent struct {
+	Kind                     string
+	SessionID                string
+	GroupID                  string
+	Channel                  string
+	SampleRateHz             int
+	ScheduledStartUS         int64
+	ActualStartUS            int64
+	SourceFrames             int64
+	RenderedFrames           int64
+	OutputFrames             int64
+	BufferedFrames           int
+	OutputLatencyFrames      int
+	CorrectionFrames         int
+	UnderrunEvents           int
+	OverlayUnderrunEvents    int
+	BackgroundUnderrunEvents int
+	ForegroundUnderrunEvents int
+	Rebuffering              bool
+	RejoinCount              int
+	RejoinFrames             int64
+	SatelliteTimeUS          int64
 }
 
 // OTARequest describes one A/B firmware update offered by Tater.
@@ -84,13 +156,19 @@ type Hooks struct {
 	Status        func() map[string]any
 	PlayWakeSound func() bool
 	PlayVoice     func(context.Context, PlayRequest) error
+	PlayOverlay   func(context.Context, OverlayRequest, func()) error
+	PlayScene     func(context.Context, SceneRequest) error
 	StopVoice     func()
 	StartMedia    func(context.Context, MediaRequest) error
+	PrepareMedia  func(context.Context, MediaRequest) (MediaPreparation, error)
+	CommitMedia   func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
+	AdjustMedia   func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
 	StopMedia     func(sessionID string)
 	PauseMedia    func(sessionID string)
 	ResumeMedia   func(sessionID string)
 	VolumeMedia   func(sessionID string, percent int)
 	TimerAlarm    func(active bool, timer Timer)
+	SetupReset    func() error
 	OTA           func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
@@ -133,15 +211,16 @@ type Client struct {
 	settings map[string]any
 	selector string
 
-	audioMu        sync.Mutex
-	preRoll        [][]byte
-	captureRoll    [][]byte
-	wakePreRoll    [][]byte
-	pendingAudio   [][]byte
-	voicePending   bool
-	voiceActive    bool
-	audioDropped   uint64
-	wakeSuppressed uint64
+	audioMu           sync.Mutex
+	preRoll           [][]byte
+	captureRoll       [][]byte
+	wakePreRoll       [][]byte
+	pendingAudio      [][]byte
+	voicePending      bool
+	voiceActive       bool
+	voiceStopAfterAck bool
+	audioDropped      atomic.Uint64
+	wakeSuppressed    uint64
 
 	verifyMu         sync.Mutex
 	verifyNext       uint32
@@ -172,9 +251,18 @@ type Client struct {
 	voiceQueue           chan queuedVoice
 	voiceStop            chan uint64
 	mediaCancel          context.CancelFunc
+	mediaCtx             context.Context
 	mediaGen             uint64
 	mediaID              string
 	mediaGroup           string
+	mediaChannel         string
+	overlayCancel        context.CancelFunc
+	overlayGen           uint64
+	overlayID            string
+	overlayGroup         string
+	sceneCancel          context.CancelFunc
+	sceneGen             uint64
+	sceneID              string
 
 	timers    *TimerManager
 	closeOnce sync.Once
@@ -238,8 +326,18 @@ func DefaultCapabilities() map[string]any {
 		"local_wake": true, "live_settings": true,
 		"continued_chat_reopen": true, "barge_in": true,
 		"tool_call_mode": true, "timers": true, "ota": true,
-		"persistent_media_sessions": true, "audio_session_version": 1,
-		"settings": true, "wake_verifier": true,
+		"intercom": true, "setup_mode": true,
+		"audio_ducking": true, "looping_background_audio": true,
+		"persistent_media_sessions": true, "synchronized_media_sessions": true,
+		"stereo_channel_selection": true, "media_playhead_telemetry": true,
+		"media_render_clock": true, "media_output_latency_frames": echoOutputLatencyFrames,
+		"media_drift_correction": true, "media_rate_slew": true,
+		"media_underrun_recovery": true, "media_session_volume": true,
+		"media_session_start_position": true, "media_sample_rate_hz": playbackRate,
+		"tts_overlays": true, "synchronized_tts_overlays": true,
+		"audio_scenes": true, "audio_scene_version": 1,
+		"audio_session_version": 4,
+		"settings":              true, "wake_verifier": true,
 		"wake_sound": true, "wake_audio_capture": true,
 	}
 }
@@ -327,6 +425,11 @@ func (c *Client) runOnce(parent context.Context) error {
 	if ack.Type != "hello.ack" || !boolValue(ack.Payload["ok"]) {
 		return fmt.Errorf("expected hello.ack, received %q", ack.Type)
 	}
+	if changed, clockErr := syncClockFromServer(ack.TS, time.Now(), clock.Step); clockErr != nil {
+		log.Printf("[clock] could not set the clock from Tater: %v", clockErr)
+	} else if changed {
+		log.Printf("[clock] stepped to %s (from Tater)", time.Now().Format(time.RFC3339))
+	}
 	if paired := stringValue(ack.Payload["device_token"]); paired != "" {
 		c.cfg.Token = paired
 		if err := c.saveToken(paired); err != nil {
@@ -408,7 +511,7 @@ func (c *Client) heartbeat(ctx context.Context) error {
 			c.enqueue(outbound{kind: websocket.PingMessage, data: []byte("tater")}, false)
 			payload := map[string]any{
 				"state": c.State(), "uptime_s": int(time.Since(c.started).Seconds()),
-				"connected": true, "audio_tx_dropped": atomic.LoadUint64(&c.audioDropped),
+				"connected": true, "audio_tx_dropped": c.audioDropped.Load(),
 			}
 			payload["wake_verifier"] = c.wakeVerifierStatus()
 			for key, value := range c.timers.Status() {
@@ -426,6 +529,9 @@ func (c *Client) heartbeat(ctx context.Context) error {
 
 func (c *Client) markDisconnected(error) {
 	c.connected.Store(false)
+	c.stopOverlay(false)
+	c.stopScene(false)
+	c.stopMedia("")
 	c.stopVoice()
 	c.connMu.Lock()
 	c.conn = nil
@@ -433,6 +539,7 @@ func (c *Client) markDisconnected(error) {
 	c.audioMu.Lock()
 	c.voicePending = false
 	c.voiceActive = false
+	c.voiceStopAfterAck = false
 	c.wakePreRoll = nil
 	c.pendingAudio = nil
 	c.audioMu.Unlock()
@@ -475,7 +582,7 @@ func (c *Client) enqueue(frame outbound, audio bool) bool {
 		return true
 	default:
 		if audio {
-			atomic.AddUint64(&c.audioDropped, 1)
+			c.audioDropped.Add(1)
 			return false
 		}
 		// Preserve control progress under audio pressure by evicting one old
@@ -530,6 +637,8 @@ func (c *Client) Close() {
 			c.conn.Close()
 		}
 		c.connMu.Unlock()
+		c.stopOverlay(false)
+		c.stopScene(false)
 		c.stopVoice()
 		c.stopMedia("")
 		c.cancelWakeVerifications()

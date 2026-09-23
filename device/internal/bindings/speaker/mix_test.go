@@ -143,6 +143,26 @@ func TestTheRampIsGradualNotAStep(t *testing.T) {
 	}
 }
 
+func TestConfiguredRampSpansExactRequestedFrames(t *testing.T) {
+	m := &Mixer{}
+	m.SetGainImmediate(unityGain)
+	target := DuckGain(-18)
+	m.SetRamp(target, 8)
+	first := period(4, 10000)
+	m.applyConfiguredGain(first)
+	if m.Gain() == target {
+		t.Fatal("eight-frame ramp completed in the first four-frame block")
+	}
+	second := period(4, 10000)
+	m.applyConfiguredGain(second)
+	if m.Gain() != target {
+		t.Fatalf("ramp gain = %d after eight frames, want %d", m.Gain(), target)
+	}
+	if got := sampleAt(first, 3, 0); got <= sampleAt(second, 0, 0) {
+		t.Fatalf("ramp did not continue across blocks: %d then %d", got, sampleAt(second, 0, 0))
+	}
+}
+
 func TestMixSumsBothStreams(t *testing.T) {
 	m := &Mixer{gain: unityGain}
 	voice := period(4, 1000)
