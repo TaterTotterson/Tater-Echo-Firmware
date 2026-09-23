@@ -20,6 +20,7 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 	gotStart := make(chan struct{})
 	allowAck := make(chan struct{})
 	frames := make(chan [][]byte, 1)
+	helloPayload := make(chan map[string]any, 1)
 	var once sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != NativeWSPath {
@@ -39,6 +40,7 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 		if json.Unmarshal(raw, &hello) != nil || hello.Type != "hello" {
 			return
 		}
+		helloPayload <- hello.Payload
 		ack, _ := marshalEnvelope("hello.ack", hello.ID, map[string]any{
 			"ok": true, "selector": "native:echo-test", "device_token": "paired-token",
 		})
@@ -93,6 +95,14 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 	}
 	if !c.Connected() {
 		t.Fatal("client did not connect")
+	}
+	select {
+	case hello := <-helloPayload:
+		if hello["firmware_target"] != "biscuit" {
+			t.Fatalf("firmware_target = %v, want biscuit", hello["firmware_target"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive hello")
 	}
 	if !c.Wake("hey_tater", 0.99) {
 		t.Fatal("Wake returned false")

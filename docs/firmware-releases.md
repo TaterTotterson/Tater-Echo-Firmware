@@ -9,11 +9,10 @@ do not trigger a Tater Echo firmware release.
 
 ## Target identity
 
-Every native connection reports the Echo hardware identity already used by
-the device protocol. Tater maps that identity to a target key from
-`targets/targets.json`; the initial key is `biscuit`. A future model receives
-its own target and factory installer even when its userspace binary can be
-shared.
+Every native `hello` reports `firmware_target`, alongside the existing Echo
+hardware identity. Tater uses that target key with `targets/targets.json`; the
+initial key is `biscuit`. A future model receives its own target and factory
+installer even when its userspace binary can be shared.
 
 ## Factory artifact
 

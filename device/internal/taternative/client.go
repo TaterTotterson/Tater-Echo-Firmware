@@ -35,6 +35,7 @@ type Config struct {
 	HardwareID      string
 	DeviceName      string
 	Board           string
+	FirmwareTarget  string
 	FirmwareVersion string
 	Room            string
 	Reconnect       time.Duration
@@ -194,6 +195,9 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 	if cfg.Board == "" {
 		cfg.Board = "echo-dot"
 	}
+	if cfg.FirmwareTarget == "" {
+		cfg.FirmwareTarget = "biscuit"
+	}
 	if cfg.FirmwareVersion == "" {
 		cfg.FirmwareVersion = "unknown"
 	}
@@ -296,6 +300,7 @@ func (c *Client) runOnce(parent context.Context) error {
 	hello := map[string]any{
 		"device_id": c.cfg.DeviceID, "hardware_id": c.cfg.HardwareID,
 		"device_name": c.cfg.DeviceName, "board": c.cfg.Board,
+		"firmware_target":  c.cfg.FirmwareTarget,
 		"firmware_version": c.cfg.FirmwareVersion, "room": c.cfg.Room,
 		"capabilities": c.cfg.Capabilities,
 	}
