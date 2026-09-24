@@ -1,8 +1,21 @@
-# Tater Echo Firmware
+<p align="center">
+  <img src="images/tater-echo-firmware-logo.png" alt="Tater Echo Firmware" width="560"/>
+</p>
 
-[![CI](https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml)
-[![Firmware](https://img.shields.io/github/v/release/TaterTotterson/Tater-Echo-Firmware?label=firmware)](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases)
-[![License: MIT](https://img.shields.io/github/license/TaterTotterson/Tater-Echo-Firmware)](LICENSE)
+<p align="center">
+  <a href="https://taterassistant.com">
+    <img alt="Visit Tater Assistant" src="https://img.shields.io/badge/Tater%20Assistant-Visit%20Website-F28C28?style=for-the-badge&logo=googlechrome&logoColor=white" />
+  </a>
+  <a href="https://discord.gg/w52namKyXT">
+    <img alt="Join the Tater Assistant Discord" src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TaterTotterson/Tater-Echo-Firmware/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/TaterTotterson/Tater-Echo-Firmware/releases"><img alt="Firmware" src="https://img.shields.io/github/v/release/TaterTotterson/Tater-Echo-Firmware?label=firmware" /></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/TaterTotterson/Tater-Echo-Firmware" /></a>
+</p>
 
 Tater Echo Firmware turns supported rooted Amazon Echo hardware into a native
 Tater voice satellite. Wake detection, audio capture, playback, LEDs, device
