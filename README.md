@@ -62,17 +62,18 @@ First complete the
 Then:
 
 1. Boot the Echo into TWRP (white LED ring) and connect USB.
-2. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz` from the
+2. Download the latest `tater-echo-biscuit-*-factory.tar.gz` archive from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
-   Use the published archive—not `factory/biscuit/` from a Git/source checkout,
-   which intentionally has no compiled payload or `bundle-manifest.json`.
-3. On macOS or Linux, run:
+   In a terminal, extract the archive, enter the extracted folder, and run the
+   installer:
 
    ```bash
+   tar -xzf tater-echo-biscuit-v*-factory.tar.gz
+   cd tater-echo-biscuit-v*-factory
    ./install.sh
    ```
 
-4. After reboot, join the `Tater-Setup-XXXX` Wi-Fi network and use the captive
+3. After reboot, join the `Tater-Setup-XXXX` Wi-Fi network and use the captive
    page to select Wi-Fi and pair the satellite with Tater.
 
 The host only needs Python 3 and `adb`. The script refuses to proceed unless it
