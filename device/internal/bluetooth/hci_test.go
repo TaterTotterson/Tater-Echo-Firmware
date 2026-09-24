@@ -57,7 +57,7 @@ func TestParseAdvReportsRandomAddrNegativeRssi(t *testing.T) {
 	if adverts[0].Addr != "06:05:04:03:02:01" {
 		t.Errorf("addr = %q", adverts[0].Addr)
 	}
-	if adverts[0].AddrType != 1 || adverts[0].Rssi != -93 || len(adverts[0].Data) != 0 {
+	if adverts[0].AddrType != 1 || adverts[0].EventType != 3 || adverts[0].Rssi != -93 || len(adverts[0].Data) != 0 {
 		t.Errorf("got %+v", adverts[0])
 	}
 }

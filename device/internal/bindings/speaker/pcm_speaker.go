@@ -399,10 +399,13 @@ func (p *PcmSpeaker) silenceLoop() {
 
 		// The ring's level must be measured BEFORE mixing: Mix sums into the
 		// voice buffer in place, so afterwards there is no voice-only signal
-		// left to measure.
+		// left to measure. Synchronized stereo replies travel on the timed
+		// music plane, so fall back to that plane whenever no foreground voice
+		// period is present. This keeps both playback paths genuinely reactive
+		// to their audible PCM rather than inventing motion in the animator.
 		var level float64
-		if voice != nil && p.levelTap != nil {
-			level = periodRMS(voice)
+		if p.levelTap != nil {
+			level = playbackMeterLevel(voice, music)
 		}
 
 		if revision := p.duckRevision.Load(); revision != duckRevision {
@@ -433,10 +436,9 @@ func (p *PcmSpeaker) silenceLoop() {
 		if p.echoTap != nil {
 			p.echoTap(out)
 		}
-		// VOICE only, deliberately — unlike the echo tap above. The meter
-		// ring visualises the RESPONSE; feeding it the mix made the ring
-		// throb along to ducked music before the response had started, which
-		// reads as the device doing something it is not.
+		// Prefer VOICE when it exists so ducked background music cannot drive
+		// the response ring. Media is used only when voice is absent, which is
+		// the synchronized-stereo TTS path.
 		if p.levelTap != nil {
 			p.levelTap(level)
 		}
@@ -692,27 +694,4 @@ func (p *PcmSpeaker) Close() {
 	close(p.stopCh)
 	p.session.Close()
 	log.Println("PcmSpeaker closed — output muted, amp off")
-}
-
-// periodRMS computes the RMS level of a stereo S16LE period, normalized to
-// 0..1 of int16 full-scale. Left channel only, every 4th frame — the wire
-// is mono duplicated L=R and the LED meter needs ~2 significant digits at
-// ~23Hz, so 512 of 2048 frames is plenty at a quarter of the cost. Runs on
-// the ALSA pump goroutine: no allocation, integer accumulate.
-func periodRMS(period []byte) float64 {
-	if len(period) < 4 {
-		return 0
-	}
-	var sum uint64
-	n := 0
-	// Stereo frame = 4 bytes (L16+R16); step 4 frames = 16 bytes.
-	for i := 0; i+1 < len(period); i += 16 {
-		s := int64(int16(uint16(period[i]) | uint16(period[i+1])<<8))
-		sum += uint64(s * s)
-		n++
-	}
-	if n == 0 {
-		return 0
-	}
-	return math.Sqrt(float64(sum)/float64(n)) / 32768.0
 }

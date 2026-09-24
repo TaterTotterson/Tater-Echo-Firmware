@@ -18,7 +18,8 @@ import (
 // opposite failure (controller gone mid-animation).
 type AnimSpec struct {
 	// Pattern: "off", "solid", the legacy "spin"/"rotate" patterns, "meter"
-	// (brightness follows live speaker RMS), or any native Tater animation:
+	// or its public Tater name "audio_glow" (brightness follows live speaker
+	// RMS), or any native Tater animation:
 	// sparkle, ping_pong, voice_ring, spinner, orbit, pulse, breathe, comet,
 	// dual_comet, scanner, ripple, heartbeat, theater, wave, shimmer,
 	// twinkle, or equalizer.
@@ -111,6 +112,10 @@ type animator struct {
 
 const defaultAnimPeriod = 80 * time.Millisecond
 
+func isAudioMeterPattern(pattern string) bool {
+	return pattern == "meter" || pattern == "audio_glow"
+}
+
 // StartAnim replaces the current animation with spec.
 func (s *Server) StartAnim(spec AnimSpec) {
 	s.anim.mu.Lock()
@@ -138,9 +143,11 @@ func (s *Server) StartAnim(spec AnimSpec) {
 		"breathe", "comet", "dual_comet", "scanner", "ripple", "heartbeat",
 		"theater", "wave", "shimmer", "twinkle", "equalizer":
 		go s.runNativeAnim(gen, spec)
-	case "meter":
-		go s.runMeter(gen, spec)
 	default:
+		if isAudioMeterPattern(spec.Pattern) {
+			go s.runMeter(gen, spec)
+			return
+		}
 		log.Printf("StartAnim: unknown pattern %q — clearing ring", spec.Pattern)
 		s.SetLEDs(blackFrame(), boolPtr(false))
 	}

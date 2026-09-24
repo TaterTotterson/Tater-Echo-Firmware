@@ -42,6 +42,40 @@ type Mixer struct {
 	rampFramesDone  int64
 }
 
+// playbackMeterLevel selects the real PCM plane that represents the current
+// response. Ordinary replies and overlays use voice. Clock-synchronized stereo
+// replies use music so they can be committed at the same monotonic timestamp on
+// every member. When both are present, voice wins so a ducked music bed does not
+// masquerade as response energy.
+func playbackMeterLevel(voice, music []byte) float64 {
+	if voice != nil {
+		return periodRMS(voice)
+	}
+	return periodRMS(music)
+}
+
+// periodRMS computes the RMS level of a stereo S16LE period, normalized to
+// 0..1 of int16 full-scale. Left channel only, every 4th frame — the wire is
+// mono duplicated L=R and the LED meter needs ~2 significant digits at ~23Hz,
+// so 512 of 2048 frames is plenty at a quarter of the cost.
+func periodRMS(period []byte) float64 {
+	if len(period) < 4 {
+		return 0
+	}
+	var sum uint64
+	n := 0
+	// Stereo frame = 4 bytes (L16+R16); step 4 frames = 16 bytes.
+	for i := 0; i+1 < len(period); i += 16 {
+		s := int64(int16(uint16(period[i]) | uint16(period[i+1])<<8))
+		sum += uint64(s * s)
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return math.Sqrt(float64(sum)/float64(n)) / 32768.0
+}
+
 // DuckGain converts decibels of attenuation to Q15.
 //
 // 0 dB is returned as exactly unity rather than a rounded conversion, so

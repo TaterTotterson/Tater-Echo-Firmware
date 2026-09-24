@@ -10,6 +10,9 @@ func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	if _, ok := got["screen"]; ok {
 		t.Fatal("biscuit unexpectedly advertises a screen")
 	}
+	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
+		t.Fatalf("biscuit BLE capabilities = %#v", got)
+	}
 }
 
 func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
@@ -22,6 +25,12 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	}
 	if got["ota"] != false {
 		t.Fatal("checkers advertised OTA before coordinated APK/native rollback exists")
+	}
+	if got["ble_advertisements"] != false {
+		t.Fatal("checkers advertised Biscuit BLE scanning before hardware bring-up")
+	}
+	if _, ok := got["ble_advertisements_version"]; ok {
+		t.Fatal("checkers advertised a BLE protocol version without BLE support")
 	}
 	if got["microphone"] != true || got["speaker"] != true {
 		t.Fatal("checkers lost shared satellite capabilities")

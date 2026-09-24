@@ -142,6 +142,7 @@ func (c *Client) handle(message Envelope) {
 			StartAtUS:             int64Value(payload["start_at_us"], 0),
 			ContinueConversation:  boolValue(payload["continue_conversation"]),
 			ConversationID:        stringValue(payload["conversation_id"]),
+			DirectionDegrees:      optionalDirection(payload["direction_degrees"]),
 		}
 		if req.OverlayID == "" {
 			req.OverlayID = message.ID
@@ -156,6 +157,7 @@ func (c *Client) handle(message Envelope) {
 			})
 			return
 		}
+		c.applyReplyDirection(req.DirectionDegrees)
 		c.startOverlay(req)
 	case "audio.scene.start":
 		foreground, _ := payload["foreground"].(map[string]any)
@@ -199,7 +201,8 @@ func (c *Client) handle(message Envelope) {
 			StartPositionMS: intValue(media["start_position_ms"], 0), Loop: boolValue(media["loop"]),
 			ContentType: stringValue(media["content_type"]), Title: stringValue(media["title"]),
 			Artist: stringValue(media["artist"]), Album: stringValue(media["album"]),
-			Channel: normalizedMediaChannel(stringValue(routing["channel"])),
+			Channel:          normalizedMediaChannel(stringValue(routing["channel"])),
+			DirectionDegrees: optionalDirection(payload["direction_degrees"]),
 		}
 		if req.SessionID == "" || req.URL == "" {
 			c.sendJSON("media.session.finished", message.ID, map[string]any{
@@ -208,6 +211,7 @@ func (c *Client) handle(message Envelope) {
 			})
 			return
 		}
+		c.applyReplyDirection(req.DirectionDegrees)
 		if message.Type == "media.session.prepare" {
 			go c.prepareMedia(message.ID, req)
 		} else {

@@ -70,6 +70,7 @@ type OverlayRequest struct {
 	StartAtUS             int64
 	ContinueConversation  bool
 	ConversationID        string
+	DirectionDegrees      *float64
 }
 
 // SceneRequest is the standalone foreground/background scene command. New
@@ -91,17 +92,18 @@ type SceneRequest struct {
 
 // MediaRequest is a persistent music session.
 type MediaRequest struct {
-	SessionID       string
-	GroupID         string
-	URL             string
-	Channel         string
-	VolumePercent   int
-	StartPositionMS int
-	Loop            bool
-	ContentType     string
-	Title           string
-	Artist          string
-	Album           string
+	SessionID        string
+	GroupID          string
+	URL              string
+	Channel          string
+	VolumePercent    int
+	StartPositionMS  int
+	Loop             bool
+	ContentType      string
+	Title            string
+	Artist           string
+	Album            string
+	DirectionDegrees *float64
 }
 
 // MediaPreparation describes a locally decoded session that is ready for a
@@ -149,27 +151,28 @@ type OTARequest struct {
 // Hooks bind protocol commands to the Echo hardware. Blocking playback and
 // OTA callbacks are launched outside the WebSocket reader.
 type Hooks struct {
-	Connected     func(selector string)
-	Disconnected  func(error)
-	State         func(state string, payload map[string]any)
-	Settings      func(values map[string]any) (map[string]any, error)
-	Status        func() map[string]any
-	PlayWakeSound func() bool
-	PlayVoice     func(context.Context, PlayRequest) error
-	PlayOverlay   func(context.Context, OverlayRequest, func()) error
-	PlayScene     func(context.Context, SceneRequest) error
-	StopVoice     func()
-	StartMedia    func(context.Context, MediaRequest) error
-	PrepareMedia  func(context.Context, MediaRequest) (MediaPreparation, error)
-	CommitMedia   func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
-	AdjustMedia   func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
-	StopMedia     func(sessionID string)
-	PauseMedia    func(sessionID string)
-	ResumeMedia   func(sessionID string)
-	VolumeMedia   func(sessionID string, percent int)
-	TimerAlarm    func(active bool, timer Timer)
-	SetupReset    func() error
-	OTA           func(context.Context, OTARequest, func(status string, progress int, message string)) error
+	Connected      func(selector string)
+	Disconnected   func(error)
+	State          func(state string, payload map[string]any)
+	Settings       func(values map[string]any) (map[string]any, error)
+	Status         func() map[string]any
+	ReplyDirection func(angleDegrees float64)
+	PlayWakeSound  func() bool
+	PlayVoice      func(context.Context, PlayRequest) error
+	PlayOverlay    func(context.Context, OverlayRequest, func()) error
+	PlayScene      func(context.Context, SceneRequest) error
+	StopVoice      func()
+	StartMedia     func(context.Context, MediaRequest) error
+	PrepareMedia   func(context.Context, MediaRequest) (MediaPreparation, error)
+	CommitMedia    func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
+	AdjustMedia    func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
+	StopMedia      func(sessionID string)
+	PauseMedia     func(sessionID string)
+	ResumeMedia    func(sessionID string)
+	VolumeMedia    func(sessionID string, percent int)
+	TimerAlarm     func(active bool, timer Timer)
+	SetupReset     func() error
+	OTA            func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
 type outbound struct {
@@ -220,6 +223,7 @@ type Client struct {
 	voiceActive       bool
 	voiceStopAfterAck bool
 	audioDropped      atomic.Uint64
+	bleBatchID        atomic.Uint32
 	wakeSuppressed    uint64
 
 	verifyMu         sync.Mutex
@@ -339,6 +343,7 @@ func DefaultCapabilities() map[string]any {
 		"audio_session_version": 4,
 		"settings":              true, "wake_verifier": true,
 		"wake_sound": true, "wake_audio_capture": true,
+		"ble_advertisements": true, "ble_advertisements_version": 1,
 	}
 }
 
@@ -353,6 +358,8 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen"] = true
 		capabilities["touchscreen"] = true
 		capabilities["screen_protocol"] = 1
+		capabilities["ble_advertisements"] = false
+		delete(capabilities, "ble_advertisements_version")
 	}
 	return capabilities
 }
@@ -582,6 +589,25 @@ func (c *Client) sendJSON(messageType, id string, payload map[string]any) bool {
 		return false
 	}
 	return c.enqueue(outbound{kind: websocket.TextMessage, data: raw}, false)
+}
+
+// sendTelemetryJSON queues best-effort diagnostics without evicting audio or
+// control traffic. Presence and DOA telemetry may be dropped under pressure;
+// the next observation will refresh it.
+func (c *Client) sendTelemetryJSON(messageType string, payload map[string]any) bool {
+	if !c.connected.Load() {
+		return false
+	}
+	raw, err := marshalEnvelope(messageType, "", payload)
+	if err != nil {
+		return false
+	}
+	select {
+	case c.out <- outbound{kind: websocket.TextMessage, data: raw}:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) sendBinary(data []byte) bool {

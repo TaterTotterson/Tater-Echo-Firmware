@@ -101,7 +101,7 @@ func NewScanner(onBatch BatchCallback) *Scanner {
 // address (e.g. ADV_IND vs SCAN_RSP) keep separate entries, so no advertised
 // data is lost — only exact repeats are thinned.
 func batchKey(a Advert) string {
-	return a.Addr + "\x00" + string(a.Data)
+	return a.Addr + "\x00" + string([]byte{byte(a.EventType)}) + "\x00" + string(a.Data)
 }
 
 // SetEnabled starts or stops the scanner. Idempotent; safe from the config

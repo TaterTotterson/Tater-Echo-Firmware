@@ -551,6 +551,24 @@ func (s *Server) Direction() (float64, bool) {
 	return math.Float64frombits(s.directionAngle.Load()), true
 }
 
+// SetReplyDirectionDegrees applies an explicit reply bearing in Tater's device
+// coordinates, where 0 degrees is the physical front. Biscuit's acoustic map
+// calls the action-button side 0 degrees; its volume-down/front side is the
+// opposite edge, so translate the reply bearing by 180 degrees before using
+// the established ring mapping.
+func (s *Server) SetReplyDirectionDegrees(angleDeg float64) {
+	if math.IsNaN(angleDeg) || math.IsInf(angleDeg, 0) {
+		return
+	}
+	const ledOffset = 240.0
+	const frontOffset = 180.0
+	position := math.Mod(angleDeg+frontOffset-ledOffset+360, 360) / 30
+	s.baseLEDsMu.Lock()
+	s.replyDirection = int(math.Floor(position+0.5)) % 12
+	s.replyDirectionKnown = true
+	s.baseLEDsMu.Unlock()
+}
+
 // ClearDirection marks the previous turn's bearing stale and resets the
 // smoothing anchor so the next person is shown immediately rather than
 // animating around the ring from an old room position.

@@ -109,6 +109,21 @@ func TestResolveMeterDefaultsAndClamps(t *testing.T) {
 	}
 }
 
+func TestAudioGlowSelectsTheLiveAudioMeter(t *testing.T) {
+	if !isAudioMeterPattern("audio_glow") || !isAudioMeterPattern("meter") {
+		t.Fatal("audio_glow and its legacy meter name must select the live speaker meter")
+	}
+	if isAudioMeterPattern("pulse") || isAudioMeterPattern("voice_ring") {
+		t.Fatal("non-meter effects must keep their own renderers")
+	}
+	a, d, f, g, r, c := resolveMeter(AnimSpec{Pattern: "audio_glow"})
+	if a != meterDefaults.attack || d != meterDefaults.decay ||
+		f != meterDefaults.floor || g != meterDefaults.gamma ||
+		r != meterDefaults.ref || c != meterDefaults.curve {
+		t.Fatalf("audio_glow did not inherit meter defaults: %v %v %v %v %v %v", a, d, f, g, r, c)
+	}
+}
+
 // TestMeterCurveIsVisiblyVaried is the regression guard for the reported
 // "too subtle to distinguish from a solid ring" bug. It asserts the shipped
 // curve produces a wide PERCEPTUAL swing across ordinary speech levels —
@@ -300,6 +315,14 @@ func TestReplyDirectionUsesAcousticTargetNotVisualLag(t *testing.T) {
 	s.endDirectionalListening()
 	if got := s.directionLEDIndex(); got != 7 {
 		t.Fatalf("reply direction = LED %d, want measured target LED 7", got)
+	}
+}
+
+func TestZeroDegreeReplyDirectionPointsAtVolumeDownFront(t *testing.T) {
+	s := &Server{}
+	s.SetReplyDirectionDegrees(0)
+	if got := s.directionLEDIndex(); got != 10 {
+		t.Fatalf("front reply direction = LED %d, want volume-down/front LED 10", got)
 	}
 }
 

@@ -80,6 +80,23 @@ func TestNothingPlayingReturnsNil(t *testing.T) {
 	}
 }
 
+func TestPlaybackMeterUsesTimedMediaForStereoReply(t *testing.T) {
+	media := period(16, 8192)
+	got := playbackMeterLevel(nil, media)
+	if math.Abs(got-0.25) > 0.001 {
+		t.Fatalf("media-only stereo reply level = %.4f, want 0.25", got)
+	}
+}
+
+func TestPlaybackMeterPrefersVoiceOverDuckedMusic(t *testing.T) {
+	voice := period(16, 4096)
+	music := period(16, 16384)
+	got := playbackMeterLevel(voice, music)
+	if math.Abs(got-0.125) > 0.001 {
+		t.Fatalf("voice-over-music level = %.4f, want voice level 0.125", got)
+	}
+}
+
 func TestTheRampSettlesEvenWithNoAudio(t *testing.T) {
 	// A duck requested while nothing is playing must not sit half-applied
 	// waiting for the next period — the next thing to play would fade in

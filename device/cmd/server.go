@@ -362,7 +362,22 @@ func main() {
 	// controller without this callback being rebuilt, and a stale choice
 	// would either strand the adverts or put them back on the liveness
 	// channel. It is two map reads on a path that runs a few times a second.
+	nativeBLEEnabled := nativeMode && strings.EqualFold(client.FirmwareTarget, "biscuit")
 	bleScanner := bluetooth.NewScanner(func(batch []bluetooth.Advert) {
+		if nativeBLEEnabled {
+			if nativeClient == nil {
+				return
+			}
+			adverts := make([]taternative.BLEAdvertisement, 0, len(batch))
+			for _, advert := range batch {
+				adverts = append(adverts, taternative.BLEAdvertisement{
+					Address: advert.Addr, AddressType: advert.AddrType,
+					EventType: advert.EventType, RSSI: advert.Rssi, Data: advert.Data,
+				})
+			}
+			nativeClient.ReportBLEAdvertisements(adverts)
+			return
+		}
 		if controlClient.HasFeature(client.FeatureBleAdvertsData) {
 			payload, err := json.Marshal(map[string]interface{}{"adverts": batch})
 			if err != nil {
@@ -375,7 +390,9 @@ func main() {
 		}
 		controlClient.SendBleAdverts(batch)
 	})
-	applyBleConfig(bleScanner)
+	if !nativeBLEEnabled {
+		applyBleConfig(bleScanner)
+	}
 
 	// Button events — forward to controller via control plane
 	_, err = buttonController.SubscribeToButton(func(event pkgbuttons.ButtonClickEvent) {
@@ -534,6 +551,7 @@ func main() {
 			Board: detectedBoard, FirmwareTarget: client.FirmwareTarget, FirmwareVersion: client.Version,
 			Room: room, Capabilities: taternative.CapabilitiesForTarget(client.FirmwareTarget),
 		}, taternative.Hooks{
+			ReplyDirection: s.SetReplyDirectionDegrees,
 			Connected: func(selector string) {
 				log.Printf("[tater-native] connected as %s", selector)
 				if pulseCancel != nil {
@@ -622,6 +640,7 @@ func main() {
 					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
 					"muted":          s.IsMuted(),
 					"wake_engine":    wakeEngine,
+					"ble":            bleScanner.Stats(),
 					"memory": map[string]any{
 						"heap_alloc_kb": memory.HeapAlloc / 1024,
 						"heap_sys_kb":   memory.HeapSys / 1024,
@@ -685,6 +704,11 @@ func main() {
 		})
 		if nativeErr != nil {
 			log.Fatalf("Tater native configuration invalid: %v", nativeErr)
+		}
+		if nativeBLEEnabled {
+			// Start only after nativeClient is fully constructed so the first
+			// batch cannot race initialization or disappear into a nil client.
+			bleScanner.SetEnabled(true)
 		}
 		dataClient.OnPCM(nativeClient.PushAudio)
 		applyMWWConfig(dataClient, nil,
@@ -813,7 +837,11 @@ func main() {
 			s.SeedVolume(msg.StartupVolume)
 		}
 		applyAecConfig(canceller, dataClient)
-		applyBleConfig(bleScanner)
+		if nativeBLEEnabled {
+			bleScanner.SetEnabled(true)
+		} else {
+			applyBleConfig(bleScanner)
+		}
 		applyMWWConfig(dataClient, controlClient, nil, nil)
 	})
 
@@ -1672,7 +1700,7 @@ var nativeVisuals = struct {
 	listening:  "directional",
 	thinking:   "sparkle",
 	tool:       "ping_pong",
-	replying:   "voice_ring",
+	replying:   "audio_glow",
 }
 
 func applyNativeVisualSettings(values, applied map[string]any) {
@@ -1854,7 +1882,7 @@ func nativeStateAnimation(state string) server.AnimSpec {
 	visual := func(name, fallback string) string {
 		name = strings.ToLower(strings.TrimSpace(name))
 		switch name {
-		case "directional", "sparkle", "ping_pong", "voice_ring", "spinner", "orbit",
+		case "directional", "sparkle", "ping_pong", "audio_glow", "voice_ring", "spinner", "orbit",
 			"pulse", "breathe", "comet", "dual_comet", "scanner", "ripple",
 			"heartbeat", "theater", "wave", "shimmer", "twinkle", "equalizer", "solid":
 			return name
@@ -1874,7 +1902,7 @@ func nativeStateAnimation(state string) server.AnimSpec {
 	case "tool_call":
 		return server.AnimSpec{Pattern: visual(tool, "ping_pong"), Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 135}
 	case "speaking", "playing":
-		return server.AnimSpec{Pattern: visual(replying, "voice_ring"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
+		return server.AnimSpec{Pattern: visual(replying, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
 	case "error":
 		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 38, TTLSec: 10}
 	default:

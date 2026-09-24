@@ -1,13 +1,20 @@
 #!/bin/bash
 set -e
 REPO_ROOT=$(git rev-parse --show-toplevel)
-# --match 'v*' keeps controller-v* tags out of the device version
-GIT_VERSION=$(git -C "$REPO_ROOT" describe --tags --match 'v*' --always --dirty 2>/dev/null)
-# If the tree is dirty or there's no tag, append datetime-dev
-if echo "$GIT_VERSION" | grep -q "dirty"; then
-    VERSION="$(date +%Y%m%d-%H%M)-dev"
-else
-    VERSION="$GIT_VERSION"
+# Local test builds use the same semantic firmware version as the release they
+# are based on. A dirty working tree is build provenance, not a newer firmware
+# version; replacing it with a timestamp made OTA comparisons unreliable.
+VERSION="${TATER_FIRMWARE_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION=$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")
+fi
+case "$VERSION" in
+    v*) ;;
+    *) VERSION="v$VERSION" ;;
+esac
+if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$'; then
+    echo "Invalid firmware version: $VERSION" >&2
+    exit 1
 fi
 [ -n "$EM_EXTRA_TAGS" ] && VERSION="${VERSION}-${EM_EXTRA_TAGS// /-}"
 echo "Building Tater Echo Firmware $VERSION..."

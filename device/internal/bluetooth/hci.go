@@ -40,10 +40,11 @@ const (
 // Advert is one received LE advertisement (or scan response), shaped for
 // direct JSON marshalling onto the control WebSocket (Data → base64).
 type Advert struct {
-	Addr     string `json:"addr"`     // AA:BB:CC:DD:EE:FF (wire bytes reversed)
-	AddrType int    `json:"addrType"` // 0 public, 1 random (HCI Address_Type)
-	Rssi     int    `json:"rssi"`     // dBm, negative
-	Data     []byte `json:"data"`     // raw AD payload
+	Addr      string `json:"addr"`      // AA:BB:CC:DD:EE:FF (wire bytes reversed)
+	AddrType  int    `json:"addrType"`  // 0 public, 1 random (HCI Address_Type)
+	EventType int    `json:"eventType"` // ADV_IND, scan response, etc. from HCI
+	Rssi      int    `json:"rssi"`      // dBm, negative
+	Data      []byte `json:"data"`      // raw AD payload
 }
 
 // buildCommand assembles an H4 command packet: type, opcode LE16, plen, params.
@@ -176,10 +177,11 @@ func parseAdvReports(pkt []byte) []Advert {
 		data := make([]byte, dataLen)
 		copy(data, body[9:9+dataLen])
 		adverts = append(adverts, Advert{
-			Addr:     mac.String(),
-			AddrType: addrType,
-			Rssi:     int(int8(body[9+dataLen])),
-			Data:     data,
+			Addr:      mac.String(),
+			AddrType:  addrType,
+			EventType: int(body[0]),
+			Rssi:      int(int8(body[9+dataLen])),
+			Data:      data,
 		})
 		body = body[9+dataLen+1:]
 	}
