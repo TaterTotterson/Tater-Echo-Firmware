@@ -315,11 +315,12 @@ DEFAULT_DEVICE_CONFIG = {
 # The highest wake threshold that can ever fire, enforced on every config
 # write by _clamp_wake_threshold below.
 #
-# openwakeword's score is a sigmoid: it approaches 1.0 and never reaches it,
-# and both scorers compare with `>=` (em_controller's ctrl_hit, and the
-# device's own shadow.go). So a threshold of exactly 1.0 is a bar nothing
-# clears — a device that scores perfectly and never wakes, which presents as
-# one that has stopped responding rather than as a value set too high.
+# The controller's openWakeWord score and the device's microWakeWord score
+# saturate below 1.0, and both detector paths compare with `>=`
+# (em_controller's ctrl_hit and microwakeword/shadow.go's policy match). So a
+# threshold of exactly 1.0 is a bar nothing clears — a device that scores
+# perfectly and never wakes, which presents as one that has stopped responding
+# rather than as a value set too high.
 #
 # The dashboard's Sensitivity slider could write 1.0 until #543, so stored
 # values at the ceiling exist in the field. This is the write-side guard: a

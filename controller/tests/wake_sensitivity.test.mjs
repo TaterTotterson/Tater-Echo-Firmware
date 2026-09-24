@@ -8,11 +8,12 @@
 // boundary, so the alternative is a second copy that drifts.
 //
 // The rule under test is that EVERY reachable threshold must be one a real
-// wake can clear. openwakeword's score is a sigmoid that saturates below 1.0
-// and both scorers test `score >= threshold`, so a threshold of exactly 1.0 is
-// a bar nothing clears. The previous 1..9 mapping produced exactly that at
-// position 1: the most precise notch was a setting that could never wake, and
-// it presented as "the Echo stopped responding" rather than as a bad value.
+// wake can clear. The controller's openWakeWord score and the device's
+// microWakeWord score saturate below 1.0, and both detector paths compare with
+// `>=`, so a threshold of exactly 1.0 is a bar nothing clears. The previous
+// 1..9 mapping produced exactly that at position 1: the most precise notch was
+// a setting that could never wake, and it presented as "the Echo stopped
+// responding" rather than as a bad value.
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -149,11 +150,11 @@ assert.ok(/score >= eff_threshold/.test(ctrl),
   "em_controller.py no longer tests `score >= eff_threshold` — re-check whether " +
   "the top of the Sensitivity range is still reachable");
 
-const shadow = readFileSync(
-  join(HERE, "..", "..", "device", "internal", "wakeword", "shadow", "shadow.go"), "utf8");
-assert.ok(/score >= threshold/.test(shadow),
-  "shadow.go no longer tests `score >= threshold` — re-check whether the top " +
-  "of the Sensitivity range is still reachable on-device");
+const deviceWake = readFileSync(
+  join(HERE, "..", "..", "device", "internal", "wakeword", "microwakeword", "shadow.go"), "utf8");
+assert.ok(/mean >= s\.threshold/.test(deviceWake),
+  "the microWakeWord scorer no longer tests `mean >= s.threshold` — re-check " +
+  "whether the top of the Sensitivity range is still reachable on-device");
 
 // ── Barge threshold runs the same way ────────────────────────────────────────
 

@@ -1,11 +1,12 @@
 """
 A wake threshold that cannot fire must not reach the database.
 
-openwakeword's score is a sigmoid: it approaches 1.0 and never reaches it, and
-both scorers compare with `>=` (em_controller's ctrl_hit, and the device's own
-shadow.go). So a stored threshold of exactly 1.0 is a bar nothing clears. The
-device scores perfectly and never wakes, which presents as one that has stopped
-responding rather than as a value set too high.
+The controller's openWakeWord score and the device's microWakeWord score
+saturate below 1.0, and both detector paths compare with `>=`
+(em_controller's ctrl_hit and microwakeword/shadow.go's policy match). So a
+stored threshold of exactly 1.0 is a bar nothing clears. The device scores
+perfectly and never wakes, which presents as one that has stopped responding
+rather than as a value set too high.
 
 The dashboard's Sensitivity slider could write 1.0 until #543 — its strictest
 notch mapped to exactly that — so the value is reachable in the field.

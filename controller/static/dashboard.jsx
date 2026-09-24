@@ -8682,13 +8682,13 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
   // the midpoint of its range. reflectT is its own inverse — the same call
   // converts both ways.
   //
-  // The precise end stops at 0.975, not 1.0. openwakeword's score is a sigmoid
-  // that saturates below 1.0 and both scorers test `score >= threshold`
-  // (em_controller.py's ctrl_hit, and shadow.go's crossed on-device), so a
-  // threshold of 1.0 is a bar nothing can clear: the most precise notch used to
-  // be a setting that could never wake. 18,021 scored frames across three Gen 2
-  // Dots peaked at 0.999, with 178 at or above 0.98 — so 0.975 is strict but
-  // reachable.
+  // The precise end stops at 0.975, not 1.0. The controller's openWakeWord
+  // score and the device's microWakeWord score saturate below 1.0, and both
+  // detector paths compare with `>=` (em_controller.py's ctrl_hit and
+  // microwakeword/shadow.go's policy match). A threshold of 1.0 is therefore a
+  // bar nothing can clear: the most precise notch used to be a setting that
+  // could never wake. 18,021 scored frames across three Gen 2 Dots peaked at
+  // 0.999, with 178 at or above 0.98 — so 0.975 is strict but reachable.
   //
   // 0.025 per step rather than 0.1, because the precision/recall tradeoff lives
   // in the range above 0.9 and 0.1 steps jumped straight over it.
