@@ -141,9 +141,11 @@ jobs:
       - name: Install pinned Android platform
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
       - name: Build APK
-        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :bleenroll:lintDebug :bleenroll:assembleDebug
       - name: Verify APK archive
-        run: unzip -t screen/app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          unzip -t screen/app/build/outputs/apk/debug/app-debug.apk
+          unzip -t screen/bleenroll/build/outputs/apk/debug/bleenroll-debug.apk
 
   python-deps-audit:
     name: Python dependency audit

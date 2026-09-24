@@ -390,6 +390,24 @@ func main() {
 		}
 		controlClient.SendBleAdverts(batch)
 	})
+	var bleEnrollment *bluetooth.Enrollment
+	if nativeBLEEnabled && bluetooth.EnrollmentSupported() {
+		bleEnrollment = bluetooth.NewEnrollment(bleScanner, func(messageType string, payload map[string]any) {
+			if nativeClient == nil {
+				return
+			}
+			enrollmentID, _ := payload["enrollment_id"].(string)
+			detail, _ := payload["error"].(string)
+			if messageType == "ble.enrollment.status" {
+				status, _ := payload["status"].(string)
+				nativeClient.ReportBLEEnrollmentStatus(enrollmentID, status, detail)
+				return
+			}
+			irk, _ := payload["irk"].(string)
+			ok, _ := payload["ok"].(bool)
+			nativeClient.ReportBLEEnrollmentResult(enrollmentID, ok, irk, detail)
+		})
+	}
 	if !nativeBLEEnabled {
 		applyBleConfig(bleScanner)
 	}
@@ -545,11 +563,16 @@ func main() {
 			detectedBoard = client.FirmwareTarget
 		}
 		var nativeErr error
+		capabilities := taternative.CapabilitiesForTarget(client.FirmwareTarget)
+		if bleEnrollment != nil {
+			capabilities["ble_enrollment"] = true
+			capabilities["ble_enrollment_version"] = 1
+		}
 		nativeClient, nativeErr = taternative.New(taternative.Config{
 			URL: nativeURL, Token: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_TOKEN")), bootstrap.Token), TokenPath: tokenPath,
 			DeviceID: deviceID, HardwareID: deviceID, DeviceName: deviceName,
 			Board: detectedBoard, FirmwareTarget: client.FirmwareTarget, FirmwareVersion: client.Version,
-			Room: room, Capabilities: taternative.CapabilitiesForTarget(client.FirmwareTarget),
+			Room: room, Capabilities: capabilities,
 		}, taternative.Hooks{
 			ReplyDirection: s.SetReplyDirectionDegrees,
 			Connected: func(selector string) {
@@ -576,6 +599,9 @@ func main() {
 				})
 			},
 			Disconnected: func(err error) {
+				if bleEnrollment != nil {
+					bleEnrollment.Cancel("")
+				}
 				if err != nil && err != context.Canceled {
 					log.Printf("[tater-native] disconnected: %v", err)
 				}
@@ -650,6 +676,9 @@ func main() {
 						"num_gc":        memory.NumGC,
 					},
 				}
+				if bleEnrollment != nil {
+					status["ble_enrollment"] = bleEnrollment.Status()
+				}
 				if angle, ok := s.Direction(); ok {
 					status["doa_deg"] = math.Round(angle*10) / 10
 				}
@@ -697,6 +726,17 @@ func main() {
 						state = nativeClient.State()
 					}
 					s.StartAnim(nativeStateAnimation(state))
+				}
+			},
+			BLEEnrollmentStart: func(payload map[string]any) error {
+				if bleEnrollment == nil {
+					return fmt.Errorf("BLE enrollment is unavailable on this firmware")
+				}
+				return bleEnrollment.Start(payload)
+			},
+			BLEEnrollmentCancel: func(enrollmentID string) {
+				if bleEnrollment != nil {
+					bleEnrollment.Cancel(enrollmentID)
 				}
 			},
 			SetupReset: func() error { return resetToSetup("Tater command", false) },
@@ -838,7 +878,9 @@ func main() {
 		}
 		applyAecConfig(canceller, dataClient)
 		if nativeBLEEnabled {
-			bleScanner.SetEnabled(true)
+			if bleEnrollment == nil || !bleEnrollment.Active() {
+				bleScanner.SetEnabled(true)
+			}
 		} else {
 			applyBleConfig(bleScanner)
 		}

@@ -151,28 +151,30 @@ type OTARequest struct {
 // Hooks bind protocol commands to the Echo hardware. Blocking playback and
 // OTA callbacks are launched outside the WebSocket reader.
 type Hooks struct {
-	Connected      func(selector string)
-	Disconnected   func(error)
-	State          func(state string, payload map[string]any)
-	Settings       func(values map[string]any) (map[string]any, error)
-	Status         func() map[string]any
-	ReplyDirection func(angleDegrees float64)
-	PlayWakeSound  func() bool
-	PlayVoice      func(context.Context, PlayRequest) error
-	PlayOverlay    func(context.Context, OverlayRequest, func()) error
-	PlayScene      func(context.Context, SceneRequest) error
-	StopVoice      func()
-	StartMedia     func(context.Context, MediaRequest) error
-	PrepareMedia   func(context.Context, MediaRequest) (MediaPreparation, error)
-	CommitMedia    func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
-	AdjustMedia    func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
-	StopMedia      func(sessionID string)
-	PauseMedia     func(sessionID string)
-	ResumeMedia    func(sessionID string)
-	VolumeMedia    func(sessionID string, percent int)
-	TimerAlarm     func(active bool, timer Timer)
-	SetupReset     func() error
-	OTA            func(context.Context, OTARequest, func(status string, progress int, message string)) error
+	Connected           func(selector string)
+	Disconnected        func(error)
+	State               func(state string, payload map[string]any)
+	Settings            func(values map[string]any) (map[string]any, error)
+	Status              func() map[string]any
+	ReplyDirection      func(angleDegrees float64)
+	PlayWakeSound       func() bool
+	PlayVoice           func(context.Context, PlayRequest) error
+	PlayOverlay         func(context.Context, OverlayRequest, func()) error
+	PlayScene           func(context.Context, SceneRequest) error
+	StopVoice           func()
+	StartMedia          func(context.Context, MediaRequest) error
+	PrepareMedia        func(context.Context, MediaRequest) (MediaPreparation, error)
+	CommitMedia         func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
+	AdjustMedia         func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
+	StopMedia           func(sessionID string)
+	PauseMedia          func(sessionID string)
+	ResumeMedia         func(sessionID string)
+	VolumeMedia         func(sessionID string, percent int)
+	TimerAlarm          func(active bool, timer Timer)
+	BLEEnrollmentStart  func(payload map[string]any) error
+	BLEEnrollmentCancel func(enrollmentID string)
+	SetupReset          func() error
+	OTA                 func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
 type outbound struct {

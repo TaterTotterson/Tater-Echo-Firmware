@@ -18,6 +18,22 @@ func (c *Client) handle(message Envelope) {
 		return
 	}
 	switch message.Type {
+	case "ble.enrollment.start":
+		if hook := c.hooks.BLEEnrollmentStart; hook != nil {
+			if err := hook(payload); err == nil {
+				return
+			} else {
+				c.ReportBLEEnrollmentResult(stringValue(payload["enrollment_id"]), false, "", err.Error())
+				return
+			}
+		}
+		c.ReportBLEEnrollmentResult(
+			stringValue(payload["enrollment_id"]), false, "", "BLE enrollment is unavailable",
+		)
+	case "ble.enrollment.cancel":
+		if hook := c.hooks.BLEEnrollmentCancel; hook != nil {
+			hook(stringValue(payload["enrollment_id"]))
+		}
 	case "settings":
 		applied := payload
 		result := map[string]any{"ok": true}

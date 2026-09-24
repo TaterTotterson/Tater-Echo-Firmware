@@ -2,11 +2,13 @@
 .DS_Store
 __pycache__
 /device/build/
+/device/internal/bluetooth/assets/*.apk
 /emos/build/
 /release/
 /screen/.gradle/
 /screen/build/
 /screen/app/build/
+/screen/bleenroll/build/
 /screen/local.properties
 controller/.env
 controller/.venv/
