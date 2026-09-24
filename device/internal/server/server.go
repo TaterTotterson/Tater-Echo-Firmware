@@ -73,12 +73,15 @@ type Server struct {
 	// listening visual. Guarded by baseLEDsMu with the base frame it paints.
 	directionPosition      float64
 	directionPositionKnown bool
-	// directionTarget is the latest acoustic bearing. Movement begins on its
-	// first observation so short phrases are visible, while interpolation and
-	// a per-frame step cap prevent a noisy sample teleporting across the ring.
-	directionTarget      int
+	// directionRenderMu keeps the audio callback and display ticker from
+	// completing adjacent eased frames out of order at the hardware boundary.
+	directionRenderMu sync.Mutex
+	// directionTarget is the latest acoustic bearing in fractional LED space.
+	// A 30fps renderer eases directionPosition toward it so the beam moves like
+	// the emOS boot head instead of jumping once per microphone observation.
+	directionTarget      float64
 	directionTargetKnown bool
-	// lastSpeechPosition is the smoothed bearing from the most recent period
+	// lastSpeechPosition is the acoustic bearing from the most recent period
 	// classified as near-end speech. Trailing silence/noise may move the live
 	// listening beam but cannot choose the subsequent reply animation.
 	lastSpeechPosition      float64
@@ -140,6 +143,11 @@ func NewServer(buttonController buttons.Controller, microphone mic.Microphone, s
 	server.mute.persist = func() {
 		saveDeviceState(statePath, deviceState{Muted: server.mute.IsMuted()})
 	}
+
+	// Audio direction estimates arrive in comparatively coarse batches. Keep
+	// the visual on its own 30fps clock so movement between those observations
+	// is continuous rather than a sequence of LED-sized jumps.
+	go server.runDirectionAnimator()
 
 	go func() {
 		uptime, err := getUptime()
@@ -392,39 +400,89 @@ func (s *Server) SetDirectionObservation(angleDeg float64, activity, speech bool
 	s.directionSpeechStarted = true
 	const ledOffset = 240.0
 	target := math.Mod(angleDeg-ledOffset+360, 360) / 30
-	targetIndex := int(math.Floor(target+0.5)) % 12
 	if !s.directionPositionKnown {
 		s.directionPosition = target
 		s.directionPositionKnown = true
-		s.directionTarget = targetIndex
+		s.directionTarget = target
 		s.directionTargetKnown = true
 	} else {
-		s.directionTarget = targetIndex
+		s.directionTarget = target
 		s.directionTargetKnown = true
-
-		delta := float64(s.directionTarget) - s.directionPosition
-		if delta > 6 {
-			delta -= 12
-		} else if delta < -6 {
-			delta += 12
-		}
-		step := delta * 0.65
-		if step > 1.5 {
-			step = 1.5
-		} else if step < -1.5 {
-			step = -1.5
-		}
-		s.directionPosition = math.Mod(s.directionPosition+step+12, 12)
 	}
-	position := s.directionPosition
 	if speech {
-		s.lastSpeechPosition = position
+		// Remember the acoustic target, not the deliberately lagging visual.
+		// A short phrase can end before the eased head arrives, but its reply
+		// should still point at the place the voice was actually measured.
+		s.lastSpeechPosition = target
 		s.lastSpeechPositionKnown = true
 	}
-	base := s.baseLEDs
 	s.baseLEDsMu.Unlock()
 	s.directionAngle.Store(math.Float64bits(angleDeg))
 	s.directionKnown.Store(true)
+	s.renderDirectionFrame()
+}
+
+const (
+	directionFrameInterval = 33 * time.Millisecond
+	directionFollow        = 0.28
+	directionMaxStep       = 0.50
+	directionSnapDistance  = 0.02
+)
+
+// smoothRingPosition takes one display-rate step along the shortest path
+// around a twelve-segment ring. The exponential follow gives the movement the
+// same settle-in character as the boot progress head, while the speed cap
+// prevents a single noisy estimate from whipping across the ring.
+func smoothRingPosition(current, target float64) float64 {
+	delta := target - current
+	if delta > 6 {
+		delta -= 12
+	} else if delta < -6 {
+		delta += 12
+	}
+	if math.Abs(delta) <= directionSnapDistance {
+		return math.Mod(target+12, 12)
+	}
+	step := delta * directionFollow
+	if step > directionMaxStep {
+		step = directionMaxStep
+	} else if step < -directionMaxStep {
+		step = -directionMaxStep
+	}
+	return math.Mod(current+step+12, 12)
+}
+
+func (s *Server) runDirectionAnimator() {
+	ticker := time.NewTicker(directionFrameInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.renderDirectionFrame()
+	}
+}
+
+// renderDirectionFrame advances and paints one smooth DOA frame. It keeps
+// painting while the bearing is steady as well: controller scene frames can
+// refresh the base listening colour, and the local overlay must remain on top.
+func (s *Server) renderDirectionFrame() {
+	s.directionRenderMu.Lock()
+	defer s.directionRenderMu.Unlock()
+
+	if s.setupFeedback.Load() {
+		return
+	}
+	if (s.volume != nil && s.volume.DisplayActive()) || (s.mute != nil && s.mute.IsMuted()) {
+		return
+	}
+
+	s.baseLEDsMu.Lock()
+	if !s.listeningLEDs || !s.directionPositionKnown || !s.directionTargetKnown {
+		s.baseLEDsMu.Unlock()
+		return
+	}
+	s.directionPosition = smoothRingPosition(s.directionPosition, s.directionTarget)
+	position := s.directionPosition
+	base := s.baseLEDs
+	s.baseLEDsMu.Unlock()
 
 	s.ledMu.Lock()
 	lc := s.ledController
@@ -436,7 +494,7 @@ func (s *Server) SetDirectionObservation(angleDeg float64, activity, speech bool
 	leds := directionalFrame(base, position)
 
 	if err := lc.SetLEDs(leds...); err != nil {
-		log.Printf("SetDirectionLEDs error: %v", err)
+		log.Printf("direction LED frame error: %v", err)
 	}
 }
 

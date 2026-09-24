@@ -4,6 +4,10 @@ __pycache__
 /device/build/
 /emos/build/
 /release/
+/screen/.gradle/
+/screen/build/
+/screen/app/build/
+/screen/local.properties
 controller/.env
 controller/.venv/
 controller/data/

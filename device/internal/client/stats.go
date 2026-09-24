@@ -47,14 +47,7 @@ type DeviceStats struct {
 	CoresOnline      int      `json:"coresOnline,omitempty"`
 	CoresTotal       int      `json:"coresTotal,omitempty"`
 	ThermalCoreLimit int      `json:"thermalCoreLimit,omitempty"`
-	// OwwShadow carries the on-device wake word window summary
-	// (shadow.Stats), nil when shadow mode is off. Riding the existing 30s
-	// tick keeps the DB cost of on-device scoring at one upsert per 30s —
-	// the same cost class as every other counter here, and the reason
-	// per-frame scores are never sent.
-	OwwShadow interface{} `json:"owwShadow,omitempty"`
-	// MwwShadow is the independent Tater microWakeWord shadow summary. It is
-	// separate from OwwShadow so both engines can be compared on the same PCM.
+	// MwwShadow is the Tater microWakeWord window summary.
 	MwwShadow interface{} `json:"mwwShadow,omitempty"`
 	// AecRef is which far-end reference echo cancellation is running on:
 	// "hw" (the frame-aligned ch8 playback loopback), "sw" (the tap at the
@@ -94,7 +87,6 @@ func (c *ControlClient) SendStats(s DeviceStats) {
 		"txDropped":        s.TxDropped,
 		"rxCrcErrors":      s.RxCrcErrors,
 		"ble":              s.Ble,
-		"owwShadow":        s.OwwShadow,
 		"mwwShadow":        s.MwwShadow,
 		"ambientLux":       s.AmbientLux,
 		"cpuTempC":         s.CPUTempC,

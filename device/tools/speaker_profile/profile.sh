@@ -59,7 +59,7 @@ sleep 2
 adb shell "su -c 'tinymix -D 0 5 On; tinymix -D 0 56 On; tinymix -D 0 64 1 1'" >/dev/null
 # Unity gain: loud enough to sit well above the room, and the highest setting
 # at which the DAC is not contributing distortion of its own (1.5% THD at 127,
-# 65% at 153 — see Volume in device/CLAUDE.md).
+# 65% at 153).
 adb shell "su -c 'tinymix -D 0 61 127 127'" >/dev/null
 
 capture() {   # capture <name> <wav> <seconds>

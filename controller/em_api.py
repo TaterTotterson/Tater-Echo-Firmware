@@ -139,8 +139,8 @@ _release_cache_ts: float = 0.0
 RELEASE_CACHE_TTL = 60  # seconds
 
 # Controller releases are `controller-v*` TAGS with no GitHub Release behind
-# them — controller-release.yml publishes a GHCR image and nothing else (see
-# "Versioning / releases" in CLAUDE.md). So the notes come from the tag's own
+# them — controller-release.yml publishes a GHCR image and nothing else. So
+# the notes come from the tag's own
 # annotation: matching-refs lists the tags, and an annotated tag's object
 # carries the message.
 #
@@ -385,7 +385,7 @@ async def create_app() -> web.Application:
     app.router.add_post("/api/devices/{id}/rollback",     _post_device_rollback)
     app.router.add_post("/api/releases/upload",           _post_upload_binary)
 
-    # Custom wake-word models (oww_forge output → data/oww_models/)
+    # Custom wake-word models (compatible ONNX files → data/oww_models/)
     app.router.add_get("/api/oww_models",             _get_oww_models)
     app.router.add_post("/api/oww_models/upload",     _post_oww_model_upload)
     app.router.add_delete("/api/oww_models/{file}",   _delete_oww_model)

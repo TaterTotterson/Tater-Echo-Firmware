@@ -25,7 +25,7 @@ KERNEL rather than being fixed: FireOS 5 boots a 64-bit kernel and FireOS 6 a
 `init_binary_problems()` checks the init against it.
 
 Pure standard library on purpose, so the whole packer is unit-testable without
-aiohttp. See controller/CLAUDE.md.
+aiohttp.
 """
 
 import gzip
@@ -340,6 +340,33 @@ def pad(b: bytes) -> bytes:
     return b + b"\0" * (-len(b) % PAGE)
 
 
+def reference_image_size(ref: bytes) -> int:
+    """Length of the Android boot image at the start of a partition dump.
+
+    The Biscuit boot partitions are fixed at 16 MiB, while the boot image
+    stored in them is normally smaller. Bytes after the header-declared,
+    page-aligned regions are partition slack, not part of the Android image;
+    a round-trip packer cannot and should not reproduce them.
+    """
+    if len(ref) < PAGE or ref[:8] != b"ANDROID!":
+        raise BuildError(
+            "That file is not an Android boot image. It should be the whole of "
+            "mmcblk0p10 read off the device, not a file from inside it.")
+    ksz, _, rsz, _, ssz, _, _, psz, _, _ = struct.unpack("<10I", ref[8:48])
+    if psz != PAGE:
+        raise BuildError(f"unexpected page size {psz} in the reference image")
+
+    def region_size(size: int) -> int:
+        return ((size + psz - 1) // psz) * psz
+
+    image_size = psz + region_size(ksz) + region_size(rsz) + region_size(ssz)
+    if image_size > len(ref):
+        raise BuildError(
+            f"the boot image is truncated: its header describes {image_size} "
+            f"bytes but only {len(ref)} were read")
+    return image_size
+
+
 def split_reference(ref: bytes) -> dict:
     """Take the device's own boot image apart into the pieces we reuse.
 
@@ -485,7 +512,7 @@ def pack(parts: dict, zimage: bytes, dtbs: bytes, ramdisk: bytes,
 
 
 def roundtrip_identical(ref: bytes) -> bool:
-    """Repack the reference from its own parts and require the same bytes back.
+    """Repack the logical image and require the same image bytes back.
 
     THE GATE THAT RUNS BEFORE ANY FLASH. It costs milliseconds, needs no
     hardware, and it is the only check available that exercises the packer
@@ -493,9 +520,12 @@ def roundtrip_identical(ref: bytes) -> bool:
     two real defects at zero risk during development — a header padded with the
     wrong byte, and a kernel put back uncompressed.
 
-    A False here means the packer does not understand this particular image,
-    and the correct response is to refuse to build rather than to flash
-    something assembled by a parser that has already been shown to be wrong.
+    A partition dump may have arbitrary unused bytes after the page-aligned
+    image described by its header. Those are deliberately excluded; every byte
+    of the actual Android image still has to reproduce. A False here means the
+    packer does not understand this particular image, and the correct response
+    is to refuse to build rather than to flash something assembled by a parser
+    that has already been shown to be wrong.
     """
     return roundtrip_diff(ref) is None
 
@@ -527,7 +557,8 @@ def roundtrip_diff(ref: bytes, ignore_id: bool = False):
     Returns (offset, description, ref_bytes, rebuilt_bytes) for the first
     difference, with 16 bytes of context either side.
     """
-    parts = split_reference(ref)
+    image = ref[:reference_image_size(ref)]
+    parts = split_reference(image)
     try:
         rebuilt = pack(parts, parts["zimage"], parts["dtbs"], parts["ramdisk"],
                        extra_cmdline="")
@@ -536,16 +567,16 @@ def roundtrip_diff(ref: bytes, ignore_id: bool = False):
         # one than an offset — reported rather than raised so this function
         # keeps its contract of returning a diff or None.
         return (0, str(e), b"", b"")
-    if rebuilt == ref:
+    if rebuilt == image:
         return None
-    if len(rebuilt) != len(ref):
-        return (min(len(rebuilt), len(ref)),
-                f"the lengths differ: the reference is {len(ref)} bytes and "
+    if len(rebuilt) != len(image):
+        return (min(len(rebuilt), len(image)),
+                f"the lengths differ: the reference image is {len(image)} bytes and "
                 f"repacking it gives {len(rebuilt)}", b"", b"")
-    rng = range(len(ref))
+    rng = range(len(image))
     if ignore_id:
         rng = [i for i in rng if not (_ID_START <= i < _ID_END)]
-    diffs = [i for i in rng if ref[i] != rebuilt[i]]
+    diffs = [i for i in rng if image[i] != rebuilt[i]]
     if not diffs:
         return None
     off = diffs[0]
@@ -560,7 +591,7 @@ def roundtrip_diff(ref: bytes, ignore_id: bool = False):
         koff = page + len(pad(pack_kernel_of(parts)))
         where = (f"the kernel image (offset {off})" if off < koff
                  else f"the ramdisk (offset {off})")
-    return (off, where, ref[off:off + 16], rebuilt[off:off + 16])
+    return (off, where, image[off:off + 16], rebuilt[off:off + 16])
 
 
 def pack_kernel_of(parts: dict) -> bytes:

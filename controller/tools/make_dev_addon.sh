@@ -49,7 +49,7 @@ tar -cf - -C "$SRC" \
     . | tar -xf - -C "$OUT"
 
 # --match: the nearest tag of ANY kind is often emos-v*, which names the wrong
-# component and looks plausible (the build.sh trap in the root CLAUDE.md).
+# component and looks plausible.
 VERSION="dev-$(git -C "$SRC" describe --tags --match 'controller-v*' --match 'controller-ea-v*' --always --dirty 2>/dev/null || echo local)"
 
 # Rewrite the add-on identity:

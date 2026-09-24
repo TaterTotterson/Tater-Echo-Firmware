@@ -8,7 +8,7 @@ reaches its driver.
 Ch7 and Ch8 of the 9-channel mic capture are **not microphones**. They are a
 stereo loopback of the device's own playback — a hardware echo reference,
 always present, needing no mixer change (measured 2026-08-29; full numbers in
-SETUP.md's Mic Array section, the story in JOURNAL.md).
+SETUP.md's Mic Array section).
 
 That is what makes this measurement cheap. The stimulus and the response come
 back in **one capture off one ADC clock** — Ch7 is what went to the DAC, Ch0–Ch6

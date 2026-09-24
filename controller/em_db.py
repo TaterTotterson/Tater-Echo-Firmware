@@ -131,7 +131,7 @@ DEFAULT_DEVICE_CONFIG = {
     # (0.4992, 0.4987, 0.4971, ...). Every one of those would have fired a
     # spurious turn on a default install — ring up, HA pipeline run, most
     # likely ending no_speech. Lower it per device if a custom wake model
-    # trades recall for false positives (see oww_forge/README.md).
+    # trades recall for false positives.
     "owwThreshold":     0.5,
     # The ceiling is OWW_THRESHOLD_MAX below, enforced on every write.
     # Barge-in (§3.2, controller-side): wake word spoken during TTS playback

@@ -194,6 +194,24 @@ static int headpos(int i)
 
 static void check_run(void)
 {
+    /* The first userspace-owned movement must bridge from the fixed kernel
+     * blue/cyan frame into Tater's orange-red frame without a dark cut. */
+    int starts_kernel = handover_frames > 0
+        && !memcmp(frames[0].rgb[0], C_KERNEL_HEAD, 3)
+        && !memcmp(frames[0].rgb[1], C_KERNEL_ORBIT, 3);
+    ck(starts_kernel, "handover starts from the kernel palette");
+
+    int ends_tater = handover_frames > 0
+        && !memcmp(frames[handover_frames - 1].rgb[0], C_HEAD, 3);
+    for (int p = 1; p < LED_N && ends_tater; p++)
+        ends_tater = !(frames[handover_frames - 1].rgb[p][0]
+                    | frames[handover_frames - 1].rgb[p][1]
+                    | frames[handover_frames - 1].rgb[p][2]);
+    ck(ends_tater, "handover ends on one Tater orange-red head");
+    ck(C_HEAD[0] > C_HEAD[1] && C_HEAD[1] > C_HEAD[2]
+       && C_ORBIT[0] > C_ORBIT[1] && C_ORBIT[1] > C_ORBIT[2],
+       "boot progress head and trail use the Tater warm palette");
+
     /* The head must never be still for long: that is the entire design goal,
      * and the stages it has to survive are fsck (4.2s) and association (9s). */
     int worst = 0, run = 0;

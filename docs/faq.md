@@ -241,10 +241,8 @@ Move Sensitivity toward Precise. If it fires with the TV on specifically,
 that — say what was playing.
 
 ### Can I use my own wake word?
-Yes — [oww_forge](../oww_forge/README.md) trains one, and you install it in
-the dashboard under **Config → Wake word → + Custom model**. Prefer the
-published Docker image over building it yourself; the upstream pins that make
-it work are only preserved in a published artifact.
+Yes. Train or obtain a compatible `.onnx` model, then install it in the
+dashboard under **Config → Wake word → + Custom model**.
 
 ### How do I hear what the device actually sent to speech-to-text?
 **Config → Microphones → Advanced → save utterances.** The audio then appears

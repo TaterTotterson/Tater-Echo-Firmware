@@ -27,8 +27,8 @@ Three details in the sweep are load-bearing:
     would alias into the band being measured.
 
   * Amplitude 12000 of 32767. Comfortably below the level where the DAC adds
-    distortion of its own at unity gain (1.5% THD at index 127, 65% at 153 -
-    see Volume in device/CLAUDE.md), because a measurement rig must not be
+    distortion of its own at unity gain (1.5% THD at index 127, 65% at 153),
+    because a measurement rig must not be
     the loudest source of the thing it is measuring.
 """
 

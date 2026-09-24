@@ -8,13 +8,11 @@
 |---|---|
 | To install and use EchoMuse | **[Quickstart](docs/quickstart.md)** — the actual onboarding guide |
 | To get a device rooted first | **[Rooting](docs/rooting.md)** — prerequisites, and R0rt1z2's XDA Forums thread, which is canon |
-| The history: what was built, what broke, why | **[Journal](JOURNAL.md)** |
 | How the mic array, audio pipeline and protocol work | This page |
 
 This file keeps its name because things link to it from outside the
-repository. Its rooting steps now live in [docs/rooting.md](docs/rooting.md)
-and its journal in [JOURNAL.md](JOURNAL.md); what remains here is the
-reference material on how the device actually works.
+repository. Its rooting steps now live in [docs/rooting.md](docs/rooting.md);
+what remains here is reference material on how the device actually works.
 
 ---
 
@@ -51,7 +49,7 @@ What the four measurements show (`aec_map.sh`, 440Hz/1200Hz tones, white noise, 
 
 `Audio_ExtCodec_EchoRef_Switch` (mixer control 41) is **not** what gates this. Every measurement above was taken with it `Off`, its shipping state; flipping it On changed the reference by 0.00001 RMS, i.e. nothing. It was the hypothesis that started the investigation and it was wrong — the reference is unconditional.
 
-**Why this matters, and what it is not.** The reference is not a *better* far-end signal than the software tap at the speaker ALSA write — it is the same bytes. What it is, is **aligned by construction**: it arrives in the same TDM frame as the mic samples, so the far-end/near-end offset is fixed by hardware at ~33 samples instead of being inferred. That is what `aecDelayMs`, the occupancy governor and the capture-stall trim logic all exist to approximate. See the AEC notes in `device/CLAUDE.md`.
+**Why this matters, and what it is not.** The reference is not a *better* far-end signal than the software tap at the speaker ALSA write — it is the same bytes. What it is, is **aligned by construction**: it arrives in the same TDM frame as the mic samples, so the far-end/near-end offset is fixed by hardware at ~33 samples instead of being inferred. That is what `aecDelayMs`, the occupancy governor and the capture-stall trim logic all exist to approximate.
 
 Two bounds on it, one benign and one to keep in view. It is pre-volume, so it does not track loudness and an adaptive filter has to find that gain itself — no worse than the software tap, which is also pre-volume. And it does not represent what the speaker emits once the DAC clips: at the top of the control's range the acoustic echo is mostly harmonics that are simply absent from the reference. That regime is already unreachable, because `DEVICE_VOLUME_MAX` caps the control at 127 (unity) for the distortion reason documented under Volume — the clipping ceiling protects the AEC as well as the ear.
 
@@ -210,8 +208,7 @@ Controller satellite:
   → t_tts_fetched_ms, tts_bytes logged
   → EQ → bass guard → limiter at 48kHz (mono end-to-end — no resample,
     no stereo). Guard before limiter: limiting first spends reduction
-    on bass about to be discarded. See controller/CLAUDE.md, "The output
-    chain"
+    on bass about to be discarded.
   → mic_stop → device stream stops BEFORE playback starts (v2.6.5 —
     previously only in the post-turn finally, so the device processed
     63–65 frames of its own TTS echo per turn, contended the Wi-Fi radio

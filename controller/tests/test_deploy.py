@@ -450,8 +450,8 @@ def test_controller_update_is_advisory_only():
 
 def test_controller_notes_come_from_the_tag_annotation():
     """
-    controller-v* tags ship a GHCR image and no GitHub Release (CLAUDE.md,
-    "Versioning / releases"), so the notes must be read from the annotated
+    controller-v* tags ship a GHCR image and no GitHub Release, so the notes
+    must be read from the annotated
     tag object. Reading them from the releases list would return the newest
     DEVICE firmware release instead — right shape, wrong product.
     """

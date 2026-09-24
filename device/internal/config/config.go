@@ -1,8 +1,8 @@
 // Package config provides a shared, concurrency-safe device configuration
 // that can be updated at runtime when the controller pushes a config message.
 //
-// Both the control client (OWW threshold) and the data client (VAD params)
-// read from this struct so changes take effect immediately without a restart.
+// Both the control client and the audio path read from this struct so changes
+// take effect immediately without a restart.
 package config
 
 import (
@@ -31,8 +31,6 @@ type Device struct {
 	StartupVolume int
 
 	// Wake word
-	OwwThreshold float64
-	OwwModel     string
 	// MwwShadowEnabled independently enables the Tater microWakeWord runtime.
 	// It is observational only: crossings are reported but never start a turn.
 	// MwwThreshold=0 uses the model manifest's calibrated threshold.
@@ -44,12 +42,8 @@ type Device struct {
 	MwwSensitivity   string
 	MwwEnvironment   string
 	// BargeInEnabled / BargeInThreshold mirror the controller's barge-in
-	// settings. The device needs them for on-device scoring: while the speaker
-	// is streaming, the controller lowers its wake bar to BargeInThreshold
-	// (echo at the mic is ~25dB louder than the person, so speech-over-TTS
-	// scores are depressed). A device scoring against the normal threshold
-	// during playback is not answering the same question, which made every
-	// barge-in look like an on-device miss.
+	// settings for compatibility with legacy control messages. Tater-native
+	// wake policy is applied by the microWakeWord configuration below.
 	BargeInEnabled   bool
 	BargeInThreshold float64
 	// DuckDb is how far MUSIC is attenuated while a voice turn plays over
@@ -58,22 +52,6 @@ type Device struct {
 	// reasoning as the LED meter response curve — not something to discover
 	// via a firmware OTA per attempt.
 	DuckDb float64
-	// OwwOnDevice selects on-device wake word scoring: "off", "shadow" or
-	// "on".
-	//
-	// Shadow scores the wake stream locally and reports what it would have
-	// detected, without acting on it, so device and controller can be
-	// compared on the same audio. "on" additionally lets the device TRIGGER
-	// the turn: the crossing is sent as an oww_wake message and the
-	// controller starts the turn on the device's word rather than its own.
-	//
-	// The controller keeps scoring in "on" mode — its detections no longer
-	// trigger, but they still record whether it agreed, so the comparison
-	// that justified shipping this keeps running with the roles inverted.
-	// It is also what keeps barge-in working unchanged, since that is
-	// scored controller-side over the turn's own audio.
-	OwwOnDevice string
-
 	// ADC gain — applied via tinymix when config is pushed
 	AdcDigitalGain int
 	AdcMicpga      int
@@ -117,9 +95,8 @@ type Device struct {
 	// AecRefSource picks where the far-end reference comes from: "auto",
 	// "hw" or "sw".
 	//
-	// It is an OVERRIDE for the detection, not a statement about the board
-	// — the same shape as OwwOnDevice, and config rather than an env var
-	// for the same reason. "auto" detects the hardware loopback and falls
+	// It is an override for the detection, not a statement about the board.
+	// "auto" detects the hardware loopback and falls
 	// back to the software tap on a board without one, which is right
 	// almost always; "hw" and "sw" pin it, so the two paths can be
 	// A/B'd from the dashboard.
@@ -176,9 +153,6 @@ func (d *Device) loadDefaults() {
 	d.VadSpeechMs = envInt("VAD_SPEECH_MS", 80)
 	d.VadSilenceMs = envInt("VAD_SILENCE_MS", 600)
 	d.StartupVolume = envInt("STARTUP_VOLUME", 85)
-	d.OwwThreshold = envFloat("OWW_THRESHOLD", 0.5)
-	d.OwwModel = envStr("OWW_MODEL", "hey_jarvis_v0.1")
-	d.OwwOnDevice = normaliseOnDevice(envStr("OWW_ON_DEVICE", OnDeviceOff))
 	d.MwwShadowEnabled = envBool("MWW_SHADOW_ENABLED", false)
 	d.MwwThreshold = envFloat("MWW_THRESHOLD", 0)
 	d.MwwSlidingWindow = envInt("MWW_SLIDING_WINDOW", 0)
@@ -230,15 +204,6 @@ func (d *Device) Apply(msg ConfigMessage) {
 	}
 	if msg.VadSilenceMs > 0 {
 		d.VadSilenceMs = msg.VadSilenceMs
-	}
-	if msg.OwwThreshold > 0 {
-		d.OwwThreshold = msg.OwwThreshold
-	}
-	if msg.OwwModel != "" {
-		d.OwwModel = msg.OwwModel
-	}
-	if msg.OwwOnDevice != "" {
-		d.OwwOnDevice = normaliseOnDevice(msg.OwwOnDevice)
 	}
 	if msg.MwwShadowEnabled != nil {
 		d.MwwShadowEnabled = *msg.MwwShadowEnabled
@@ -390,9 +355,6 @@ func (d *Device) Snapshot() ConfigMessage {
 		VadThreshold:       d.VadThreshold,
 		VadSpeechMs:        d.VadSpeechMs,
 		VadSilenceMs:       d.VadSilenceMs,
-		OwwThreshold:       d.OwwThreshold,
-		OwwModel:           d.OwwModel,
-		OwwOnDevice:        d.OwwOnDevice,
 		MwwShadowEnabled:   &mwwShadowEnabled,
 		MwwThreshold:       &mwwThreshold,
 		MwwSlidingWindow:   &mwwSlidingWindow,
@@ -435,9 +397,6 @@ type ConfigMessage struct {
 	VadThreshold     float64  `json:"vadThreshold,omitempty"`
 	VadSpeechMs      int      `json:"vadSpeechMs,omitempty"`
 	VadSilenceMs     int      `json:"vadSilenceMs,omitempty"`
-	OwwThreshold     float64  `json:"owwThreshold,omitempty"`
-	OwwModel         string   `json:"owwModel,omitempty"`
-	OwwOnDevice      string   `json:"owwOnDevice,omitempty"`
 	MwwShadowEnabled *bool    `json:"mwwShadowEnabled,omitempty"`
 	MwwThreshold     *float64 `json:"mwwThreshold,omitempty"`
 	MwwSlidingWindow *int     `json:"mwwSlidingWindow,omitempty"`
@@ -512,42 +471,13 @@ func clampMicGainDb(db int) int {
 	return db
 }
 
-// On-device wake word modes.
 const (
-	OnDeviceOff    = "off"
-	OnDeviceShadow = "shadow"
-	OnDeviceOn     = "on"
-
 	// AecRefSource values. "auto" detects the hardware loopback and falls
 	// back to the software tap; the other two pin it for an A/B.
 	AecRefAuto = "auto"
 	AecRefHW   = "hw"
 	AecRefSW   = "sw"
 )
-
-// normaliseOnDevice maps a pushed value onto a known mode. Anything
-// unrecognised becomes "off": a device receiving a mode it cannot honour must
-// not guess, because the two plausible guesses are "score but do nothing" and
-// "start triggering turns", and one of those is a live behaviour change on a
-// device that cannot deliver it.
-//
-// That rule is why firmware predating "on" is safe to leave in the field: it
-// normalises the value away and keeps scoring in shadow. The controller does
-// not rely on that — it gates the setting on the oww_trigger capability — but
-// the device must not depend on the controller being careful.
-func normaliseOnDevice(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case OnDeviceShadow:
-		return OnDeviceShadow
-	case OnDeviceOn:
-		return OnDeviceOn
-	case "", OnDeviceOff:
-		return OnDeviceOff
-	default:
-		log.Printf("[config] unknown owwOnDevice %q — treating as %q", v, OnDeviceOff)
-		return OnDeviceOff
-	}
-}
 
 // normaliseAecRef keeps an unknown value on the DETECTING path rather than
 // pinning one. A typo that pinned "sw" would silently disable the hardware

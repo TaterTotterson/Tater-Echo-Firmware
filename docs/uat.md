@@ -171,8 +171,8 @@ restarting anything.
 **Flag:** A setting that saves but changes nothing.
 
 ### C4 · A custom model installs and works
-**Do:** Train one with [oww_forge](../oww_forge/README.md), then Config → Wake
-word → **+ Custom model** → upload.
+**Do:** Obtain a compatible `.onnx` model, then Config → Wake word →
+**+ Custom model** → upload.
 **Expect:** It appears in the list, can be selected, and the device wakes on
 it.
 **Flag:** A model that uploads and is selectable but never triggers — that is

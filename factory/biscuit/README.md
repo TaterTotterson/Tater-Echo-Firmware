@@ -4,9 +4,15 @@ This installer is the supported bridge from **amonet-biscuit v2.0.0 + TWRP**
 to Tater Echo Firmware. It runs on macOS or Linux and needs only `adb` and
 Python 3.
 
+> **Use the published factory archive, not this source directory.** The source
+> checkout's `factory/biscuit/` folder contains the installer template only.
+> The release workflow adds `bundle-manifest.json`, compiled firmware, emOS,
+> wake-word assets, and the other verified payload files.
+
 1. Finish amonet v2.0.0 and the FireOS 6 flash/root steps from the XDA guide.
 2. Boot the Echo into TWRP (white ring) and connect its USB cable.
-3. Download and extract the `tater-echo-biscuit-*-factory.tar.gz` release.
+3. Download and extract `tater-echo-biscuit-*-factory.tar.gz` from the
+   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
 4. From the extracted directory, run `./install.sh`.
 5. After reboot, join `Tater-Setup-XXXX` and complete the Tater setup page.
 

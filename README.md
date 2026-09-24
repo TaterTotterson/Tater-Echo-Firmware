@@ -10,12 +10,12 @@ controls, and the Tater satellite protocol all run on the Echo—no Home
 Assistant or EchoMuse controller is required.
 
 The repository is arranged for multiple Echo models. Each target has its own
-factory path while sharing the Tater-native protocol and release format. The
-current hardware-tested target is:
+factory path while sharing the Tater-native protocol and release format.
 
-| Target | Device | Unlock base | Factory | OTA |
-|---|---|---|---:|---:|
-| `biscuit` | Echo Dot 2nd Generation (2016) | amonet-biscuit v2.0.0 | Yes | Yes |
+| Target | Device | Unlock base | Status | Factory | OTA |
+|---|---|---|---|---:|---:|
+| `biscuit` | Echo Dot 2nd Generation (2016) | amonet-biscuit v2.0.0 | Hardware tested | Yes | Yes |
+| `checkers` | Echo Show 5 1st Generation (2019) | amonet-checkers v2.0.1+ | Screen/bring-up preview | Screen only | Not yet |
 
 Machine-readable target data lives in [`targets/targets.json`](targets/targets.json).
 
@@ -36,6 +36,8 @@ Machine-readable target data lives in [`targets/targets.json`](targets/targets.j
 - BLE presence advertisements for Tater's room-level presence system.
 - First-boot Wi-Fi and Tater pairing portal—no browser USB wizard required.
 - SHA-256 verified A/B OTA with automatic userspace rollback after fast crashes.
+- A lightweight Checkers screen APK with live listening, thinking, reply/DOA,
+  media, timer, mute, volume, and push-to-intercom surfaces.
 
 See [`docs/tater-native-port.md`](docs/tater-native-port.md) for the protocol,
 runtime layout, and detailed validation notes.
@@ -48,7 +50,9 @@ Then:
 
 1. Boot the Echo into TWRP (white LED ring) and connect USB.
 2. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz` from the
-   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases).
+   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
+   Use the published archive—not `factory/biscuit/` from a Git/source checkout,
+   which intentionally has no compiled payload or `bundle-manifest.json`.
 3. On macOS or Linux, run:
 
    ```bash
@@ -71,6 +75,25 @@ in `boot_b`. Never publish that backup; it contains code from your device.
 Installer details and recovery options are in
 [`factory/biscuit/README.md`](factory/biscuit/README.md).
 
+## First-stage Echo Show 5 testing
+
+The Checkers target currently provides the reversible screen and hardware
+bring-up stage. It requires amonet 2.0.1 or newer, working TWRP, and rooted
+stock Fire OS 6. Run this stage before replacing Fire OS so the profiler can
+record Amazon's original audio routing and microphone topology. Extract
+`tater-echo-checkers-<version>-factory.tar.gz`, connect USB, and run:
+
+```bash
+./install.sh --profile
+```
+
+The script installs and launches Tater Show as the HOME app, then creates a
+redacted, read-only hardware profile. It does not write any partition or start
+the native audio service. That service stays gated until Checkers' real ALSA
+routes and microphone channel map have been measured from the first unit.
+Details and recovery commands are in
+[`factory/checkers/README.md`](factory/checkers/README.md).
+
 ## Releases
 
 An annotated `vX.Y.Z` tag builds two artifacts for each supported model:
@@ -79,6 +102,8 @@ An annotated `vX.Y.Z` tag builds two artifacts for each supported model:
 |---|---|
 | `tater-echo-biscuit-vX.Y.Z-factory.tar.gz` | Complete post-amonet installation and recovery bundle |
 | `tater-echo-biscuit-vX.Y.Z-ota.bin` | Device-independent Tater userspace update over Wi-Fi |
+| `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Guarded Checkers screen installer and hardware profiler |
+| `tater-echo-checkers-vX.Y.Z-screen-preview.apk` | Standalone signed developer-preview screen APK |
 | `firmware-manifest.json` | Target, compatibility, file sizes, and SHA-256 hashes |
 | `SHA256SUMS` | Human/tool verification of every release artifact |
 
@@ -99,7 +124,7 @@ OTA contract.
 
 ## OTA status
 
-The Echo firmware side is ready for Tater-managed OTA. Tater sends an
+The hardware-tested Biscuit firmware is ready for Tater-managed OTA. Tater sends an
 `ota.url` command containing the release URL, SHA-256, and size. The Echo:
 
 1. downloads to the inactive `server_a`/`server_b` slot;
@@ -110,7 +135,9 @@ The Echo firmware side is ready for Tater-managed OTA. Tater sends an
 Tater resolves this repository's `firmware-manifest.json`, selects the artifact
 matching the Echo's `biscuit` target, and sends the existing OTA command. Echo
 updates therefore appear alongside the other native-satellite updates in the
-Tater application.
+Tater application. Checkers advertises `ota: false` until the native service,
+APK signing identity, and coordinated APK/service rollback have passed hardware
+testing.
 
 ## Development
 
@@ -128,7 +155,8 @@ Run the Go and installer regression tests:
 
 ```bash
 cd device && go test -race ./internal/actionbutton ./internal/taternative ./internal/wakeword/microwakeword ./internal/beamformer ./internal/server
-cd .. && python3 -m unittest factory.biscuit.test_install
+cd .. && python3 -m unittest factory.biscuit.test_install factory.checkers.test_install tools.test_merge_release_manifests
+./screen/gradlew -p screen :app:assembleDebug
 ```
 
 Release builds run in GitHub Actions because emOS also needs pinned static ARM

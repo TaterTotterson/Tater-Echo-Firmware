@@ -4,8 +4,7 @@ em_tap_burst.py — coalesce a burst of Action-button taps into one event
 A tap can only be classified as "single" once no second tap follows it, so
 detecting a double means holding every tap for the length of the window.
 That cost is only acceptable because `buttonSingleTapEvent` has already
-turned a tap into an HA event rather than the start of a voice turn — see
-CLAUDE.md's Action Button section.
+turned a tap into an HA event rather than the start of a voice turn.
 
 Each tap restarts the window; when it finally expires the burst reports
 once as single/double/triple. Anything beyond three reports as triple:

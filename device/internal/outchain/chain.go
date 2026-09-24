@@ -71,7 +71,7 @@ func (p Params) String() string {
 // The processing is MONO: L and R are averaged, processed once and written
 // back to both. The wire is mono and toStereo duplicates it, so the average
 // is exact on everything this device plays; stereo output is not supported
-// on this hardware (device/CLAUDE.md), and processing two identical channels
+// on this hardware, and processing two identical channels
 // would double the cost for nothing.
 //
 // Process runs on the ALSA write goroutine only. SetParams and SetActive may

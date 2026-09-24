@@ -3,8 +3,7 @@
 Split out as pure logic for the reason em_volume.py and em_linkauth.py were.
 Here the reason is also mechanical: em_ble_proxy imports zeroconf, which the
 CI test job does not install, so a test that reaches this decision through
-that module cannot run where it matters (see controller/CLAUDE.md on keeping
-the suite to pure-logic modules).
+that module cannot run where it matters.
 
 WHY THE COUNTERS MATTER. `/dev/stpbt` is not a Bluetooth device — it is the
 MT8163's combo radio behind MediaTek's WMT stack, shared with WiFi. When a

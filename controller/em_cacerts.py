@@ -37,8 +37,8 @@ WHY NOT ROUTE THROUGH THE SUPERVISOR PROXY
 Add-ons can reach Home Assistant at `http://supervisor/core/api/` with
 SUPERVISOR_TOKEN, avoiding TLS altogether. It requires `homeassistant_api:
 true`, which this project deliberately declined when it would have been
-convenient for mirroring user roles (see the add-on notes in CLAUDE.md, and
-issue #171): it grants the ENTIRE Home Assistant API. Taking it to avoid
+convenient for mirroring user roles (issue #171): it grants the ENTIRE Home
+Assistant API. Taking it to avoid
 reading one file would be a much larger permission for a smaller benefit, and
 it would not help the standalone container at all.
 """

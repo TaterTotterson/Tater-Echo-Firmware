@@ -36,10 +36,9 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/listen"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/server"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/show"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/taternative"
-	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword"
-	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wifi"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/board"
 	pkgbuttons "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
@@ -130,9 +129,15 @@ func main() {
 	// The Server doesn't exist yet when the speaker starts its pump loop,
 	// so the tap goes through an atomic pointer armed just below.
 	var srvPtr atomic.Pointer[server.Server]
+	var showServerPtr atomic.Pointer[show.Server]
 	pcmSpeaker, err := speaker.NewPcmSpeaker(canceller.WriteFar, func(rms float64) {
 		if srv := srvPtr.Load(); srv != nil {
 			srv.SetAudioLevel(rms)
+		}
+		if screen := showServerPtr.Load(); screen != nil {
+			screen.Update(func(snapshot *show.Snapshot) {
+				snapshot.AudioLevel = math.Min(1, rms*2)
+			})
 		}
 	})
 	if err != nil {
@@ -246,6 +251,16 @@ func main() {
 	// Direction callback — update LED ring to show estimated source angle
 	dataClient.OnDirectionChanged(func(angle float64, activity bool, speech bool) {
 		s.SetDirectionObservation(angle, activity, speech)
+		if screen := showServerPtr.Load(); screen != nil {
+			screen.Update(func(snapshot *show.Snapshot) {
+				if activity || speech {
+					value := math.Mod(angle+360, 360)
+					snapshot.DirectionDegrees = &value
+				} else {
+					snapshot.DirectionDegrees = nil
+				}
+			})
+		}
 	})
 	controlClient := client.NewControlClient(
 		deviceID,
@@ -473,12 +488,51 @@ func main() {
 		if deviceName == "" {
 			deviceName = "Tater Echo " + deviceID
 		}
+		room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
+		if client.FirmwareTarget == "checkers" {
+			screen := show.New(show.DefaultAddress, show.Snapshot{
+				Phase: "offline", DeviceName: deviceName, Room: room,
+				Message: "Connecting to Tater", Muted: s.IsMuted(),
+				VolumePercent: deviceVolumePercent(s.VolumeLevel()),
+			}, func(command show.Command) {
+				switch command.Action {
+				case "screen.ready":
+					// The complete current snapshot was already sent on accept.
+				case "mute.toggle":
+					s.MuteToggle()
+				case "volume.delta":
+					if command.Value != nil && *command.Value < 0 {
+						s.VolumeStepDown()
+					} else if command.Value != nil && *command.Value > 0 {
+						s.VolumeStepUp()
+					}
+				case "intercom.start":
+					if nativeClient != nil && !s.IsMuted() && !s.LinkDown() {
+						nativeClient.StartIntercom()
+					}
+				case "intercom.stop":
+					if nativeClient != nil {
+						nativeClient.StopCapture(false)
+					}
+				}
+			})
+			showServerPtr.Store(screen)
+			go func() {
+				if err := screen.Run(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("[show] screen service stopped: %v", err)
+				}
+			}()
+		}
+		detectedBoard := board.IDOf(board.Detect(""))
+		if detectedBoard == "unknown" {
+			detectedBoard = client.FirmwareTarget
+		}
 		var nativeErr error
 		nativeClient, nativeErr = taternative.New(taternative.Config{
 			URL: nativeURL, Token: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_TOKEN")), bootstrap.Token), TokenPath: tokenPath,
 			DeviceID: deviceID, HardwareID: deviceID, DeviceName: deviceName,
-			Board: board.IDOf(board.Detect("")), FirmwareVersion: client.Version,
-			Room: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room),
+			Board: detectedBoard, FirmwareTarget: client.FirmwareTarget, FirmwareVersion: client.Version,
+			Room: room, Capabilities: taternative.CapabilitiesForTarget(client.FirmwareTarget),
 		}, taternative.Hooks{
 			Connected: func(selector string) {
 				log.Printf("[tater-native] connected as %s", selector)
@@ -497,6 +551,11 @@ func main() {
 				nativeClient.ReportSettings(map[string]any{
 					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
 				})
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Connected = true
+					snapshot.Phase = "idle"
+					snapshot.Message = "Ready when you are"
+				})
 			},
 			Disconnected: func(err error) {
 				if err != nil && err != context.Canceled {
@@ -512,13 +571,28 @@ func main() {
 					pulseCancel, pulseKind = cancel, "orange"
 					go pulseOrange(pulseCtx, s)
 				}
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Connected = false
+					snapshot.Phase = "offline"
+					snapshot.Message = "Connecting to Tater"
+					snapshot.AudioLevel = 0
+				})
 			},
-			State: func(state string, _ map[string]any) {
+			State: func(state string, payload map[string]any) {
 				dataClient.ApplyNativeBeamState(state)
 				if state == "idle" || state == "error" {
 					s.ClearDirection()
 				}
 				s.StartAnim(nativeStateAnimation(state))
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Phase = showPhase(state)
+					snapshot.Message = showMessage(state, payload)
+					if state == "idle" || state == "error" {
+						snapshot.DirectionDegrees = nil
+						snapshot.AudioLevel = 0
+						snapshot.Media = nil
+					}
+				})
 			},
 			Settings: func(values map[string]any) (map[string]any, error) {
 				applied, err := applyTaterSettings(values, s, canceller, dataClient, nativePlayer)
@@ -564,18 +638,38 @@ func main() {
 			},
 			PlayWakeSound: nativePlayer.PlayWakeSound,
 			PlayVoice:     nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
-			PlayOverlay:  nativePlayer.PlayOverlay,
-			PlayScene:    nativePlayer.PlayScene,
-			StartMedia:   nativePlayer.PlayMedia,
-			PrepareMedia: nativePlayer.PrepareMedia,
-			CommitMedia:  nativePlayer.CommitMedia,
-			AdjustMedia:  nativePlayer.AdjustMedia,
-			StopMedia:    func(string) { nativePlayer.StopMedia() },
-			PauseMedia:   func(string) { nativePlayer.PauseMedia() },
-			ResumeMedia:  func(string) { nativePlayer.ResumeMedia() },
-			VolumeMedia:  func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
+			PlayOverlay: nativePlayer.PlayOverlay,
+			PlayScene:   nativePlayer.PlayScene,
+			StartMedia: func(playCtx context.Context, request taternative.MediaRequest) error {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Media = &show.Media{Title: request.Title, Artist: request.Artist, Album: request.Album}
+					snapshot.Phase = "music"
+				})
+				err := nativePlayer.PlayMedia(playCtx, request)
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Media = nil })
+				return err
+			},
+			PrepareMedia: func(playCtx context.Context, request taternative.MediaRequest) (taternative.MediaPreparation, error) {
+				prepared, err := nativePlayer.PrepareMedia(playCtx, request)
+				if err == nil {
+					updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+						snapshot.Media = &show.Media{Title: request.Title, Artist: request.Artist, Album: request.Album}
+					})
+				}
+				return prepared, err
+			},
+			CommitMedia: nativePlayer.CommitMedia,
+			AdjustMedia: nativePlayer.AdjustMedia,
+			StopMedia: func(string) {
+				nativePlayer.StopMedia()
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Media = nil })
+			},
+			PauseMedia:  func(string) { nativePlayer.PauseMedia() },
+			ResumeMedia: func(string) { nativePlayer.ResumeMedia() },
+			VolumeMedia: func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
 			TimerAlarm: func(active bool, _ taternative.Timer) {
 				nativePlayer.SetTimerAlarm(active)
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.TimerActive = active })
 				if active {
 					s.StartAnim(nativeTimerAnimation())
 				} else {
@@ -671,10 +765,6 @@ func main() {
 		// change callback sends the report instead.
 		muted := s.IsMuted()
 		controlClient.SendMuteState(muted)
-		// The features just arrived on the ack, and a restarted controller
-		// has no record of what this device is doing — so resolve and report
-		// unconditionally.
-		syncListenState(dataClient, controlClient, true)
 		if s.VolumeSeeded() {
 			controlClient.SendVolumeState(s.VolumeLevel())
 		}
@@ -691,7 +781,6 @@ func main() {
 		go func() {
 			st := collectStats()
 			st.Ble = bleScanner.Stats()
-			st.OwwShadow = shadowStats(dataClient)
 			st.MwwShadow = mwwShadowStats(dataClient)
 			st.AecRef = canceller.RefSource()
 			controlClient.SendStats(st)
@@ -725,9 +814,7 @@ func main() {
 		}
 		applyAecConfig(canceller, dataClient)
 		applyBleConfig(bleScanner)
-		applyShadowConfig(dataClient, controlClient, pcmSpeaker, s)
 		applyMWWConfig(dataClient, controlClient, nil, nil)
-		syncListenState(dataClient, controlClient, false)
 	})
 
 	// Speaker flush — barge-in: cut buffered TTS the moment the controller
@@ -760,14 +847,7 @@ func main() {
 		// How close the Echo came to hearing a barge-in over this stream.
 		// Under private listening nothing else can say: the controller
 		// hears no audio during a reply.
-		var barge map[string]interface{}
-		if sc := dataClient.ShadowScorer(); sc != nil {
-			peak, bar, frames := sc.TakeBargeWindow()
-			barge = map[string]interface{}{"peak": peak, "bar": bar, "frames": frames}
-			log.Printf("[listen] over playback: %d frames at the barge bar %.2f, peak %.3f",
-				frames, bar, peak)
-		}
-		controlClient.SendPlaybackStats(st.Periods, st.Underruns, st, barge)
+		controlClient.SendPlaybackStats(st.Periods, st.Underruns, st, nil)
 	})
 
 	// WiFi change — the executor owns the whole switch/rollback sequence
@@ -831,6 +911,12 @@ func main() {
 	// dump to confirm the sibling mute controls before touching them (see
 	// review C5 fix sequence) — deliberately not guessed at here.
 	s.SetMuteChangeCallback(func(muted bool) {
+		updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+			snapshot.Muted = muted
+			if muted {
+				snapshot.Message = "Microphones muted"
+			}
+		})
 		if nativeClient != nil {
 			nativeClient.ReportSettings(map[string]any{"muted": muted})
 			if muted {
@@ -860,6 +946,9 @@ func main() {
 	// Volume change — notify controller so HA entity and dashboard reflect it.
 	// Fires on every Set() call: physical button press or future volume_set command.
 	s.SetVolumeChangeCallback(func(level int) {
+		updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+			snapshot.VolumePercent = deviceVolumePercent(level)
+		})
 		if nativeClient != nil {
 			nativeClient.ReportSettings(map[string]any{"volume_percent": deviceVolumePercent(level)})
 		} else {
@@ -948,7 +1037,6 @@ func main() {
 		for range ticker.C {
 			st := collectStats()
 			st.Ble = bleScanner.Stats()
-			st.OwwShadow = shadowStats(dataClient)
 			st.MwwShadow = mwwShadowStats(dataClient)
 			st.AecRef = canceller.RefSource()
 			controlClient.SendStats(st)
@@ -989,41 +1077,11 @@ func main() {
 		nativeClient.Close()
 	}
 	dataClient.SetMWWShadowScorer(nil)
-	dataClient.SetShadowScorer(nil)
 	pcmSpeaker.Close()
 	os.Exit(0)
 }
 
 // ─── Hardware stats collection ────────────────────────────────────────────────
-
-// shadowStats drains the on-device wake word counters for this reporting
-// window, or nil when shadow mode is off — nil marshals the field away, so the
-// controller can tell "off" from "on and saw nothing", which are very different
-// answers to "why were there no detections".
-func shadowStats(dc *client.DataClient) interface{} {
-	sc := dc.ShadowScorer()
-	if sc == nil {
-		return nil
-	}
-	st := sc.Drain()
-	return map[string]interface{}{
-		"frames":    st.Frames,
-		"drops":     st.Drops,
-		"notReady":  st.NotReady,
-		"crossings": st.Crossings,
-		"maxScore":  st.MaxScore,
-		"threshold": st.Threshold,
-		"errors":    st.Errors,
-		"lastErr":   st.LastErr,
-		"ready":     sc.Ready(),
-		// Maxima that explain a drop: the slowest single inference (consumer
-		// stalling) against the longest gap between frames arriving (producer
-		// bursting). Cheap enough to send every window — two integers on a
-		// message that already exists.
-		"maxInferMs": st.MaxInferMs,
-		"maxGapMs":   st.MaxGapMs,
-	}
-}
 
 // mwwShadowStats drains the independent Tater microWakeWord observer. Raw and
 // sliding maxima are both retained: the former diagnoses model activity while
@@ -1393,18 +1451,6 @@ func applyAecConfig(canceller *aec.Canceller, dataClient *client.DataClient) {
 // applyBleConfig starts/stops the BLE proxy scanner from the current
 // effective config. SetEnabled is idempotent, so calling it on every config
 // push is free.
-// shadowState remembers what the live scorer was built for, so a config push
-// that changes neither the mode nor the model does not rebuild it. Rebuilding
-// means reloading a 12MB runtime and starting a fresh ~1.28s not-ready window,
-// and config pushes arrive on every reconnect — so "idempotent unless something
-// changed" is the difference between a stable shadow run and one that is
-// perpetually warming up.
-var shadowState struct {
-	mode    string
-	model   string
-	lastErr string
-}
-
 // mwwShadowState makes config reapplication idempotent. Rebuilding is more
 // expensive than changing a scalar: it reloads the TFLM model and discards its
 // streaming state, so only an actual enable/model/threshold change does it.
@@ -1836,6 +1882,47 @@ func nativeStateAnimation(state string) server.AnimSpec {
 	}
 }
 
+func updateShow(screen *show.Server, change func(*show.Snapshot)) {
+	if screen != nil {
+		screen.Update(change)
+	}
+}
+
+func showPhase(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "playing":
+		return "music"
+	case "tool_call":
+		return "thinking"
+	case "idle", "listening", "thinking", "speaking", "error":
+		return strings.ToLower(strings.TrimSpace(state))
+	default:
+		return "idle"
+	}
+}
+
+func showMessage(state string, payload map[string]any) string {
+	for _, key := range []string{"message", "text", "title"} {
+		if value := strings.TrimSpace(fmt.Sprint(payload[key])); value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	switch showPhase(state) {
+	case "listening":
+		return "I’m listening"
+	case "thinking":
+		return "Thinking"
+	case "speaking":
+		return "Replying"
+	case "music":
+		return "Now playing"
+	case "error":
+		return "Needs attention"
+	default:
+		return "Ready when you are"
+	}
+}
+
 func scaleNativeColor(color [3]uint8, scale float64) [3]uint8 {
 	return [3]uint8{
 		uint8(math.Round(float64(color[0]) * scale)),
@@ -1848,203 +1935,7 @@ func nativeTimerAnimation() server.AnimSpec {
 	return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{255, 80, 0}}, PeriodMs: 27}
 }
 
-// applyShadowConfig starts, stops or re-points on-device wake word scoring from
-// the current effective config.
-//
-// Failure to load is an ordinary condition, not an error state: the runtime and
-// models are installed out of band, so "not installed" is what every device
-// reports until someone puts them there. It is logged once per distinct reason
-// rather than on every config push, and the device carries on with
-// controller-side wake word exactly as before.
-func applyShadowConfig(dc *client.DataClient, cc *client.ControlClient,
-	spk *speaker.PcmSpeaker, srv *server.Server) {
-	snap := config.Get().Snapshot()
-	mode, model := snap.OwwOnDevice, snap.OwwModel
-	threshold := float32(snap.OwwThreshold)
-
-	if mode == config.OnDeviceOff {
-		if dc.ShadowScorer() != nil {
-			dc.SetShadowScorer(nil)
-			log.Printf("[shadow] on-device wake word disabled")
-		}
-		shadowState.mode, shadowState.model, shadowState.lastErr = mode, model, ""
-		return
-	}
-
-	// Already running for this model: thresholds and the mode change live.
-	if sc := dc.ShadowScorer(); sc != nil && shadowState.model == model {
-		sc.SetThreshold(threshold)
-		if snap.BargeInEnabled != nil && *snap.BargeInEnabled && spk != nil {
-			sc.SetBargeThreshold(float32(snap.BargeInThreshold), speakerPlaying(spk))
-		} else {
-			sc.SetBargeThreshold(0, nil)
-		}
-		if shadowState.mode != mode {
-			shadowState.mode = mode
-			log.Printf("[shadow] mode now %q (%s)", mode, actsOnCrossings(mode))
-		}
-		return
-	}
-
-	// The mode is read at CROSSING time, not baked in here, so flipping
-	// between "shadow" and "on" costs nothing: the scorer is identical in
-	// both and rebuilding it would reload a 12MB runtime and open a fresh
-	// ~1.28s not-ready window every time someone changed their mind.
-	sc, err := shadow.Open(model, threshold, func(score, crossed float32, at time.Time) {
-		onWakeCrossing(cc, dc, spk, srv, score, crossed, at)
-	})
-	if err != nil {
-		if msg := err.Error(); msg != shadowState.lastErr {
-			shadowState.lastErr = msg
-			log.Printf("[shadow] not started: %v", err)
-		}
-		dc.SetShadowScorer(nil)
-		shadowState.mode, shadowState.model = mode, model
-		return
-	}
-	// Mirror the controller's barge-in behaviour: while the speaker is
-	// streaming its wake bar drops to bargeInThreshold, and a device scoring
-	// against the normal threshold would disagree on every barge-in.
-	if snap.BargeInEnabled != nil && *snap.BargeInEnabled && spk != nil {
-		sc.SetBargeThreshold(float32(snap.BargeInThreshold), speakerPlaying(spk))
-	}
-	if spk != nil && benchScorer != nil {
-		benchScorer(sc, spk)
-	}
-	dc.SetShadowScorer(sc)
-	shadowState.mode, shadowState.model, shadowState.lastErr = mode, model, ""
-	bargeNote := "barge-in off"
-	if snap.BargeInEnabled != nil && *snap.BargeInEnabled {
-		bargeNote = fmt.Sprintf("barge-in bar %.2f", snap.BargeInThreshold)
-	}
-	log.Printf("[shadow] on-device wake word scoring (%s, threshold %.2f, %s) — %s",
-		sc.Info(), threshold, bargeNote, actsOnCrossings(mode))
-}
-
-// speakerPlaying is when the wake bar drops to bargeInThreshold: a response,
-// an alarm (both on the voice plane) or music. The controller has always
-// scored wake-over-music at the barge bar when barge-in is enabled, and this
-// is only ever installed when it is; a device that listens privately has to
-// apply the rule itself, since the controller no longer hears the stream.
-//
-// "Playing" runs until the speaker has been quiet for wakeword.ScoreSpan:
-// a wake word spoken in the last second of a reply is scored in frames whose
-// window still holds the reply's echo, so it needs the lower bar too.
-func speakerPlaying(spk *speaker.PcmSpeaker) func() bool {
-	return func() bool {
-		return spk.VoiceAudible(wakeword.ScoreSpan) || spk.MusicAudible(wakeword.ScoreSpan)
-	}
-}
-
-// benchScorer instruments a newly opened scorer; set only in bench builds
-// (trace_bench.go), nil in release.
-var benchScorer func(*shadow.Scorer, *speaker.PcmSpeaker)
-
-// actsOnCrossings describes what a crossing will DO, for the log line. The
-// distinction is the whole difference between the two live modes and is not
-// otherwise visible on the device.
-func actsOnCrossings(mode string) string {
-	if mode == config.OnDeviceOn {
-		return "triggering turns"
-	}
-	return "reporting only, not triggering"
-}
-
-// onWakeCrossing is what a threshold crossing does, decided fresh each time
-// from the current config rather than at scorer-construction time.
-//
-// Mute is checked HERE, on the device, and that placement is deliberate. Mute
-// is device-sovereign: the device already refuses every mic_start while muted
-// and the ADC is muted in hardware, so a wake sent while muted could at worst
-// start a turn that captures silence. But "at worst" still means the ring
-// lights up and HA runs a pipeline because a muted device thought it heard
-// something, and there is nothing on the device connecting the two for the
-// person watching it happen. The controller-side check stays as well — this is
-// the same belt-and-braces as the button path, not a replacement for it.
-// crossed is the bar this score actually cleared — the lower barge-in one
-// during playback. The controller records it against the turn, and recording
-// the nominal threshold instead is what once made every barge-in look like a
-// wake that had fired below its own bar.
-//
-// Under private listening a crossing OPENS A SESSION before it is reported, so
-// the audio after the wake word is already on its way when the controller
-// reads the wake. A crossing while a session is open is words inside it, not a
-// new wake, and is dropped.
-// localDuck is set in main before any wake can cross.
 var localDuck *speaker.LocalDuck
-
-func onWakeCrossing(cc *client.ControlClient, dc *client.DataClient,
-	spk *speaker.PcmSpeaker, srv *server.Server,
-	score, crossed float32, at time.Time) {
-	ageMs := time.Since(at).Milliseconds()
-	if config.Get().Snapshot().OwwOnDevice != config.OnDeviceOn {
-		cc.SendOwwShadowCross(score, ageMs)
-		return
-	}
-	if srv != nil && srv.IsMuted() {
-		// Still reported, because a crossing while muted is real data about
-		// the detector and shadow mode would have recorded it. It just does
-		// not become a turn.
-		cc.SendOwwShadowCross(score, ageMs)
-		log.Printf("[shadow] wake %.3f suppressed — muted", score)
-		return
-	}
-	var session uint32
-	if dc.ListenState() == client.ListenLocal {
-		var ok bool
-		session, ok = dc.OpenListen(at)
-		if !ok {
-			log.Printf("[listen] wake %.3f inside open session %d — ignored", score, session)
-			return
-		}
-		log.Printf("[listen] wake %.3f opened session %d", score, session)
-	}
-	// #263: light the listening ring NOW, from the one place that already
-	// knows the wake happened. The crossing used to travel to the controller
-	// and wait for leds_listening to come back — measured at +522ms before
-	// the animation moved, on a link whose control-plane tail reaches 2s
-	// (#139). The controller's own frame lands within an RTT and takes over
-	// via StartAnim's generation counter; same pattern as the volume arc,
-	// where the device draws immediately and the authoritative state follows.
-	// No new arbitration: the LED priority system already handles a newer
-	// frame superseding a local one. Only devices that have received a
-	// listening spec (config push) can do this; everyone else keeps the old
-	// behaviour exactly.
-	if srv != nil {
-		if raw := config.Get().Snapshot().ListeningAnim; len(raw) > 0 {
-			var spec server.AnimSpec
-			if err := json.Unmarshal(raw, &spec); err == nil && spec.Pattern != "" {
-				srv.StartAnim(spec)
-			}
-		}
-	}
-	// Duck with the ring, not a round trip later. Music only: a reply being
-	// barged over is cut by the controller's speaker_flush, not ducked.
-	if spk != nil && localDuck != nil && spk.MusicAudible(0) {
-		localDuck.Start(config.Get().DuckDb)
-	}
-	barge := spk != nil && spk.VoiceAudible(wakeword.ScoreSpan)
-	cc.SendOwwWake(score, crossed, at, session, dc.ListenFloor(), barge)
-}
-
-// syncListenState resolves what the device does with its wake stream and
-// tells the controller when that changes (always, when force is set). Called
-// after every config push and on every connect: those are the only moments
-// the mode, the controller's features or the scorer can change.
-func syncListenState(dc *client.DataClient, cc *client.ControlClient, force bool) {
-	snap := config.Get().Snapshot()
-	state, reason := listen.Resolve(
-		snap.OwwOnDevice == config.OnDeviceOn,
-		cc.HasFeature(client.FeatureListenSession),
-		dc.ShadowScorer() != nil,
-		shadowState.lastErr,
-	)
-	if dc.SetListenState(state) || force {
-		if err := cc.SendListenState(state, reason); err != nil {
-			log.Printf("[listen] could not report state %s: %v", state, err)
-		}
-	}
-}
 
 func applyBleConfig(scanner *bluetooth.Scanner) {
 	snap := config.Get().Snapshot()

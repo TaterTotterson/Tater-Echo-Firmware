@@ -253,6 +253,56 @@ func TestDirectionMovesOnFirstSpeechWithoutTeleporting(t *testing.T) {
 	}
 }
 
+func TestDirectionSmoothingRunsAtDisplayRate(t *testing.T) {
+	s := &Server{}
+	s.listeningLEDs = true
+	s.SetDirectionObservation(330, true, true) // LED 3
+	s.SetDirectionObservation(90, true, true)  // LED 7
+
+	previous := s.directionPosition
+	for frame := 0; frame < 6; frame++ {
+		s.renderDirectionFrame()
+		current := s.directionPosition
+		step := current - previous
+		if step <= 0 || step > directionMaxStep+1e-9 {
+			t.Fatalf("frame %d moved %.3f LEDs, want a smooth clockwise step in (0, %.2f]", frame, step, directionMaxStep)
+		}
+		previous = current
+	}
+	if previous >= 7 {
+		t.Fatalf("display-rate smoothing jumped directly to target: got %.3f, target 7", previous)
+	}
+}
+
+func TestDirectionSmoothingUsesShortestWrap(t *testing.T) {
+	clockwise := smoothRingPosition(11.8, 0.4)
+	if clockwise <= 11.8 && clockwise >= 0.4 {
+		t.Fatalf("11.8 -> 0.4 did not cross the wrap clockwise: %.3f", clockwise)
+	}
+	if d := ringDistance(clockwise, 11.8); d > directionMaxStep+1e-9 {
+		t.Fatalf("wrap step %.3f exceeds cap %.2f", d, directionMaxStep)
+	}
+
+	counterClockwise := smoothRingPosition(0.2, 11.6)
+	if counterClockwise >= 0.2 && counterClockwise <= 11.6 {
+		t.Fatalf("0.2 -> 11.6 did not cross the wrap counter-clockwise: %.3f", counterClockwise)
+	}
+}
+
+func TestReplyDirectionUsesAcousticTargetNotVisualLag(t *testing.T) {
+	s := &Server{}
+	s.listeningLEDs = true
+	s.SetDirectionObservation(330, true, true) // LED 3
+	s.SetDirectionObservation(90, true, true)  // target LED 7; visual only reaches 3.5
+	if s.directionPosition >= 7 {
+		t.Fatal("test setup no longer has visual lag")
+	}
+	s.endDirectionalListening()
+	if got := s.directionLEDIndex(); got != 7 {
+		t.Fatalf("reply direction = LED %d, want measured target LED 7", got)
+	}
+}
+
 func TestDirectionalListeningWaitsForSpeech(t *testing.T) {
 	s := &Server{}
 	s.listeningLEDs = true

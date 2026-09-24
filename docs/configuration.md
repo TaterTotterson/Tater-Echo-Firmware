@@ -212,8 +212,8 @@ are pre-trained recognisers — you're picking a word, not training anything.
 Pick one that doesn't collide with words you say a lot (and if your
 household still talks to real Alexas, don't pick Alexa).
 
-Want your own word? Train a model with `oww_forge/` (see its README), then
-use the **+ Custom model** tile to upload the `.onnx` — it's stored in the
+Want your own word? Train or obtain a compatible `.onnx` model, then use the
+**+ Custom model** tile to upload it — it's stored in the
 controller's data volume, appears as a tile next to the stock words, and
 takes effect immediately on selection. The `×` on an unselected custom tile
 deletes it.

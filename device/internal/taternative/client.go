@@ -342,6 +342,21 @@ func DefaultCapabilities() map[string]any {
 	}
 }
 
+// CapabilitiesForTarget removes hardware claims that do not apply to a
+// target and adds target-specific surfaces. Checkers renders Tater state on
+// its LCD; its first bring-up must not claim Biscuit's LED ring.
+func CapabilitiesForTarget(target string) map[string]any {
+	capabilities := DefaultCapabilities()
+	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+		capabilities["led_ring"] = false
+		capabilities["ota"] = false
+		capabilities["screen"] = true
+		capabilities["touchscreen"] = true
+		capabilities["screen_protocol"] = 1
+	}
+	return capabilities
+}
+
 // Run reconnects until ctx is cancelled or Close is called.
 func (c *Client) Run(ctx context.Context) error {
 	defer close(c.done)

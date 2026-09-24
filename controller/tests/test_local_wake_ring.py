@@ -39,22 +39,6 @@ def test_the_controller_updates_it_on_a_live_scene_change():
         "a live scene change must refresh the device's cached animation"
 
 
-def test_the_device_draws_locally_before_reporting_the_crossing():
-    src = (ROOT / "device" / "cmd" / "server.go").read_text()
-    fn = src[src.index("func onWakeCrossing"):]
-    fn = fn[:fn.index("\nfunc ", 1)]
-    draw = fn.index("srv.StartAnim(spec)")
-    send = fn.index("cc.SendOwwWake(")
-    assert draw < send, \
-        "the local draw must precede the report - drawing after is the bug"
-    # Only devices that actually trigger locally may do this; shadow mode
-    # and muted crossings keep their existing paths.
-    assert fn.index("OnDeviceOn") < draw, \
-        "shadow-mode crossings must not light the turn ring"
-    assert "IsMuted()" in fn[:fn.index("srv.StartAnim(spec)")], \
-        "a muted crossing is suppressed, not announced"
-
-
 def test_the_go_config_message_carries_the_field():
     src = (ROOT / "device" / "internal" / "config" / "config.go").read_text()
     assert re.search(r'ListeningAnim\s+json\.RawMessage\s+`json:"listeningAnim,omitempty"`', src), \

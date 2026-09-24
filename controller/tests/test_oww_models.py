@@ -88,7 +88,7 @@ def test_display_name_strips_the_version_suffix():
 def test_display_name_handles_custom_model_paths():
     """
     Custom models arrive as a path (owwModel stores one), and carry no
-    version suffix — oww_forge names the file after the phrase, which is
+    version suffix — custom trainers typically name the file after the phrase, which is
     the only source of the name that exists for them: the ONNX files have
     no metadata at all (metadata_props={}, empty doc strings, raw torch_jit
     exports) and custom models are not in openwakeword.MODELS either.

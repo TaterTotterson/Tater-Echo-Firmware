@@ -2375,7 +2375,7 @@ class DeviceESPhomeServer:
         self._timers = em_timers.TimerRegistry()
         # What the DEVICE says it implements, from its register message.
         # Drives which HA entities are advertised — negotiate by capability,
-        # never by version (CLAUDE.md).
+        # never by version.
         #
         # Seeded from _pending_caps at creation, because the device registers
         # BEFORE this object exists and the entity list is a one-shot. The
@@ -2713,8 +2713,8 @@ def get_status(device_id: str) -> Optional[dict]:
     refuses a turn on exactly `get_server()` and `get_satellite()`, so those
     are the two calls made here rather than a second opinion assembled from
     flags beside them. A readout that can disagree with the decision it
-    describes is worse than none: it is the `speaking` drift (see the
-    dashboard notes in CLAUDE.md) waiting to happen on the panel someone
+    describes is worse than none: it is the `speaking` drift waiting to happen
+    on the panel someone
     opens *because* the device is not answering.
 
     THREE STATES, NOT FOUR. The BT proxy reports `haSubscribed` alongside

@@ -17,7 +17,6 @@ needs to travel with it.
 | Component | Where | Licence | Copyright |
 |---|---|---|---|
 | SpeexDSP (acoustic echo canceller) | `device/internal/aec/` | BSD-3-Clause | Xiph.Org Foundation, Jean-Marc Valin, Analog Devices, CSIRO |
-| ONNX Runtime C API header | `device/internal/wakeword/ort/include/` | MIT | Microsoft |
 | aioesphomeapi protocol buffers | `controller/esphome/vendor/` | MIT | Otto Winter |
 | Home Assistant Voice PE timer sound (`timer_finished.flac`) | `controller/sounds/` | CC BY 4.0 | Clayton Charles Tapp |
 
@@ -33,8 +32,7 @@ travel with the work, and the container is where the work actually goes.
 |---|---|---|---|
 | GoTinyAlsa (`wilbowes/GoTinyAlsa` fork) | `GoTinyAlsa/` | BSD-3-Clause | binozoworks |
 
-The fork exists to carry a `GetAudioStream` defer-in-loop leak fix; see
-`device/CLAUDE.md` before repointing it upstream.
+The fork exists to carry a `GetAudioStream` defer-in-loop leak fix.
 
 ## Installed at build or run time
 
@@ -54,6 +52,4 @@ Listed because they end up in the published container image:
 
 ## Wake word models
 
-The stock models shipped by openWakeWord keep their upstream licence. Models
-built with `oww_forge/` are generated from synthetic speech; see
-`oww_forge/README.md`, whose pinned upstreams carry their own terms.
+Wake-word models retain the licence and terms supplied by their publisher.

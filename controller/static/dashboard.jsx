@@ -8642,8 +8642,8 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
     { value: 'hey_rhasspy_v0.1',  label: 'Hey Rhasspy'   },
   ];
 
-  // Custom models discovered in the controller's data volume (oww_forge
-  // output). Tile value = absolute file path — openwakeword accepts paths
+  // Custom models discovered in the controller's data volume. Tile value =
+  // absolute file path — openwakeword accepts paths
   // in place of stock names, so no other plumbing is needed.
   const [customModels, setCustomModels] = useState([]);
   const wwFileRef = useRef(null);
@@ -8902,7 +8902,7 @@ function DeviceConfigForm({ config, onChange, disabled, sections, onScopeChange,
               cursor: disabled ? 'default' : 'pointer', opacity: 0.85,
             }}>
               <div style={{ fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>+ Custom model</div>
-              <div style={{ fontFamily: mono, fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>upload .onnx (oww_forge)</div>
+              <div style={{ fontFamily: mono, fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>upload compatible .onnx</div>
               <input ref={wwFileRef} type="file" accept=".onnx" style={{ display: 'none' }}
                 onChange={e => { uploadWakeModel(e.target.files[0]); e.target.value = ''; }}/>
             </div>

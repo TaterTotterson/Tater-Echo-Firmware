@@ -1,14 +1,13 @@
 """Push a local file to a device over the controller shell proxy, resumably.
 
     docker cp controller/tools/push_file.py echomuse-controller:/tmp/
-    docker cp device/build/oww_probe echomuse-controller:/tmp/
+    docker cp path/to/local-file echomuse-controller:/tmp/payload
     docker exec echomuse-controller python /tmp/push_file.py \
-        <device_id> /tmp/oww_probe /data/local/tmp/oww_probe [--chmod 755]
+        <device_id> /tmp/payload /data/local/tmp/payload [--chmod 755]
 
 Why this exists rather than `ota.py`: that pushes the firmware binary through
 the update endpoint, which writes one specific place. This puts an arbitrary
-file anywhere, which is what the on-device wake word work needs (a 12.3MB
-libonnxruntime.so, three .onnx models, a test fixture).
+file anywhere for development and diagnostics.
 
 Five device-specific traps are baked in, each of which produced a convincing
 wrong answer first:

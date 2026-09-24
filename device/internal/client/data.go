@@ -16,8 +16,6 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/listen"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/processor"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword"
-	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/ort"
-	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/shadow"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/mic"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 	"github.com/gorilla/websocket"
@@ -122,7 +120,7 @@ const (
 // ─── VAD constants ────────────────────────────────────────────────────────────
 
 const (
-	vadOwwChunkBytes = 1280 * 2 // 2560 bytes = 80ms
+	wakeChunkBytes = 1280 * 2 // 2560 bytes = 80ms
 
 	// prerollBudgetMs is how much pre-gate audio is retained while the VAD
 	// gate is closed and flushed upstream the moment it opens. The ring is
@@ -253,15 +251,8 @@ type DataClient struct {
 	pcmObserverMu sync.RWMutex
 	pcmObserver   func([]byte)
 
-	// shadowScorer scores the always-on wake stream on the device without
-	// acting on it (internal/wakeword/shadow), nil when off. Guarded because
-	// a config push swaps it from the control goroutine while the mic
-	// goroutine is pushing frames into it.
-	shadowMu     sync.Mutex
-	shadowScorer *shadow.Scorer
-	// mwwShadowScorer observes the identical post-AEC 80 ms frames with the
-	// Tater microWakeWord runtime. It remains independent of the inherited
-	// openWakeWord scorer so either experiment can be enabled by itself.
+	// mwwShadowScorer observes the post-AEC 80 ms frames with the Tater
+	// microWakeWord runtime.
 	mwwShadowMu     sync.Mutex
 	mwwShadowScorer *microwakeword.ShadowScorer
 
@@ -307,15 +298,6 @@ type DataClient struct {
 	// the new one's Lock()/Process(). Uncontended outside that brief
 	// overlap, so the cost is a no-op lock per 160ms batch.
 	pipeMu sync.Mutex
-
-	// The turn stream's speech gate (speechgate.go). newSpeechStream returns
-	// a scorer for one turn, or nil for the RMS threshold; a field so tests
-	// can substitute one. vad is the shared Silero session, loaded on first
-	// success; vadErr de-duplicates the "not loaded" log line.
-	newSpeechStream func() speechScorer
-	vadMu           sync.Mutex
-	vad             *ort.VAD
-	vadErr          string
 }
 
 // NewDataClient wires the mic/speaker pipeline. canceller is the shared AEC
@@ -333,7 +315,6 @@ func NewDataClient(deviceID string, microphone mic.Subscribable, spk speaker.Spe
 		aec:        canceller,
 		listenGate: listen.New(0, 0, 0),
 	}
-	d.newSpeechStream = d.sileroStream
 	d.listenState.Store(ListenStream)
 	// Seeded from the env default so a device that never reaches a
 	// controller still honours EM_AEC_HW_REF; the first config push
@@ -430,33 +411,6 @@ func (d *DataClient) noteEchoRef(ref []byte) bool {
 		return true
 	}
 	return false
-}
-
-// OnDirectionChanged registers a callback invoked when the estimated dominant
-// source direction changes. Called from the mic streaming goroutine — keep it fast.
-// SetShadowScorer installs (or removes, with nil) the on-device wake word
-// scorer. Any previous scorer is closed, which releases its ONNX Runtime
-// sessions — a config push that changes the wake model rebuilds it, and
-// leaking a set of sessions per change would be a slow death on a device with
-// 1GB of storage and less RAM.
-//
-// Returns the scorer it replaced, already closed, purely so callers can log the
-// transition.
-func (d *DataClient) SetShadowScorer(s *shadow.Scorer) {
-	d.shadowMu.Lock()
-	old := d.shadowScorer
-	d.shadowScorer = s
-	d.shadowMu.Unlock()
-	if old != nil {
-		old.Close()
-	}
-}
-
-// ShadowScorer returns the active scorer, or nil.
-func (d *DataClient) ShadowScorer() *shadow.Scorer {
-	d.shadowMu.Lock()
-	defer d.shadowMu.Unlock()
-	return d.shadowScorer
 }
 
 // SetMWWShadowScorer installs or removes the Tater microWakeWord observer.
@@ -1064,17 +1018,6 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	d.proc.ResetAGC()
 	d.pipeMu.Unlock()
 
-	// Speech gate for a bounded turn: Silero when loaded, else the RMS
-	// threshold. The wake stream warms the session in the background so the
-	// first turn does not pay for loading it.
-	var speechDet speechScorer
-	var speechPeak float32
-	if lockMic {
-		speechDet = d.newSpeechStream()
-	} else {
-		go d.loadSilero()
-	}
-
 	ch := d.mic.Subscribe()
 	defer d.mic.Unsubscribe(ch)
 
@@ -1084,7 +1027,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	silenceCount := 0
 	active := false
 	everActive := false // true once active has been true at least once this turn
-	buf := make([]byte, 0, vadOwwChunkBytes*4)
+	buf := make([]byte, 0, wakeChunkBytes*4)
 	// preroll ring — processed mono periods captured while the gate is
 	// closed, oldest first. Flushed into buf at gate open, cleared while
 	// active. Slices are retained (not copied): Process() returns a fresh
@@ -1101,7 +1044,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	gainDb := -1
 	gainLin := 1.0
 
-	// On-device shadow scoring. Reset at stream start because a
+	// On-device microWakeWord scoring. Reset at stream start because a
 	// StopMic/StartMic pair happens after every voice turn and the detector
 	// must not splice across the gap.
 	//
@@ -1112,9 +1055,6 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	// newly installed scorer never saw a single frame. Wake word detection
 	// then stayed dead until the next StartMic, which only follows a voice
 	// turn, which could not happen because the wake word was dead.
-	if sc := d.ShadowScorer(); sc != nil {
-		sc.Reset()
-	}
 	if sc := d.MWWShadowScorer(); sc != nil {
 		sc.Reset()
 	}
@@ -1204,11 +1144,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// this case would already be unreachable (timer stopped below).
 			// Unreachable entirely when !lockMic, since noSpeechTimerC is
 			// nil in that case and a nil channel never becomes ready.
-			if speechDet != nil {
-				log.Printf("[data] streamMic: no speech detected within timeout (Silero peak %.2f) — ending turn", speechPeak)
-			} else {
-				log.Println("[data] streamMic: no speech detected within timeout — ending turn")
-			}
+			log.Println("[data] streamMic: no speech detected within timeout — ending turn")
 			sendFrame([]byte{frameTypeNoSpeechTimeout})
 			endedItself = true
 			return
@@ -1323,17 +1259,6 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// lockstep with micGainDb.
 			rms := vadPeriodRMS(mono)
 			speech := rms >= threshold*gainLin
-			if speechDet != nil {
-				if p, err := speechDet.Prob(monoFloat(mono)); err != nil {
-					log.Printf("[data] speech gate: %v — RMS threshold for the rest of this turn", err)
-					speechDet = nil
-				} else {
-					speech = p >= speechProb
-					if p > speechPeak {
-						speechPeak = p
-					}
-				}
-			}
 			if lockOnSpeech && speech {
 				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
 				d.beam.LockCurrent(turnBeam)
@@ -1341,8 +1266,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			}
 
 			// Gate windows in units of actual iterations: the mic delivers
-			// whole ALSA-buffer batches (160ms/2560 samples — see the
-			// pipeline note in CLAUDE.md), so divide the configured ms by
+			// whole ALSA-buffer batches (160ms/2560 samples), so divide the configured ms by
 			// the real batch duration. The old /32 assumed 32ms periods and
 			// silently made both windows 5× longer than configured (80ms
 			// speech-to-open was really 320ms; 600ms silence-to-close was
@@ -1401,17 +1325,12 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			}
 
 			// The always-on (!lockMic) wake stream. Every processed period,
-			// batched into 80ms chunks, is scored locally when a scorer is
-			// loaded; what then leaves the device depends on listenState
-			// (docs/listening.md): in ListenStream every chunk is sent, in
-			// ListenLocal only an open session's audio, in ListenDegraded
-			// nothing. The scorer always sees the continuous stream — no VAD
-			// gate, no preroll, no end-of-speech sentinels. openwakeword
-			// is a streaming model whose internal mel-spectrogram buffer
-			// assumes continuous audio; feeding it VAD-gated bursts spliced
-			// together (even with preroll) measurably depresses scores, and
-			// an absolute RMS threshold is wrong in at least one room of
-			// every home. Bandwidth is a non-issue: 16kHz mono S16 is
+			// batched into 80ms chunks, is scored locally by microWakeWord.
+			// What then leaves the device depends on listenState in legacy
+			// controller mode; direct Tater mode consumes the same processed
+			// chunks through observePCM. The detector always sees continuous
+			// audio—no VAD gate, preroll splice, or endpoint sentinel.
+			// Bandwidth is a non-issue: 16kHz mono S16 is
 			// 32KB/s, ~12.5 frames/s at this chunk size — 6× smaller than
 			// the TTS playback stream. Turn endpointing for wake-triggered
 			// turns is owned controller-side (HA STT_VAD_END in esphome
@@ -1420,14 +1339,14 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			if !lockMic {
 				buf = append(buf, mono...)
 				state := d.ListenState()
-				for len(buf) >= vadOwwChunkBytes {
+				for len(buf) >= wakeChunkBytes {
 					// One copy per frame, stamped once, shared by the scorer
 					// and the listen gate: the gate keeps frames in its ring,
 					// and a wake's session starts after the frame the scorer
 					// crossed on, which only works if both saw the same time.
-					chunk := make([]byte, vadOwwChunkBytes)
-					copy(chunk, buf[:vadOwwChunkBytes])
-					buf = buf[vadOwwChunkBytes:]
+					chunk := make([]byte, wakeChunkBytes)
+					copy(chunk, buf[:wakeChunkBytes])
+					buf = buf[wakeChunkBytes:]
 					at := time.Now()
 					// Score the SAME bytes on the SAME 80ms boundaries the
 					// controller receives in stream mode, so a device/controller
@@ -1436,9 +1355,6 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 					// than delaying this loop, which reads 160ms ALSA batches
 					// out of a 160ms-deep ring. Re-read per frame: a config
 					// push can swap the scorer mid-stream and close the old one.
-					if sc := d.ShadowScorer(); sc != nil {
-						sc.PushBytesAt(chunk, at)
-					}
 					if sc := d.MWWShadowScorer(); sc != nil {
 						sc.PushBytes(chunk)
 					}
@@ -1502,11 +1418,11 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 						active = false
 						silenceCount = 0
 						if len(buf) > 0 {
-							pad := make([]byte, vadOwwChunkBytes-len(buf)%vadOwwChunkBytes)
+							pad := make([]byte, wakeChunkBytes-len(buf)%wakeChunkBytes)
 							buf = append(buf, pad...)
-							for len(buf) >= vadOwwChunkBytes {
-								sendFrame(buf[:vadOwwChunkBytes])
-								buf = buf[vadOwwChunkBytes:]
+							for len(buf) >= wakeChunkBytes {
+								sendFrame(buf[:wakeChunkBytes])
+								buf = buf[wakeChunkBytes:]
 							}
 							buf = buf[:0]
 						}
@@ -1517,9 +1433,9 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 
 			if active {
 				buf = append(buf, mono...)
-				for len(buf) >= vadOwwChunkBytes {
-					sendFrame(buf[:vadOwwChunkBytes])
-					buf = buf[vadOwwChunkBytes:]
+				for len(buf) >= wakeChunkBytes {
+					sendFrame(buf[:wakeChunkBytes])
+					buf = buf[wakeChunkBytes:]
 				}
 			} else {
 				// Gate closed — keep the most recent batches for the next

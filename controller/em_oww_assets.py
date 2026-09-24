@@ -2,14 +2,14 @@
 em_oww_assets.py — on-device wake word asset distribution
 ==========================================================
 
-The device can run the wake model itself (see "On-device wake word" in
-CLAUDE.md), but the ONNX Runtime and the models are deliberately NOT in the
+Legacy EchoMuse firmware can run the wake model itself, but the ONNX Runtime
+and the models are deliberately NOT in the
 firmware: 12.3MB would double the OTA payload and both A/B slots, and the
 runtime changes far less often than the binary. They are installed out of
 band, which until now meant `controller/tools/push_file.py` by hand — fine
 for us, a wall for anyone else, and the blocker for `owwOnDevice=on`.
 
-What has to land on a device, in `shadow.DefaultDir`:
+What has to land on a legacy device:
 
     libonnxruntime.so     12.3MB   the dlopen'd runtime
     melspectrogram.onnx    1.1MB   shared feature models, same for every
@@ -43,8 +43,7 @@ from pathlib import Path
 
 import em_oww_models
 
-# Where the device expects everything. Must match shadow.DefaultDir in
-# device/internal/wakeword/shadow/open.go — there is a test.
+# Where legacy EchoMuse firmware expects its OpenWakeWord assets.
 DEVICE_DIR = "/data/local/share/echomuse/oww"
 
 RUNTIME_NAME = "libonnxruntime.so"
@@ -56,11 +55,8 @@ SHARED_NAMES = ("melspectrogram.onnx", "embedding_model.onnx")
 # Where the vendored ARM runtime lands in the image (see Dockerfile).
 RUNTIME_DIR = "/app/models/oww_runtime"
 
-# Silero VAD for the device's turn-stream speech gate (device
-# internal/client/speechgate.go, sileroModel). Built into RUNTIME_DIR by the
-# Dockerfile's `silero` stage as the typed-field rewrite: openwakeword's own
-# copy crashes ORT on the Echo, so it must never be sourced from the package.
-# Optional — a device without it gates on RMS exactly as before.
+# Silero VAD used by legacy EchoMuse firmware. Built into RUNTIME_DIR by the
+# Dockerfile's `silero` stage as a typed-field rewrite.
 VAD_NAME = "silero_vad.onnx"
 
 # The stock wake words a user can actually select, and therefore the set every
@@ -129,8 +125,7 @@ def openwakeword_resources() -> Path | None:
     The installed openwakeword package's bundled models directory.
 
     Imported lazily and tolerantly: this module is unit-tested in an
-    environment that deliberately does not have openwakeword (see CLAUDE.md
-    on keeping the test deps to pytest/numpy/scipy).
+    environment that deliberately does not have openwakeword.
     """
     try:
         import openwakeword  # noqa: F401

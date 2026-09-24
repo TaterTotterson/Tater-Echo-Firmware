@@ -69,7 +69,7 @@ devb() { $T $ADB exec-out "$PFX$1 2>/dev/null$SFX" 2>/dev/null || true; }
 
 model=$(dev "getprop ro.product.device" | tr -cd 'A-Za-z0-9_.-')
 [ -n "$model" ] || model="unknown"
-OUT="${1:-./echomuse-profile-$model-$(date +%Y%m%d-%H%M%S)}"
+OUT="${1:-./tater-echo-profile-$model-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT/files"
 P="$OUT/profile.txt"
 : > "$P"
@@ -79,7 +79,7 @@ run() { printf '$ %s\n' "$1" >> "$P"; dev "$1" >> "$P"; }
 
 echo "Profiling $model into $OUT (root: $ROOT)…" >&2
 {
-  echo "EchoMuse board profile"
+  echo "Tater Echo board profile"
   echo "profile.sh format 1"
   echo "host date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "root: $ROOT"

@@ -230,6 +230,34 @@ def test_a_reference_round_trips_byte_for_byte():
     assert eb.roundtrip_identical(make_reference())
 
 
+def test_a_full_partition_dump_round_trips_only_its_logical_boot_image():
+    """Factory install reads the entire 16 MiB partition with dd. The Android
+    image is shorter and its exact end is declared by the three region sizes in
+    the header; partition slack after that point is not an image-format field.
+
+    Use non-zero slack so this proves the gate is using the header boundary,
+    not merely stripping zeroes and accidentally accepting one device image.
+    """
+    ref = make_reference()
+    slack = 16 * 1024 * 1024 - len(ref)
+    partition = ref + b"partition-slack" * ((slack + 14) // 15)
+    partition = partition[:16 * 1024 * 1024]
+    assert len(partition) == 16 * 1024 * 1024
+    assert eb.reference_image_size(partition) == len(ref)
+    assert eb.roundtrip_diff(partition, ignore_id=True) is None
+
+    info = eb.build_emos_image(partition, fake_init(), "0.1")
+    assert info["reference_size"] == len(partition)
+    assert eb.split_reference(info["image"])["zimage"] == \
+        eb.split_reference(ref)["zimage"]
+
+
+def test_a_truncated_logical_boot_image_is_refused_even_with_a_valid_header():
+    ref = make_reference()
+    with pytest.raises(eb.BuildError, match="boot image is truncated"):
+        eb.reference_image_size(ref[:-1])
+
+
 def test_round_trip_fails_when_the_image_is_not_what_it_says():
     """
     The gate has to be capable of saying no, or it is decoration.

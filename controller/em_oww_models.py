@@ -2,8 +2,8 @@
 em_oww_models.py — custom openWakeWord model discovery
 =======================================================
 
-Custom wake-word models (trained by oww_forge, or any openWakeWord-
-compatible .onnx) live in `oww_models/` next to the SQLite database —
+Custom openWakeWord-compatible `.onnx` models live in `oww_models/` next to
+the SQLite database —
 inside the persisted data volume in Docker, so models survive image
 upgrades. The controller passes `owwModel` straight to
 `OWWModel(wakeword_models=[...])`, which accepts file paths as well as

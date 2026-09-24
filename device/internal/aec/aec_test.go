@@ -444,8 +444,8 @@ func TestReferenceScalingSurvivesAVolumeChange(t *testing.T) {
 
 func TestPlaybackLevelScaleIsTheCodecLaw(t *testing.T) {
 	c := New()
-	// 0.5dB per step, unity at 127 — the control's own law, see Volume in
-	// device/CLAUDE.md. Getting this wrong scales the reference to something
+	// 0.5dB per step, unity at 127 — the control's own law. Getting this wrong
+	// scales the reference to something
 	// the speaker never played, which is worse than not scaling at all.
 	for _, tc := range []struct {
 		level int

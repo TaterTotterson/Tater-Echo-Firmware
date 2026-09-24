@@ -112,11 +112,11 @@ static const struct node nodes[] = {
  * the ring is claimed as the FIRST thing init does, before any step that can
  * fail.
  *
- * What replaces it is deliberately a CONTINUATION of it rather than a
- * different display: the same two blues, a lighter head leading a dark blue
- * trail, in the same direction at the same rate. The head's position is the
- * boot's progress — twelve stages, one LED each, arriving back at the bottom
- * as the network comes up.
+ * What replaces it keeps the orbit's direction and motion, but crosses into
+ * Tater's orange-red palette as userspace claims the ring. A bright warm head
+ * leads a dark orange-red trail. The head's position is the boot's progress —
+ * twelve stages, one LED each, arriving back at the bottom as the network
+ * comes up.
  *
  * The head moves continuously rather than in twelve jumps, and that is the
  * whole point of it. Stages are nothing like evenly spaced in time — linking
@@ -129,8 +129,8 @@ static const struct node nodes[] = {
  * that has not happened.
  *
  * Rendering a fractional position on twelve LEDs is a cross-fade between the
- * two segments either side of it, which is also what makes it read as the same
- * object as the kernel's orbit rather than a chunky imitation of one.
+ * two segments either side of it, which is what makes it read as the same
+ * moving object as the kernel's orbit rather than a chunky imitation.
  *
  * A stage that fails turns the head red and stops it. That is a clue, not a
  * diagnosis: the trail on the cache partition is the diagnosis.
@@ -196,17 +196,21 @@ static long mono_ms(void);
  * the orbit ever needs re-measuring, on this board or another. */
 #define ORBIT_PROBE 0
 
-/* The orbit's ring, which is also what the tail repaints it with. */
-static const unsigned char C_ORBIT[3]  = { 0x00, 0x00, 0xFF };
-static const unsigned char C_HEAD[3]   = { 0x00, 0xFF, 0xFF }; /* the orbit's head */
+/* The kernel palette is fixed in Amazon's prebuilt driver. Keep it only so
+ * the handover can identify and smoothly leave that animation. */
+static const unsigned char C_KERNEL_ORBIT[3] = { 0x00, 0x00, 0xFF };
+static const unsigned char C_KERNEL_HEAD[3]  = { 0x00, 0xFF, 0xFF };
+/* Tater's runtime accent is rgb(255,90,31). A dim proportional ground makes
+ * the completed arc readable without competing with the moving head. */
+static const unsigned char C_ORBIT[3]  = { 0x30, 0x11, 0x06 };
+static const unsigned char C_HEAD[3]   = { 0xFF, 0x5A, 0x1F };
 static const unsigned char C_FAIL[3]   = { 0xFF, 0x00, 0x00 };
 static const unsigned char C_AMBER[3]  = { 0xFF, 0x60, 0x00 };
 /* The native satellites use warm-white twinkles for provisioning and reserve
  * orange for a configured satellite that cannot reach Tater. Keep those two
  * states visually distinct here too. */
 static const unsigned char C_SETUP[3]  = { 0xFF, 0xE3, 0xB5 };
-/* Cyan is already full on two channels, so the only way UP is toward white —
- * adding red is what "brighter" means once green and blue are at 0xFF. */
+/* The completed orange-red ring rises to white before it fades away. */
 static const unsigned char C_PEAK[3]   = { 0xFF, 0xFF, 0xFF };
 
 #define SUB       256                  /* sub-LED position units */
@@ -224,8 +228,8 @@ static const unsigned char C_PEAK[3]   = { 0xFF, 0xFF, 0xFF };
  * Once it parks on position 12 and waits for the network, the breath is the
  * only thing happening at all, for 27.6 seconds of a 35 second boot, so it has
  * to actually read: 65% was measured on the device as not noticeable (Wil,
- * 2026-09-05). Parked it swings most of the way back to blue, and slower, so
- * it reads as waiting rather than as activity. */
+ * 2026-09-05). Parked it swings most of the way back to the dark ground
+ * colour, and slower, so it reads as waiting rather than as activity. */
 #define BREATH_MIN     ((SUB * 13) / 20)   /* moving: 65%, a shimmer */
 #define BREATH_PARKED  ((SUB *  1) / 5)    /* parked: 20%, a throb   */
 #define BREATH_MS         2400
@@ -363,9 +367,8 @@ static int head_advance(int head_q, int stage)
  * either reading clearly (Wil, 2026-09-05).
  *
  * The head mixes between the GROUND and the head colour rather than scaling
- * toward black: scaling cyan down takes the blue channel with it, so the head
- * would go dimmer than the ring it sits on. Mixing holds blue at full and
- * moves only the green.
+ * toward black, so the bottom of the breath never gets dimmer than the trail
+ * it sits on.
  */
 static void anim_render(int head_q, int still, int failed, int trail)
 {
@@ -397,12 +400,12 @@ static void anim_render(int head_q, int still, int failed, int trail)
         return;
     }
 
-    /* Ahead of the head the ring is DARK, and the tail paints the orbit's own
-     * blue back onto it as it goes. Carrying the lit ring through instead —
-     * the first version of this — put the tail and the ground two shades of
-     * the same blue apart, and on the device that read as no progress bar at
-     * all (Wil, from video, 2026-09-05). The handover is covered by fading the
-     * ring out rather than by keeping it lit; see anim_handover. */
+    /* Ahead of the head the ring is DARK, and the tail paints the Tater ground
+     * colour back onto it as it goes. Carrying the lit ring through instead —
+     * the first version of this — left too little contrast for the progress
+     * bar to read at all (Wil, from video, 2026-09-05). The handover is
+     * covered by fading the ring out rather than by keeping it lit; see
+     * anim_handover. */
     int i = head_q / SUB, fr = head_q % SUB;
     for (int p = 0; p < LED_N; p++) {
         if (trail && p < i)
@@ -448,9 +451,9 @@ static int orbit_head_pos(void)
         return -1;
 
     char want[6];
-    puthex(want,     C_ORBIT[0]);
-    puthex(want + 2, C_ORBIT[1]);
-    puthex(want + 4, C_ORBIT[2]);
+    puthex(want,     C_KERNEL_ORBIT[0]);
+    puthex(want + 2, C_KERNEL_ORBIT[1]);
+    puthex(want + 4, C_KERNEL_ORBIT[2]);
 
     int found = -1, count = 0;
     for (int L = 0; L < LED_N; L++) {
@@ -576,28 +579,29 @@ static void anim_claim(void)
     if (fd >= 0) { write(fd, "3", 1); close(fd); }
 }
 
-/* The handover: take the lit ring away, and leave the head behind.
+/* The handover: leave the fixed kernel blues and enter Tater's palette.
  *
  * We stop the kernel's animation with its head at the bottom, so at this
- * instant the ring is exactly what it has been showing all along. Fading the
- * blue out from under that head — rather than cutting to a dark ring, or
- * carrying the lit ring through — is what makes the two animations read as
- * one: nothing jumps, nothing changes colour, the ring simply clears and the
- * head is left standing where the orbit left it, about to travel.
+ * instant the ring is exactly what it has been showing all along. One smooth
+ * transition changes the cyan head to Tater orange-red while changing and
+ * fading the blue ground underneath it. The head is left standing where the
+ * orbit left it, about to travel.
  *
  * It also buys the contrast the progress display needs. Against a lit ring the
- * tail was two shades of blue away from the ground and did not read as a
- * progress bar at all; against a dark one it paints the orbit's own blue back
- * on as it goes.
+ * tail does not read as a progress bar at all; against a dark one it paints
+ * the Tater ground colour back on as it goes.
  */
 static void anim_handover(void)
 {
-    unsigned char f[LED_N][3];
+    unsigned char f[LED_N][3], ground[3], changed[3], head[3];
 
-    for (int v = SUB; v >= 0; v -= 16) {
+    for (int v = 0; v <= SUB; v += 16) {
+        blend(changed, C_KERNEL_ORBIT, C_ORBIT, v);
+        scale(ground, changed, SUB - v);
+        blend(head, C_KERNEL_HEAD, C_HEAD, v);
         for (int p = 0; p < LED_N; p++)
-            scale(f[p], C_ORBIT, v);
-        memcpy(f[0], C_HEAD, 3);      /* the head stays, and stays put */
+            memcpy(f[p], ground, 3);
+        memcpy(f[0], head, 3);        /* the head stays, and stays put */
         led_write(f);
         usleep(TICK_MS * 1000);
     }
@@ -667,10 +671,10 @@ static void anim_main(void)
 /* Sample the kernel's own animation before taking the ring away from it.
  *
  * `frame` is read/write, so the driver hands back exactly what it is
- * displaying — which turns "match the orbit's blues" from an eyeballing job
- * into two constants copied off a boot trail, and the sample interval gives
- * its direction and period as well. Costs ~400ms of a boot; compile it out
- * once the numbers above are filled in. */
+ * displaying — which turns the handover's source palette from an eyeballing
+ * job into two constants copied off a boot trail, and the sample interval
+ * gives its direction and period as well. Costs ~400ms of a boot; compile it
+ * out once the numbers above are filled in. */
 static void orbit_probe(void)
 {
 #if ORBIT_PROBE

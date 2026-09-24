@@ -27,6 +27,7 @@ MANIFEST = ROOT / "bundle-manifest.json"
 PAYLOAD = ROOT / "payload"
 REMOTE_STAGE = "/tmp/tater-echo-factory"
 ANDROID_MAGIC = b"ANDROID!"
+RELEASES_URL = "https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest"
 
 
 class InstallError(RuntimeError):
@@ -42,6 +43,13 @@ def sha256(path: Path) -> str:
 
 
 def load_manifest() -> dict:
+    if not MANIFEST.is_file():
+        raise InstallError(
+            "this installer is being run outside a published factory bundle. "
+            "Do not run factory/biscuit/install.sh from a source checkout; "
+            f"download and extract tater-echo-biscuit-*-factory.tar.gz from {RELEASES_URL}, "
+            "then run ./install.sh from that extracted directory"
+        )
     try:
         manifest = json.loads(MANIFEST.read_text())
     except (OSError, ValueError) as exc:
@@ -110,8 +118,7 @@ class Adb:
 def select_adb(binary: str, serial: str | None) -> Adb:
     probe = Adb(binary, None)
     output = probe.run("devices", capture=True)
-    devices = [line.split()[0] for line in output.splitlines()[1:]
-               if len(line.split()) >= 2 and line.split()[1] == "device"]
+    devices = connected_adb_devices(output)
     if serial:
         if serial not in devices:
             raise InstallError(f"ADB device {serial!r} is not connected")
@@ -121,6 +128,23 @@ def select_adb(binary: str, serial: str | None) -> Adb:
             f"expected exactly one connected ADB device, found {len(devices)}; "
             "use --serial when more than one is attached")
     return Adb(binary, devices[0])
+
+
+def connected_adb_devices(output: str) -> list[str]:
+    """Return usable serials from `adb devices`.
+
+    Android's adb host labels a normal boot as ``device`` and some TWRP builds
+    as ``recovery``. Both expose the same shell/push/pull transport needed by
+    this installer; require_twrp() performs the authoritative recovery check
+    immediately after selection.
+    """
+    usable_states = {"device", "recovery"}
+    devices: list[str] = []
+    for line in output.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] in usable_states:
+            devices.append(fields[0])
+    return devices
 
 
 def require_twrp(adb: Adb) -> None:

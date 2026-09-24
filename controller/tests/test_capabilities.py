@@ -23,6 +23,8 @@ CONTROL_GO = ROOT / "device" / "internal" / "client" / "control.go"
 CONTROLLER = ROOT / "controller" / "em_controller.py"
 API = ROOT / "controller" / "em_api.py"
 ESPHOME = ROOT / "controller" / "em_esphome.py"
+LEGACY_OWW_CAPABILITIES = {"oww_shadow", "oww_trigger", "oww_local_only"}
+LEGACY_CONTROLLER_FEATURES = {"listen_session"}
 
 
 def device_capabilities() -> list[str]:
@@ -44,7 +46,7 @@ def device_capabilities() -> list[str]:
 
 def test_device_announces_expected_capabilities():
     caps = device_capabilities()
-    for expected in ("mic", "speaker", "leds", "led_anim", "buttons", "oww_shadow"):
+    for expected in ("mic", "speaker", "leds", "led_anim", "buttons", "mww_shadow"):
         assert expected in caps, f"firmware no longer announces {expected!r}"
 
 
@@ -65,7 +67,9 @@ def test_every_capability_the_controller_checks_is_one_the_device_sends():
     checked |= set(re.findall(r'_device_has\(\s*"([a-z_]+)"\s*\)',
                               ESPHOME.read_text()))
     assert checked, "no capability checks found — has the idiom changed?"
-    unknown = checked - caps
+    # The controller retains these checks for older EchoMuse firmware. Current
+    # Tater firmware intentionally does not advertise the removed OWW runtime.
+    unknown = checked - caps - LEGACY_OWW_CAPABILITIES
     assert not unknown, (
         f"controller checks capabilities the firmware never announces: {sorted(unknown)}. "
         f"Device sends: {sorted(caps)}"
@@ -87,18 +91,11 @@ def test_shadow_capability_is_surfaced_to_the_dashboard():
         "the dashboard must gate the on-device toggle on the capability"
 
 
-def test_triggering_is_a_separate_capability_from_scoring():
-    """
-    Shadow shipped first, so there is firmware in the field that scores the
-    wake word and reports it while having no code to act on it. Gating "on"
-    behind oww_shadow alone would offer those devices a mode that leaves them
-    scoring perfectly and never answering — the "I enabled it and nothing
-    happened" the capability rule exists to prevent.
-    """
-    caps = device_capabilities()
-    assert "oww_trigger" in caps, "firmware no longer announces oww_trigger"
-    assert "oww_shadow" in caps, \
-        "oww_trigger must not replace oww_shadow — shadow is still a mode"
+def test_legacy_openwakeword_capabilities_are_not_advertised_by_tater_firmware():
+    caps = set(device_capabilities())
+    assert not caps & LEGACY_OWW_CAPABILITIES
+    # Keep the controller gates for older EchoMuse firmware; absence on a new
+    # Tater device leaves every legacy control disabled.
     assert "oww_trigger_capable" in CONTROLLER.read_text(), \
         "em_controller must expose the trigger capability as a property"
     assert "owwTriggerCapable" in API.read_text(), \
@@ -313,8 +310,9 @@ def test_the_controller_announces_its_own_features_and_the_device_reads_them():
     # Every announced feature must be a constant the device actually tests
     # for. A typo here is permanently silent on both sides.
     consumed = set(re.findall(r'Feature\w+\s*=\s*"([a-z_]+)"', go))
-    assert announced <= consumed, (
-        f"controller announces {announced - consumed} which the device never "
+    unsupported = announced - consumed - LEGACY_CONTROLLER_FEATURES
+    assert not unsupported, (
+        f"controller announces {unsupported} which the device never "
         f"looks for — the feature would never be used and nothing would say so"
     )
 
@@ -334,18 +332,14 @@ def test_microwakeword_shadow_is_negotiated_and_never_dispatched_as_a_wake():
     assert "pending_wake.offer" not in block
 
 
-def test_private_listening_is_negotiated_in_both_directions():
-    """docs/listening.md: the device listens privately only against a
-    controller announcing listen_session, and the controller treats a device
-    as private-capable only on oww_local_only. The literals in em_controller
-    are what the two tests above cross-check against the Go; em_listen's
-    constants must be the same strings or the pure logic reads a different
-    capability from the one negotiated."""
+def test_private_listening_remains_legacy_controller_compatibility_only():
+    """Older EchoMuse firmware still negotiates its private OWW stream, while
+    current Tater firmware neither advertises nor consumes that protocol."""
     import sys
     sys.path.insert(0, str(ROOT / "controller"))
     import em_listen
     py = CONTROLLER.read_text()
     assert f'"{em_listen.FEATURE}"' in py[py.index("CONTROLLER_FEATURES = ["):][:200]
     assert f'"{em_listen.CAPABILITY}" in (self.capabilities' in py
-    assert em_listen.CAPABILITY in device_capabilities()
-    assert re.search(r'FeatureListenSession\s*=\s*"listen_session"', CONTROL_GO.read_text())
+    assert em_listen.CAPABILITY not in device_capabilities()
+    assert not re.search(r'FeatureListenSession\s*=\s*"listen_session"', CONTROL_GO.read_text())

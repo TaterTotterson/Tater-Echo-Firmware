@@ -69,7 +69,7 @@ It lists what it's about to do and waits for `y`. Stages:
     array defeats it. For those devices the recording needs `pcm_capture`,
     which we build and attach to the issue for you. Or build it yourself:
     `porting/pcm_capture/build.sh` (needs the `echomuse-compiler` Docker
-    image, see `device/CLAUDE.md`).
+    image described in the root README).
 
 **`mics.raw` is a recording of your room.** If anyone spoke during those 10
 seconds, leave it out of the public post. `probe.txt` already holds the

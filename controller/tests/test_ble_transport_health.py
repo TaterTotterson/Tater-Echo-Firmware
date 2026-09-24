@@ -15,8 +15,7 @@ dropped both, so nothing anywhere could say how often this happens.
 These test `em_ble_health` rather than reaching the decision through
 `em_ble_proxy`, which imports zeroconf — a dependency the CI test job does
 not install, so a test routed through that module passes locally and cannot
-run where it matters. That is the same reason the logic was split out at
-all; see controller/CLAUDE.md on keeping the suite to pure-logic modules.
+run where it matters. That is the same reason the logic was split out at all.
 """
 
 import re

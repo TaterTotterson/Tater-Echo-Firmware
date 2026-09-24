@@ -33,7 +33,3 @@ Deeper technical references live elsewhere:
 - [SETUP.md](../SETUP.md) — architecture reference: how the mic array, the
   audio pipeline and the device/controller protocol actually work, plus
   troubleshooting. Not an onboarding guide.
-- [JOURNAL.md](../JOURNAL.md) — the engineering journal: a long-form,
-  chronological record of what was built, what broke, and what we got wrong.
-- [CLAUDE.md](../CLAUDE.md) — codebase orientation for developers (and AI
-  assistants).

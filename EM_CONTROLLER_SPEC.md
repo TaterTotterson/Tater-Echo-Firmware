@@ -9,9 +9,7 @@
 > current: "Open Questions / Known Gaps" lists the browser-based provisioner
 > and the PTY shell as not implemented, and both shipped (v2.4.5 and v2.7.1
 > respectively); the OTA section describes an `update.sh` pushed to the device
-> that no longer exists. For how the controller actually works today, read
-> **`CLAUDE.md`** (current architecture and the invariants behind it) and
-> **[`JOURNAL.md`](JOURNAL.md)** (why each thing is the way it is). For using it,
+> that no longer exists. For current user guidance, read
 > **`docs/quickstart.md`**.
 
 ---

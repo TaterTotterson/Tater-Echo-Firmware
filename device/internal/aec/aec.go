@@ -198,8 +198,8 @@ type Canceller struct {
 // not been through, so the hardware reference can be scaled to match what the
 // speaker is actually emitting.
 //
-// The control is 0.5dB per step with unity at 127 (see Volume in
-// device/CLAUDE.md), so the scalar is 10^((level-127)/40).
+// The control is 0.5dB per step with unity at 127, so the scalar is
+// 10^((level-127)/40).
 //
 // SOFTWARE-TAP FRAMES ARE DELIBERATELY LEFT ALONE. That tap is pre-volume
 // too, but its ring holds audio written BEFORE the change, so scaling it by

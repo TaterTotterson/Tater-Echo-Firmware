@@ -30,18 +30,6 @@ jobs:
         working-directory: controller
         run: python -m pytest tests/ -v
 
-  forge-metadata-tests:
-    name: ONNX metadata round trip
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      # Keep runtime/model dependencies out of the lightweight controller suite.
-      - run: pip install pytest numpy pyyaml aiohttp onnx==1.17.0 onnxruntime
-      - run: python -m pytest oww_forge/tests/ -v
-
   controller-lint:
     name: Controller lint (undefined names)
     runs-on: ubuntu-latest
@@ -112,9 +100,6 @@ jobs:
           node controller/tests/kernel_label.test.mjs
           node controller/tests/wifi_ssid.test.mjs
           node controller/tests/wake_sensitivity.test.mjs
-      - name: Run forge console tests
-        run: node oww_forge/tests/console_log.test.mjs
-
   device-tests:
     name: Device Go tests
     runs-on: ubuntu-latest
@@ -134,10 +119,31 @@ jobs:
         working-directory: device
         run: go test ./internal/... ./pkg/...
       - name: Test factory installer safety logic
-        run: python3 -m unittest factory.biscuit.test_install
+        run: python3 -m unittest factory.biscuit.test_install factory.checkers.test_install tools.test_merge_release_manifests
       - name: Test native microWakeWord runtime
         working-directory: device
         run: ./test_microwakeword_runtime.sh
+
+  checkers-screen:
+    name: Checkers screen APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            screen/*.gradle.kts
+            screen/gradle/wrapper/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+      - name: Install pinned Android platform
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Build APK
+        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Verify APK archive
+        run: unzip -t screen/app/build/outputs/apk/debug/app-debug.apk
 
   python-deps-audit:
     name: Python dependency audit

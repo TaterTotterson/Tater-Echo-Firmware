@@ -11,11 +11,35 @@ SPEC.loader.exec_module(install)
 
 
 class FactoryInstallerTests(unittest.TestCase):
+    def test_source_checkout_explains_how_to_get_release_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = install.MANIFEST
+            install.MANIFEST = Path(directory) / "bundle-manifest.json"
+            try:
+                with self.assertRaisesRegex(
+                        install.InstallError,
+                        r"outside a published factory bundle.*factory/biscuit/install\.sh.*releases/latest"):
+                    install.load_manifest()
+            finally:
+                install.MANIFEST = original
+
     def test_boot_kind_rejects_non_android(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "boot.img"
             image.write_bytes(b"not a boot image")
             self.assertEqual(install.boot_kind(image), "invalid")
+
+    def test_adb_selection_accepts_twrp_recovery_transport(self):
+        output = """List of devices attached
+G090LF1072830RGM recovery product:omni_biscuit device:biscuit
+offline-one offline
+unauthorized-one unauthorized
+normal-one device product:biscuit
+"""
+        self.assertEqual(
+            install.connected_adb_devices(output),
+            ["G090LF1072830RGM", "normal-one"],
+        )
 
     def test_boot_kind_distinguishes_stock_and_emos(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -174,37 +174,11 @@ def test_a_partial_inventory_is_safe():
     assert len(p.push) == len(desired)
 
 
-# ─── Contract with the device ────────────────────────────────────────────────
-
-def test_device_dir_matches_the_firmware_constant():
-    """
-    DEVICE_DIR and shadow.DefaultDir are the same path in two languages. If
-    they drift, the controller installs assets the device will not look for,
-    and the only symptom is shadow mode silently never starting.
-    """
-    from pathlib import Path
-    go = (Path(__file__).resolve().parents[2]
-          / "device/internal/wakeword/shadow/open.go").read_text()
-    assert f'DefaultDir = "{A.DEVICE_DIR}"' in go, (
-        "em_oww_assets.DEVICE_DIR has drifted from shadow.DefaultDir"
-    )
-
-
-def test_shared_model_names_match_what_the_device_opens():
-    from pathlib import Path
-    go = (Path(__file__).resolve().parents[2]
-          / "device/internal/wakeword/shadow/open.go").read_text()
-    for name in A.SHARED_NAMES:
-        assert f'"{name}"' in go, f"{name} is not what the device opens"
-    assert f'"{A.RUNTIME_NAME}"' in go
-
-
 def test_classifier_filename_matches_the_device_stem_rule():
     """
-    The device derives the classifier filename with shadow.ModelStem, which
-    mirrors em_oww_models.prediction_key. Both must agree, or we send
-    hey_mycroft_v0.1.onnx and the device opens hey_mycroft_v0.onnx — the
-    exact bug ModelStem was written to fix.
+    Legacy controller assets retain the full versioned stem. This protects
+    compatibility for existing EchoMuse devices without coupling current
+    Tater-native firmware to OpenWakeWord.
     """
     import em_oww_models
     assert em_oww_models.prediction_key("hey_mycroft_v0.1") == "hey_mycroft_v0.1"
@@ -457,13 +431,6 @@ def test_the_vad_model_ships_from_the_image_not_the_package(tmp_path):
     assets, _ = A.desired_assets([], runtime_dir=tmp_path, include_stock=False)
     vad = next(a for a in assets if a.name == A.VAD_NAME)
     assert vad.kind == "vad" and vad.source == tmp_path / A.VAD_NAME
-
-
-def test_vad_name_matches_what_the_device_opens():
-    from pathlib import Path
-    go = (Path(__file__).resolve().parents[2]
-          / "device/internal/client/speechgate.go").read_text()
-    assert f'sileroModel = "{A.VAD_NAME}"' in go
 
 
 def test_the_image_builds_the_model_where_the_plan_looks():

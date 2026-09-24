@@ -135,7 +135,7 @@ absent optional fields take prior/default behaviour.
 |--------|---------|---------|
 | `register` | see above | Handshake, sent once at connect |
 | `button` | `clickType`, `down`, `heldMs`, `muted`, `button.type` | Button press/release; `heldMs` only if `button_hold` |
-| `mute_state` | `muted` | Mute toggled (mute is device-sovereign — see `device/CLAUDE.md`) |
+| `mute_state` | `muted` | Mute toggled (mute is device-sovereign) |
 | `volume_state` | `level` | Volume changed; controller persists it as `startupVolume` |
 | `oww_shadow_cross` | score/threshold/age fields | Shadow-mode wake crossing (report only) |
 | `oww_wake` | `score`, `threshold`, `ageMs`, `capturedMono`; under private listening also `session`, `floor`, `barge` | On-device trigger fired (`owwOnDevice=on`). With `session` it opened a private-listening session whose audio follows as `0x07` ([listening.md](listening.md)); without, it lands in `Device.pending_wake` and the continuous stream carries the audio |
@@ -205,7 +205,7 @@ device and capture frames only ever flow from it. The two capture sentinels are
 distinct on purpose: "wake word then silence" (quietly give up) must be
 distinguishable from "spoke, and the backend had nothing to say."
 
-Mic stream shapes (`device/CLAUDE.md`, Device audio pipeline):
+Mic stream shapes:
 
 - **Always-on wake stream** (`mic_start` without `lock_mic`) is ungated and
   AGC-free — every period is sent continuously so the wake scorer sees an
@@ -258,7 +258,7 @@ non-zero/non-nil fields are applied; zero/nil fields are ignored**, so pointer
 types (`*bool`, `*int`) exist where `false`/`0` must be distinguishable from
 "unset." Changes take effect immediately — no restart.
 
-The canonical field set (repo-root `CLAUDE.md`, "Device config push"):
+The canonical field set:
 
 ```
 vadThreshold, vadSpeechMs, vadSilenceMs,
@@ -324,7 +324,7 @@ satellite. Its responsibilities:
 Everything a backend can reasonably drive — intents, TTS, HA entities — stays
 in the controller / Home Assistant via the ESPHome Voice Assistant API. The
 device does not reimplement it, and does not depend on Amazon HALs or libraries
-to do its own job (see the direction note in the repo-root `CLAUDE.md`).
+to do its own job.
 
 ## Board profile — `crown` (Echo Show 8, 1st gen)
 

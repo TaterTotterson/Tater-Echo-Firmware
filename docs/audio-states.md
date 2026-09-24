@@ -108,8 +108,8 @@ capability (`em_player.py:70`):
 | announces `audio_mix` | `0x04`/`0x05` | **ducks** (`duck on`) | music continues quietly under the response | **[today]** |
 | does not | `0x02`/`0x03` | **pauses**, `resume_after` set | old behaviour, seek needed to resume | **[today]** |
 
-Degrading to the old path rather than to a wrong answer is the rule from
-`CLAUDE.md`: a device that cannot mix would never play `0x04` at all, which is
+Degrading to the old path rather than to a wrong answer is the rule: a device
+that cannot mix would never play `0x04` at all, which is
 silence, not degraded behaviour.
 
 ---

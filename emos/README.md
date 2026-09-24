@@ -515,8 +515,8 @@ Knowing which one you are looking at is most of the diagnosis:
 |---|---|---|
 | solid dark blue | the bootloader | powered, before Linux. We have not confirmed whether this is the preloader or LK |
 | full blue ring, one cyan segment orbiting | the **kernel**, via the `is31fl3236` driver's `boot_animation` | the kernel is up and **our init has not run**. It orbits until userspace claims the ring, so an orbit that never becomes a progress head means PID 1 never started, or died before its first instruction |
-| the ring fading out, one cyan LED left at position 1 | emOS init | the handover: we have just taken the ring |
-| blue arc growing behind a cyan head | emOS init | booting, and the head's position is how far |
+| the blue ring changing and fading out, one orange-red LED left at position 1 | emOS init | the handover: we have just taken the ring and entered Tater's palette |
+| dark orange-red arc growing behind a bright orange-red head | emOS init | booting, and the head's position is how far |
 | positions 12 and 1 lit and throbbing | emOS init | every stage done, waiting on the network — most of the boot |
 | both sides filling to the top, then white, then fading | emOS init | up, on the network, ring handed back |
 | red, stopped | emOS init | a stage failed, at the point it reached |
@@ -535,24 +535,27 @@ display by one LED including where the closing sweep meets.
 
 ### The handover
 
-Ours is a continuation of the kernel's orbit rather than a different display,
-and the palette is measured off the driver rather than eyeballed — `frame` is a
-read/write attribute, so writing 1 to `boot_animation` on a running device
-replays the orbit and each frame reads back exactly as displayed. Measured on
-EFF, 2026-09-05: ground `0000ff` on **all twelve** LEDs, head `00ffff` cyan,
-rising physical index, 109ms per step (min 100, max 120, n=13), 1.31s per
-revolution. Sampling at 100ms first suggested exactly one step per sample,
-which is aliasing rather than a measurement — the figures come from a second
-pass at full speed against `/proc/uptime`.
+Ours continues the kernel orbit's direction and motion, then smoothly changes
+from its fixed palette into Tater's orange-red. The kernel palette is measured
+off the driver rather than eyeballed — `frame` is a read/write attribute, so
+writing 1 to `boot_animation` on a running device replays the orbit and each
+frame reads back exactly as displayed. Measured on EFF, 2026-09-05: ground
+`0000ff` on **all twelve** LEDs, head `00ffff` cyan, rising physical index,
+109ms per step (min 100, max 120, n=13), 1.31s per revolution. Sampling at
+100ms first suggested exactly one step per sample, which is aliasing rather
+than a measurement — the figures come from a second pass at full speed against
+`/proc/uptime`.
 
 The animation runs until userspace stops it, so WHEN we stop it is ours to
 choose: `anim_claim` polls the position and takes the ring the instant the
 orbit's head reaches **position 12**. Our next act is lighting position 1 —
 the step the orbit would have taken anyway — so the motion carries straight on.
-The blue ring then fades out from under that head, which is what buys the
-contrast: against a lit ring the progress arc was two shades of blue from the
-ground and did not read at all, so the ring is cleared and the tail **repaints**
-the orbit's own blue as the head travels.
+The blue ring then changes to Tater orange-red as it fades out from under that
+head, which is what buys the contrast: against a lit ring the progress arc does
+not read at all, so the ring is cleared and the tail **repaints** the dark Tater
+ground colour as the head travels. The bootloader and kernel still own the
+earliest part of boot and remain blue; emOS takes over at its first userspace
+instruction and all visible progress after the handover is Tater-themed.
 
 ### The head
 
@@ -638,13 +641,14 @@ backwards, that nothing lights ahead of it, and that the ring is handed back
 dark. CI runs `--check` on every PR, so those invariants hold without anyone
 remembering to look. Only the clean boot is asserted: the failure display ends
 with the ring lit on purpose, so it fails the handed-back-dark check by design
-and needs its own invariants before it can be asserted too. Note the display is gamma-corrected: rendered linearly the dark blue
-trail reads as blank, which is a property of the ramp and not of the ring.
+and needs its own invariants before it can be asserted too. Note the display is
+gamma-corrected: rendered linearly the dark orange-red trail reads as blank,
+which is a property of the ramp and not of the ring.
 
-**Three constants in `init.c` are still guesses** and are gathered under "Four
-numbers nobody has measured yet": the two blues, and which way round the index
-runs. `ORBIT_PROBE` reads the kernel's own frames back out of `frame` — it is a
-read/write attribute, so the driver hands back exactly what it is displaying —
+The kernel palette constants in `init.c` preserve the measured handover source,
+not emOS's display palette. `ORBIT_PROBE` reads the kernel's own frames back out
+of `frame` — it is a read/write attribute, so the driver hands back exactly
+what it is displaying —
 and writes them to the boot trail, which gives the palette exactly rather than
 by eye, plus the orbit's direction and period. One boot answers all three. The
 bottom LED is settled: position 0 is the one just left of bottom centre, where

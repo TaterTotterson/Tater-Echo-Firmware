@@ -1,10 +1,9 @@
 name: Tater Echo Firmware Release
 
-# One annotated vX.Y.Z tag produces both artifacts for every supported target:
-#   * factory: post-amonet installer, emOS payload, and Tater userspace
-#   * ota:     the small A/B server update consumed by Tater over Wi-Fi
-# A factory archive never contains Amazon's kernel or device trees. The
-# installer builds the final image from the attached Echo's own boot partition.
+# One annotated vX.Y.Z tag builds every target independently, then publishes a
+# single compatibility manifest. Biscuit produces factory + OTA firmware;
+# Checkers initially produces a reversible screen/bring-up preview. No archive
+# contains an Amazon kernel, device tree, or proprietary Android image.
 
 on:
   push:
@@ -59,6 +58,7 @@ jobs:
           cd device
           go test -race \
             ./internal/actionbutton \
+            ./internal/show \
             ./internal/taternative \
             ./internal/wakeword/microwakeword \
             ./internal/aec \
@@ -82,6 +82,7 @@ jobs:
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
             echomuse-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
               -o build/server ./cmd/"
 
@@ -163,14 +164,121 @@ jobs:
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tater-echo-biscuit-${{ steps.version.outputs.version }}
           path: release/
           if-no-files-found: error
 
+  checkers:
+    name: Echo Show 5 (checkers) screen preview
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::version must look like v0.1.0"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            screen/*.gradle.kts
+            screen/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install pinned Android platform
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Run Checkers installer tests
+        run: python3 -m unittest factory.checkers.test_install tools.test_merge_release_manifests
+
+      - name: Build signed developer-preview APK
+        env:
+          TATER_SHOW_VERSION_NAME: ${{ steps.version.outputs.version }}
+          TATER_SHOW_VERSION_CODE: ${{ github.run_number }}
+        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Package and verify Checkers preview
+        run: |
+          python3 tools/package_echo_release.py \
+            --version '${{ steps.version.outputs.version }}' \
+            --target checkers --output release
+          mkdir /tmp/tater-checkers-factory-check
+          tar -xzf release/tater-echo-checkers-${{ steps.version.outputs.version }}-factory.tar.gz \
+            -C /tmp/tater-checkers-factory-check
+          /tmp/tater-checkers-factory-check/*/install.sh --verify-bundle
+          unzip -t release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk \
+            | grep -F "package: name='com.tatertotterson.show'"
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk \
+            | grep -F "versionName='${{ steps.version.outputs.version }}'"
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tater-echo-checkers-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish combined release
+    if: github.ref_type == 'tag'
+    needs: [biscuit, checkers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download Biscuit artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-biscuit-${{ steps.version.outputs.version }}
+          path: staging/biscuit
+
+      - name: Download Checkers artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-checkers-${{ steps.version.outputs.version }}
+          path: staging/checkers
+
+      - name: Verify and merge target manifests
+        run: |
+          python3 tools/merge_release_manifests.py \
+            --version '${{ steps.version.outputs.version }}' --output release \
+            staging/biscuit/firmware-manifest.json \
+            staging/checkers/firmware-manifest.json
+          (cd release && sha256sum -c SHA256SUMS)
+
       - name: Read annotated tag notes
-        if: github.ref_type == 'tag'
         shell: bash
         run: |
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
@@ -181,7 +289,6 @@ jobs:
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/release-notes.md
 
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
           name: Tater Echo Firmware ${{ steps.version.outputs.version }}
