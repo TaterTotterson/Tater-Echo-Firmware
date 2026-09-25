@@ -47,8 +47,7 @@ Machine-readable target data lives in [`targets/targets.json`](targets/targets.j
   playback, disk-backed streaming, rate-slew/rejoin correction, synchronized
   TTS overlays and audio scenes, local music ducking, volume,
   mute, timers, and announcements.
-- BLE presence advertisements for Tater's room-level presence system, plus
-  one-shot phone/watch enrollment with automatic bond cleanup.
+- BLE presence advertisements for Tater's room-level presence system.
 - First-boot Wi-Fi and Tater pairing portal—no browser USB wizard required.
 - SHA-256 verified A/B OTA with automatic userspace rollback after fast crashes.
 - A lightweight Checkers screen APK with live listening, thinking, reply/DOA,

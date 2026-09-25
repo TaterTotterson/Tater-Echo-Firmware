@@ -53,27 +53,6 @@ jobs:
           go-version-file: device/go.mod
           cache-dependency-path: device/go.sum
 
-      - name: Set up Java for BLE enrollment helper
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-          cache-dependency-path: |
-            screen/*.gradle.kts
-            screen/gradle/wrapper/gradle-wrapper.properties
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Build embedded BLE enrollment helper
-        run: |
-          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
-          ./screen/gradlew -p screen --no-daemon :bleenroll:lintDebug :bleenroll:assembleDebug
-          mkdir -p device/internal/bluetooth/assets
-          cp screen/bleenroll/build/outputs/apk/debug/bleenroll-debug.apk \
-            device/internal/bluetooth/assets/tater-ble-enrollment.apk
-
       - name: Run firmware regression tests
         run: |
           cd device
@@ -101,7 +80,7 @@ jobs:
             -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler -c "cd /sdk && go build -tags 'server bleenroll' \
+            echomuse-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
@@ -152,8 +131,7 @@ jobs:
         shell: bash
         run: |
           file device/build/server device/build/microwakeword-android/libtater_microwakeword.so \
-            emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox \
-            device/internal/bluetooth/assets/tater-ble-enrollment.apk
+            emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
           file device/build/server | grep -q '32-bit.*ARM'
           file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
           file emos/build/init32 | grep -q '32-bit LSB executable, ARM'

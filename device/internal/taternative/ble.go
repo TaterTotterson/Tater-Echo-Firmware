@@ -48,25 +48,3 @@ func (c *Client) ReportBLEAdvertisements(adverts []BLEAdvertisement) bool {
 		"adverts":          rows,
 	})
 }
-
-// ReportBLEEnrollmentStatus reports only public one-shot session state.
-func (c *Client) ReportBLEEnrollmentStatus(enrollmentID, status, detail string) bool {
-	payload := map[string]any{"enrollment_id": enrollmentID, "status": status}
-	if detail != "" {
-		payload["error"] = detail
-	}
-	return c.sendJSON("ble.enrollment.status", "", payload)
-}
-
-// ReportBLEEnrollmentResult sends the IRK once on the authenticated native
-// socket. The controller consumes it directly into its private registry.
-func (c *Client) ReportBLEEnrollmentResult(enrollmentID string, ok bool, irk, detail string) bool {
-	payload := map[string]any{"enrollment_id": enrollmentID, "ok": ok}
-	if ok && irk != "" {
-		payload["irk"] = irk
-	}
-	if detail != "" {
-		payload["error"] = detail
-	}
-	return c.sendJSON("ble.enrollment.result", "", payload)
-}

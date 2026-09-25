@@ -16,4 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "TaterShow"
 include(":app")
-include(":bleenroll")
