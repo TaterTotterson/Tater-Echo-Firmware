@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestAndroidShellEnvironmentSuppliesSystemPath(t *testing.T) {
+	got := androidShellEnvironment([]string{"HOME=/data", "PATH=/broken", "TERM=dumb"})
+	want := []string{"HOME=/data", "TERM=dumb", "PATH=" + androidSystemPath}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("environment = %#v, want %#v", got, want)
+	}
+}
+
 func TestScanBluetoothIdentityKeysUsesPeerPIDIRK(t *testing.T) {
 	input := `[Adapter]
 Address=00:11:22:33:44:55

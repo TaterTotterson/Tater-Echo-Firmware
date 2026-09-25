@@ -19,6 +19,7 @@ import (
 const (
 	enrollmentAPKPath   = "/data/local/tmp/tater-ble-enrollment.apk"
 	enrollmentComponent = "com.tatertotterson.bleenroll/.EnrollmentService"
+	androidSystemPath   = "/system/bin:/system/xbin:/vendor/bin:/sbin"
 )
 
 var (
@@ -129,8 +130,20 @@ func (e *Enrollment) setStatus(id, status, detail string) {
 }
 
 func shell(command string) (string, error) {
-	output, err := exec.Command("/system/bin/sh", "-c", command).CombinedOutput()
+	cmd := exec.Command("/system/bin/sh", "-c", command)
+	cmd.Env = androidShellEnvironment(os.Environ())
+	output, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(output)), err
+}
+
+func androidShellEnvironment(base []string) []string {
+	environment := make([]string, 0, len(base)+1)
+	for _, value := range base {
+		if !strings.HasPrefix(value, "PATH=") {
+			environment = append(environment, value)
+		}
+	}
+	return append(environment, "PATH="+androidSystemPath)
 }
 
 func (e *Enrollment) run(ctx context.Context, id, name string, timeout time.Duration) {
