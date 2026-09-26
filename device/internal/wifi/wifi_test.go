@@ -222,6 +222,71 @@ func TestComposeConfOpenNetwork(t *testing.T) {
 	}
 }
 
+func TestSSIDFromWifiDumpUsesOnlyLiveWifiInfo(t *testing.T) {
+	cases := []struct {
+		name string
+		dump string
+		want string
+	}{
+		{
+			name: "connected",
+			dump: "rec[0]: SSID: stale state: COMPLETED\n" +
+				"mWifiInfo SSID: PhooeyFi, BSSID: da:b3:70:34:9d:ef, MAC: 00:11\n",
+			want: "PhooeyFi",
+		},
+		{
+			name: "quoted",
+			dump: "  mWifiInfo SSID: \"Kitchen WiFi\", BSSID: 00:11:22:33:44:55\n",
+			want: "Kitchen WiFi",
+		},
+		{
+			name: "disconnected does not fall back to history",
+			dump: "rec[0]: SSID: PhooeyFi state: COMPLETED\n" +
+				"mWifiInfo SSID: , BSSID: 00:00:00:00:00:00\n",
+		},
+		{
+			name: "unknown",
+			dump: "mWifiInfo SSID: <unknown ssid>, BSSID: 00:00:00:00:00:00\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(ssidFromWifiDump(tc.dump)); got != tc.want {
+				t.Fatalf("ssidFromWifiDump() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseWifiDumpScanDeduplicatesAndPreservesSpaces(t *testing.T) {
+	dump := `
+    BSSID                             Frequency  RSSI    Age             SSID                                 Flags
+    da:b3:70:34:9d:ef                 5220       -51     0.432           PhooeyFi                             [WPA2-PSK-CCMP][ESS]
+    da:b3:70:34:9d:f0                 2412       -72     1.202           PhooeyFi                             [WPA2-PSK-CCMP][ESS]
+    00:11:22:33:44:55                 2437       -63     0.125           Kitchen Things                       [WPA2-PSK-CCMP][ESS]
+    00:11:22:33:44:66                 2462       -80     0.520                                                [ESS]
+`
+	got := parseWifiDumpScan(dump)
+	if len(got) != 2 {
+		t.Fatalf("parseWifiDumpScan() returned %d networks: %#v", len(got), got)
+	}
+	if got[0].SSID != "PhooeyFi" || got[0].Signal != -51 {
+		t.Fatalf("strongest/deduped network = %#v", got[0])
+	}
+	if got[1].SSID != "Kitchen Things" || got[1].SSIDHex != "4b69746368656e205468696e6773" {
+		t.Fatalf("SSID with spaces = %#v", got[1])
+	}
+}
+
+func TestLinkInfoFromWifiDumpUsesLiveRecord(t *testing.T) {
+	dump := `rec[0]: BSSID=00:00:00:00:00:00 Link speed: 1Mbps
+ mWifiInfo SSID: PhooeyFi, BSSID: da:b3:70:34:9d:ef, MAC: 40:a9:cf:18:d4:b7, Supplicant state: COMPLETED, RSSI: -51, Link speed: 433Mbps, Frequency: 5220MHz, Net ID: 0`
+	speed, freq, bssid := linkInfoFromWifiDump(dump)
+	if speed != 433 || freq != 5220 || bssid != "da:b3:70:34:9d:ef" {
+		t.Fatalf("linkInfoFromWifiDump() = %d, %d, %q", speed, freq, bssid)
+	}
+}
+
 // The conf we write on emOS has to be readable by whichever supplicant init
 // will start, and the two run as different users. Writing it root-only on a
 // FireOS 5 image left Amazon's supplicant unable to open it: it exited at

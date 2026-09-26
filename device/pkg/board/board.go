@@ -36,8 +36,18 @@ var Biscuit = &Board{
 	Tuning:       biscuitTuning,
 }
 
+// Checkers is the Echo Show 5 first generation (MT8163). Its product id was
+// read from /proc/idme/device_type_id on rooted Fire OS 6574.1. It does not
+// inherit Biscuit's thermal policy: the two products have different
+// enclosures, sensors and cooling tables, and Checkers stays on the kernel
+// defaults until its own policy has been measured.
+var Checkers = &Board{
+	ID:           "checkers",
+	DeviceTypeID: "A4ZP7ZC4PI6TO",
+}
+
 // Known is every board the firmware can identify.
-var Known = []*Board{Biscuit}
+var Known = []*Board{Biscuit, Checkers}
 
 // Detect returns the board beneath root, or nil when none matches. root is ""
 // on a device and a fixture directory in tests.

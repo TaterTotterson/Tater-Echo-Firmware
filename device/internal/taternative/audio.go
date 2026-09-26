@@ -311,7 +311,13 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 	c.voiceResponsePending = true
 	c.playMu.Unlock()
 
-	c.setState("speaking", map[string]any{"tts_kind": first.req.TTSKind})
+	playbackState := "speaking"
+	if toolVoiceRequest(first.req) {
+		playbackState = "tool_call"
+	}
+	c.setState(playbackState, map[string]any{
+		"tts_kind": first.req.TTSKind, "state_after": first.req.StateAfter,
+	})
 	ok := true
 	reason := ""
 	continueConversation := false
@@ -407,6 +413,12 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 		c.setState(stateAfter, payload)
 	}
 	return nil
+}
+
+func toolVoiceRequest(req PlayRequest) bool {
+	ttsKind := strings.ToLower(strings.TrimSpace(req.TTSKind))
+	stateAfter := strings.ToLower(strings.TrimSpace(req.StateAfter))
+	return ttsKind == "tool" || ttsKind == "tool_progress" || stateAfter == "tool_call"
 }
 
 func (c *Client) playVoiceSegment(generation uint64, req PlayRequest) error {

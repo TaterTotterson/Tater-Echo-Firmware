@@ -23,14 +23,20 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	if got["screen"] != true || got["touchscreen"] != true || got["screen_protocol"] != 1 {
 		t.Fatalf("checkers screen capabilities = %#v", got)
 	}
-	if got["ota"] != false {
-		t.Fatal("checkers advertised OTA before coordinated APK/native rollback exists")
+	if got["screen_weather"] != true {
+		t.Fatal("checkers did not advertise its Environment Core weather surface")
 	}
-	if got["ble_advertisements"] != false {
-		t.Fatal("checkers advertised Biscuit BLE scanning before hardware bring-up")
+	if got["screen_notifications"] != true {
+		t.Fatal("checkers did not advertise its temporary display notification surface")
 	}
-	if _, ok := got["ble_advertisements_version"]; ok {
-		t.Fatal("checkers advertised a BLE protocol version without BLE support")
+	if got["camera_snapshot"] != true || got["camera_snapshot_version"] != 1 {
+		t.Fatal("checkers did not advertise its on-demand Room Vision camera")
+	}
+	if got["ota"] != true {
+		t.Fatal("checkers did not advertise coordinated native+APK OTA")
+	}
+	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
+		t.Fatal("checkers did not advertise its Android BLE presence relay")
 	}
 	if got["microphone"] != true || got["speaker"] != true {
 		t.Fatal("checkers lost shared satellite capabilities")

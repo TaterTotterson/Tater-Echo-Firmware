@@ -92,3 +92,48 @@ func TestBoolValue(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckersMixerMapping(t *testing.T) {
+	f := &fake{values: map[string]string{"DAC1 Playback Volume": "173"}}
+	Use(f)
+	ConfigureTarget("checkers")
+	defer func() {
+		ConfigureTarget("biscuit")
+		Use(unavailable{})
+	}()
+
+	if err := SetPlaybackLevel(127, 127); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSpeakerEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if failed := SetADCMute(true); failed != 0 {
+		t.Fatalf("SetADCMute failed %d writes", failed)
+	}
+	want := [][]string{
+		{"DAC1 Playback Volume", "173"},
+		{"Ext_Speaker_Amp_Switch", "Off"},
+		{"ADC_A Left Mute", "1"},
+		{"ADC_A Right Mute", "1"},
+	}
+	if !reflect.DeepEqual(f.sets, want) {
+		t.Fatalf("checkers writes = %v, want %v", f.sets, want)
+	}
+	if got, err := GetPlaybackLevel(127); err != nil || got != 127 {
+		t.Fatalf("GetPlaybackLevel = %d, %v; want 127", got, err)
+	}
+}
+
+func TestBiscuitSpeakerAmpIsActiveHigh(t *testing.T) {
+	f := &fake{}
+	Use(f)
+	ConfigureTarget("biscuit")
+	defer Use(unavailable{})
+	if err := SetSpeakerEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.sets, [][]string{{"Ext_Speaker_Amp_Switch", "On"}}) {
+		t.Fatalf("biscuit amp writes = %v", f.sets)
+	}
+}

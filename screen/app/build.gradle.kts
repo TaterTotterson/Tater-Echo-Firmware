@@ -2,9 +2,18 @@ plugins {
     id("com.android.application")
 }
 
+val taterShowKeystorePath = System.getenv("TATER_SHOW_KEYSTORE_PATH")?.trim().orEmpty()
+val taterShowKeyAlias = System.getenv("TATER_SHOW_KEY_ALIAS")?.trim().orEmpty()
+val taterShowKeyPassword = System.getenv("TATER_SHOW_KEY_PASSWORD").orEmpty()
+val taterShowStorePassword = System.getenv("TATER_SHOW_STORE_PASSWORD").orEmpty()
+
 android {
     namespace = "com.tatertotterson.show"
     compileSdk = 37
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     defaultConfig {
         applicationId = "com.tatertotterson.show"
@@ -22,10 +31,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (taterShowKeystorePath.isNotEmpty()) {
+            create("taterRelease") {
+                storeFile = file(taterShowKeystorePath)
+                storePassword = taterShowStorePassword
+                keyAlias = taterShowKeyAlias
+                keyPassword = taterShowKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.findByName("taterRelease")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

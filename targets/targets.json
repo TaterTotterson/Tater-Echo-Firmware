@@ -17,12 +17,12 @@
       "cpu": "armv7a",
       "unlock": "amonet-checkers-v2.0.1+",
       "preview_base_os": ["fireos-6", "lineage-18.1"],
-      "native_base_os": "lineage-18.1",
+      "native_base_os": "fireos-6",
       "factory_install": true,
-      "ota": false,
+      "ota": true,
       "factory_installer": "factory/checkers/install.py",
       "screen_apk": true,
-      "status": "screen-preview"
+      "status": "hardware-tested"
     }
   }
 }

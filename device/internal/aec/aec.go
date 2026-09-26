@@ -86,6 +86,12 @@ type Canceller struct {
 	enabled bool
 	delayMs int
 	tailMs  int // configured (aecTailMs): the software tap's filter length
+	// pathCount is the number of distinct physical acoustic paths this board
+	// can select. Biscuit has seven independently selected microphones;
+	// Checkers currently exposes one stable mono mix. Keeping this runtime
+	// count avoids allocating six filters that Checkers can never select.
+	pathCount   int
+	defaultPath int
 
 	// st aliases states[activePath] for the processing hot path and for the
 	// existing state import/export contract.
@@ -303,7 +309,32 @@ func (c *Canceller) RefSource() string {
 
 // New returns a disabled Canceller. Call SetParams (config push) to arm it.
 func New() *Canceller {
-	c := &Canceller{activePath: defaultPathID}
+	return newWithPaths(aecPaths, defaultPathID)
+}
+
+// NewForTarget returns a canceller sized for the acoustic paths exposed by
+// target. Checkers' four-channel ALSA endpoint has two live channels that are
+// combined into one stable mono stream, so it needs only one learned path.
+// Biscuit and unknown future targets retain the established seven-path bank.
+func NewForTarget(target string) *Canceller {
+	if target == "checkers" {
+		return newWithPaths(1, 0)
+	}
+	return New()
+}
+
+func newWithPaths(pathCount, defaultPath int) *Canceller {
+	if pathCount < 1 || pathCount > aecPaths {
+		pathCount = aecPaths
+	}
+	if defaultPath < 0 || defaultPath >= pathCount {
+		defaultPath = pathCount - 1
+	}
+	c := &Canceller{
+		activePath:  defaultPath,
+		pathCount:   pathCount,
+		defaultPath: defaultPath,
+	}
 	for i := range c.residualGain {
 		c.residualGain[i] = 1
 	}
@@ -314,8 +345,8 @@ func New() *Canceller {
 // produced the current mono buffer. States are retained across turns; only one
 // is processed at a time. Out-of-range ids fall back to the centre mic.
 func (c *Canceller) SelectPath(id int) {
-	if id < 0 || id >= aecPaths {
-		id = defaultPathID
+	if id < 0 || id >= c.pathCount {
+		id = c.defaultPath
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -393,7 +424,7 @@ func (c *Canceller) buildLocked() {
 	c.stTailMs = c.effectiveTailLocked()
 	tailSamples := C.int(c.stTailMs * sampleRate / 1000)
 	rate := C.spx_int32_t(sampleRate)
-	for path := range c.states {
+	for path := 0; path < c.pathCount; path++ {
 		c.states[path] = C.speex_echo_state_init(C.int(FrameSize), tailSamples)
 		C.speex_echo_ctl(c.states[path], C.SPEEX_ECHO_SET_SAMPLING_RATE, unsafe.Pointer(&rate))
 		c.residualGain[path] = 1
@@ -404,7 +435,7 @@ func (c *Canceller) buildLocked() {
 	c.micBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
 	c.refBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
 	c.outBuf = (*C.spx_int16_t)(C.malloc(FrameSize * 2))
-	log.Printf("[aec] enabled: frame=%d tail=%dms delay=%dms paths=%d", FrameSize, c.stTailMs, c.delayMs, aecPaths)
+	log.Printf("[aec] enabled: frame=%d tail=%dms delay=%dms paths=%d", FrameSize, c.stTailMs, c.delayMs, c.pathCount)
 }
 
 // seedRingLocked seeds the ring with the bulk delay as silence: the mic

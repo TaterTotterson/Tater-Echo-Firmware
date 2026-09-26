@@ -27,6 +27,13 @@
 #   - Refuses to run beside EchoMuse's own server, which holds the PCMs too.
 set -eu
 
+# Mixer dumps and kernel nodes are byte streams. In a UTF-8 macOS locale,
+# tr(1) otherwise aborts on arbitrary device bytes with "Illegal byte
+# sequence" and leaves an incomplete probe. Keep the host-side parser
+# byte-oriented on every supported installer host.
+LC_ALL=C
+export LC_ALL
+
 SERIAL=""; YES=0; ROUTE=1; BUTTONS=1; MICS=0; CAPTURE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -232,8 +239,21 @@ if [ $MICS = 1 ]; then
   # the format the vendor uses is the one the hardware accepts.
   cap=$(dev "$PCMS" | grep -E 'c/sub0/status RUNNING' | cut -d' ' -f1 | sed -n 1p)
   if [ -z "$cap" ]; then
-    echo "no capture PCM is running — nothing holds the mic to learn its format from" >> "$P"
-    say "Mics: no running capture stream to copy the format from; skipping."
+    # Checkers normally leaves its direct ADC endpoint closed while idle, so
+    # there is no stock owner whose hw_params can be copied. Its constraints
+    # are fixed and were read from tinypcminfo on Fire OS 6574.1. Keep this
+    # positive and exact: an unknown board with no running capture still skips.
+    if [ "$model" = checkers ] && dev "test -e /proc/asound/card0/pcm22c/sub0/status; echo \$?" | grep -q '^0$'; then
+      cap=/proc/asound/card0/pcm22c/sub0/status
+      card=0; pcmdev=22; ch=4; rate=16000; fmt=s24_3le
+      owner=""; ownername="(endpoint was free)"; svc=""
+      { echo "capture: $cap (card $card device $pcmdev), free at probe start";
+        echo "access: RW_INTERLEAVED"; echo "format: S24_3LE";
+        echo "channels: 4"; echo "rate: 16000"; } >> "$P"
+    else
+      echo "no capture PCM is running — nothing holds the mic to learn its format from" >> "$P"
+      say "Mics: no running capture stream to copy the format from; skipping."
+    fi
   else
     hw=$(dev "cat ${cap%status}hw_params")
     owner=$(dev "cat $cap" | sed -n 's/^owner_pid *: *//p')
@@ -276,14 +296,21 @@ if [ $MICS = 1 ]; then
       say "Mics: this device records $fmt, which stock tinycap can't. Re-run with"
       say "      --capture <pcm_capture binary> (see porting/README.md)."
     else
-      restore() { dev "start $svc; rm -f /data/local/tmp/em_mic.raw /data/local/tmp/pcm_capture" >/dev/null; }
+      restore() {
+        [ -n "$svc" ] && dev "start $svc" >/dev/null
+        dev "rm -f /data/local/tmp/em_mic.raw /data/local/tmp/pcm_capture" >/dev/null
+      }
       trap 'restore' EXIT INT TERM
       [ $tool = pcm_capture ] && $ADB push "$CAPTURE" /data/local/tmp/pcm_capture >/dev/null && dev "chmod 755 /data/local/tmp/pcm_capture" >/dev/null
       SECS=10
       say ""
       say "Mics: recording ${SECS}s. Stay QUIET until told to clap."
-      say "      (stopping '$svc', which holds the mic, until the recording is done)"
-      dev "stop $svc" >/dev/null; sleep 1
+      if [ -n "$svc" ]; then
+        say "      (stopping '$svc', which holds the mic, until the recording is done)"
+        dev "stop $svc" >/dev/null; sleep 1
+      else
+        say "      (the direct capture endpoint is already free; no Android service is stopped)"
+      fi
       if [ $tool = pcm_capture ]; then
         $ADB exec-out "${PFX}/data/local/tmp/pcm_capture -D $card -d $pcmdev -c $ch -r $rate -f $fmt -t $SECS -o /data/local/tmp/em_mic.raw${SFX}" > "$OUT/capture.log" 2>&1 &
       else
@@ -296,7 +323,11 @@ if [ $MICS = 1 ]; then
       wait $cp || true
       $ADB pull /data/local/tmp/em_mic.raw "$OUT/mics.raw" >/dev/null 2>&1 || true
       restore; trap - EXIT INT TERM
-      say "Mics: done, '$svc' restarted ($(dev "getprop init.svc.$svc"))."
+      if [ -n "$svc" ]; then
+        say "Mics: done, '$svc' restarted ($(dev "getprop init.svc.$svc"))."
+      else
+        say "Mics: done; no Android service needed restarting."
+      fi
       cat "$OUT/capture.log" >> "$P"
       raw="$OUT/mics.raw"
       # tinycap writes a WAV; skip its 44-byte header for the analysis.

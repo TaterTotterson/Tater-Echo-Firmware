@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"sync"
@@ -237,7 +238,7 @@ type DataClient struct {
 	conn   *websocket.Conn
 	connMu sync.Mutex
 
-	beam              *beamformer.Beamformer
+	beam              beamformer.FrontEnd
 	proc              *processor.Processor
 	aec               *aec.Canceller
 	onDirectionChange func(angle float64, activity bool, speech bool)
@@ -305,12 +306,19 @@ type DataClient struct {
 // runs its near-end side on the mono mic stream. Disabled cancellers pass
 // audio through untouched.
 func NewDataClient(deviceID string, microphone mic.Subscribable, spk speaker.Speaker, canceller *aec.Canceller) *DataClient {
+	return NewDataClientForTarget(deviceID, microphone, spk, canceller, "biscuit")
+}
+
+// NewDataClientForTarget wires the shared pipeline to the board's raw-capture
+// front end. The default constructor remains Biscuit for tests and existing
+// callers; release startup always supplies its compiled firmware target.
+func NewDataClientForTarget(deviceID string, microphone mic.Subscribable, spk speaker.Speaker, canceller *aec.Canceller, target string) *DataClient {
 	d := &DataClient{
 		deviceID:   deviceID,
 		mic:        microphone,
 		spk:        spk,
 		readyCh:    make(chan string, 1),
-		beam:       beamformer.New(),
+		beam:       beamformer.NewForTarget(target),
 		proc:       processor.New(),
 		aec:        canceller,
 		listenGate: listen.New(0, 0, 0),
@@ -1293,11 +1301,19 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// characterised — that job is done (2026-07-07 fleet
 			// analysis) and /tmp/server.log is RAM-backed and unrotated.
 			if periodCount%3750 == 0 || (clipped != lastClipped && periodCount%100 == 0) {
+				pairDiag := ""
+				if beamDiag.HealthyMicChannels > 0 {
+					pairDiag = fmt.Sprintf(
+						" pair_cal=%v pair_delay=%.2f pair_level=%.1fdB pair_coh=%.2f pair_ns=%.2f pair_mics=%d",
+						beamDiag.Calibrated, beamDiag.DelaySamples, beamDiag.LevelBalanceDB,
+						beamDiag.Coherence, beamDiag.NoiseGain, beamDiag.HealthyMicChannels,
+					)
+				}
 				log.Printf("[data] VAD diag: rms=%.5f threshold=%.5f gain=%ddB clipped=%d by_ch=%v "+
-					"gate=%v active=%v agc=%v mic=ch%d doa_conf=%.2f spatial=%.2f playback=%v",
+					"gate=%v active=%v agc=%v mic=ch%d doa_conf=%.2f spatial=%.2f playback=%v%s",
 					rms, threshold*gainLin, gainDb, clipped, d.beam.ClippedByChannel(),
 					speech, active, agcEnabled, beamDiag.OutputChannel, beamDiag.Confidence,
-					beamDiag.Spatial, beamDiag.PlaybackActive)
+					beamDiag.Spatial, beamDiag.PlaybackActive, pairDiag)
 				lastClipped = clipped
 			}
 			periodCount++

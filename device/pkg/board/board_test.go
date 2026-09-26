@@ -28,10 +28,15 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 	cases := map[string]*Board{
 		"A3S5BH2HU6VAYF\x00": Biscuit, // as the kernel returns it
 		"A3S5BH2HU6VAYF\n":   Biscuit,
+		"A4ZP7ZC4PI6TO\x00":  Checkers,
+		"A4ZP7ZC4PI6TO\n":    Checkers,
 		"\x00A3S5BH2HU6VAYF": nil,
 		"A3S5BH2HU6VAYF":     Biscuit,
+		"A4ZP7ZC4PI6TO":      Checkers,
 		"A3S5BH2HU6VAYFX":    nil,
+		"A4ZP7ZC4PI6TOX":     nil,
 		"a3s5bh2hu6vayf":     nil,
+		"a4zp7zc4pi6to":      nil,
 		"":                   nil,
 		"\n":                 nil,
 	}
@@ -40,6 +45,12 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 		if got := Detect(root); got != want {
 			t.Errorf("Detect(%q) = %v, want %v", id, got, want)
 		}
+	}
+}
+
+func TestCheckersHasNoBorrowedThermalPolicy(t *testing.T) {
+	if Checkers.Tuning != nil {
+		t.Fatal("checkers must not inherit biscuit thermal tuning")
 	}
 }
 

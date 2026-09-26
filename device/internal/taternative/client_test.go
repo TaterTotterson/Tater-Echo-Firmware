@@ -336,6 +336,125 @@ func TestLateRunEndDoesNotClobberContinuedListening(t *testing.T) {
 	}
 }
 
+func TestToolCallStateFlattensNestedVoiceEventMetadata(t *testing.T) {
+	type observedState struct {
+		state   string
+		payload map[string]any
+	}
+	states := make(chan observedState, 4)
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		State: func(state string, payload map[string]any) {
+			states <- observedState{state: state, payload: payload}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{
+		"event": "TOOL_CALL_START",
+		"data": map[string]any{
+			"tool": "room_vision",
+			"text": "I’m taking a quick look now.",
+		},
+	}})
+	got := <-states
+	if got.state != "tool_call" {
+		t.Fatalf("state = %q, want tool_call", got.state)
+	}
+	if tool := stringValue(got.payload["tool"]); tool != "room_vision" {
+		t.Fatalf("tool = %q, want room_vision", tool)
+	}
+	if text := stringValue(got.payload["text"]); text != "I’m taking a quick look now." {
+		t.Fatalf("text = %q, want progress message", text)
+	}
+	if event := stringValue(got.payload["event"]); event != "TOOL_CALL_START" {
+		t.Fatalf("event = %q, want TOOL_CALL_START", event)
+	}
+}
+
+func TestToolProgressTTSEventsKeepToolCallVisualState(t *testing.T) {
+	states := make(chan string, 4)
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		State: func(state string, _ map[string]any) { states <- state },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{
+		"event": "TTS_START",
+		"data":  map[string]any{"tts_kind": "tool"},
+	}})
+	if got := <-states; got != "tool_call" {
+		t.Fatalf("tool TTS state = %q, want tool_call", got)
+	}
+	c.handle(Envelope{Type: "voice.event", Payload: map[string]any{
+		"event": "TTS_START",
+		"data":  map[string]any{"tts_kind": "response"},
+	}})
+	if got := <-states; got != "speaking" {
+		t.Fatalf("response TTS state = %q, want speaking", got)
+	}
+}
+
+func TestToolProgressPlaybackKeepsToolCallVisualState(t *testing.T) {
+	playedState := make(chan string, 1)
+	var c *Client
+	var err error
+	c, err = New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		PlayVoice: func(_ context.Context, _ PlayRequest) error {
+			playedState <- c.State()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+
+	c.handle(Envelope{Type: "play.url", Payload: map[string]any{
+		"url": "https://audio.test/tool-progress.wav", "tts_kind": "tool_progress",
+		"state_after": "tool_call",
+	}})
+	select {
+	case got := <-playedState:
+		if got != "tool_call" {
+			t.Fatalf("state during playback = %q, want tool_call", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("tool progress did not play")
+	}
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case frame := <-c.out:
+			if frame.kind != websocket.TextMessage {
+				continue
+			}
+			var message Envelope
+			if err := json.Unmarshal(frame.data, &message); err != nil {
+				t.Fatal(err)
+			}
+			if message.Type == "playback.finished" {
+				goto playbackFinished
+			}
+		case <-deadline.C:
+			t.Fatal("tool progress playback did not finish")
+		}
+	}
+
+playbackFinished:
+	if got := c.State(); got != "tool_call" {
+		t.Fatalf("state after playback = %q, want tool_call", got)
+	}
+}
+
 func TestHeartbeatQueuesWebSocketPingAndStatus(t *testing.T) {
 	c, err := New(Config{
 		URL: "ws://tater.test", DeviceID: "echo-test", Heartbeat: time.Millisecond,

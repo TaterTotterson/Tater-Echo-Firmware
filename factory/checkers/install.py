@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Install the Tater Show developer preview on an unlocked Checkers.
+"""Install Tater firmware on an unlocked Echo Show 5 Checkers.
 
-This first-stage installer intentionally writes no partitions and installs no
-native audio service. It verifies Checkers + root on stock Fire OS 6 or the
-later LineageOS test environment, installs the screen APK, and optionally
-makes it the HOME activity. The hardware profile should be captured on stock
-Fire OS before its original ALSA and microphone configuration is replaced.
+The full native install is currently for rooted stock Fire OS: it verifies
+Checkers + root, installs the screen APK and native userspace under /data, and
+adds a reversible Magisk boot supervisor. LineageOS 18.1 is accepted only for
+the non-persistent screen preview until its native init integration lands. The
+installer never writes boot, recovery, system, or vendor.
 """
 
 from __future__ import annotations
@@ -23,6 +23,15 @@ MANIFEST = ROOT / "bundle-manifest.json"
 PAYLOAD = ROOT / "payload"
 PACKAGE = "com.tatertotterson.show"
 ACTIVITY = f"{PACKAGE}/.MainActivity"
+REMOTE_STAGE = "/data/local/tmp/tater-checkers-install"
+CERTIFIED_FIREOS_NAME = "Fire OS 6574.1 (NS65741/8146)"
+CERTIFIED_FIREOS_DISPLAY = "NS65741"
+CERTIFIED_FIREOS_INCREMENTAL = "0013222531716"
+CERTIFIED_FIREOS_URL = (
+    "https://ftvdb.com/echo/firmware/com.amazon.checkers.android.os/"
+    "d17ab1fb8fa374cc3f9b1d813d4094dc-13222531716-fire-os-6574-1-"
+    "ns65741-8146-2026-09-15/"
+)
 
 
 class InstallError(RuntimeError):
@@ -149,6 +158,15 @@ def require_checkers(adb: Adb) -> str:
         raise InstallError(f"connected device reports {product!r}, not checkers")
     release = adb.shell("getprop ro.build.version.release").strip()
     if release.startswith("7.1"):
+        display = adb.shell("getprop ro.build.display.id").strip()
+        incremental = adb.shell("getprop ro.build.version.incremental").strip()
+        if (display, incremental) != (
+                CERTIFIED_FIREOS_DISPLAY, CERTIFIED_FIREOS_INCREMENTAL):
+            reported = f"{display or 'unknown'}/{incremental or 'unknown'}"
+            raise InstallError(
+                f"Checkers reports untested Fire OS build {reported}; this release requires "
+                f"{CERTIFIED_FIREOS_NAME}. Restore the verified image from {CERTIFIED_FIREOS_URL} "
+                "before installing Tater")
         userspace = "stock Fire OS 6"
     elif release == "11":
         userspace = "LineageOS 18.1"
@@ -181,10 +199,18 @@ def confirm_unlock(assume_yes: bool) -> None:
         raise InstallError("installation cancelled")
 
 
+def require_supported_install_mode(userspace: str, no_home: bool, uninstalling: bool) -> None:
+    if userspace == "LineageOS 18.1" and not no_home and not uninstalling:
+        raise InstallError(
+            "the persistent Checkers service is still Fire-OS/Magisk-specific; "
+            "on LineageOS use --no-home for the screen preview until the native "
+            "Lineage init service and rollback path are complete")
+
+
 def install_apk(adb: Adb, set_home: bool, demo: bool = False) -> None:
     apk = PAYLOAD / "tater-show.apk"
     try:
-        adb.run("install", "--no-streaming", "-r", str(apk))
+        adb.run("install", "--no-streaming", "-r", "-g", str(apk))
     except InstallError as exc:
         if "UPDATE_INCOMPATIBLE" in str(exc):
             raise InstallError(
@@ -194,6 +220,12 @@ def install_apk(adb: Adb, set_home: bool, demo: bool = False) -> None:
     package = adb.shell(f"pm path {PACKAGE}")
     if not package.startswith("package:"):
         raise InstallError("Android did not report the installed Tater Show package")
+    # Android 7 gates BLE scan results on both the runtime location grant and
+    # Location being enabled, even for a fixed appliance that never requests
+    # coordinates. The Show APK only consumes raw BLE advertisements.
+    adb.shell(f"pm grant {PACKAGE} android.permission.ACCESS_FINE_LOCATION", check=False)
+    adb.shell(f"pm grant {PACKAGE} android.permission.CAMERA", check=False)
+    adb.shell("settings put secure location_mode 3", check=False)
     if set_home:
         result = adb.shell(f"cmd package set-home-activity --user 0 {ACTIVITY}", check=False)
         if "error" in result.lower() or "failed" in result.lower():
@@ -205,9 +237,103 @@ def install_apk(adb: Adb, set_home: bool, demo: bool = False) -> None:
         raise InstallError(f"Android installed Tater Show but could not launch it: {result}")
 
 
-def uninstall(adb: Adb) -> None:
+def install_native(adb: Adb, root: RootShell) -> None:
+    mapping = {
+        "server": "/data/local/bin/server_a",
+        "libtater_microwakeword.so": "/data/local/share/tater/microwakeword/libtater_microwakeword.so",
+        "hey_tater.tflite": "/data/local/share/tater/microwakeword/hey_tater.tflite",
+        "hey_tater.json": "/data/local/share/tater/microwakeword/hey_tater.json",
+        "wpa_supplicant-ap": "/data/local/lib/tater/wpa_supplicant-ap",
+        "module.prop": "/data/adb/modules/tater_checkers/module.prop",
+        "sepolicy.rule": "/data/adb/modules/tater_checkers/sepolicy.rule",
+        "post-fs-data.sh": "/data/adb/modules/tater_checkers/post-fs-data.sh",
+        "service.sh": "/data/adb/modules/tater_checkers/service.sh",
+        "privacy.sh": "/data/adb/modules/tater_checkers/privacy.sh",
+        "privacy-packages.txt": "/data/adb/modules/tater_checkers/privacy-packages.txt",
+        "privacy-components.txt": "/data/adb/modules/tater_checkers/privacy-components.txt",
+        "speech-interaction-manager.replace": (
+            "/data/adb/modules/tater_checkers/system/priv-app/"
+            "SpeechInteractionManager/.replace"),
+        "bishop.replace": (
+            "/data/adb/modules/tater_checkers/system/priv-app/"
+            "com.amazon.bishop/.replace"),
+        "uninstall.sh": "/data/adb/modules/tater_checkers/uninstall.sh",
+    }
+    # A repair install can run while the old setup AP executable and daemon
+    # are active. Stop the existing supervisor first so it cannot race the new
+    # generation or immediately restart the old server during replacement.
+    root.run(
+        "old_supervisor=$(cat /data/local/etc/tater/checkers-service.pid 2>/dev/null); "
+        "case $old_supervisor in *[!0-9]*|\"\") ;; *) "
+        "[ $old_supervisor -gt 2 ] && kill $old_supervisor 2>/dev/null || true;; esac; "
+        "for old_server in $(pidof server 2>/dev/null); do "
+        "old_parent=$(sed -n \"s/^PPid:[[:space:]]*//p\" /proc/$old_server/status 2>/dev/null); "
+        "case $old_parent in *[!0-9]*|\"\") ;; *) "
+        "[ $old_parent -gt 2 ] && kill $old_parent 2>/dev/null || true;; esac; "
+        "kill $old_server 2>/dev/null || true; done; sleep 2")
+    root.run(
+        f"rm -rf {REMOTE_STAGE}; mkdir -p {REMOTE_STAGE} /data/local/bin "
+        "/data/local/lib/tater /data/local/share/tater/microwakeword "
+        "/data/local/etc/tater /data/local/etc/tater/ota /data/adb/modules/tater_checkers "
+        "/data/adb/modules/tater_checkers/system/priv-app/SpeechInteractionManager "
+        "/data/adb/modules/tater_checkers/system/priv-app/com.amazon.bishop; "
+        f"chown 2000:2000 {REMOTE_STAGE}; chmod 700 {REMOTE_STAGE}; "
+        "rm -f /data/local/etc/tater/ota/pending.env /data/local/etc/tater/ota/healthy "
+        "/data/local/etc/tater/ota/rollback.apk /data/local/etc/tater/ota/screen.apk")
+    for name in mapping:
+        source = PAYLOAD / name
+        if not source.is_file():
+            raise InstallError(f"the bundled native payload is missing: {name}")
+        adb.run("push", str(source), f"{REMOTE_STAGE}/{name}")
+    for name, destination in mapping.items():
+        # Rename a fully copied sibling over the old inode. Android otherwise
+        # returns ETXTBSY when repairing a unit whose AP supplicant is active.
+        root.run(
+            f"rm -f {destination}.new; cp {REMOTE_STAGE}/{name} {destination}.new; "
+            f"mv -f {destination}.new {destination}")
+    root.run(
+        "rm -f /data/local/bin/server_b.new; "
+        "cp /data/local/bin/server_a /data/local/bin/server_b.new; "
+        "chmod 755 /data/local/bin/server_b.new; "
+        "mv -f /data/local/bin/server_b.new /data/local/bin/server_b; "
+        "chmod 755 /data/local/bin/server_a /data/local/bin/server_b "
+        "/data/local/lib/tater/wpa_supplicant-ap "
+        "/data/local/share/tater/microwakeword/libtater_microwakeword.so "
+        "/data/adb/modules/tater_checkers/post-fs-data.sh "
+        "/data/adb/modules/tater_checkers/service.sh "
+        "/data/adb/modules/tater_checkers/privacy.sh "
+        "/data/adb/modules/tater_checkers/uninstall.sh; "
+        "chmod 644 /data/local/share/tater/microwakeword/hey_tater.tflite "
+        "/data/local/share/tater/microwakeword/hey_tater.json "
+        "/data/adb/modules/tater_checkers/module.prop "
+        "/data/adb/modules/tater_checkers/privacy-packages.txt "
+        "/data/adb/modules/tater_checkers/privacy-components.txt "
+        "/data/adb/modules/tater_checkers/system/priv-app/SpeechInteractionManager/.replace "
+        "/data/adb/modules/tater_checkers/system/priv-app/com.amazon.bishop/.replace "
+        "/data/adb/modules/tater_checkers/sepolicy.rule; "
+        "ln -sf server_a /data/local/bin/server; "
+        "test -e /data/local/etc/tater/setup_enabled || : > /data/local/etc/tater/setup_enabled; "
+        f"rm -rf {REMOTE_STAGE}; sync")
+    # PackageManager is available during installation. Build and validate the
+    # UID cache synchronously so Magisk can restore the firewall in its early
+    # post-fs-data phase before Android services make public connections.
+    root.run("/system/bin/sh /data/adb/modules/tater_checkers/privacy.sh firewall")
+    # Start this boot immediately. Magisk runs the same script automatically
+    # on every later boot.
+    root.run(
+        "nohup /system/bin/sh /data/adb/modules/tater_checkers/service.sh "
+        ">/data/local/tmp/tater-checkers-service-launch.log 2>&1 &")
+
+
+def uninstall(adb: Adb, root: RootShell) -> None:
+    root.run(
+        "pkill -x server >/dev/null 2>&1 || true; "
+        "if [ -x /data/adb/modules/tater_checkers/uninstall.sh ]; then "
+        "/system/bin/sh /data/adb/modules/tater_checkers/uninstall.sh; fi; "
+        "pm enable --user 0 com.amazon.ds2.oobe.efd >/dev/null 2>&1 || true; "
+        "rm -rf /data/adb/modules/tater_checkers; sync")
     adb.run("uninstall", PACKAGE, check=False)
-    print("Tater Show removed. Android will ask for a HOME app the next time Home is opened.")
+    print("Tater Show and its boot supervisor were removed; Amazon OOBE was re-enabled.")
 
 
 def collect_profile(adb: Adb) -> None:
@@ -224,10 +350,12 @@ def collect_profile(adb: Adb) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Install the Tater Show preview on Echo Show 5 checkers")
+    parser = argparse.ArgumentParser(description="Install Tater firmware on Echo Show 5 checkers")
     parser.add_argument("--adb", default="adb", help="path to adb")
     parser.add_argument("--serial", help="ADB serial when more than one device is connected")
-    parser.add_argument("--no-home", action="store_true", help="launch once without making Tater Show the HOME app")
+    parser.add_argument(
+        "--no-home", action="store_true",
+        help="install only the screen preview without native boot services (required on LineageOS)")
     parser.add_argument("--profile", action="store_true", help="also collect the read-only Checkers hardware profile")
     parser.add_argument("--demo", action="store_true", help="cycle all screen states without the native audio service")
     parser.add_argument("--uninstall", action="store_true", help="remove the preview app")
@@ -246,14 +374,20 @@ def main() -> int:
             return 0
         adb = select_adb(args.adb, args.serial)
         userspace = require_checkers(adb)
+        root = resolve_root(adb)
         print(f"Verified Checkers running {userspace} with root and an amonet 2.x layout.")
+        require_supported_install_mode(userspace, args.no_home, args.uninstall)
         if args.uninstall:
-            uninstall(adb)
+            uninstall(adb, root)
             return 0
         confirm_unlock(args.yes)
         install_apk(adb, not args.no_home, args.demo)
-        print("Tater Show is installed and running.")
-        print("The screen will report Native service offline until the measured Checkers audio build is installed.")
+        if not args.no_home and not args.demo:
+            install_native(adb, root)
+            print("Tater native firmware and persistent boot supervision are installed.")
+            print("Connect to the Tater-Setup hotspot shown on the Echo Show to finish setup.")
+        else:
+            print("Tater Show screen preview is installed and running without native boot services.")
         if args.profile:
             collect_profile(adb)
         else:

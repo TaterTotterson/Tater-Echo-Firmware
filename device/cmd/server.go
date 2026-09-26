@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -26,6 +28,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/als"
 	internalbuttons "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/buttons"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/jack"
+	hardwareled "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/led"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mic"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/speaker"
@@ -53,6 +56,7 @@ start_server.sh, which restarts it; do not run a second copy by hand).
   version         print the firmware version and build time
   platform-init   apply the board's platform settings, for emOS's boot
   setup-portal    serve the emOS first-boot captive portal on port 80
+  setup-mode      run the complete Checkers setup hotspot, screen and portal
   help            this text
 `
 
@@ -68,6 +72,11 @@ func main() {
 		case "setup-portal":
 			if err := taternative.RunSetupPortal(taternative.SetupPortalOptions{}); err != nil {
 				log.Fatalf("Tater setup portal: %v", err)
+			}
+			os.Exit(0)
+		case "setup-mode":
+			if err := runCheckersSetupMode(); err != nil {
+				log.Fatalf("Tater Checkers setup mode: %v", err)
 			}
 			os.Exit(0)
 		case "version", "--version", "-v":
@@ -87,6 +96,8 @@ func main() {
 	}
 	log.SetOutput(os.Stdout)
 	log.Printf("Tater Echo Firmware %s starting", client.Version)
+	mixer.ConfigureTarget(client.FirmwareTarget)
+	hardwareled.ConfigureTarget(client.FirmwareTarget)
 
 	deviceID := client.GetSerialNo()
 	log.Printf("Device ID: %s", deviceID)
@@ -110,12 +121,12 @@ func main() {
 	// deadline makes it worth doing.
 	applyCoreFloor()
 
-	buttonController, err := internalbuttons.NewButtonController()
+	buttonController, err := internalbuttons.NewButtonControllerForTarget(client.FirmwareTarget)
 	if err != nil {
 		log.Fatalf("Failed to initialize Button controller: %v", err)
 	}
 
-	microphone, err := mic.NewMicrophone()
+	microphone, err := mic.NewMicrophoneForTarget(client.FirmwareTarget)
 	if err != nil {
 		log.Fatalf("Failed to initialize Microphone: %v", err)
 	}
@@ -123,14 +134,14 @@ func main() {
 	// AEC canceller — far end fed by the speaker's echo tap, near end run
 	// by the data client on the mono mic stream. Starts disabled; armed by
 	// applyAecConfig from env defaults below and on every config push.
-	canceller := aec.New()
+	canceller := aec.NewForTarget(client.FirmwareTarget)
 
 	// The level tap drives the energy-reactive LED ring ("meter" pattern).
 	// The Server doesn't exist yet when the speaker starts its pump loop,
 	// so the tap goes through an atomic pointer armed just below.
 	var srvPtr atomic.Pointer[server.Server]
 	var showServerPtr atomic.Pointer[show.Server]
-	pcmSpeaker, err := speaker.NewPcmSpeaker(canceller.WriteFar, func(rms float64) {
+	pcmSpeaker, err := speaker.NewPcmSpeakerForTarget(client.FirmwareTarget, canceller.WriteFar, func(rms float64) {
 		if srv := srvPtr.Load(); srv != nil {
 			srv.SetAudioLevel(rms)
 		}
@@ -182,6 +193,36 @@ func main() {
 	nativeMode := nativeURL != ""
 	var nativeClient *taternative.Client
 	var nativePlayer *taternative.LocalPlayer
+	var checkersOTAHealth = struct {
+		sync.Mutex
+		appVersion     string
+		taterConnected bool
+		marked         bool
+	}{}
+	tryMarkCheckersOTAHealthy := func() {
+		if !strings.EqualFold(client.FirmwareTarget, "checkers") {
+			return
+		}
+		checkersOTAHealth.Lock()
+		appVersion := checkersOTAHealth.appVersion
+		connected := checkersOTAHealth.taterConnected
+		marked := checkersOTAHealth.marked
+		checkersOTAHealth.Unlock()
+		if marked || !connected || appVersion == "" {
+			return
+		}
+		ok, err := taternative.MarkCheckersOTAHealthy(client.Version, appVersion)
+		if err != nil {
+			log.Printf("[ota] could not mark Checkers generation healthy: %v", err)
+			return
+		}
+		if ok {
+			checkersOTAHealth.Lock()
+			checkersOTAHealth.marked = true
+			checkersOTAHealth.Unlock()
+			log.Printf("[ota] Checkers native and screen generation %s is healthy", client.Version)
+		}
+	}
 	resetToSetup := func(source string, playSound bool) error {
 		log.Printf("[tater-native] setup reset requested by %s", source)
 		if nativeClient != nil {
@@ -237,6 +278,49 @@ func main() {
 			}
 		},
 	})
+	// Checkers has no action button. Keep intercom on the touchscreen and use
+	// a deliberately awkward physical recovery gesture instead: five short
+	// Volume Down presses, then hold the sixth for five seconds. Ordinary
+	// volume presses still work, so setup remains reachable even if the APK or
+	// Tater connection is unhealthy without adding an easy-to-hit setup button.
+	if strings.EqualFold(client.FirmwareTarget, "checkers") {
+		checkersSetupGesture := actionbutton.New(actionbutton.Config{IntercomHold: 24 * time.Hour}, actionbutton.Callbacks{
+			ShowClicks: func(count, target int) {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Message = fmt.Sprintf("Setup recovery · %d of %d", count, target)
+				})
+			},
+			ShowCountdown: func(remaining, total int) {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					if remaining <= 0 {
+						snapshot.Message = "Starting Tater setup"
+					} else {
+						snapshot.Message = fmt.Sprintf("Keep holding Volume Down · %d", remaining)
+					}
+				})
+			},
+			ClearFeedback: func() {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Message = "Ready when you are"
+				})
+			},
+			SetupComplete: func() {
+				if err := resetToSetup("Checkers volume-down gesture", true); err != nil {
+					log.Printf("[tater-native] physical setup reset failed: %v", err)
+				}
+			},
+		})
+		buttonController.SetVolumeEventCallback(func(direction string, down bool, _ int64) {
+			if direction != "down" {
+				return
+			}
+			if down {
+				checkersSetupGesture.Press()
+			} else {
+				checkersSetupGesture.Release()
+			}
+		})
+	}
 	if nativeMode {
 		// Direct-native mode always needs the local detector. The incoming
 		// settings frame may refine model/threshold after hello.
@@ -244,7 +328,7 @@ func main() {
 		config.Get().Apply(config.ConfigMessage{MwwShadowEnabled: &enabled})
 	}
 
-	dataClient := client.NewDataClient(deviceID, microphone, pcmSpeaker, canceller)
+	dataClient := client.NewDataClientForTarget(deviceID, microphone, pcmSpeaker, canceller, client.FirmwareTarget)
 	canceller.SetStatePath(aec.DefaultStatePath) // saved echo path: loaded on the hardware reference
 	applyAecConfig(canceller, dataClient)        // arm from env defaults before any config push
 
@@ -363,6 +447,17 @@ func main() {
 	// would either strand the adverts or put them back on the liveness
 	// channel. It is two map reads on a path that runs a few times a second.
 	nativeBLEEnabled := nativeMode && strings.EqualFold(client.FirmwareTarget, "biscuit")
+	checkersBLEEnabled := nativeMode && strings.EqualFold(client.FirmwareTarget, "checkers")
+	var checkersBLE = struct {
+		sync.Mutex
+		scanning bool
+		seen     uint64
+		sent     uint64
+		unique   int
+		errors   uint64
+		lastErr  string
+		logged   bool
+	}{}
 	bleScanner := bluetooth.NewScanner(func(batch []bluetooth.Advert) {
 		if nativeBLEEnabled {
 			if nativeClient == nil {
@@ -390,7 +485,7 @@ func main() {
 		}
 		controlClient.SendBleAdverts(batch)
 	})
-	if !nativeBLEEnabled {
+	if !nativeBLEEnabled && !checkersBLEEnabled {
 		applyBleConfig(bleScanner)
 	}
 
@@ -475,19 +570,21 @@ func main() {
 	// Init leaves the internal amp on regardless of what is plugged in.
 	// SetJackRouting owns the whole mapping (issue #80 for the removal half,
 	// measured against a stock Dot 2026-09-03 for the rest).
-	go jack.Watch(ctx, func(inserted bool) {
-		pcmSpeaker.SetJackRouting(inserted)
-	})
-	// Android's audio HAL rewrites the codec on every mediaserver restart —
-	// roughly once a minute with a plug inserted — so applying the routing on
-	// the jack edge alone holds for about a minute and then the jack goes
-	// quiet again. Measured 2026-09-03. Nothing can stop mediaserver (the
-	// framework crash-loops without it), so the routing is reconciled instead.
-	go pcmSpeaker.WatchJackRouting(ctx)
+	if client.FirmwareTarget != "checkers" {
+		go jack.Watch(ctx, func(inserted bool) {
+			pcmSpeaker.SetJackRouting(inserted)
+		})
+		// Android's audio HAL rewrites the codec on every mediaserver restart —
+		// roughly once a minute with a plug inserted — so applying the routing on
+		// the jack edge alone holds for about a minute and then the jack goes
+		// quiet again. Measured 2026-09-03. Nothing can stop mediaserver (the
+		// framework crash-loops without it), so the routing is reconciled instead.
+		go pcmSpeaker.WatchJackRouting(ctx)
+	}
 
 	if nativeMode {
 		nativePlayer = taternative.NewLocalPlayer(pcmSpeaker)
-		otaInstaller := taternative.NewOTAInstaller()
+		otaInstaller := taternative.NewOTAInstallerForTarget(client.FirmwareTarget)
 		otaInstaller.Restart = func() {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		}
@@ -515,6 +612,49 @@ func main() {
 				switch command.Action {
 				case "screen.ready":
 					// The complete current snapshot was already sent on accept.
+					checkersOTAHealth.Lock()
+					checkersOTAHealth.appVersion = strings.TrimSpace(command.AppVersion)
+					checkersOTAHealth.Unlock()
+					tryMarkCheckersOTAHealthy()
+				case "ble.advertisements":
+					checkersBLE.Lock()
+					checkersBLE.scanning = command.BLEScanning
+					checkersBLE.seen = command.AdvertsSeen
+					checkersBLE.unique = command.UniqueAddrs
+					if command.BLEError != "" {
+						checkersBLE.errors++
+						checkersBLE.lastErr = command.BLEError
+					}
+					checkersBLE.Unlock()
+					if nativeClient == nil || len(command.Adverts) == 0 {
+						return
+					}
+					adverts := make([]taternative.BLEAdvertisement, 0, len(command.Adverts))
+					for _, advert := range command.Adverts {
+						if len(adverts) >= 64 {
+							break
+						}
+						data, err := hex.DecodeString(strings.TrimSpace(advert.Data))
+						if err != nil || len(data) == 0 || len(data) > 255 {
+							continue
+						}
+						adverts = append(adverts, taternative.BLEAdvertisement{
+							Address: advert.Address, AddressType: advert.AddressType,
+							EventType: advert.EventType, RSSI: advert.RSSI, Data: data,
+						})
+					}
+					if nativeClient.ReportBLEAdvertisements(adverts) {
+						checkersBLE.Lock()
+						checkersBLE.sent += uint64(len(adverts))
+						firstBatch := !checkersBLE.logged && len(adverts) > 0
+						checkersBLE.logged = checkersBLE.logged || firstBatch
+						seen := checkersBLE.seen
+						unique := checkersBLE.unique
+						checkersBLE.Unlock()
+						if firstBatch {
+							log.Printf("[ble] Checkers Android scanner forwarding: batch=%d seen=%d unique=%d", len(adverts), seen, unique)
+						}
+					}
 				case "mute.toggle":
 					s.MuteToggle()
 				case "volume.delta":
@@ -552,8 +692,51 @@ func main() {
 			Room: room, Capabilities: taternative.CapabilitiesForTarget(client.FirmwareTarget),
 		}, taternative.Hooks{
 			ReplyDirection: s.SetReplyDirectionDegrees,
+			CameraSnapshot: func(captureCtx context.Context) (taternative.CameraSnapshot, error) {
+				snapshot, err := show.CaptureCameraSnapshot(captureCtx, "")
+				if err != nil {
+					return taternative.CameraSnapshot{}, err
+				}
+				return taternative.CameraSnapshot{
+					Image: snapshot.Image, ContentType: snapshot.ContentType,
+				}, nil
+			},
+			DisplayWeather: func(payload map[string]any) {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					snapshot.Weather = showWeather(payload)
+					snapshot.TaterTimeUnixMS = int64(nativeNumber(payload["clock_unix_ms"], 0))
+					snapshot.TaterUTCOffset = int(nativeNumber(payload["utc_offset_seconds"], 0))
+					snapshot.TaterTimezone = firstNonEmpty(showPayloadText(payload, "timezone"), "Tater")
+				})
+			},
+			DisplayNotification: func(payload map[string]any) {
+				var image []byte
+				if encoded := showPayloadText(payload, "image_data_b64"); encoded != "" {
+					decoded, err := base64.StdEncoding.DecodeString(encoded)
+					if err != nil {
+						log.Printf("[show] ignored malformed notification image: %v", err)
+					} else {
+						image = decoded
+					}
+				}
+				expiresAt := int64(nativeNumber(payload["expires_at"], 0) * 1000)
+				notification := &show.Notification{
+					ID: showPayloadText(payload, "id"), Kind: showPayloadText(payload, "kind"),
+					Priority: showPayloadText(payload, "priority"), Title: showPayloadText(payload, "title"),
+					CameraName:  showPayloadText(payload, "camera_name"),
+					Description: showPayloadText(payload, "description"),
+					ImageURL:    showPayloadText(payload, "image_url"), ExpiresAtUnixMS: expiresAt,
+				}
+				if screen := showServerPtr.Load(); screen != nil {
+					screen.SetNotification(notification, image, showPayloadText(payload, "image_content_type"))
+				}
+			},
 			Connected: func(selector string) {
 				log.Printf("[tater-native] connected as %s", selector)
+				checkersOTAHealth.Lock()
+				checkersOTAHealth.taterConnected = true
+				checkersOTAHealth.Unlock()
+				tryMarkCheckersOTAHealthy()
 				if pulseCancel != nil {
 					pulseCancel()
 					pulseCancel = nil
@@ -573,9 +756,14 @@ func main() {
 					snapshot.Connected = true
 					snapshot.Phase = "idle"
 					snapshot.Message = "Ready when you are"
+					snapshot.ToolName = ""
+					snapshot.ToolMessage = ""
 				})
 			},
 			Disconnected: func(err error) {
+				checkersOTAHealth.Lock()
+				checkersOTAHealth.taterConnected = false
+				checkersOTAHealth.Unlock()
 				if err != nil && err != context.Canceled {
 					log.Printf("[tater-native] disconnected: %v", err)
 				}
@@ -593,6 +781,8 @@ func main() {
 					snapshot.Connected = false
 					snapshot.Phase = "offline"
 					snapshot.Message = "Connecting to Tater"
+					snapshot.ToolName = ""
+					snapshot.ToolMessage = ""
 					snapshot.AudioLevel = 0
 				})
 			},
@@ -603,8 +793,30 @@ func main() {
 				}
 				s.StartAnim(nativeStateAnimation(state))
 				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
-					snapshot.Phase = showPhase(state)
-					snapshot.Message = showMessage(state, payload)
+					phase := showPhase(state)
+					snapshot.Phase = phase
+					if phase == "tool_call" {
+						toolName := firstNonEmpty(
+							showPayloadText(payload, "tool_label"),
+							showPayloadText(payload, "tool"),
+							showPayloadText(payload, "tool_name"),
+						)
+						toolMessage := firstNonEmpty(
+							showPayloadText(payload, "text"),
+							showPayloadText(payload, "message"),
+						)
+						if toolName != "" {
+							snapshot.ToolName = toolName
+						}
+						if toolMessage != "" {
+							snapshot.ToolMessage = toolMessage
+						}
+						snapshot.Message = firstNonEmpty(snapshot.ToolMessage, "Working on that now")
+					} else {
+						snapshot.Message = showMessage(state, payload)
+						snapshot.ToolName = ""
+						snapshot.ToolMessage = ""
+					}
 					if state == "idle" || state == "error" {
 						snapshot.DirectionDegrees = nil
 						snapshot.AudioLevel = 0
@@ -636,11 +848,22 @@ func main() {
 				}
 				var memory runtime.MemStats
 				runtime.ReadMemStats(&memory)
+				bleStatus := any(bleScanner.Stats())
+				if checkersBLEEnabled {
+					checkersBLE.Lock()
+					bleStatus = map[string]any{
+						"scanning": checkersBLE.scanning, "advertsSeen": checkersBLE.seen,
+						"advertsSent": checkersBLE.sent, "uniqueAddrs": checkersBLE.unique,
+						"hciErrors": checkersBLE.errors, "lastError": checkersBLE.lastErr,
+						"transport": "android",
+					}
+					checkersBLE.Unlock()
+				}
 				status := map[string]any{
 					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
 					"muted":          s.IsMuted(),
 					"wake_engine":    wakeEngine,
-					"ble":            bleScanner.Stats(),
+					"ble":            bleStatus,
 					"memory": map[string]any{
 						"heap_alloc_kb": memory.HeapAlloc / 1024,
 						"heap_sys_kb":   memory.HeapSys / 1024,
@@ -839,7 +1062,7 @@ func main() {
 		applyAecConfig(canceller, dataClient)
 		if nativeBLEEnabled {
 			bleScanner.SetEnabled(true)
-		} else {
+		} else if !checkersBLEEnabled {
 			applyBleConfig(bleScanner)
 		}
 		applyMWWConfig(dataClient, controlClient, nil, nil)
@@ -1109,6 +1332,59 @@ func main() {
 	os.Exit(0)
 }
 
+func runCheckersSetupMode() error {
+	if !strings.EqualFold(strings.TrimSpace(client.FirmwareTarget), "checkers") {
+		return fmt.Errorf("setup-mode is only supported by a checkers-target build")
+	}
+	log.SetOutput(os.Stdout)
+	serial := strings.TrimSpace(client.GetSerialNo())
+	suffix := "Echo"
+	if len(serial) >= 4 {
+		suffix = strings.ToUpper(serial[len(serial)-4:])
+	}
+	ssid := "Tater-Setup-" + suffix
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	screen := show.New(show.DefaultAddress, show.Snapshot{
+		Phase: "setup", Connected: false, DeviceName: ssid,
+		Room:          taternative.DefaultCheckersAPAddress,
+		Message:       "Open Tater, choose Satellites, then Add Satellite",
+		VolumePercent: 50,
+	}, nil)
+	go func() {
+		if err := screen.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[setup] screen service stopped: %v", err)
+		}
+	}()
+
+	network := &taternative.CheckersSetupNetwork{}
+	if err := network.Start(ctx, ssid); err != nil {
+		return err
+	}
+	defer network.Stop()
+	go func() {
+		<-ctx.Done()
+		network.Stop()
+		os.Exit(0)
+	}()
+	return taternative.RunSetupPortal(taternative.SetupPortalOptions{
+		ApplyWiFi: func(ssid []byte, password string) error {
+			screen.Update(func(snapshot *show.Snapshot) {
+				snapshot.Message = "Joining Wi-Fi and connecting to Tater"
+			})
+			network.Stop()
+			return wifi.Provision(ssid, password)
+		},
+		Restart: func() {
+			syscall.Sync()
+			if err := exec.Command("/system/bin/reboot").Run(); err != nil {
+				log.Printf("[setup] reboot after provisioning: %v", err)
+			}
+		},
+	})
+}
+
 // ─── Hardware stats collection ────────────────────────────────────────────────
 
 // mwwShadowStats drains the independent Tater microWakeWord observer. Raw and
@@ -1222,14 +1498,14 @@ func netDeltas() (tx, rx, txErr, txDrop, rxCrc uint64) {
 	return
 }
 
-// linkInfoCache holds the last wpa_cli result and when it was taken.
+// linkInfoCache holds the last Wi-Fi link result and when it was taken.
 var linkInfoCache struct {
 	speed, freq int
 	bssid       string
 	at          time.Time
 }
 
-// linkInfoInterval — how often the wpa_cli subprocess is actually run.
+// linkInfoInterval — how often the platform Wi-Fi query is actually run.
 // Unlike everything else in collectStats this costs a process spawn, and
 // PHY rate / band / AP change on the scale of minutes, not seconds. Cached
 // values are reused between refreshes so every stats message still carries
@@ -1238,45 +1514,15 @@ const linkInfoInterval = 2 * time.Minute
 
 // linkInfo returns negotiated PHY rate (Mbps), frequency (MHz) and BSSID.
 //
-// Requires the -p control-socket path: plain `wpa_cli -i wlan0` answers
-// UNKNOWN COMMAND on FireOS because the default socket dir doesn't exist.
-// Returns zero values if wpa_supplicant isn't reachable — the fields are
-// omitempty, so the controller sees them absent rather than wrong.
+// Returns zero values if the platform Wi-Fi service isn't reachable — the
+// fields are omitempty, so the controller sees them absent rather than wrong.
 func linkInfo() (speed, freq int, bssid string) {
 	if time.Since(linkInfoCache.at) < linkInfoInterval {
 		return linkInfoCache.speed, linkInfoCache.freq, linkInfoCache.bssid
 	}
 	linkInfoCache.at = time.Now()
 
-	out, err := exec.Command("wpa_cli", "-p", "/data/misc/wifi/sockets",
-		"-i", "wlan0", "signal_poll").Output()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
-			if !ok {
-				continue
-			}
-			n, convErr := strconv.Atoi(v)
-			if convErr != nil {
-				continue
-			}
-			switch k {
-			case "LINKSPEED":
-				linkInfoCache.speed = n
-			case "FREQUENCY":
-				linkInfoCache.freq = n
-			}
-		}
-	}
-	if out, err := exec.Command("wpa_cli", "-p", "/data/misc/wifi/sockets",
-		"-i", "wlan0", "status").Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "bssid="); ok {
-				linkInfoCache.bssid = v
-				break
-			}
-		}
-	}
+	linkInfoCache.speed, linkInfoCache.freq, linkInfoCache.bssid = wifi.CurrentLinkInfo()
 	return linkInfoCache.speed, linkInfoCache.freq, linkInfoCache.bssid
 }
 
@@ -1921,7 +2167,7 @@ func showPhase(state string) string {
 	case "playing":
 		return "music"
 	case "tool_call":
-		return "thinking"
+		return "tool_call"
 	case "idle", "listening", "thinking", "speaking", "error":
 		return strings.ToLower(strings.TrimSpace(state))
 	default:
@@ -1940,6 +2186,8 @@ func showMessage(state string, payload map[string]any) string {
 		return "I’m listening"
 	case "thinking":
 		return "Thinking"
+	case "tool_call":
+		return "Working on that now"
 	case "speaking":
 		return "Replying"
 	case "music":
@@ -1949,6 +2197,40 @@ func showMessage(state string, payload map[string]any) string {
 	default:
 		return "Ready when you are"
 	}
+}
+
+func showWeather(payload map[string]any) *show.Weather {
+	if !nativeBool(payload["available"], false) {
+		return nil
+	}
+	weather := &show.Weather{
+		TemperatureText:       showPayloadText(payload, "temperature_text"),
+		TemperatureUnit:       showPayloadText(payload, "temperature_unit"),
+		IndoorTemperatureText: showPayloadText(payload, "indoor_temperature_text"),
+		IndoorHumidityText:    showPayloadText(payload, "indoor_humidity_text"),
+		Condition:             showPayloadText(payload, "condition"),
+		ConditionKind:         showPayloadText(payload, "condition_kind"),
+		FeelsLikeText:         showPayloadText(payload, "feels_like_text"),
+		FeelsLikeRelation:     showPayloadText(payload, "feels_like_relation"),
+		HumidityText:          showPayloadText(payload, "humidity_text"),
+		WindText:              showPayloadText(payload, "wind_text"),
+		RainText:              showPayloadText(payload, "rain_text"),
+		LightningText:         showPayloadText(payload, "lightning_text"),
+		Source:                showPayloadText(payload, "source"),
+		Stale:                 nativeBool(payload["stale"], false),
+	}
+	if weather.TemperatureText == "" && weather.Condition == "" {
+		return nil
+	}
+	return weather
+}
+
+func showPayloadText(payload map[string]any, key string) string {
+	value := strings.TrimSpace(fmt.Sprint(payload[key]))
+	if value == "<nil>" {
+		return ""
+	}
+	return value
 }
 
 func scaleNativeColor(color [3]uint8, scale float64) [3]uint8 {

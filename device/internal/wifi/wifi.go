@@ -242,20 +242,133 @@ func CurrentSSID() string {
 	return SSIDText(currentSSIDBytes())
 }
 
+func checkersFireOS() bool {
+	return !onEmOS() && strings.EqualFold(getprop("ro.product.device", ""), "checkers")
+}
+
 // currentSSIDBytes is the associated SSID's exact bytes, or nil. The status
 // line is printf_encode'd like scan_results, and only the trailing CR a line
 // can carry is stripped: spaces at either end are part of an SSID.
 func currentSSIDBytes() []byte {
-	out, _ := wpaCli("status")
-	if !strings.Contains(out, "wpa_state=COMPLETED") {
+	// Checkers' Fire OS SELinux policy denies wpa_supplicant's reply to a
+	// Magisk-domain wpa_cli socket. Avoid issuing the doomed request at all:
+	// besides returning no status, it would add an AVC denial on every poll.
+	if checkersFireOS() {
+		if dump, err := exec.Command("/system/bin/dumpsys", "wifi").Output(); err == nil {
+			return ssidFromWifiDump(string(dump))
+		}
 		return nil
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "ssid="); ok {
-			return UnescapeSSID(v)
+	out, _ := wpaCli("status")
+	if strings.Contains(out, "wpa_state=COMPLETED") {
+		for _, line := range strings.Split(out, "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "ssid="); ok {
+				return UnescapeSSID(v)
+			}
+		}
+	}
+	// WifiStateMachine receives the same events inside the framework, so use
+	// its live WifiInfo as a general Fire OS fallback. emOS has no dumpsys
+	// service and keeps the direct path above.
+	if !onEmOS() {
+		if dump, err := exec.Command("/system/bin/dumpsys", "wifi").Output(); err == nil {
+			return ssidFromWifiDump(string(dump))
 		}
 	}
 	return nil
+}
+
+// ssidFromWifiDump extracts only the live WifiInfo record. Connection-history
+// rows also contain SSIDs and must never satisfy the association gate.
+func ssidFromWifiDump(dump string) []byte {
+	const prefix = "mWifiInfo SSID:"
+	for _, line := range strings.Split(dump, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if before, _, ok := strings.Cut(value, ", BSSID:"); ok {
+			value = before
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+		}
+		if value == "" || value == "<unknown ssid>" {
+			return nil
+		}
+		return []byte(value)
+	}
+	return nil
+}
+
+// CurrentLinkInfo returns the negotiated PHY rate, frequency and AP BSSID.
+// Checkers reads WifiStateMachine because its SELinux policy blocks replies to
+// Magisk-domain wpa_cli clients; other targets keep the direct control path.
+func CurrentLinkInfo() (speed, freq int, bssid string) {
+	if checkersFireOS() {
+		if dump, err := exec.Command("/system/bin/dumpsys", "wifi").Output(); err == nil {
+			return linkInfoFromWifiDump(string(dump))
+		}
+		return 0, 0, ""
+	}
+	out, err := wpaCli("signal_poll")
+	if err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+			if !ok {
+				continue
+			}
+			n, convErr := strconv.Atoi(value)
+			if convErr != nil {
+				continue
+			}
+			switch key {
+			case "LINKSPEED":
+				speed = n
+			case "FREQUENCY":
+				freq = n
+			}
+		}
+	}
+	if out, err := wpaCli("status"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if value, ok := strings.CutPrefix(strings.TrimSpace(line), "bssid="); ok {
+				bssid = value
+				break
+			}
+		}
+	}
+	return speed, freq, bssid
+}
+
+func linkInfoFromWifiDump(dump string) (speed, freq int, bssid string) {
+	const prefix = "mWifiInfo SSID:"
+	for _, line := range strings.Split(dump, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		for _, field := range strings.Split(line, ",") {
+			field = strings.TrimSpace(field)
+			switch {
+			case strings.HasPrefix(field, "BSSID:"):
+				value := strings.TrimSpace(strings.TrimPrefix(field, "BSSID:"))
+				if _, err := net.ParseMAC(value); err == nil {
+					bssid = value
+				}
+			case strings.HasPrefix(field, "Link speed:"):
+				value := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(field, "Link speed:")), "Mbps")
+				speed, _ = strconv.Atoi(value)
+			case strings.HasPrefix(field, "Frequency:"):
+				value := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(field, "Frequency:")), "MHz")
+				freq, _ = strconv.Atoi(value)
+			}
+		}
+		return speed, freq, bssid
+	}
+	return 0, 0, ""
 }
 
 // currentIPv4 returns the interface's IPv4 address, or "".
@@ -282,6 +395,13 @@ func currentIPv4() string {
 // first, deduped by SSID (strongest AP wins — multiple APs/bands share
 // SSIDs). Safe while associated; expect a brief audio-free RF glitch.
 func Scan() ([]Network, error) {
+	if checkersFireOS() {
+		dump, err := exec.Command("/system/bin/dumpsys", "wifi").Output()
+		if err != nil {
+			return nil, fmt.Errorf("read framework WiFi scan: %w", err)
+		}
+		return parseWifiDumpScan(string(dump)), nil
+	}
 	if _, err := wpaCli("scan"); err != nil {
 		return nil, fmt.Errorf("scan trigger: %w", err)
 	}
@@ -292,6 +412,54 @@ func Scan() ([]Network, error) {
 	}
 
 	return parseScan(out), nil
+}
+
+// parseWifiDumpScan reads WifiStateMachine's cached scan table. Checkers uses
+// this path because SELinux blocks wpa_supplicant from replying to a
+// Magisk-domain wpa_cli socket. Fire OS refreshes this table itself; asking it
+// avoids both the failed control request and its repeating AVC denial.
+func parseWifiDumpScan(dump string) []Network {
+	best := map[string]int{}
+	for _, line := range strings.Split(dump, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 6 {
+			continue
+		}
+		if _, err := net.ParseMAC(fields[0]); err != nil {
+			continue
+		}
+		signal, err := strconv.Atoi(fields[2])
+		if err != nil {
+			continue
+		}
+		flags := len(fields)
+		for i := 4; i < len(fields); i++ {
+			if strings.HasPrefix(fields[i], "[") {
+				flags = i
+				break
+			}
+		}
+		if flags <= 4 {
+			continue
+		}
+		name := strings.Trim(strings.Join(fields[4:flags], " "), "\"")
+		ssid := []byte(name)
+		if name == "<unknown ssid>" || hiddenOrEmpty(ssid) {
+			continue
+		}
+		if previous, ok := best[name]; !ok || signal > previous {
+			best[name] = signal
+		}
+	}
+	networks := make([]Network, 0, len(best))
+	for name, signal := range best {
+		ssid := []byte(name)
+		networks = append(networks, Network{
+			SSID: SSIDText(ssid), SSIDHex: hex.EncodeToString(ssid), Signal: signal,
+		})
+	}
+	sort.Slice(networks, func(i, j int) bool { return networks[i].Signal > networks[j].Signal })
+	return networks
 }
 
 // parseScan turns scan_results into one Network per SSID, strongest AP first.
@@ -489,7 +657,33 @@ func disableWifi() error {
 		_ = svcWifi("enable")
 		return fmt.Errorf("wifi did not go down after 'svc wifi disable'")
 	}
+	// Disassociation alone is not enough on Fire OS. In setup mode wlan0 is
+	// already disconnected, so that test passes immediately while the old
+	// supplicant is still shutting down. Writing then races WifiStateMachine's
+	// final save, which can overwrite the new network. Wait for the process to
+	// be gone before replacing its config. emOS does not call this function.
+	if !waitFor("supplicant shutdown after disable", 10*time.Second, func() bool { return !supplicantRunning() }) {
+		_ = svcWifi("enable")
+		return fmt.Errorf("wpa_supplicant did not stop after 'svc wifi disable'")
+	}
 	return nil
+}
+
+func supplicantRunning() bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		comm, err := os.ReadFile("/proc/" + entry.Name() + "/comm")
+		if err == nil && strings.TrimSpace(string(comm)) == "wpa_supplicant" {
+			return true
+		}
+	}
+	return false
 }
 
 func enableWifi() error {
@@ -745,6 +939,50 @@ func Change(ssidBytes []byte, psk string, connected func() bool) {
 	// controller acknowledges with wifi_commit.
 	log.Printf("[wifi] change to %q succeeded — awaiting commit from controller", ssid)
 	setResult(Result{OK: true, SSID: ssid})
+}
+
+// Provision joins the first network on a newly configured device. Unlike
+// Change it has no controller-reconnect gate: the native token and URL are
+// written by the setup portal immediately before this call, so the next daemon
+// start owns that validation. The old Fire OS network file is still backed up
+// and restored on any association or DHCP failure.
+func Provision(ssidBytes []byte, psk string) error {
+	if err := validate(ssidBytes, psk); err != nil {
+		return err
+	}
+	ssid := SSIDText(ssidBytes)
+	readPath, _ := confPaths()
+	old, err := os.ReadFile(readPath)
+	if err != nil {
+		return fmt.Errorf("cannot read current WiFi config: %w", err)
+	}
+	if err := os.WriteFile(backupPath(), old, 0o600); err != nil {
+		return fmt.Errorf("cannot back up current WiFi config: %w", err)
+	}
+	mk, _ := json.Marshal(marker{NewSSID: ssid, StartedAt: time.Now().Unix()})
+	if err := os.WriteFile(markerPath, mk, 0o600); err != nil {
+		return fmt.Errorf("cannot mark WiFi provisioning pending: %w", err)
+	}
+	revert := func(reason error) error {
+		if restoreErr := reloadConf(string(old)); restoreErr != nil {
+			return fmt.Errorf("%v; restoring previous WiFi also failed: %w", reason, restoreErr)
+		}
+		_ = os.Remove(markerPath)
+		_ = os.Remove(backupPath())
+		return reason
+	}
+	if err := reloadConf(composeConf(ssidBytes, psk)); err != nil {
+		return revert(err)
+	}
+	if !waitForAssociation(ssidBytes, associateTimeout) {
+		return revert(fmt.Errorf("did not associate to %q within %s", ssid, associateTimeout))
+	}
+	if !waitFor("IPv4 address", ipTimeout, func() bool { return currentIPv4() != "" }) {
+		return revert(fmt.Errorf("associated to %q but received no IPv4 address within %s", ssid, ipTimeout))
+	}
+	Commit()
+	log.Printf("[wifi] first-boot provisioning joined %q at %s", ssid, currentIPv4())
+	return nil
 }
 
 // RecoverIfPending restores the pre-change config if a previous change

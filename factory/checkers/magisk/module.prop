@@ -1,0 +1,6 @@
+id=tater_checkers
+name=Tater Echo Show 5 native services
+version=0.2.0-dev
+versionCode=20000
+author=TaterTotterson
+description=Boot supervision, display ownership, and device policy for the Tater native Checkers satellite.

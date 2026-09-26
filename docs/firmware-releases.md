@@ -10,9 +10,9 @@ do not trigger a Tater Echo firmware release.
 ## Target identity
 
 Every native `hello` reports `firmware_target`, alongside the existing Echo
-hardware identity. Tater uses that target key with `targets/targets.json`; the
-initial key is `biscuit`. A future model receives its own target and factory
-installer even when its userspace binary can be shared.
+hardware identity. Tater uses that target key with `targets/targets.json`;
+current keys are `biscuit` and `checkers`. A future model receives its own
+target and factory installer even when its userspace binary can be shared.
 
 ## Factory artifact
 
@@ -25,9 +25,12 @@ It does not include a redistributable boot image. The device's kernel, device
 trees, boot addresses, and MTK wrapper are read from that device's stock boot
 partition. The installer then creates and verifies the final image locally.
 
-## OTA artifact
+## OTA artifacts
 
-The OTA asset is the ARM userspace ELF only. Tater sends:
+Biscuit's OTA asset is the ARM userspace ELF. Checkers uses a deterministic ZIP
+containing the ARM daemon, signed screen APK, and an inner manifest with the
+version, sizes, and SHA-256 hashes. Tater sends the same target-independent
+command envelope for either format:
 
 ```json
 {
@@ -43,9 +46,11 @@ the Tater native protocol; this is the command payload relevant to release
 selection. The device rejects a missing/invalid digest, a size mismatch, a
 non-ELF download, an HTTP error, or an artifact over 128 MiB.
 
-On success it writes the inactive userspace slot and atomically switches
-`/data/local/bin/server`. The supervisor automatically switches back after
-three startup failures shorter than its minimum healthy runtime.
+On Biscuit, success writes the inactive userspace slot and atomically switches
+`/data/local/bin/server`; the supervisor switches back after three fast startup
+failures. On Checkers, the installer also backs up and upgrades the APK. The
+supervisor commits only when the new daemon connects to Tater and a
+matching-version APK reports ready over loopback, otherwise it restores both.
 
 ## Manifest
 

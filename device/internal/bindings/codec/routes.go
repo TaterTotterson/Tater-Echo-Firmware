@@ -35,6 +35,7 @@ package codec
 
 import (
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
@@ -75,6 +76,33 @@ var Routes = []Write{
 	{"HPL Output Mixer L_DAC Switch", "1"},
 }
 
+// CheckersRoutes is the Fire OS 6574.1 audio_device.xml route verified
+// against the live Checkers mixer and playback trace. Checkers has one
+// TLV320AIC3101 ADC and an RT5616 DAC; applying Biscuit's four-ADC / HPL-HPR
+// route would leave both ends silent.
+var CheckersRoutes = []Write{
+	{"ADC_A Left Ip Select ADC_A DIF1_L switch", "1"},
+	{"ADC_A Right Ip Select ADC_A DIF1_R switch", "1"},
+	{"ADC_A DIF1_L Input Gain", "0"},
+	{"ADC_A DIF1_R Input Gain", "0"},
+	{"ADC_A MICPGA Volume Ctrl", "40"},
+	{"SpiTimeStamps", "Off"},
+
+	{"Audio_I2S0dl1_hd_Switch", "On"},
+	{"DAC MIXL INF1 Switch", "1"},
+	{"DAC MIXR INF1 Switch", "1"},
+	{"Stereo DAC MIXL DAC L1 Switch", "1"},
+	{"Stereo DAC MIXL DAC R1 Switch", "1"},
+	{"Stereo DAC MIXR DAC L1 Switch", "1"},
+	{"Stereo DAC MIXR DAC R1 Switch", "1"},
+	{"OUT MIXL DAC L1 Switch", "1"},
+	{"OUT MIXR DAC R1 Switch", "1"},
+	{"LOUT MIX OUTVOL L Switch", "1"},
+	{"LOUT MIX OUTVOL R Switch", "1"},
+	{"OUT Channel Switch", "1"},
+	{"OUT Playback Switch", "1"},
+}
+
 var once sync.Once
 
 // EnsureRoutes applies Routes exactly once per process.
@@ -85,19 +113,23 @@ var once sync.Once
 //
 // A control that does not resolve is now a loud failure rather than a write to
 // whatever happens to hold that id on this kernel.
-func EnsureRoutes() {
+func EnsureRoutes(target string) {
 	once.Do(func() {
+		routes := Routes
+		if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+			routes = CheckersRoutes
+		}
 		var failed int
-		for _, w := range Routes {
+		for _, w := range routes {
 			if err := mixer.Set(w.Name, w.Value); err != nil {
 				failed++
 			}
 		}
 		if failed > 0 {
 			log.Printf("[codec] %d of %d DAPM routes failed — audio may be silent",
-				failed, len(Routes))
+				failed, len(routes))
 		} else {
-			log.Printf("[codec] %d DAPM routes closed", len(Routes))
+			log.Printf("[codec] %d DAPM routes closed", len(routes))
 		}
 	})
 }

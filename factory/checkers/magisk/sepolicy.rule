@@ -1,0 +1,17 @@
+# The Checkers native daemon is launched by Magisk's root shell. Fire OS labels
+# that process `shell`, even at uid 0, and otherwise denies the MediaTek radio
+# mode character device that is required to enter and leave first-boot SoftAP.
+allow shell device file { getattr open read write ioctl }
+allow magisk device file { getattr open read write ioctl }
+
+# Setup mode owns a dedicated ap0 interface. These are the bounded socket and
+# capability operations used by netlink address setup and the static AP
+# supplicant; they do not grant access to Android application data.
+allow shell self capability { net_admin net_raw }
+allow shell self netlink_route_socket { create bind read write getattr setopt getopt nlmsg_read nlmsg_write }
+allow shell self netlink_generic_socket { create bind read write getattr setopt getopt }
+allow shell self packet_socket { create bind read write getattr setopt getopt }
+allow magisk self capability { net_admin net_raw }
+allow magisk self netlink_route_socket { create bind read write getattr setopt getopt nlmsg_read nlmsg_write }
+allow magisk self netlink_generic_socket { create bind read write getattr setopt getopt }
+allow magisk self packet_socket { create bind read write getattr setopt getopt }

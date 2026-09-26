@@ -30,6 +30,13 @@
 #     wpa_supplicant contents, no SSIDs.
 set -eu
 
+# Device properties and boot headers can contain arbitrary bytes. macOS runs
+# shells in a UTF-8 locale by default, where tr(1) aborts with "Illegal byte
+# sequence" instead of treating that data as bytes. Keep the entire profiler
+# byte-oriented on every host; individual output files are redacted below.
+LC_ALL=C
+export LC_ALL
+
 SERIAL=""; VENDOR=0
 while [ $# -gt 0 ]; do
   case "$1" in

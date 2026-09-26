@@ -2,8 +2,8 @@ name: Tater Echo Firmware Release
 
 # One annotated vX.Y.Z tag builds every target independently, then publishes a
 # single compatibility manifest. Biscuit produces factory + OTA firmware;
-# Checkers initially produces a reversible screen/bring-up preview. No archive
-# contains an Amazon kernel, device tree, or proprietary Android image.
+# Checkers produces partition-safe native userspace plus its screen APK. No
+# archive contains an Amazon kernel, device tree, or proprietary Android image.
 
 on:
   push:
@@ -171,12 +171,14 @@ jobs:
           if-no-files-found: error
 
   checkers:
-    name: Echo Show 5 (checkers) screen preview
+    name: Echo Show 5 (checkers) native firmware
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Select version
         id: version
@@ -207,16 +209,102 @@ jobs:
       - name: Install pinned Android platform
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
 
-      - name: Run Checkers installer tests
-        run: python3 -m unittest factory.checkers.test_install tools.test_merge_release_manifests
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
 
-      - name: Build signed developer-preview APK
+      - name: Run Checkers installer tests
+        run: |
+          python3 -m unittest factory.checkers.test_install factory.checkers.test_privacy tools.test_merge_release_manifests
+          cd device
+          go test -race \
+            ./internal/taternative \
+            ./internal/wifi \
+            ./internal/show \
+            ./internal/wakeword/microwakeword \
+            ./internal/aec \
+            ./internal/beamformer \
+            ./internal/bindings/mixer \
+            ./pkg/board
+
+      - name: Configure persistent Tater Show signing
+        env:
+          TATER_SHOW_KEYSTORE_BASE64: ${{ secrets.TATER_SHOW_KEYSTORE_BASE64 }}
+          TATER_SHOW_KEY_ALIAS: ${{ secrets.TATER_SHOW_KEY_ALIAS }}
+          TATER_SHOW_KEY_PASSWORD: ${{ secrets.TATER_SHOW_KEY_PASSWORD }}
+          TATER_SHOW_STORE_PASSWORD: ${{ secrets.TATER_SHOW_STORE_PASSWORD }}
+        run: |
+          test -n "$TATER_SHOW_KEYSTORE_BASE64" || { echo "::error::TATER_SHOW_KEYSTORE_BASE64 is not configured"; exit 1; }
+          test -n "$TATER_SHOW_KEY_ALIAS" || { echo "::error::TATER_SHOW_KEY_ALIAS is not configured"; exit 1; }
+          test -n "$TATER_SHOW_KEY_PASSWORD" || { echo "::error::TATER_SHOW_KEY_PASSWORD is not configured"; exit 1; }
+          test -n "$TATER_SHOW_STORE_PASSWORD" || { echo "::error::TATER_SHOW_STORE_PASSWORD is not configured"; exit 1; }
+          printf '%s' "$TATER_SHOW_KEYSTORE_BASE64" | base64 --decode > /tmp/tater-show-release.jks
+          chmod 600 /tmp/tater-show-release.jks
+
+      - name: Build signed Tater Show APK
         env:
           TATER_SHOW_VERSION_NAME: ${{ steps.version.outputs.version }}
           TATER_SHOW_VERSION_CODE: ${{ github.run_number }}
-        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          TATER_SHOW_KEYSTORE_PATH: /tmp/tater-show-release.jks
+          TATER_SHOW_KEY_ALIAS: ${{ secrets.TATER_SHOW_KEY_ALIAS }}
+          TATER_SHOW_KEY_PASSWORD: ${{ secrets.TATER_SHOW_KEY_PASSWORD }}
+          TATER_SHOW_STORE_PASSWORD: ${{ secrets.TATER_SHOW_STORE_PASSWORD }}
+        run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
-      - name: Package and verify Checkers preview
+      - name: Build Android compiler image
+        run: docker build -t echomuse-compiler device/compiler/
+
+      - name: Compile Checkers native firmware
+        run: |
+          mkdir -p device/build
+          build_unix=$(date +%s)
+          docker run --rm --entrypoint bash \
+            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
+            -v "${{ github.workspace }}/device":/sdk \
+            -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
+            echomuse-compiler -c "cd /sdk && go build -tags server \
+              -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=checkers \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
+              -o build/server ./cmd/"
+
+      - name: Build ARMv7 microWakeWord runtime
+        run: device/build_microwakeword_runtime.sh
+
+      - name: Fetch pinned Hey Tater model
+        shell: bash
+        run: |
+          mkdir -p device/build/microwakeword-testdata
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV6/hey_tater.tflite \
+            -o device/build/microwakeword-testdata/hey_tater.tflite
+          echo 'd3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9  device/build/microwakeword-testdata/hey_tater.tflite' | sha256sum -c -
+
+      - name: Build static setup-access-point supplicant
+        run: |
+          mkdir -p emos/build/wpa
+          docker run --rm -v "${{ github.workspace }}/emos":/emos \
+            -v "${{ github.workspace }}/emos/build/wpa":/out -w /tmp \
+            echomuse-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
+
+      - name: Verify Checkers native inputs
+        run: |
+          file device/build/server \
+            device/build/microwakeword-android/libtater_microwakeword.so \
+            emos/build/wpa/wpa_supplicant
+          file device/build/server | grep -q '32-bit.*ARM'
+          file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
+          file emos/build/wpa/wpa_supplicant | grep -q '32-bit LSB executable, ARM'
+          file emos/build/wpa/wpa_supplicant | grep -q 'statically linked'
+          strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
+          strings device/build/server | grep -qF 'checkers'
+
+      - name: Package and verify Checkers native firmware
+        env:
+          TATER_SHOW_APK: screen/app/build/outputs/apk/release/app-release.apk
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' \
@@ -226,6 +314,8 @@ jobs:
             -C /tmp/tater-checkers-factory-check
           /tmp/tater-checkers-factory-check/*/install.sh --verify-bundle
           unzip -t release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose \
+            release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk \
             | grep -F "package: name='com.tatertotterson.show'"
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging release/tater-echo-checkers-${{ steps.version.outputs.version }}-screen-preview.apk \

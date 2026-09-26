@@ -920,10 +920,16 @@ func (b *Beamformer) OutputChannel() int { return b.outputChannel }
 // Diagnostics is a cheap snapshot read on the mic goroutine for periodic
 // field logs. Confidence is the best-vs-second separation in [0,1].
 type Diagnostics struct {
-	OutputChannel  int
-	Confidence     float64
-	Spatial        float64
-	PlaybackActive bool
+	OutputChannel      int
+	Confidence         float64
+	Spatial            float64
+	PlaybackActive     bool
+	Calibrated         bool
+	DelaySamples       float64
+	LevelBalanceDB     float64
+	NoiseGain          float64
+	Coherence          float64
+	HealthyMicChannels int
 }
 
 func (b *Beamformer) Diagnostics() Diagnostics {

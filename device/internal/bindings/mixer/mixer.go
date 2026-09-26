@@ -17,6 +17,8 @@ package mixer
 import (
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -27,6 +29,139 @@ const (
 	PlaybackVolume = "PCM Playback Volume" // DAC digital volume, 0.5dB steps, 127 = 0dB
 	HPDriverGain   = "HP Driver Gain Volume"
 )
+
+// targetProfile contains only controls whose meaning differs between boards.
+// Route switches live in codec because they are an ordered group applied
+// before opening a PCM. Logical volume remains 0..127 everywhere so Tater's
+// stored level does not change when the hardware codec does.
+type targetProfile struct {
+	playbackVolume string
+	playbackMax    int
+	speakerAmp     string
+	speakerOn      string
+	speakerOff     string
+	adcMute        []string
+}
+
+var biscuitProfile = targetProfile{
+	playbackVolume: PlaybackVolume,
+	playbackMax:    127,
+	speakerAmp:     SpeakerAmp,
+	speakerOn:      "On",
+	speakerOff:     "Off",
+	adcMute: []string{
+		"ADC_A Left Mute", "ADC_A Right Mute",
+		"ADC_B Left Mute", "ADC_B Right Mute",
+		"ADC_C Left Mute", "ADC_C Right Mute",
+		"ADC_D Left Mute", "ADC_D Right Mute",
+	},
+}
+
+var checkersProfile = targetProfile{
+	// RT5616's stock route uses 173 as its normal top level. Keep the two
+	// unused positive-gain steps out of Tater's scale, just as Biscuit caps
+	// its DAC at unity rather than at the control's numeric maximum.
+	playbackVolume: "DAC1 Playback Volume",
+	playbackMax:    173,
+	speakerAmp:     SpeakerAmp,
+	// Checkers' external speaker GPIO is active-low. This was observed both
+	// in the stock ext_speaker_output path and in the live route trace.
+	speakerOn:  "Off",
+	speakerOff: "On",
+	adcMute:    []string{"ADC_A Left Mute", "ADC_A Right Mute"},
+}
+
+var (
+	targetMu      sync.RWMutex
+	activeProfile = biscuitProfile
+)
+
+// ConfigureTarget selects the measured mixer semantics for this process.
+// It must run once, before any hardware controller is constructed.
+func ConfigureTarget(target string) {
+	targetMu.Lock()
+	defer targetMu.Unlock()
+	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+		activeProfile = checkersProfile
+		return
+	}
+	activeProfile = biscuitProfile
+}
+
+func profile() targetProfile {
+	targetMu.RLock()
+	p := activeProfile
+	p.adcMute = append([]string(nil), activeProfile.adcMute...)
+	targetMu.RUnlock()
+	return p
+}
+
+// SetPlaybackLevel maps Tater's stable 0..logicalMax volume onto the board's
+// codec range and writes it by name.
+func SetPlaybackLevel(level, logicalMax int) error {
+	p := profile()
+	if logicalMax <= 0 {
+		return fmt.Errorf("mixer: invalid logical volume maximum %d", logicalMax)
+	}
+	if level < 0 {
+		level = 0
+	}
+	if level > logicalMax {
+		level = logicalMax
+	}
+	raw := (level*p.playbackMax + logicalMax/2) / logicalMax
+	return Set(p.playbackVolume, strconv.Itoa(raw))
+}
+
+// GetPlaybackLevel reads the board codec and maps it back to Tater's stable
+// logical scale.
+func GetPlaybackLevel(logicalMax int) (int, error) {
+	p := profile()
+	if logicalMax <= 0 {
+		return 0, fmt.Errorf("mixer: invalid logical volume maximum %d", logicalMax)
+	}
+	v, err := Get(p.playbackVolume)
+	if err != nil {
+		return 0, err
+	}
+	raw, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("mixer: %q returned %q: %w", p.playbackVolume, v, err)
+	}
+	if raw < 0 {
+		raw = 0
+	}
+	if raw > p.playbackMax {
+		raw = p.playbackMax
+	}
+	return (raw*logicalMax + p.playbackMax/2) / p.playbackMax, nil
+}
+
+// SetSpeakerEnabled accounts for Checkers' active-low external amplifier.
+func SetSpeakerEnabled(enabled bool) error {
+	p := profile()
+	value := p.speakerOff
+	if enabled {
+		value = p.speakerOn
+	}
+	return Set(p.speakerAmp, value)
+}
+
+// SetADCMute applies every physical microphone mute on the selected board and
+// returns the number of writes that failed.
+func SetADCMute(muted bool) int {
+	value := "0"
+	if muted {
+		value = "1"
+	}
+	failed := 0
+	for _, control := range profile().adcMute {
+		if Set(control, value) != nil {
+			failed++
+		}
+	}
+	return failed
+}
 
 // Backend is the device implementation. Values are strings as tinymix prints
 // and accepts them: enum names, "On"/"Off" for switches, decimal integers.

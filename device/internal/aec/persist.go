@@ -37,7 +37,7 @@ func (c *Canceller) SetStatePath(path string) {
 }
 
 func (c *Canceller) statePathFor(path int) string {
-	if path == defaultPathID {
+	if path == c.defaultPath {
 		// Preserve the original filename for the centre mic and existing fleets.
 		return c.statePath
 	}

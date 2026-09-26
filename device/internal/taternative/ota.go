@@ -20,9 +20,13 @@ const maxFirmwareBytes = 128 * 1024 * 1024
 // A/B slot and atomically flips the server symlink. The existing supervisor
 // performs its normal fast-exit rollback if the new slot cannot start.
 type OTAInstaller struct {
-	ActivePath string
-	HTTP       *http.Client
-	Restart    func()
+	ActivePath       string
+	HTTP             *http.Client
+	Restart          func()
+	Target           string
+	StateDir         string
+	RunCommand       func(context.Context, string, ...string) ([]byte, error)
+	InstalledAPKPath func(context.Context, string) (string, error)
 }
 
 func NewOTAInstaller() *OTAInstaller {
@@ -30,6 +34,16 @@ func NewOTAInstaller() *OTAInstaller {
 		ActivePath: "/data/local/bin/server",
 		HTTP:       &http.Client{Timeout: 5 * time.Minute},
 	}
+}
+
+// NewOTAInstallerForTarget selects the transaction appropriate to the target.
+// Biscuit remains a single ELF A/B update; Checkers coordinates the native
+// slot with its Android screen APK and leaves rollback state for the Magisk
+// supervisor.
+func NewOTAInstallerForTarget(target string) *OTAInstaller {
+	installer := NewOTAInstaller()
+	installer.Target = strings.ToLower(strings.TrimSpace(target))
+	return installer
 }
 
 func (i *OTAInstaller) Install(ctx context.Context, req OTARequest, report func(string, int, string)) error {
@@ -41,6 +55,9 @@ func (i *OTAInstaller) Install(ctx context.Context, req OTARequest, report func(
 	}
 	if _, err := hex.DecodeString(req.SHA256); err != nil {
 		return errors.New("OTA SHA-256 is invalid")
+	}
+	if strings.EqualFold(i.Target, "checkers") {
+		return i.installCheckers(ctx, req, report)
 	}
 	activePath := i.ActivePath
 	if activePath == "" {

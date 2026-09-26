@@ -7,6 +7,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // i2C device that sets the current led
@@ -35,6 +36,33 @@ type I2CController struct {
 	// torn frames written to the i2C device.
 	mu sync.Mutex
 }
+
+var (
+	targetMu sync.RWMutex
+	target   = "biscuit"
+)
+
+// ConfigureTarget selects the visual hardware for this process. Checkers has
+// an LCD and no ring; retaining a logical 12-LED sink lets the existing state
+// machine keep producing animations while the screen protocol renders the
+// equivalent phase, without touching Biscuit's nonexistent sysfs nodes.
+func ConfigureTarget(value string) {
+	targetMu.Lock()
+	target = strings.ToLower(strings.TrimSpace(value))
+	targetMu.Unlock()
+}
+
+func screenOnly() bool {
+	targetMu.RLock()
+	defer targetMu.RUnlock()
+	return target == "checkers"
+}
+
+type discardController struct{}
+
+func (discardController) Init() error                { return nil }
+func (discardController) GetNumLEDs() (int, error)   { return len(led.Leds), nil }
+func (discardController) SetLEDs(_ ...led.Led) error { return nil }
 
 func (i *I2CController) Init() error {
 
@@ -107,6 +135,9 @@ func (i *I2CController) SetLEDs(LEDs ...led.Led) error {
 }
 
 func NewDefaultController() (led.Controller, error) {
+	if screenOnly() {
+		return discardController{}, nil
+	}
 	controller := &I2CController{}
 
 	if err := controller.Init(); err != nil {

@@ -33,8 +33,13 @@ type SetupPortalOptions struct {
 	BootstrapPath string
 	TokenPath     string
 	MarkerPath    string
-	Restart       func()
-	RestartDelay  time.Duration
+	// ApplyWiFi replaces the emOS config-file write on platforms such as
+	// Checkers where Android owns the station supplicant. It runs only after
+	// the success page has reached the phone, because joining the selected
+	// network necessarily tears down the setup connection.
+	ApplyWiFi    func(ssid []byte, password string) error
+	Restart      func()
+	RestartDelay time.Duration
 }
 
 func (o SetupPortalOptions) defaults() SetupPortalOptions {
@@ -210,10 +215,12 @@ func (p *setupPortal) save(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not reset the old pairing", http.StatusInternalServerError)
 		return
 	}
-	if err := writeSetupFile(p.opts.WiFiPath, []byte(wpa), 0o600); err != nil {
-		log.Printf("[setup] write WiFi config: %v", err)
-		http.Error(w, "Could not save Wi-Fi settings", http.StatusInternalServerError)
-		return
+	if p.opts.ApplyWiFi == nil {
+		if err := writeSetupFile(p.opts.WiFiPath, []byte(wpa), 0o600); err != nil {
+			log.Printf("[setup] write WiFi config: %v", err)
+			http.Error(w, "Could not save Wi-Fi settings", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := writeSetupFile(p.opts.MarkerPath, []byte("1\n"), 0o600); err != nil {
 		log.Printf("[setup] refresh setup marker: %v", err)
@@ -226,6 +233,12 @@ func (p *setupPortal) save(w http.ResponseWriter, r *http.Request) {
 	p.once.Do(func() {
 		go func() {
 			time.Sleep(p.opts.RestartDelay)
+			if p.opts.ApplyWiFi != nil {
+				if err := p.opts.ApplyWiFi([]byte(ssid), password); err != nil {
+					log.Printf("[setup] apply Wi-Fi settings: %v", err)
+					return
+				}
+			}
 			p.opts.Restart()
 		}()
 	})

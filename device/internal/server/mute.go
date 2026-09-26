@@ -76,24 +76,13 @@ func (m *muteController) Toggle() {
 // A was muted before, leaving chips B–D — including ch6, the mic wake word
 // and STT actually use — physically hot; the mic stream-stop was what made
 // mute effective. By name since 2026-09-17 (#546).
-var adcMuteCtls = []string{
-	"ADC_A Left Mute", "ADC_A Right Mute",
-	"ADC_B Left Mute", "ADC_B Right Mute",
-	"ADC_C Left Mute", "ADC_C Right Mute",
-	"ADC_D Left Mute", "ADC_D Right Mute",
-}
-
 // setAdcMute reports every failure, not just the first per control: this is
 // the hardware half of the mute, and a silent miss here is a hot microphone.
 func setAdcMute(val string) {
-	failed := 0
-	for _, ctl := range adcMuteCtls {
-		if mixer.Set(ctl, val) != nil {
-			failed++
-		}
-	}
+	muted := val == "1"
+	failed := mixer.SetADCMute(muted)
 	if failed > 0 {
-		log.Printf("Mute: %d of %d ADC mute controls failed to set %s", failed, len(adcMuteCtls), val)
+		log.Printf("Mute: %d ADC mute controls failed to set %s", failed, val)
 	}
 }
 

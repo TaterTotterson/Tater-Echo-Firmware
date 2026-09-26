@@ -1,0 +1,4 @@
+# Intentionally empty on certified Fire OS 6574.1. Amazon schedulers inside
+# shared framework packages crash-loop their host process when a target
+# component is disabled. Dedicated packages and native daemons are isolated by
+# the other policy layers instead.

@@ -16,8 +16,16 @@ if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$'
     echo "Invalid firmware version: $VERSION" >&2
     exit 1
 fi
+TARGET="${TATER_FIRMWARE_TARGET:-biscuit}"
+case "$TARGET" in
+    biscuit|checkers) ;;
+    *)
+        echo "Invalid firmware target: $TARGET" >&2
+        exit 1
+        ;;
+esac
 [ -n "$EM_EXTRA_TAGS" ] && VERSION="${VERSION}-${EM_EXTRA_TAGS// /-}"
-echo "Building Tater Echo Firmware $VERSION..."
+echo "Building Tater Echo Firmware $VERSION for $TARGET..."
 
 # Suppress known harmless warnings from vendored C sources:
 #   -Wno-null-dereference: rnnoise/rnn.c assert-style null checks
@@ -35,6 +43,7 @@ BUILD_UNIX=$(date +%s)
 BUILD_CMD="cd /sdk && mkdir -p build && go build \
     -tags \"server ${EM_EXTRA_TAGS}\" \
     -ldflags \"-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${VERSION} \
+               -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=${TARGET} \
                -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=${BUILD_UNIX}\" \
     -o build/server ./cmd/"
 

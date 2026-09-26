@@ -2,7 +2,6 @@ package server
 
 import (
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
@@ -111,21 +110,10 @@ func newVolumeController(ledGetter func() led.Controller) *volumeController {
 // which is quiet enough to read as broken.
 func (vc *volumeController) readFromDevice() int {
 	fallback := (volumeButtonFloor + volumeMax) / 2
-	v, err := mixer.Get(mixer.PlaybackVolume)
+	l, err := mixer.GetPlaybackLevel(volumeMax)
 	if err != nil {
 		log.Printf("Volume read failed: %v", err)
 		return fallback
-	}
-	// The control's own range is 0->175; volumeMax caps us at 127 (unity) —
-	// see the constant. A device that was left above the cap reads back high
-	// here and the next Set() clamps it.
-	l, err := strconv.Atoi(v)
-	if err != nil {
-		log.Printf("Volume parse failed: %v", err)
-		return fallback
-	}
-	if l > volumeMax {
-		l = volumeMax
 	}
 	return l
 }
@@ -153,7 +141,7 @@ func (vc *volumeController) Set(level int, showRing bool) {
 	vc.mu.Unlock()
 
 	// Apply to ALSA
-	if err := mixer.Set(mixer.PlaybackVolume, strconv.Itoa(level)); err != nil {
+	if err := mixer.SetPlaybackLevel(level, volumeMax); err != nil {
 		log.Printf("Volume set failed: %v", err)
 	}
 

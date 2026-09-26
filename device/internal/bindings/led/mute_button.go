@@ -27,6 +27,9 @@ const (
 // and switches the LED off (the process starts unmuted; a crash while
 // muted must not leave a stale red button on restart).
 func InitMuteButtonLED() error {
+	if screenOnly() {
+		return nil
+	}
 	if _, err := os.Stat(muteButtonValuePath); os.IsNotExist(err) {
 		if err := os.WriteFile(gpioExportPath, []byte(muteButtonGPIO), 0644); err != nil {
 			return fmt.Errorf("mute button LED: export gpio%s: %w", muteButtonGPIO, err)
@@ -41,6 +44,9 @@ func InitMuteButtonLED() error {
 // SetMuteButtonLED switches the red LED under the mic-off button.
 // Active-high (see package comment): 1 = on, 0 = off.
 func SetMuteButtonLED(on bool) error {
+	if screenOnly() {
+		return nil
+	}
 	v := []byte("0")
 	if on {
 		v = []byte("1")

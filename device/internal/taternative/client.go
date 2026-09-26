@@ -148,31 +148,42 @@ type OTARequest struct {
 	SizeBytes int64
 }
 
+// CameraSnapshot is one ephemeral frame returned for an explicit Room Vision
+// request. The native client encodes it directly into the correlated result;
+// it is never stored by the firmware.
+type CameraSnapshot struct {
+	Image       []byte
+	ContentType string
+}
+
 // Hooks bind protocol commands to the Echo hardware. Blocking playback and
 // OTA callbacks are launched outside the WebSocket reader.
 type Hooks struct {
-	Connected      func(selector string)
-	Disconnected   func(error)
-	State          func(state string, payload map[string]any)
-	Settings       func(values map[string]any) (map[string]any, error)
-	Status         func() map[string]any
-	ReplyDirection func(angleDegrees float64)
-	PlayWakeSound  func() bool
-	PlayVoice      func(context.Context, PlayRequest) error
-	PlayOverlay    func(context.Context, OverlayRequest, func()) error
-	PlayScene      func(context.Context, SceneRequest) error
-	StopVoice      func()
-	StartMedia     func(context.Context, MediaRequest) error
-	PrepareMedia   func(context.Context, MediaRequest) (MediaPreparation, error)
-	CommitMedia    func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
-	AdjustMedia    func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
-	StopMedia      func(sessionID string)
-	PauseMedia     func(sessionID string)
-	ResumeMedia    func(sessionID string)
-	VolumeMedia    func(sessionID string, percent int)
-	TimerAlarm     func(active bool, timer Timer)
-	SetupReset     func() error
-	OTA            func(context.Context, OTARequest, func(status string, progress int, message string)) error
+	Connected           func(selector string)
+	Disconnected        func(error)
+	State               func(state string, payload map[string]any)
+	Settings            func(values map[string]any) (map[string]any, error)
+	Status              func() map[string]any
+	ReplyDirection      func(angleDegrees float64)
+	PlayWakeSound       func() bool
+	PlayVoice           func(context.Context, PlayRequest) error
+	PlayOverlay         func(context.Context, OverlayRequest, func()) error
+	PlayScene           func(context.Context, SceneRequest) error
+	StopVoice           func()
+	StartMedia          func(context.Context, MediaRequest) error
+	PrepareMedia        func(context.Context, MediaRequest) (MediaPreparation, error)
+	CommitMedia         func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
+	AdjustMedia         func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
+	StopMedia           func(sessionID string)
+	PauseMedia          func(sessionID string)
+	ResumeMedia         func(sessionID string)
+	VolumeMedia         func(sessionID string, percent int)
+	TimerAlarm          func(active bool, timer Timer)
+	DisplayWeather      func(payload map[string]any)
+	DisplayNotification func(payload map[string]any)
+	CameraSnapshot      func(context.Context) (CameraSnapshot, error)
+	SetupReset          func() error
+	OTA                 func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
 type outbound struct {
@@ -354,12 +365,14 @@ func CapabilitiesForTarget(target string) map[string]any {
 	capabilities := DefaultCapabilities()
 	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
 		capabilities["led_ring"] = false
-		capabilities["ota"] = false
+		capabilities["ota"] = true
 		capabilities["screen"] = true
 		capabilities["touchscreen"] = true
 		capabilities["screen_protocol"] = 1
-		capabilities["ble_advertisements"] = false
-		delete(capabilities, "ble_advertisements_version")
+		capabilities["screen_weather"] = true
+		capabilities["screen_notifications"] = true
+		capabilities["camera_snapshot"] = true
+		capabilities["camera_snapshot_version"] = 1
 	}
 	return capabilities
 }

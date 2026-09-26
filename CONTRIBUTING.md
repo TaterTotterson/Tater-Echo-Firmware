@@ -89,7 +89,8 @@ cross-compilation does not produce a binary that runs on the Echo.
 git submodule update --init          # GoTinyAlsa (wilbowes fork, carries a leak fix)
 cd device
 docker build -t echomuse-compiler compiler/
-./compile.sh                         # output: build/server
+./compile.sh                                      # Biscuit → build/server
+TATER_FIRMWARE_TARGET=checkers ./compile.sh       # Checkers → build/server
 ```
 
 The controller runs from source with Python 3.12

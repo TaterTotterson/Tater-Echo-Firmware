@@ -18,6 +18,16 @@ func (c *Client) handle(message Envelope) {
 		return
 	}
 	switch message.Type {
+	case "display.weather":
+		if hook := c.hooks.DisplayWeather; hook != nil {
+			hook(copyMap(payload))
+		}
+	case "display.notification":
+		if hook := c.hooks.DisplayNotification; hook != nil {
+			hook(copyMap(payload))
+		}
+	case "camera.snapshot":
+		go c.captureCameraSnapshot(message.ID)
 	case "settings":
 		applied := payload
 		result := map[string]any{"ok": true}
@@ -42,23 +52,28 @@ func (c *Client) handle(message Envelope) {
 		c.handleWakeVerificationResult(payload)
 	case "voice.event":
 		event := strings.ToUpper(stringValue(payload["event"]))
+		statePayload := voiceEventStatePayload(payload, event)
 		switch event {
 		case "STT_VAD_END", "STT_END":
 			c.stopVoiceCapture()
-			c.setState("thinking", payload)
+			c.setState("thinking", statePayload)
 		case "INTENT_START":
-			c.setState("thinking", payload)
+			c.setState("thinking", statePayload)
 		case "INTENT_END":
 			data, _ := payload["data"].(map[string]any)
 			c.setPendingReopen(
 				boolValue(data["continue_conversation"]),
 				stringValue(data["conversation_id"]),
 			)
-			c.setState("thinking", payload)
+			c.setState("thinking", statePayload)
 		case "TOOL_CALL_START":
-			c.setState("tool_call", payload)
+			c.setState("tool_call", statePayload)
 		case "TTS_START", "TTS_END":
-			c.setState("speaking", payload)
+			if toolVisualPayload(statePayload) {
+				c.setState("tool_call", statePayload)
+			} else {
+				c.setState("speaking", statePayload)
+			}
 		case "RUN_END":
 			// playback.finished completes the old run just before a continued
 			// voice.start opens the next one. A late RUN_END from that old run
@@ -75,7 +90,7 @@ func (c *Client) handle(message Envelope) {
 		case "ERROR":
 			c.stopVoiceCapture()
 			c.setPendingReopen(false, "")
-			c.setState("error", payload)
+			c.setState("error", statePayload)
 		}
 	case "play.url":
 		req := PlayRequest{
@@ -299,6 +314,28 @@ func (c *Client) handle(message Envelope) {
 	case "error":
 		log.Printf("[tater-native] server error: %s", stringValue(payload["error"]))
 	}
+}
+
+// voiceEventStatePayload flattens the versioned voice.event data object for
+// local state consumers. Tater sends tool identity and its spoken progress
+// line inside data; retaining only the envelope made screen targets lose both.
+func voiceEventStatePayload(payload map[string]any, event string) map[string]any {
+	statePayload := copyMap(payload)
+	if data, ok := payload["data"].(map[string]any); ok {
+		for key, value := range data {
+			statePayload[key] = value
+		}
+	}
+	statePayload["event"] = event
+	return statePayload
+}
+
+func toolVisualPayload(payload map[string]any) bool {
+	ttsKind := strings.ToLower(strings.TrimSpace(stringValue(payload["tts_kind"])))
+	visualMode := strings.ToLower(strings.TrimSpace(stringValue(payload["visual_mode"])))
+	stateAfter := strings.ToLower(strings.TrimSpace(stringValue(payload["state_after"])))
+	return ttsKind == "tool" || ttsKind == "tool_progress" ||
+		visualMode == "tool_call" || stateAfter == "tool_call"
 }
 
 func normalizedMediaChannel(value string) string {

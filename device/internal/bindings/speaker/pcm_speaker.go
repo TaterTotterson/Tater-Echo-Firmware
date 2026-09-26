@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,7 @@ var silencePeriod = make([]byte, periodBytes)
 
 type PcmSpeaker struct {
 	session *tinyalsa.AudioSession
+	target  string
 	stopCh  chan struct{}
 	// jackInserted is the plug position last applied by SetJackRouting, and
 	// jackKnown says whether one has been applied at all. The reconcile loop
@@ -149,9 +151,17 @@ func (p *PcmSpeaker) OnStreamStats(cb func(StreamStats)) {
 }
 
 func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeaker, error) {
+	return NewPcmSpeakerForTarget("biscuit", echoTap, levelTap)
+}
+
+// NewPcmSpeakerForTarget opens the measured playback endpoint and applies
+// board-specific codec/amp semantics. Both current targets use pcm23p, but
+// their codecs and external-amplifier polarity are different.
+func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeaker, error) {
 	s := &PcmSpeaker{
 		stopCh:   make(chan struct{}),
 		deadCh:   make(chan struct{}),
+		target:   target,
 		echoTap:  echoTap,
 		levelTap: levelTap,
 		chain:    outchain.New(48000),
@@ -175,7 +185,9 @@ func (p *PcmSpeaker) Init() error {
 	// unmute must come last. The old order (amp on → unmute → open PCM)
 	// unmuted a floating DAC and then hit it with the stream-open
 	// transient — the "click" on every service start.
-	exec.Command("stop", "mixer").Run()
+	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+		exec.Command("stop", "mixer").Run()
+	}
 	// Android's media stack takes the speaker for itself when a headphone
 	// plug is present at boot, and ALSA parks a blocking open behind it with
 	// no timeout — stranding the whole device, since everything else in
@@ -183,14 +195,16 @@ func (p *PcmSpeaker) Init() error {
 	// takeover as `stop mixer` above and `stop smarthomewifid` in main: on a
 	// device where EchoMuse drives the codec directly, mediaserver has no
 	// work to do and is only ever in the way.
-	exec.Command("stop", "media").Run()
+	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+		exec.Command("stop", "media").Run()
+	}
 	waitForFreePcm(cardNr, deviceNr, pcmFreeTimeout)
 	// Connect the DAC to the output mixer before opening the stream: DAPM
 	// decides what to power at stream open, and an unrouted DAC is powered
 	// down, which presents as a clean "voice stream complete, underruns=0"
 	// into silence. See the codec package.
-	codec.EnsureRoutes()
-	mixer.Set(mixer.PlaybackVolume, "0") // mute before touching amp or stream
+	codec.EnsureRoutes(p.target)
+	mixer.SetPlaybackLevel(0, 127) // mute before touching amp or stream
 
 	device := tinyalsa.NewDevice(cardNr, deviceNr, pcm.Config{
 		Channels:         2,
@@ -211,10 +225,10 @@ func (p *PcmSpeaker) Init() error {
 
 	go p.silenceLoop()
 
-	time.Sleep(100 * time.Millisecond)     // silence reaches the DAC (~2 periods)
-	mixer.Set(mixer.SpeakerAmp, "On")      // enable amp onto a clocked, silent DAC
-	time.Sleep(50 * time.Millisecond)      // let amp settle
-	mixer.Set(mixer.PlaybackVolume, "100") // unmute
+	time.Sleep(100 * time.Millisecond) // silence reaches the DAC (~2 periods)
+	mixer.SetSpeakerEnabled(true)      // enable amp onto a clocked, silent DAC
+	time.Sleep(50 * time.Millisecond)  // let amp settle
+	mixer.SetPlaybackLevel(100, 127)   // unmute
 
 	log.Println("PcmSpeaker initialised — silence stream running")
 	return nil
@@ -281,6 +295,9 @@ func waitForFreePcm(card, device int, timeout time.Duration) {
 //     until someone unplugged and replugged — which is exactly why replugging
 //     was the folk remedy. It manufactures the edge the boot never had.
 func (p *PcmSpeaker) SetJackRouting(inserted bool) {
+	if strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+		return
+	}
 	p.jackMu.Lock()
 	p.jackInserted = inserted
 	p.jackKnown = true
@@ -316,6 +333,9 @@ const JackReconcileInterval = 30 * time.Second
 // jack.Watch has run there is no desired state, and guessing one would fight
 // whatever Init established.
 func (p *PcmSpeaker) ReconcileJackRouting() int {
+	if strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+		return 0
+	}
 	p.jackMu.Lock()
 	inserted, known := p.jackInserted, p.jackKnown
 	p.jackMu.Unlock()
@@ -343,6 +363,9 @@ func (p *PcmSpeaker) ReconcileJackRouting() int {
 // Runs regardless of plug position: the HAL's rewrite is not specific to the
 // jack, and a gain left at the floor is just as wrong for the internal driver.
 func (p *PcmSpeaker) WatchJackRouting(ctx context.Context) {
+	if strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+		return
+	}
 	t := time.NewTicker(JackReconcileInterval)
 	defer t.Stop()
 	var corrected int
@@ -689,8 +712,8 @@ func (p *PcmSpeaker) FlushMusic() { p.music.flush() }
 // amp-off after every server exit as a belt-and-braces for paths where
 // this never runs (SIGKILL, panic).
 func (p *PcmSpeaker) Close() {
-	mixer.Set(mixer.PlaybackVolume, "0") // mute
-	mixer.Set(mixer.SpeakerAmp, "Off")   // amp off
+	mixer.SetPlaybackLevel(0, 127) // mute
+	mixer.SetSpeakerEnabled(false) // amp off
 	close(p.stopCh)
 	p.session.Close()
 	log.Println("PcmSpeaker closed — output muted, amp off")
