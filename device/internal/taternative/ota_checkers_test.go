@@ -136,13 +136,45 @@ func TestCheckersOTAStagesNativeAndAPKAsOneRollbackGeneration(t *testing.T) {
 	commandMu.Lock()
 	joined := strings.Join(commands, "\n")
 	commandMu.Unlock()
-	if !strings.Contains(joined, "pm install -r -d -g "+filepath.Join(stateDir, "screen.apk")) {
+	if !strings.Contains(joined, checkersAndroidShell+" "+checkersPackageManager+
+		" install -r -d -g "+filepath.Join(stateDir, "screen.apk")) {
 		t.Fatalf("APK install commands = %q", joined)
 	}
 	select {
 	case <-restarted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("coordinated update did not request restart")
+	}
+}
+
+func TestCheckersPackageManagerWrapperAlwaysRunsThroughAndroidShell(t *testing.T) {
+	installer := NewOTAInstallerForTarget("checkers")
+	var commands []string
+	installer.RunCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		if len(args) >= 2 && args[1] == "path" {
+			return []byte("package:/data/app/com.tatertotterson.show/base.apk\n"), nil
+		}
+		return []byte("Success\n"), nil
+	}
+	path, err := installer.currentAPK(context.Background(), checkersPackage)
+	if err != nil || path != "/data/app/com.tatertotterson.show/base.apk" {
+		t.Fatalf("current APK = %q, %v", path, err)
+	}
+	installer.restoreCheckersAPK(context.Background(), "/data/local/etc/tater/ota/rollback.apk")
+
+	want := []string{
+		checkersAndroidShell + " " + checkersPackageManager + " path " + checkersPackage,
+		checkersAndroidShell + " " + checkersPackageManager +
+			" install -r -d -g /data/local/etc/tater/ota/rollback.apk",
+	}
+	if strings.Join(commands, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("package manager commands = %q, want %q", commands, want)
+	}
+	for _, command := range commands {
+		if strings.HasPrefix(command, checkersPackageManager+" ") || strings.HasPrefix(command, "pm ") {
+			t.Fatalf("package manager executed directly: %q", command)
+		}
 	}
 }
 

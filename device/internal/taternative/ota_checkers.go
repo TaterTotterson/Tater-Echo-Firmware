@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	checkersPackage  = "com.tatertotterson.show"
-	checkersOTAState = "/data/local/etc/tater/ota"
+	checkersPackage        = "com.tatertotterson.show"
+	checkersOTAState       = "/data/local/etc/tater/ota"
+	checkersAndroidShell   = "/system/bin/sh"
+	checkersPackageManager = "/system/bin/pm"
 )
 
 var checkersVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
@@ -136,7 +138,7 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 	if report != nil {
 		report("installing", 96, "Installing the coordinated Tater Show screen")
 	}
-	if _, err := i.run(ctx, "pm", "install", "-r", "-d", "-g", apkStaged); err != nil {
+	if _, err := i.runPM(ctx, "install", "-r", "-d", "-g", apkStaged); err != nil {
 		_ = os.Remove(pendingPath)
 		return fmt.Errorf("install Tater Show APK: %w", err)
 	}
@@ -320,7 +322,7 @@ func (i *OTAInstaller) currentAPK(ctx context.Context, packageName string) (stri
 	if i.InstalledAPKPath != nil {
 		return i.InstalledAPKPath(ctx, packageName)
 	}
-	output, err := i.run(ctx, "pm", "path", packageName)
+	output, err := i.runPM(ctx, "path", packageName)
 	if err != nil {
 		return "", fmt.Errorf("locate installed Tater Show APK: %w", err)
 	}
@@ -342,8 +344,17 @@ func (i *OTAInstaller) run(ctx context.Context, name string, args ...string) ([]
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
+func (i *OTAInstaller) runPM(ctx context.Context, args ...string) ([]byte, error) {
+	// Fire OS ships /system/bin/pm as a shell wrapper without a kernel-readable
+	// interpreter header. Go's os/exec therefore returns ENOEXEC when it is
+	// launched directly. Explicitly run the wrapper through Android's shell for
+	// path lookup, coordinated installation, and rollback.
+	commandArgs := append([]string{checkersPackageManager}, args...)
+	return i.run(ctx, checkersAndroidShell, commandArgs...)
+}
+
 func (i *OTAInstaller) restoreCheckersAPK(ctx context.Context, path string) {
-	_, _ = i.run(ctx, "pm", "install", "-r", "-d", "-g", path)
+	_, _ = i.runPM(ctx, "install", "-r", "-d", "-g", path)
 }
 
 func copyOTAFile(source, destination string, mode os.FileMode) error {
