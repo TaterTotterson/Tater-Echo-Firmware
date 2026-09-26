@@ -108,6 +108,13 @@ private/LAN destinations. Tater's native daemon and screen app retain normal
 Internet access, so GitHub firmware OTA and public media/wake-sound downloads
 continue to work.
 
+Fire OS may enqueue Amazon OTA or security payloads in Android's shared
+Download Provider before Package Manager quarantine finishes. Tater removes
+only provider rows whose recorded requester is an Amazon package, terminates
+those transfers, and keeps the provider UID LAN-only from early boot. This
+does not affect Tater's root-owned OTA transport, its screen app, or downloads
+requested by non-Amazon applications.
+
 Amazon job components embedded in either the core `amazon.fireos` resource
 package or Android Settings must remain registered. This Fire OS build schedules
 them without handling a missing/disabled target: framework jobs crash

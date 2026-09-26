@@ -173,6 +173,7 @@ class CheckersPrivacyTests(unittest.TestCase):
         script = (MAGISK / "privacy.sh").read_text()
         apply_case = script[script.index('case "${1:-apply}" in'):]
         self.assertLess(apply_case.index("refresh_firewall"), apply_case.index("apply_packages"))
+        self.assertLess(apply_case.index("cancel_amazon_downloads"), apply_case.index("apply_packages"))
         refresh = script[script.index("refresh_firewall() {"):script.index('case "${1:-apply}" in')]
         self.assertLess(refresh.index("snapshot_package_uids"), refresh.index("apply_cached_firewall"))
         snapshot = script[script.index("snapshot_package_uids() {"):script.index("firewall_packages() {")]
@@ -182,6 +183,17 @@ class CheckersPrivacyTests(unittest.TestCase):
         self.assertIn("firewall_is_live", script)
         self.assertIn('apply_cached_firewall force', script)
         self.assertIn('privacy_log "firewall already active', script)
+
+    def test_amazon_downloads_are_cancelled_without_blocking_tater_ota(self):
+        script = (MAGISK / "privacy.sh").read_text()
+        self.assertIn("cancel_amazon_downloads", script)
+        self.assertIn("content://downloads/all_downloads", script)
+        self.assertIn("--projection _id:notificationpackage", script)
+        self.assertIn("com.amazon.*)", script)
+        self.assertIn('am force-stop com.android.providers.downloads', script)
+        self.assertIn("com.android.providers.downloads", script)
+        self.assertIn("Tater's", script)
+        self.assertIn("native OTA transport", script)
 
     def test_early_boot_firewall_uses_installer_validated_cache(self):
         early = (MAGISK / "post-fs-data.sh").read_text()

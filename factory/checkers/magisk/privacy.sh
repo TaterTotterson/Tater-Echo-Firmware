@@ -13,6 +13,7 @@ DISABLED_COMPONENTS_BY_TATER=$STATE_DIR/disabled-components-by-tater.txt
 INSTALLED_SNAPSHOT=$STATE_DIR/installed-packages.tmp
 DISABLED_SNAPSHOT=$STATE_DIR/disabled-packages.tmp
 UID_SNAPSHOT=$STATE_DIR/package-uids.tmp
+AMAZON_DOWNLOAD_SNAPSHOT=$STATE_DIR/amazon-downloads.tmp
 FIREWALL_UIDS=$STATE_DIR/firewall-uids.txt
 FIREWALL_FINGERPRINT=$STATE_DIR/firewall-policy.md5
 INLOC_WAS_RUNNING=$STATE_DIR/inlocservice-was-running
@@ -26,6 +27,56 @@ FIREWALL_REFRESHED=0
 
 privacy_log() {
     echo "$(date +%s) $*" >> "$LOG"
+}
+
+cancel_amazon_downloads() {
+    # Amazon OTA and security clients can enqueue work in Android's shared
+    # DownloadProvider before PackageManager quarantine finishes. Disabling
+    # the requester does not cancel an already-running provider transfer, so
+    # remove only rows whose recorded requester is an Amazon package. Tater's
+    # native OTA transport and ordinary non-Amazon downloads are untouched.
+    command -v content >/dev/null 2>&1 || {
+        privacy_log "amazon-download-cleanup unavailable"
+        return 0
+    }
+    mkdir -p "$STATE_DIR"
+    if ! content query --uri content://downloads/all_downloads \
+            --projection _id:notificationpackage </dev/null \
+            > "$AMAZON_DOWNLOAD_SNAPSHOT" 2>/dev/null; then
+        privacy_log "amazon-download-cleanup query-failed"
+        rm -f "$AMAZON_DOWNLOAD_SNAPSHOT"
+        return 1
+    fi
+    removed=0
+    while IFS= read -r row; do
+        package=${row#*notificationpackage=}
+        package=${package%%,*}
+        case "$package" in
+            com.amazon.*) ;;
+            *) continue ;;
+        esac
+        id=${row#*_id=}
+        id=${id%%,*}
+        case "$id" in
+            ""|*[!0-9]*)
+                privacy_log "amazon-download-cleanup invalid-row"
+                continue
+                ;;
+        esac
+        if content delete --uri content://downloads/all_downloads \
+                --where "_id=$id" </dev/null >/dev/null 2>&1; then
+            removed=$((removed + 1))
+        else
+            privacy_log "amazon-download-cleanup delete-failed id=$id"
+        fi
+    done < "$AMAZON_DOWNLOAD_SNAPSHOT"
+    rm -f "$AMAZON_DOWNLOAD_SNAPSHOT"
+    if [ "$removed" -gt 0 ]; then
+        # Ensure provider workers holding sockets for the deleted rows exit.
+        # Android restarts the provider on demand for future local/Tater use.
+        am force-stop com.android.providers.downloads >/dev/null 2>&1 || true
+    fi
+    privacy_log "amazon-download-cleanup removed=$removed"
 }
 
 snapshot_package_state() {
@@ -128,6 +179,7 @@ restore_packages() {
         done < "$DISABLED_BY_TATER"
     fi
     rm -f "$DISABLED_BY_TATER" "$INSTALLED_SNAPSHOT" "$DISABLED_SNAPSHOT" "$UID_SNAPSHOT" \
+        "$AMAZON_DOWNLOAD_SNAPSHOT" \
         "$FIREWALL_UIDS" "$FIREWALL_FINGERPRINT" \
         "$STATE_DIR/firewall-uids-v4.txt" "$STATE_DIR/firewall-uids-v6.txt"
     privacy_log "package-policy restored count=$restored"
@@ -249,6 +301,7 @@ com.amazon.tcomm.jackson
 com.amazon.webview
 com.amazon.webview.chromium
 com.amazon.wifi.sync
+com.android.providers.downloads
 EOF
 }
 
@@ -398,6 +451,7 @@ case "${1:-apply}" in
         # setup/connecting UI and native service remain responsive throughout.
         status=0
         refresh_firewall || status=1
+        cancel_amazon_downloads || status=1
         apply_native_services
         apply_packages
         apply_components
