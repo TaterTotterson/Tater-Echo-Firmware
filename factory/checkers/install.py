@@ -271,7 +271,9 @@ def install_native(adb: Adb, root: RootShell) -> None:
         "/data/local/etc/tater/ota/module.zip; "
         "rm -rf /data/adb/modules/tater_checkers.ota-new "
         "/data/adb/modules/tater_checkers.ota-rollback "
-        "/data/adb/modules/tater_checkers.ota-failed")
+        "/data/adb/modules/tater_checkers.ota-failed "
+        "/data/local/etc/tater/ota/module-rollback "
+        "/data/local/etc/tater/ota/module-failed")
     for name in mapping:
         source = PAYLOAD / name
         if not source.is_file():
@@ -326,7 +328,9 @@ def uninstall(adb: Adb, root: RootShell) -> None:
         "rm -rf /data/adb/modules/tater_checkers "
         "/data/adb/modules/tater_checkers.ota-new "
         "/data/adb/modules/tater_checkers.ota-rollback "
-        "/data/adb/modules/tater_checkers.ota-failed; "
+        "/data/adb/modules/tater_checkers.ota-failed "
+        "/data/local/etc/tater/ota/module-rollback "
+        "/data/local/etc/tater/ota/module-failed; "
         "rm -f /data/local/etc/tater/ota/module.zip; sync")
     adb.run("uninstall", PACKAGE, check=False)
     print("Tater Show and its boot supervisor were removed; Amazon OOBE was re-enabled.")

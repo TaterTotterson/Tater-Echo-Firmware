@@ -14,8 +14,9 @@ OTA_PENDING=$OTA_DIR/pending.env
 OTA_HEALTHY=$OTA_DIR/healthy
 OTA_MODULE=$OTA_DIR/module.zip
 MODULE_DIR=/data/adb/modules/tater_checkers
-MODULE_ROLLBACK=/data/adb/modules/tater_checkers.ota-rollback
-MODULE_FAILED=/data/adb/modules/tater_checkers.ota-failed
+MODULE_ROLLBACK=$OTA_DIR/module-rollback
+MODULE_FAILED=$OTA_DIR/module-failed
+LEGACY_MODULE_ROLLBACK=/data/adb/modules/tater_checkers.ota-rollback
 SUPERVISOR_PID=$LOG_DIR/checkers-service.pid
 SCREEN_RECOVERY_STATE=$LOG_DIR/screen-recovery-count
 SCREEN_WATCHDOG_PID=
@@ -210,6 +211,10 @@ rollback_pending_ota() {
 # but the old script does not know to remove its rollback material.
 if [ ! -f "$OTA_PENDING" ]; then
     rm -rf "$MODULE_DIR.ota-new" "$MODULE_ROLLBACK" "$MODULE_FAILED"
+    # v0.2.3 briefly stored its recovery copy in Magisk's scan directory.
+    # That makes Magisk boot it as a second module, so remove the stale copy
+    # once no coordinated generation depends on it.
+    rm -rf "$LEGACY_MODULE_ROLLBACK" /data/adb/modules/tater_checkers.ota-failed
     rm -f "$OTA_MODULE"
 fi
 

@@ -27,7 +27,7 @@ const (
 	checkersModuleAsset      = "assets/tater-checkers-module.zip"
 	checkersMaxModuleBytes   = 8 * 1024 * 1024
 	checkersModuleStageName  = "module.zip"
-	checkersModuleBackupName = "tater_checkers.ota-rollback"
+	checkersModuleBackupName = "module-rollback"
 )
 
 var checkersVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
@@ -161,7 +161,11 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 	if moduleDir == "" {
 		moduleDir = checkersModuleDir
 	}
-	moduleRollback := filepath.Join(filepath.Dir(moduleDir), checkersModuleBackupName)
+	// Never keep the preserved module under /data/adb/modules. Magisk treats
+	// every directory there as a boot module, regardless of its suffix, which
+	// would start the rollback service beside the new service after reboot and
+	// make both native daemons contend for the Checkers microphone.
+	moduleRollback := filepath.Join(stateDir, checkersModuleBackupName)
 
 	pending := strings.Join([]string{
 		"version=" + manifest.Version,
@@ -538,18 +542,21 @@ func checkersModuleVersionMatches(moduleDir, version string) bool {
 	return false
 }
 
-func checkersModulePaths(moduleDir string) (string, string) {
-	return moduleDir + ".ota-new", filepath.Join(filepath.Dir(moduleDir), checkersModuleBackupName)
+func checkersModulePaths(moduleDir, stateDir string) (string, string) {
+	return moduleDir + ".ota-new", filepath.Join(stateDir, checkersModuleBackupName)
 }
 
-func installCheckersModuleGeneration(archivePath, moduleDir, version string) (string, error) {
+func installCheckersModuleGeneration(archivePath, moduleDir, stateDir, version string) (string, error) {
 	if !filepath.IsAbs(moduleDir) || filepath.Clean(moduleDir) == string(filepath.Separator) {
 		return "", errors.New("Checkers boot module destination is unsafe")
+	}
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) == string(filepath.Separator) {
+		return "", errors.New("Checkers OTA state destination is unsafe")
 	}
 	if err := verifyCheckersModuleArchive(archivePath, version); err != nil {
 		return "", err
 	}
-	next, rollback := checkersModulePaths(moduleDir)
+	next, rollback := checkersModulePaths(moduleDir, stateDir)
 	if err := os.RemoveAll(next); err != nil {
 		return "", fmt.Errorf("clear staged Checkers boot module: %w", err)
 	}
@@ -693,7 +700,7 @@ func MarkCheckersOTAHealthy(version, appVersion string) (bool, bool, error) {
 		}
 	}
 	if stagedModule != "" {
-		_, existingRollback := checkersModulePaths(moduleDir)
+		_, existingRollback := checkersModulePaths(moduleDir, stateDir)
 		if checkersModuleVersionMatches(moduleDir, wanted) {
 			if _, statErr := os.Stat(existingRollback); statErr == nil {
 				rollback = existingRollback
@@ -703,7 +710,7 @@ func MarkCheckersOTAHealthy(version, appVersion string) (bool, bool, error) {
 		}
 	}
 	if stagedModule != "" && rollback == "" {
-		rollback, err = installCheckersModuleGeneration(stagedModule, moduleDir, wanted)
+		rollback, err = installCheckersModuleGeneration(stagedModule, moduleDir, stateDir, wanted)
 		if err != nil {
 			return false, false, err
 		}

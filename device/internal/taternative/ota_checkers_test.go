@@ -299,7 +299,7 @@ func TestMarkCheckersOTAHealthyInstallsStagedModuleAndRequestsReboot(t *testing.
 	if err := os.WriteFile(staged, module, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rollback := filepath.Join(filepath.Dir(moduleDir), checkersModuleBackupName)
+	rollback := filepath.Join(stateDir, checkersModuleBackupName)
 	pending := "version=v0.2.3\nstaged_module=" + staged + "\nrollback_module=" + rollback + "\n"
 	if err := os.WriteFile(filepath.Join(stateDir, "pending.env"), []byte(pending), 0o600); err != nil {
 		t.Fatal(err)
@@ -317,6 +317,20 @@ func TestMarkCheckersOTAHealthyInstallsStagedModuleAndRequestsReboot(t *testing.
 	ok, reboot, err = MarkCheckersOTAHealthy("v0.2.3", "v0.2.3")
 	if err != nil || !ok || reboot {
 		t.Fatalf("post-reboot module health = %v, reboot=%v, %v", ok, reboot, err)
+	}
+}
+
+func TestCheckersModuleRollbackLivesOutsideMagiskScanDirectory(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "data", "adb", "modules", "tater_checkers")
+	stateDir := filepath.Join(root, "data", "local", "etc", "tater", "ota")
+	_, rollback := checkersModulePaths(moduleDir, stateDir)
+	modulesDir := filepath.Dir(moduleDir) + string(filepath.Separator)
+	if strings.HasPrefix(filepath.Clean(rollback)+string(filepath.Separator), modulesDir) {
+		t.Fatalf("rollback %q is inside Magisk module scan path %q", rollback, modulesDir)
+	}
+	if rollback != filepath.Join(stateDir, checkersModuleBackupName) {
+		t.Fatalf("rollback = %q, want OTA state storage", rollback)
 	}
 }
 
