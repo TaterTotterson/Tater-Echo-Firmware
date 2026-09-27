@@ -7,119 +7,35 @@ on:
   workflow_dispatch:
 
 jobs:
-  controller-tests:
-    name: Controller unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      # The tests cover pure-logic modules only — numpy/scipy for the EQ
-      # math, nothing that pulls in openwakeword/onnxruntime (which would
-      # cost minutes of install for zero coverage).
-      - name: Install test dependencies
-        # pyyaml is for the add-on config parity tests (test_channels.py):
-        # config.yaml is genuinely YAML and hand-parsing it to compare
-        # options and schema would be fragile in exactly the way that test
-        # exists to prevent. Pure Python and dependency-free — nothing like
-        # pulling openwakeword or aiohttp in here, which is what the
-        # minimal-test-env rule is actually about.
-        run: pip install pytest numpy scipy pyyaml
-      - name: Run pytest
-        working-directory: controller
-        run: python -m pytest tests/ -v
-
-  controller-lint:
-    name: Controller lint (undefined names)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Install pyflakes
-        run: pip install pyflakes
-      # Why this job exists, in one sentence: `time.monotonic()` was added to
-      # em_controller.py, which does not import time, and the resulting
-      # NameError killed the wake word listener on the first detection --
-      # fleet-wide, in production, on a line no test could reach because the
-      # wake loop needs openwakeword and a real utterance to execute.
-      #
-      # pyflakes finds that class of bug in milliseconds without importing
-      # anything, which is what makes it worth a job: the controller's heavy
-      # modules (em_controller, em_api, em_esphome) are deliberately NOT
-      # imported by the test suite, so every rarely-taken branch in them is
-      # untested by construction. Undefined names are the failure mode that
-      # punishes hardest -- silent until executed, then fatal.
-      #
-      # Scoped to undefined names ONLY, on purpose. The codebase has pre-existing
-      # unused-variable and f-string warnings that are not worth a churn commit,
-      # and a lint job that fails for style would get ignored or removed.
-      - name: Check for undefined names
-        working-directory: controller
-        run: |
-          out=$(python -m pyflakes em_*.py tools/*.py tests/*.py esphome/*.py 2>&1 \
-                | grep -i "undefined name" || true)
-          if [ -n "$out" ]; then
-            echo "$out"
-            echo "::error::pyflakes found undefined name(s) -- see above"
-            exit 1
-          fi
-          echo "No undefined names."
-
-  dashboard-tests:
-    name: Dashboard logic tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # No setup-node step: ubuntu-latest ships a node, and this test needs
-      # nothing beyond the standard library. The dashboard is otherwise
-      # untested by construction — it compiles to a single classic script
-      # with no module boundary to import across — so this covers the pure
-      # logic that decides what the wizard will and will not attempt.
-      - name: Run dashboard tests
-        run: |
-          node controller/tests/wifi_scan.test.mjs
-          node controller/tests/boot_target.test.mjs
-          node controller/tests/sysread.test.mjs
-          node controller/tests/pm_verdict.test.mjs
-          node controller/tests/wizard_log_class.test.mjs
-          node controller/tests/web_usb_blocked.test.mjs
-          node controller/tests/emos_md5.test.mjs
-          node controller/tests/boot_image_length.test.mjs
-          node controller/tests/number_field.test.mjs
-          node controller/tests/unlock_verdict.test.mjs
-          node controller/tests/slot_choice.test.mjs
-          node controller/tests/server_binary.test.mjs
-          node controller/tests/duplicate_device.test.mjs
-          node controller/tests/our_boot_image.test.mjs
-          node controller/tests/device_line.test.mjs
-          node controller/tests/wipe_verdict.test.mjs
-          node controller/tests/wifi_nvram.test.mjs
-          node controller/tests/kernel_label.test.mjs
-          node controller/tests/wifi_ssid.test.mjs
-          node controller/tests/wake_sensitivity.test.mjs
   device-tests:
-    name: Device Go tests
+    name: Firmware and installer tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: true  # GoTinyAlsa replace directive in device/go.mod
+          submodules: true
       - uses: actions/setup-go@v7
         with:
           go-version-file: device/go.mod
           cache-dependency-path: device/go.sum
-      # cmd/ imports the hardware bindings, which carry //go:build server
-      # (device builds pass -tags server) — listing cmd on a host platform
-      # fails package setup. Wildcards skip tag-excluded packages, so
-      # internal/... + pkg/... covers every host-testable package.
-      - name: Run go test
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run Go tests
         working-directory: device
         run: go test ./internal/... ./pkg/...
-      - name: Test factory installer safety logic
-        run: python3 -m unittest factory.biscuit.test_install factory.checkers.test_install factory.checkers.test_privacy tools.test_checkers_module tools.test_merge_release_manifests
+      - name: Run factory and release tests
+        run: |
+          python3 -m unittest \
+            factory.biscuit.test_install \
+            factory.checkers.test_install \
+            factory.checkers.test_privacy \
+            tools.test_checkers_module \
+            tools.test_merge_release_manifests
+      - name: Verify the factory emOS packer
+        run: |
+          python3 -m pip install pytest
+          python3 -m pytest -q factory/biscuit/test_emos_build.py
       - name: Test native microWakeWord runtime
         working-directory: device
         run: ./test_microwakeword_runtime.sh
@@ -142,508 +58,85 @@ jobs:
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
       - name: Embed Checkers boot module
         run: python3 tools/checkers_module.py --version v0.0.0-dev --output screen/app/src/main/assets/tater-checkers-module.zip
-      - name: Build APK
+      - name: Test, lint, and build
         run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Verify APK archive
         run: unzip -t screen/app/build/outputs/apk/debug/app-debug.apk
 
-  python-deps-audit:
-    name: Python dependency audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Install pip-audit
-        run: pip install pip-audit
-      # This is the FAST check, not the authoritative one. requirements.txt
-      # leaves scipy/tqdm/scikit-learn/requests unpinned and installs
-      # openwakeword separately with --no-deps, so what a user actually runs
-      # is decided at image build time, not here. The published image is the
-      # source of truth and is scanned in security-scan.yml; this job exists
-      # to fail on a PR that adds a known-vulnerable pin, minutes rather than
-      # a release later.
-      #
-      # Report-only for now, deliberately. A dependency audit that goes red
-      # on an advisory with no fix available teaches people to ignore a red
-      # X, which costs more than the job earns. Gate it on FIXABLE findings
-      # once a month of real output shows what the steady state looks like.
-      - name: Audit pinned dependencies
-        working-directory: controller
-        run: |
-          pip-audit -r requirements.txt --desc 2>&1 | tee audit.txt || true
-          if grep -qiE "^(Name|found [1-9])" audit.txt; then
-            echo "::warning::pip-audit reported findings — see the log"
-          fi
-
-  device-vulncheck:
-    name: Device Go vulnerability check
+  firmware-build:
+    name: ARM firmware and emOS builds
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: device/go.mod
-          cache-dependency-path: device/go.sum
-      - name: Install govulncheck
-        # GOTOOLCHAIN=auto for the INSTALL only, so Go fetches whatever
-        # toolchain the tool needs to compile itself. golang.org/x/vuln raised
-        # its minimum to Go 1.25 at v1.2.0, and this runner is pinned to the
-        # firmware's 1.24.0 via device/go.mod — so `@latest` started failing
-        # on every run, on a check whose scan step already carries `|| true`
-        # and cannot fail the job. Pure noise: red emails for a check that
-        # was not reporting anything.
-        #
-        # Not a version pin: v1.1.4 is the last release that builds under
-        # 1.24, which would freeze the scanner on 2024 and re-break the day
-        # its minimum moves again. This survives the next bump.
-        #
-        # Scoped to this step deliberately. The scan below must keep running
-        # under the module's own Go, or it analyses a standard library the
-        # firmware does not ship.
-        run: GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
-      # govulncheck reports only vulnerabilities on REACHABLE call paths, so
-      # it is low-noise enough to read every time — unlike a plain dependency
-      # diff, most of which never executes.
-      #
-      # Two blind spots worth stating rather than discovering later: the
-      # vendored SpeexDSP C in internal/aec/ has no package metadata and is
-      # invisible to every scanner we could run, and ONNX Runtime is dlopen'd
-      # at runtime rather than linked, so it is not in this module graph at
-      # all — its version is pinned by AAR sha256 in the asset path instead.
-      #
-      # Same package scope as go vet: cmd/ carries //go:build server and
-      # fails package setup on a host platform.
-      - name: Run govulncheck
+      - name: Build pinned compiler image
+        run: docker build -t tater-echo-compiler device/compiler/
+      - name: Build Biscuit firmware
         working-directory: device
-        run: govulncheck ./internal/... ./pkg/... || true
-
-  controller-image:
-    name: Controller image builds
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0  # the diff below needs the base commit
-      # Plain git rather than a paths-filter action: this decides whether a
-      # build runs, so it is not worth a third-party action holding repo
-      # credentials. On push to main there is nothing to diff against and
-      # controller-build.yml builds anyway, so this only ever runs on a PR.
-      - name: Did the image inputs change?
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "not a pull request — controller-build.yml covers main"
-            exit 0
-          fi
-          base="${{ github.event.pull_request.base.sha }}"
-          files=$(git diff --name-only "$base"...HEAD -- \
-                    controller/Dockerfile controller/requirements.txt)
-          if [ -n "$files" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "$files"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "Dockerfile and requirements.txt unchanged"
-          fi
-      - name: Set up Docker Buildx
-        if: steps.changed.outputs.build == 'true'
-        uses: docker/setup-buildx-action@v4
-      # Why this job exists: NOTHING else builds this image on a PR.
-      # controller-build.yml runs on push to main only, and the test jobs
-      # above pin themselves to python-version 3.12 regardless of what the
-      # Dockerfile says — so a base-image or dependency bump arrives with
-      # seven green checks and no evidence behind any of them.
-      #
-      # That is not hypothetical. Dependabot #127 (python:3.12-slim ->
-      # 3.14-slim) was green on every check while speexdsp-ns==0.1.2 has no
-      # wheel past cp312 and onnxruntime==1.20.1 none past cp313, so the
-      # image could not have built at all. The first failure would have been
-      # on main, in the job that publishes.
-      #
-      # Deliberately narrow, because a full image build is minutes:
-      #   - Only when the Dockerfile or requirements.txt actually changed.
-      #     Application code cannot break the build in a way the other jobs
-      #     miss; a missing wheel is exactly what they cannot see.
-      #   - amd64 only. The break this catches is a missing wheel or an apt
-      #     package that moved, both of which show up on either architecture,
-      #     and arm64 under QEMU costs far more than it adds. The release
-      #     path still builds both.
-      #   - No push, no registry login, no GHCR credentials. This answers
-      #     "does it build", nothing more.
-      #
-      # It is a JOB rather than a separate workflow so that it always reports
-      # a result, including when it skips. A workflow-level `paths:` filter
-      # would leave the check simply absent on most PRs, which is the one
-      # state a branch protection rule cannot tell apart from "not finished".
-      - name: Build the controller image
-        if: steps.changed.outputs.build == 'true'
-        uses: docker/build-push-action@v7
-        with:
-          context: controller
-          push: false
-          load: true
-          tags: echomuse-controller:pr
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      # A wheel's CPU baseline is invisible to every other check, because
-      # every runner is newer than the CPUs it excludes. numpy 2.4 needed
-      # x86-64-v2 and the add-on would not start on Proxmox's kvm64 (#496)
-      # while this job was green. The trigger above is exactly right for it:
-      # only a Dockerfile or requirements change can move a baseline.
-      - name: CPU baseline (kvm64)
-        if: steps.changed.outputs.build == 'true'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-user-static
-          controller/tools/cpu_baseline_check.sh echomuse-controller:pr
-
-
-  controller-imports:
-    name: Controller modules import and the controller boots
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # WHY THIS EXISTS: the two largest files in the controller have no
-      # test that so much as imports them. controller/CLAUDE.md records the
-      # constraint honestly — the suite cannot import em_controller or
-      # em_esphome, which is why em_linkauth, em_runbarrier, em_barge and
-      # em_turnclock were split out as pure modules with real coverage.
-      # That split is right and should continue. What it leaves behind is a
-      # blind spot: em_controller.py is ~4000 lines that nothing in CI ever
-      # parses beyond `pyflakes`, and em_api.py is not far behind.
-      #
-      # PR #280 walked straight into it — the control-plane dispatch chain
-      # re-indented inside a try/except, +498/-389, in exactly that file.
-      # A misplaced `except` would have been syntactically valid Python
-      # with the wrong control flow, every test still green, and the first
-      # symptom a device dropping its connection in the field. It was
-      # smoke-tested by hand instead, which is not a control.
-      #
-      # NO BUILD. The published image already carries aiohttp, onnxruntime,
-      # numpy and the rest, so the PR's source is mounted OVER it and the
-      # imports run against real dependencies. A pull is seconds where a
-      # build is minutes, and this has to run on every PR to be worth
-      # anything — application code is precisely what it catches.
-      #
-      # The tradeoff, stated so a later failure is not mysterious: a PR that
-      # ADDS a dependency fails here until the image is rebuilt, because
-      # :latest predates it. That is a true signal (a new dependency IS a
-      # deployment change) and the controller-image job above is what
-      # actually verifies such a PR builds. If it becomes noisy, gate this
-      # on requirements.txt being unchanged rather than deleting the job.
-      # The PR's Python is layered ONTO the published image rather than
-      # bind-mounted over /app. static/dashboard.js is gitignored and built
-      # during the image build, so mounting the source tree over /app hides
-      # the compiled bundle — the controller would still boot and serve a
-      # dashboard that 404s its own JavaScript, which is a worse check than
-      # no check. Overlaying only *.py keeps everything the build produced.
-      # PINNED BY DIGEST, for the reason the compiler image is (device/CLAUDE.md):
-      # a floating tag means this job's baseline can move without a PR, so a
-      # red check stops being evidence about the PR that is red. :latest only
-      # advances on a GA release — EA deliberately never moves it — so the
-      # drift is infrequent and therefore easy to miss when it happens.
-      #
-      # Currently 2.20.2. BUMP IT when a GA release changes dependencies:
-      # the symptom is this job failing on an import of something newly added
-      # to requirements.txt, which is a true signal about a stale pin rather
-      # than about the PR. Get the digest with:
-      #
-      #   docker buildx imagetools inspect ghcr.io/wilbowes/echomuse-controller:latest
-      #
-      # Note pinning does NOT reduce the package's pull count — GHCR counts
-      # fetches by digest the same as by tag. This is about reproducibility
-      # only; do not re-litigate it as a stats change.
-      - name: Layer this PR's controller source onto the published image
-        env:
-          BASE: ghcr.io/wilbowes/echomuse-controller@sha256:3df932996b3c9ac6fc583eaf40aba904b9a86bf5e531169515ce49dd0c5216af
-        run: |
-          docker pull "$BASE"
-          printf 'FROM %s\nCOPY controller/*.py /app/\n' "$BASE" \
-            > /tmp/ci-overlay.Dockerfile
-          docker build -f /tmp/ci-overlay.Dockerfile -t echomuse-controller:ci .
-      # Every module, not a hand-picked list: a new file added to the
-      # controller must import cleanly on the day it lands, and naming them
-      # individually means the next em_*.py is silently exempt.
-      #
-      # em_start is excluded because it is the add-on entrypoint — it reads
-      # /data/options.json and execs the controller, so importing it does
-      # not mean what importing the others means.
-      - name: Import every controller module
-        run: |
-          docker run --rm -w /app --entrypoint python3 \
-            echomuse-controller:ci -c '
-          import importlib, pathlib, sys, traceback
-          mods = sorted(p.stem for p in pathlib.Path(".").glob("*.py"))
-          mods = [m for m in mods if m not in ("em_start",)]
-          print(f"importing {len(mods)} modules")
-          failed = []
-          for m in mods:
-              try:
-                  importlib.import_module(m)
-              except BaseException:
-                  failed.append(m)
-                  print(f"--- {m} ---", file=sys.stderr)
-                  traceback.print_exc()
-          if failed:
-              print("\nFAILED: " + ", ".join(failed), file=sys.stderr)
-              sys.exit(1)
-          print("all modules imported")
-          '
-      # Importing proves the file parses and its module-level code runs.
-      # It does NOT prove the thing starts: the asyncio setup, the mDNS
-      # advertisement, the PKI generation and the ESPHome listeners all
-      # happen after that. Booting to "ready" covers the rest of the path a
-      # user meets first, and a controller that cannot start is the one
-      # failure nobody can work around.
-      - name: Boot the controller and wait for ready
-        run: |
-          mkdir -p /tmp/em-ci-data
-          docker run -d --name em-ci \
-            -e SERVER_IP=127.0.0.1 \
-            -e DB_PATH=/app/data/echomuse.db \
-            -e DEVICE_APPROVAL=strict \
-            -v /tmp/em-ci-data:/app/data \
-            echomuse-controller:ci
-          # 90s: a first start generates the CA and runs every migration on
-          # an empty database, which is the slowest legitimate boot there is.
-          for i in $(seq 1 90); do
-            if docker logs em-ci 2>&1 | grep -q "Controller ready"; then
-              echo "booted in ${i}s"
-              docker logs em-ci
-              # A traceback ANYWHERE in a clean first boot is a fault, even
-              # one something caught — nothing should be recovering from an
-              # error on an empty database with no devices attached.
-              if docker logs em-ci 2>&1 | grep -q "Traceback"; then
-                echo "::error::traceback during a clean first boot"
-                exit 1
-              fi
-              exit 0
-            fi
-            if [ "$(docker inspect -f '{{.State.Status}}' em-ci)" != "running" ]; then
-              echo "::error::controller exited before becoming ready"
-              docker logs em-ci
-              exit 1
-            fi
-            sleep 1
-          done
-          echo "::error::controller did not report ready within 90s"
-          docker logs em-ci
-          exit 1
-      - name: Stop the controller
-        if: always()
-        run: docker rm -f em-ci 2>/dev/null || true
-
-  device-firmware-build:
-    name: Device and emOS builds (pinned compiler)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: true  # GoTinyAlsa replace directive in device/go.mod
-      # THE ONLY JOB THAT EXERCISES THE COMPILER THE FIRMWARE ACTUALLY SHIPS
-      # FROM. Every other Go job here runs on amd64 with GitHub's toolchain,
-      # which device/CLAUDE.md already notes proves nothing about this image:
-      # it carries the Go version and NDK pinned by digest against a 2015
-      # platform we cannot upgrade.
-      #
-      # Added after #276, where a Dependabot bump raised go.mod's `go`
-      # directive past the pinned toolchain's version and left the firmware
-      # unbuildable for four days. Nothing failed, because the image is
-      # otherwise exercised only by compile.sh and release.yml — so the next
-      # thing to notice would have been a release tag failing at the build
-      # step, which is the worst moment to find out.
-      #
-      # It builds only; it does not verify the binary runs. Moving the
-      # compiler pin still needs a real device in the loop.
-      - name: Build compiler image
-        run: docker build -t echomuse-compiler device/compiler/
-      - name: Build firmware
-        run: |
-          docker run --rm --entrypoint bash \
-            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
-            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
-            -v "$PWD/device":/sdk \
-            -v "$PWD/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler \
-            -c "cd /sdk && go build -tags server -o build/server ./cmd/"
-      - name: Check it is an ARM binary
-        # A build that silently produced a host binary would pass the step
-        # above and ship something the hardware cannot run.
+        run: ./compile.sh
+      - name: Build Checkers firmware
+        working-directory: device
+        run: TATER_FIRMWARE_TARGET=checkers ./compile.sh
+      - name: Verify ARM userspace output
         run: |
           file device/build/server
           file device/build/server | grep -q "ARM" || {
             echo "::error::firmware is not an ARM binary"; exit 1; }
-      # emOS's init rides in this job rather than its own because the compiler
-      # it needs is already here: the NDK inside this image is the toolchain
-      # emos/build.sh reaches for, and building the image is minutes where the
-      # compile below is seconds. A second job would pay that cost twice for
-      # one clang invocation.
-      #
-      # It is built for BOTH ARM architectures, because the init must match the
-      # device's KERNEL, not its userspace: FireOS 5 boots a 64-bit kernel and
-      # FireOS 6 — the only FireOS amonet-biscuit v2.0.0 boots — a 32-bit build
-      # of the same 3.18.19 source. The firmware beside it is armv7a either way,
-      # since it targets the Android userspace, which is 32-bit on both. A
-      # mismatch is the fact that cost five flashed images of a 32-bit kernel
-      # under a 64-bit boot chain (see the LibreEcho notes), and build.sh picks
-      # the architecture from the reference image for the same reason.
-      #
-      # Only the aarch64 init is published today (emos-release.yml); the armv7a
-      # compile is here so the 32-bit build cannot quietly rot before it ships.
-      #
-      # -static is the part that has to keep working. Three boots with a
-      # busybox script init produced no output at all, which is
-      # indistinguishable from a kernel that never started; there is no
-      # dynamic loader at PID 1 time, so a link that quietly picks up a shared
-      # object is a device that has to be recovered by hand to diagnose.
-      - name: Build the emOS init (aarch64, static)
+      - name: Build static emOS init for aarch64
         run: |
           mkdir -p emos/build
-          docker run --rm -v "$PWD/emos":/emos -w /emos echomuse-compiler bash -lc \
-            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
-               -static -O2 -Wall -o build/init init/init.c'
-      - name: Check it is a static aarch64 binary
-        # Same reasoning as the firmware check above, plus the static half:
-        # both properties are silent when wrong and fatal on the device.
+          docker run --rm -v "$PWD/emos":/emos -w /emos tater-echo-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang -static -O2 -Wall -o build/init init/init.c'
+          file emos/build/init | grep -q "ARM aarch64"
+          file emos/build/init | grep -q "statically linked"
+      - name: Build static emOS init for armv7a
         run: |
-          file emos/build/init
-          file emos/build/init | grep -q "ARM aarch64" || {
-            echo "::error::emOS init is not an aarch64 binary"; exit 1; }
-          file emos/build/init | grep -q "statically linked" || {
-            echo "::error::emOS init is not statically linked"; exit 1; }
-      - name: Build the emOS init (armv7a, static)
-        run: |
-          docker run --rm -v "$PWD/emos":/emos -w /emos echomuse-compiler bash -lc \
-            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang \
-               -static -O2 -Wall -o build/init32 init/init.c'
-      - name: Check it is a static 32-bit ARM binary
-        run: |
-          file emos/build/init32
-          file emos/build/init32 | grep -q "32-bit LSB executable, ARM" || {
-            echo "::error::emOS armv7a init is not a 32-bit ARM binary"; exit 1; }
-          file emos/build/init32 | grep -q "statically linked" || {
-            echo "::error::emOS armv7a init is not statically linked"; exit 1; }
+          docker run --rm -v "$PWD/emos":/emos -w /emos tater-echo-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
+          file emos/build/init32 | grep -q "32-bit LSB executable, ARM"
+          file emos/build/init32 | grep -q "statically linked"
 
   emos-checks:
-    name: emOS init checks (ring and password)
+    name: emOS safety checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # WHY THIS EXISTS: emos/ is ~1,900 lines of C that until now nothing in
-      # CI compiled, let alone ran. It is also the code with the longest
-      # feedback loop in the project — a change reaches a verdict only by
-      # flashing a boot partition and watching the device, so a mistake that a
-      # compiler or a simulator could have caught costs a reflash instead.
-      #
-      # Both tools below already existed for exactly this and were run by
-      # hand. Running them here is the whole change; neither reimplements
-      # anything, because both #include init.c whole and drive the real
-      # functions.
-      #
-      # Host cc, not the NDK: these are the OFF-TARGET tools, and their value
-      # is the behaviour they check rather than the code generation. The
-      # target build lives in the pinned-compiler job above, where the NDK is.
-      - name: The boot ring holds its invariants
-        # Only the clean boot is asserted. `ringsim --check <stage>` also
-        # renders the failure display, but that path deliberately ends with
-        # the ring LIT — it is an error indication — so it fails the
-        # handed-back-dark check by design and is not a scenario to assert
-        # here without a second invariant set.
+      - name: Verify boot-ring invariants
         run: |
           cc -O2 -Wall -o /tmp/ringsim emos/init/ringsim.c -lm
           /tmp/ringsim --check
-      # The console idle timeout is parsed by hand in C from a file the
-      # FIRMWARE writes and INIT reads, in different languages in different
-      # trees. Every way it can be wrong is silent on hardware: a shorter
-      # timeout than was set presents as the device dropping the link, and
-      # accepting a corrupt record logs somebody out of the console they
-      # reached for because everything else had already failed.
-      - name: The console timeout parser reads what the firmware writes
+      - name: Verify console and boot parsers
         run: |
           cc -O2 -o /tmp/tmoutcheck emos/init/tmoutcheck.c
           /tmp/tmoutcheck
-      # The supplicant's control socket directory is declared inside the conf,
-      # and emOS has two confs that declare different ones — em-wifi's own file
-      # and the wizard's Android one — with wpa_conf() switching between them
-      # on which exists. Reading the wrong one is silent: the only caller is
-      # the reassociate nudge, so it does not fail, it leaves a device with
-      # good credentials sitting at DISCONNECTED for minutes, which looks on
-      # the ring exactly like a wrong password.
-      - name: The control socket is found in whichever conf is in use
-        run: |
           cc -O2 -o /tmp/wpacheck emos/init/wpacheck.c
           /tmp/wpacheck
           cc -O2 -o /tmp/cmdlinecheck emos/init/cmdlinecheck.c
           /tmp/cmdlinecheck
           cc -O2 -o /tmp/serialcheck emos/init/serialcheck.c
           /tmp/serialcheck
-      # The C hashes a password by hand — init is a static binary with no
-      # crypto library — and the controller hashes it in Python. Nothing but
-      # equal output proves they agree, and the failure mode is a device
-      # refusing the password the dashboard just accepted, discovered over
-      # USB on hardware.
-      #
-      # The vectors are NOT restated here. pwcheck prints the password that
-      # produced each record, so this recomputes from the C's own inputs with
-      # nothing but hashlib; a third copy of the table would be the drift the
-      # check is for. It also needs no controller module, so it stands whether
-      # or not the console-password work is in the tree beside it.
-      - name: The C password hash agrees with Python's
+      - name: Verify C and Python password hashes agree
         run: |
           cc -O2 -o /tmp/pwcheck emos/init/pwcheck.c
-          /tmp/pwcheck | tee /tmp/vectors.txt
-          # The vectors go in as an ARGUMENT, not on stdin: the heredoc below
-          # is already stdin, so a redirect here would be overridden and the
-          # loop would read the script's own source and find no records.
+          /tmp/pwcheck > /tmp/vectors.txt
           python3 - /tmp/vectors.txt <<'PY'
           import hashlib, sys
-
-          n = 0
-          for line in open(sys.argv[1]):
-              line = line.rstrip("\n")
-              if not line:
-                  continue
-              pw, record = line.split("\t", 1)
-              iters, salthex, got = record.split(":")
-              h = hashlib.sha256(bytes.fromhex(salthex) + pw.encode()).digest()
-              for _ in range(int(iters) - 1):
-                  h = hashlib.sha256(h).digest()
-              if h.hex() != got:
-                  print(f"::error::{iters} rounds of {pw!r}: "
-                        f"C says {got}, Python says {h.hex()}")
-                  sys.exit(1)
-              n += 1
-          # A pwcheck that emitted nothing would otherwise pass this silently,
-          # which is the shape of bug ringsim's own frame count exists to catch.
-          if n < 4:
-              print(f"::error::pwcheck emitted {n} vectors, expected at least 4")
-              sys.exit(1)
-          print(f"{n} vectors agree")
+          vectors = [line.rstrip("\n") for line in open(sys.argv[1]) if line.strip()]
+          if len(vectors) < 4:
+              raise SystemExit(f"expected at least 4 vectors, got {len(vectors)}")
+          for line in vectors:
+              password, record = line.split("\t", 1)
+              iterations, salt, expected = record.split(":")
+              value = hashlib.sha256(bytes.fromhex(salt) + password.encode()).digest()
+              for _ in range(int(iterations) - 1):
+                  value = hashlib.sha256(value).digest()
+              if value.hex() != expected:
+                  raise SystemExit(f"hash mismatch for {password!r}")
           PY
-      # mkboot.py cannot be exercised without a reference boot image, which is
-      # the one input we never ship — it comes off the user's own device. So
-      # this is the same undefined-name check the controller gets, for the
-      # same reason: it is the failure that is silent until the line runs, and
-      # the line here runs while somebody is writing to a boot partition.
-      - name: Check the packer for undefined names
-        run: |
-          pip install pyflakes
-          out=$(python -m pyflakes emos/mkboot.py 2>&1 | grep -i "undefined name" || true)
-          if [ -n "$out" ]; then
-            echo "$out"
-            echo "::error::pyflakes found undefined name(s) in mkboot.py"
-            exit 1
-          fi
-          echo "No undefined names."
 
-  device-vet:
-    name: Device go vet
+  static-analysis:
+    name: Firmware static analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -656,3 +149,12 @@ jobs:
       - name: Run go vet
         working-directory: device
         run: go vet ./internal/... ./pkg/...
+      - name: Run govulncheck
+        working-directory: device
+        run: |
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./internal/... ./pkg/... || true
+      - name: Check Python packers for undefined names
+        run: |
+          python3 -m pip install pyflakes
+          python3 -m pyflakes emos/mkboot.py factory/biscuit/tools/tater_emos_build.py

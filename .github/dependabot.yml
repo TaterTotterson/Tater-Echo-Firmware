@@ -1,8 +1,7 @@
 version: 2
 
-# This repository publishes Echo firmware, not the inherited EchoMuse
-# controller image. Keep automated update traffic limited to dependencies that
-# are compiled into the firmware or execute with repository credentials.
+# Limit automated updates to dependencies compiled into the firmware or used
+# by workflows that execute with repository credentials.
 updates:
   - package-ecosystem: gomod
     directory: /device

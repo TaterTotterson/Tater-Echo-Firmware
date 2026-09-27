@@ -6,8 +6,8 @@
 // is made to re-read it. FireOS has a long tail, so its path is not
 // transitional.
 //
-// The FireOS mechanics mirror the provisioning wizard's runConfigWifi
-// (controller/static/dashboard.jsx), which was hard-won on real hardware:
+// The FireOS mechanics mirror the setup portal's Wi-Fi transition, which was
+// verified on real hardware:
 //
 //   - The only safe reload path THERE is `svc wifi disable` + `svc wifi enable`.
 //     The framework-managed wpa_supplicant instance auto-associates and

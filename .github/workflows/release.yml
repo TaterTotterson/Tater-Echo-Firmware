@@ -70,7 +70,7 @@ jobs:
           python3 -m py_compile scripts/silent_stream_server.py
 
       - name: Build Android compiler image
-        run: docker build -t echomuse-compiler device/compiler/
+        run: docker build -t tater-echo-compiler device/compiler/
 
       - name: Compile Tater Echo userspace
         run: |
@@ -81,7 +81,7 @@ jobs:
             -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler -c "cd /sdk && go build -tags server \
+            tater-echo-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
@@ -103,7 +103,7 @@ jobs:
         run: |
           mkdir -p emos/build
           docker run --rm -v "${{ github.workspace }}/emos":/emos -w /emos \
-            echomuse-compiler bash -lc \
+            tater-echo-compiler bash -lc \
             '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
 
       - name: Build static Wi-Fi tools
@@ -111,7 +111,7 @@ jobs:
           mkdir -p emos/build/wpa
           docker run --rm -v "${{ github.workspace }}/emos":/emos \
             -v "${{ github.workspace }}/emos/build/wpa":/out -w /tmp \
-            echomuse-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
+            tater-echo-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
           cp emos/device/em-wifi emos/build/wpa/em-wifi
 
       - name: Set up qemu for BusyBox
@@ -261,7 +261,7 @@ jobs:
         run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
       - name: Build Android compiler image
-        run: docker build -t echomuse-compiler device/compiler/
+        run: docker build -t tater-echo-compiler device/compiler/
 
       - name: Compile Checkers native firmware
         run: |
@@ -272,7 +272,7 @@ jobs:
             -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
             -v "${{ github.workspace }}/GoTinyAlsa":/GoTinyAlsa \
-            echomuse-compiler -c "cd /sdk && go build -tags server \
+            tater-echo-compiler -c "cd /sdk && go build -tags server \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=checkers \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
@@ -295,7 +295,7 @@ jobs:
           mkdir -p emos/build/wpa
           docker run --rm -v "${{ github.workspace }}/emos":/emos \
             -v "${{ github.workspace }}/emos/build/wpa":/out -w /tmp \
-            echomuse-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
+            tater-echo-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
 
       - name: Verify Checkers native inputs
         run: |

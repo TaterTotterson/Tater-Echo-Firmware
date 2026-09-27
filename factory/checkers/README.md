@@ -18,12 +18,6 @@ Do not use amonet 2.0.0 for Checkers. It has a TWRP-upgrade fault on the 1.x to
 kB of usable RAM, so native-service memory budgeting must assume a 1 GB
 device.
 
-This installer can recognize LineageOS 18.1, but the full persistent install
-below is still Fire-OS/Magisk-specific. On LineageOS it deliberately permits
-only `./install.sh --no-home` as a non-persistent screen preview. Follow the
-separate [Checkers Lineage development guide](../../docs/checkers-lineage.md)
-for the verified ROM and port status.
-
 ## Install or recover stock Fire OS before rooting
 
 The amonet process can leave the original, potentially old Fire OS installation

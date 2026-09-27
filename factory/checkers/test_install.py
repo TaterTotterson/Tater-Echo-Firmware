@@ -52,9 +52,6 @@ class CheckersInstallerTests(unittest.TestCase):
     def test_accepts_stock_fire_os_and_amonet_2(self):
         self.assertEqual("stock Fire OS 6", install.require_checkers(self.healthy()))
 
-    def test_accepts_lineage_android_11(self):
-        self.assertEqual("LineageOS 18.1", install.require_checkers(self.healthy(release="11")))
-
     def test_rejects_untested_fire_os_build(self):
         adb = self.healthy()
         adb.values["getprop ro.build.version.incremental"] = "0013222530692"
@@ -87,7 +84,7 @@ class CheckersInstallerTests(unittest.TestCase):
             install.require_checkers(adb)
 
     def test_rejects_unknown_android_generation(self):
-        with self.assertRaisesRegex(install.InstallError, "supported bring-up"):
+        with self.assertRaisesRegex(install.InstallError, "requires stock Fire OS 6"):
             install.require_checkers(self.healthy(release="9"))
 
     def test_launcher_change_is_optional(self):
@@ -153,13 +150,6 @@ class CheckersInstallerTests(unittest.TestCase):
                 install.confirm_unlock(False)
         with mock.patch("builtins.print"), mock.patch("builtins.input", return_value="CHECKERS"):
             install.confirm_unlock(False)
-
-    def test_lineage_requires_non_persistent_preview(self):
-        with self.assertRaisesRegex(install.InstallError, "Fire-OS/Magisk-specific"):
-            install.require_supported_install_mode("LineageOS 18.1", False, False)
-        install.require_supported_install_mode("LineageOS 18.1", True, False)
-        install.require_supported_install_mode("LineageOS 18.1", False, True)
-        install.require_supported_install_mode("stock Fire OS 6", False, False)
 
     def test_uninstall_runs_reversible_module_cleanup_before_removal(self):
         adb = self.healthy()

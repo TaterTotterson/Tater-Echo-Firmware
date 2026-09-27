@@ -1,55 +1,37 @@
-# Third-party components
+# Third-party notices
 
-EchoMuse is MIT licensed (see `LICENSE`). It vendors and links the components
-below, each of which keeps its own licence. All are permissive and compatible
-with redistribution under MIT, and each requires that its copyright notice
-travels with the software — which is what this file is for.
+Tater Echo Firmware is MIT licensed. The firmware and release bundles also
+contain or link the components below under their own terms. Keep this notice
+with redistributed binaries and factory bundles.
 
-The device binary published on the releases page is a **combined work**: it
-links SpeexDSP and GoTinyAlsa. BSD-3-Clause asks that binary redistributions
-reproduce the copyright notice "in the documentation or other materials
-provided with the distribution", and this file is that material. If the binary
-is ever distributed somewhere other than alongside this repository, this notice
-needs to travel with it.
+## Firmware components
 
-## Vendored into this repository
+| Component | Location | License |
+|---|---|---|
+| SpeexDSP acoustic echo canceller | `device/internal/aec/` | BSD-3-Clause |
+| GoTinyAlsa | `GoTinyAlsa/` submodule | BSD-3-Clause |
+| TFLite Micro and microfrontend dependencies | `device/internal/wakeword/microwakeword/native/` build | Apache-2.0 and BSD-3-Clause |
 
-| Component | Where | Licence | Copyright |
-|---|---|---|---|
-| SpeexDSP (acoustic echo canceller) | `device/internal/aec/` | BSD-3-Clause | Xiph.Org Foundation, Jean-Marc Valin, Analog Devices, CSIRO |
-| aioesphomeapi protocol buffers | `controller/esphome/vendor/` | MIT | Otto Winter |
-| Home Assistant Voice PE timer sound (`timer_finished.flac`) | `controller/sounds/` | CC BY 4.0 | Clayton Charles Tapp |
+SpeexDSP is copyright Xiph.Org Foundation, Jean-Marc Valin, Analog Devices,
+and CSIRO. GoTinyAlsa is copyright binozoworks; this repository uses the
+`wilbowes/GoTinyAlsa` fork containing a stream leak fix. Detailed wake-runtime
+attribution is in
+[`device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md`](device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md).
 
-Full licence texts sit beside the code, in `COPYING` or `*_LICENSE` files. Do
-not remove them — they are the attribution the licences require. The timer
-sound carries its attribution in `controller/sounds/LICENSE.md`, which ships
-in the controller image alongside the audio: CC BY 4.0 asks that the credit
-travel with the work, and the container is where the work actually goes.
+## BusyBox
 
-## Linked as a submodule
+Biscuit factory releases contain BusyBox under GPL-2.0. Every published
+factory archive includes the exact corresponding source tarball, license, and
+build script under `sources/`.
 
-| Component | Where | Licence | Copyright |
-|---|---|---|---|
-| GoTinyAlsa (`wilbowes/GoTinyAlsa` fork) | `GoTinyAlsa/` | BSD-3-Clause | binozoworks |
+## Build and Android dependencies
 
-The fork exists to carry a `GetAudioStream` defer-in-loop leak fix.
+The Checkers screen uses Android/AndroidX and Gradle dependencies under their
+respective upstream licenses. Native runtime libraries fetched by the pinned
+build scripts retain their upstream license files in the build output.
 
-## Installed at build or run time
+## Wake-word models
 
-These are dependencies rather than vendored code — they are fetched by the
-Dockerfiles and `requirements.txt`, and are not redistributed as source here.
-Listed because they end up in the published container image:
-
-- **ONNX Runtime** (MIT) — wake word inference, controller and device.
-- **openWakeWord** (Apache-2.0) — wake word models and feature pipeline.
-- **DTLN** (MIT, Nils L. Westhausen) — the two pretrained noise-suppression
-  models the controller image downloads at build time, pinned to a commit in
-  `controller/Dockerfile`. Baked into the published image, so they are
-  redistributed with it.
-- **ffmpeg** (LGPL-2.1+ as packaged by Debian) — invoked as a separate
-  process, never linked.
-- The Python dependencies in `controller/requirements.txt`, all permissive.
-
-## Wake word models
-
-Wake-word models retain the licence and terms supplied by their publisher.
+Wake-word models retain the license and terms supplied by their publisher.
+Adding a model to a release does not relicense it under this repository's MIT
+license.

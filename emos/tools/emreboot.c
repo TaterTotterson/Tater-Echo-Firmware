@@ -14,7 +14,7 @@
  * Not built by CI and not part of the image. Build it with the pinned
  * compiler:
  *
- *   docker run --rm -v "$PWD/emos":/emos -v /tmp:/out -w /emos echomuse-compiler \
+ *   docker run --rm -v "$PWD/emos":/emos -v /tmp:/out -w /emos tater-echo-compiler \
  *     bash -lc '$NDK/aarch64-linux-android21-clang -nostdlib -static -Os \
  *               -o /out/emreboot tools/emreboot.c' && llvm-strip /tmp/emreboot
  *

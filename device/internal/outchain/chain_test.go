@@ -80,16 +80,16 @@ func stereo(mono []int16) []byte {
 	return buf
 }
 
-// TestMatchesControllerChain holds the port to em_eq/em_mbc/em_limiter on
-// vectors the Python generated (testdata/gen_vectors.py), period by period,
-// with every parameter change applied where the device would apply it.
+// TestMatchesReferenceChain holds the output chain to independently generated
+// reference vectors, period by period, with every parameter change applied
+// where the device would apply it.
 //
 // Tolerance is ONE LSB on a handful of samples, and it exists for one
 // reason: numpy vectorises the release recursions as a sheared running
 // minimum and computes 10**x its own way, so the float64 gain differs from
 // ours in the last bits, and a sample sitting on an integer boundary can
 // truncate either side of it. Anything larger is a behaviour difference.
-func TestMatchesControllerChain(t *testing.T) {
+func TestMatchesReferenceChain(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "vectors.json"))
 	if err != nil {
 		t.Fatal(err)

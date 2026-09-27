@@ -48,7 +48,7 @@ type AnimSpec struct {
 	//
 	// Tunable from the dashboard because this is a *taste* parameter: the
 	// original fixed curve measured only ~23% perceived brightness
-	// variation on speech (see docs/led-ring-states.md), and finding a
+	// variation on speech, and finding a
 	// value that reads well in a real room takes several passes. Shipping
 	// them as config turns that loop into a page refresh instead of a
 	// firmware OTA per iteration.
@@ -60,8 +60,8 @@ type AnimSpec struct {
 	Curve  *float64 `json:"curve"`  // input exponent; <1 lifts quiet detail
 }
 
-// meterDefaults are the shipped response curve. Derived in
-// docs/led-ring-states.md §"Why it's barely visible":
+// meterDefaults are the shipped response curve. See the Audio Glow section in
+// docs/led-ring-states.md:
 //   - decay 0.30 → τ≈133ms, which tracks syllables (150-250ms). The old
 //     0.12 gave τ≈333ms and smoothed everything below phrase rate away,
 //     which is why the ring looked nearly static during speech.

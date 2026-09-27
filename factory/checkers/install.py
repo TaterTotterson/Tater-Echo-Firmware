@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Install Tater firmware on an unlocked Echo Show 5 Checkers.
 
-The full native install is currently for rooted stock Fire OS: it verifies
-Checkers + root, installs the screen APK and native userspace under /data, and
-adds a reversible Magisk boot supervisor. LineageOS 18.1 is accepted only for
-the non-persistent screen preview until its native init integration lands. The
-installer never writes boot, recovery, system, or vendor.
+The installer verifies rooted stock Fire OS, installs the screen APK and native
+userspace under /data, and adds a reversible Magisk boot supervisor. It never
+writes boot, recovery, system, or vendor.
 """
 
 from __future__ import annotations
@@ -149,8 +147,8 @@ def resolve_root(adb: Adb) -> RootShell:
 
 
 def require_checkers(adb: Adb) -> str:
-    # Lineage userdebug can restart adbd as root. Stock Fire OS normally
-    # rejects this and is instead accessed through the boot-root `su` path.
+    # Stock Fire OS normally rejects root adbd and is instead accessed through
+    # the boot-root `su` path.
     adb.run("root", check=False)
     adb.run("wait-for-device")
     product = adb.shell("getprop ro.product.device").strip().lower()
@@ -168,12 +166,10 @@ def require_checkers(adb: Adb) -> str:
                 f"{CERTIFIED_FIREOS_NAME}. Restore the verified image from {CERTIFIED_FIREOS_URL} "
                 "before installing Tater")
         userspace = "stock Fire OS 6"
-    elif release == "11":
-        userspace = "LineageOS 18.1"
     else:
         raise InstallError(
-            f"Checkers reports Android {release or 'unknown'}; supported bring-up environments are "
-            "stock Fire OS 6 (Android 7.1) and LineageOS 18.1 (Android 11)")
+            f"Checkers reports Android {release or 'unknown'}; this release requires "
+            "stock Fire OS 6 (Android 7.1)")
     root = resolve_root(adb)
     recovery = root.run(
         "for p in /dev/block/by-name/recovery /dev/block/platform/*/by-name/recovery "
@@ -197,14 +193,6 @@ def confirm_unlock(assume_yes: bool) -> None:
     print("Confirm that you installed amonet 2.0.1 or newer and can still boot TWRP.")
     if input("Type CHECKERS to continue: ").strip() != "CHECKERS":
         raise InstallError("installation cancelled")
-
-
-def require_supported_install_mode(userspace: str, no_home: bool, uninstalling: bool) -> None:
-    if userspace == "LineageOS 18.1" and not no_home and not uninstalling:
-        raise InstallError(
-            "the persistent Checkers service is still Fire-OS/Magisk-specific; "
-            "on LineageOS use --no-home for the screen preview until the native "
-            "Lineage init service and rollback path are complete")
 
 
 def install_apk(adb: Adb, set_home: bool, demo: bool = False) -> None:
@@ -363,7 +351,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--serial", help="ADB serial when more than one device is connected")
     parser.add_argument(
         "--no-home", action="store_true",
-        help="install only the screen preview without native boot services (required on LineageOS)")
+        help="install only the screen preview without native boot services")
     parser.add_argument("--profile", action="store_true", help="also collect the read-only Checkers hardware profile")
     parser.add_argument("--demo", action="store_true", help="cycle all screen states without the native audio service")
     parser.add_argument("--uninstall", action="store_true", help="remove the preview app")
@@ -384,7 +372,6 @@ def main() -> int:
         userspace = require_checkers(adb)
         root = resolve_root(adb)
         print(f"Verified Checkers running {userspace} with root and an amonet 2.x layout.")
-        require_supported_install_mode(userspace, args.no_home, args.uninstall)
         if args.uninstall:
             uninstall(adb, root)
             return 0

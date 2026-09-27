@@ -8,6 +8,6 @@ docker run --rm --entrypoint bash \
     -e CGO_LDFLAGS="-Wl,--hash-style=both" \
     -v "$ROOT/porting/pcm_capture":/sdk \
     -v "$ROOT/GoTinyAlsa":/GoTinyAlsa \
-    echomuse-compiler \
+    tater-echo-compiler \
     -c "cd /sdk && go build -tags server -o pcm_capture ."
 file "$ROOT/porting/pcm_capture/pcm_capture" 2>/dev/null || true

@@ -10,7 +10,7 @@
 // Each frame: 9 samples × 3 bytes = 27 bytes
 // Each period (512 frames): 13,824 bytes
 //
-// Build inside echomuse-compiler Docker container:
+// Build inside tater-echo-compiler Docker container:
 //   go build -tags server -o capture_mics .
 
 package main

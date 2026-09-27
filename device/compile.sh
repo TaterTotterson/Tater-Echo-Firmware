@@ -53,7 +53,7 @@ if docker run --rm \
   -e CGO_CFLAGS="$SUPPRESS" \
   -v "$(pwd)":/sdk \
   -v "$REPO_ROOT/GoTinyAlsa":/GoTinyAlsa \
-  echomuse-compiler \
+  tater-echo-compiler \
   -c "$BUILD_CMD" 2>/tmp/build_err.log; then
     echo ""
     echo "✓ Build succeeded → build/server  ($VERSION)"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build wpa_supplicant and wpa_cli for emOS: static ARM32, nl80211, no external
-# deps. Run inside the echomuse-compiler image; it fetches its own sources, or
+# deps. Run inside the tater-echo-compiler image; it fetches its own sources, or
 # uses wpa_supplicant-2.10/ and libnl-tiny/ if they are already beside it.
 # See emos-fireos6-system-as-root memory for why each workaround below is
 # needed -- none of them are optional.

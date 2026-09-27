@@ -44,14 +44,14 @@ NDK=${NDK:-/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/b
 # nothing at all, with no output. So it is read out of the reference rather
 # than assumed.
 #
-# The sniffer lives in the CONTROLLER's packer and is called from here rather
-# than reimplemented. It used to be a second copy inline in this file, which is
+# The sniffer lives in the factory bundle's packer and is called from here
+# rather than reimplemented. It used to be a second copy inline in this file, which is
 # the shape everything else in this pair has a test against: the wizard and this
 # script must agree about which architecture an image wants, and two copies of
 # the rule can disagree without either one being wrong on its own. Note the
-# import is by path — emos/ is outside the controller package, exactly as
-# tests/test_emos_build.py loads mkboot.py from the other direction.
-PACKER=$HERE/../controller/em_emos_build.py
+# import is by path, exactly as factory/biscuit/test_emos_build.py loads
+# mkboot.py from the other direction.
+PACKER=$HERE/../factory/biscuit/tools/tater_emos_build.py
 [ -f "$PACKER" ] || {
     echo "cannot find the packer at $PACKER — it is where the architecture" >&2
     echo "sniffer lives, so run this from a full checkout rather than a copy" >&2
@@ -78,8 +78,8 @@ CC=${CC:-$NDK/$TRIPLE-clang}
 if [ -x "$CC" ]; then
     "$CC" -static -O2 -Wall -o "$WORK/init" "$HERE/init/init.c"
 else
-    echo "building init in the echomuse-compiler image ($CC not found)"
-    docker run --rm -v "$HERE":/emos -v "$WORK":/out -w /emos echomuse-compiler \
+    echo "building init in the tater-echo-compiler image ($CC not found)"
+    docker run --rm -v "$HERE":/emos -v "$WORK":/out -w /emos tater-echo-compiler \
         bash -lc "$NDK/$TRIPLE-clang -static -O2 -Wall -o /out/init init/init.c"
 fi
 

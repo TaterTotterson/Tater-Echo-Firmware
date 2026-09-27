@@ -14,7 +14,7 @@ build_tool() {
         -e CGO_LDFLAGS="-Wl,--hash-style=both" \
         -v "$tool_dir":/sdk \
         -v "$REPO_ROOT/GoTinyAlsa":/GoTinyAlsa \
-        echomuse-compiler \
+        tater-echo-compiler \
         -c "cd /sdk && go build -tags server -o $name ."
 
     mkdir -p "$BUILD_DIR"
@@ -34,7 +34,7 @@ build_module_tool() {
         -e CGO_LDFLAGS="-Wl,--hash-style=both" \
         -v "$(pwd)":/sdk \
         -v "$REPO_ROOT/GoTinyAlsa":/GoTinyAlsa \
-        echomuse-compiler \
+        tater-echo-compiler \
         -c "cd /sdk && go build $2 -o build/$name ./tools/$name"
 
     echo "Output: $BUILD_DIR/$name"
@@ -55,5 +55,4 @@ echo ""
 echo "Run:"
 echo "  adb shell su -c 'bf_capture --angle 330 --seconds 5'"
 echo "  adb pull /tmp/ ."
-echo "Without adb, push over the controller shell plane instead:"
-echo "  python controller/tools/push_file.py <local> <remote>   (resumable)"
+echo "Use adb push to copy a tool to an attached test device."

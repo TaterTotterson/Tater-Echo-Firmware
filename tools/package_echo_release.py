@@ -146,9 +146,11 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 "README.md": (REPO / "factory/biscuit/README.md", 0o644),
                 "LICENSE": (REPO / "LICENSE", 0o644),
                 "NOTICE.md": (REPO / "NOTICE.md", 0o644),
-                "tools/em_emos_build.py": (REPO / "controller/em_emos_build.py", 0o644),
+                "tools/tater_emos_build.py": (
+                    REPO / "factory/biscuit/tools/tater_emos_build.py", 0o644),
                 "payload/server": (REPO / "device/build/server", 0o755),
-                "payload/start_server.sh": (REPO / "controller/device_payloads/start_server.sh", 0o755),
+                "payload/start_server.sh": (
+                    REPO / "factory/biscuit/payload/start_server.sh", 0o755),
                 "payload/libtater_microwakeword.so": (
                     REPO / "device/build/microwakeword-android/libtater_microwakeword.so", 0o755),
                 "payload/hey_tater.tflite": (

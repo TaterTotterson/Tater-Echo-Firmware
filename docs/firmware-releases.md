@@ -4,8 +4,7 @@
 
 Tater Echo firmware uses annotated `vMAJOR.MINOR.PATCH` tags. The exact tag is
 compiled into the userspace binary and copied into `firmware-manifest.json`.
-Other product namespaces inherited from EchoMuse (`emos-v*`, `controller-v*`)
-do not trigger a Tater Echo firmware release.
+Only tags in that format trigger a firmware release.
 
 ## Target identity
 

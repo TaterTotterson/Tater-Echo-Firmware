@@ -15,9 +15,6 @@ preceding generation if the update cannot prove healthy.
 - Unlock: amonet 2.0.1 or newer, with TWRP retained.
 - Profiling userspace: rooted stock Fire OS 6 / Android 7.1.2; `su` root is
   supported and root adbd is not required.
-- Replacement userspace under active development: unofficial LineageOS 18.1 /
-  Android 11. See [`checkers-lineage.md`](checkers-lineage.md) for the exact
-  verified image, backup boundary, install path, and current limitations.
 - RAM: the hardware-verified Fire OS 6574.1 profile exposes 997,780 kB
   (approximately 1 GB usable). Do not size the native service from the 2 GB
   assumption that appeared in the preliminary notes.
@@ -34,9 +31,6 @@ on the Echo; that mismatch was confirmed to cause a recoverable Echo-logo boot
 loop. The exact hardware-verified package, checksum, TWRP commands, and
 recovery procedure are documented in
 [`factory/checkers/README.md`](../factory/checkers/README.md).
-The Lineage hardware work used for comparison is documented in
-[lineageos-echo-show-camera](https://github.com/jxlarrea/lineageos-echo-show-camera).
-
 ## Hardware verified on Fire OS 6574.1
 
 - Board identity: IDME device type `A4ZP7ZC4PI6TO` maps positively to
@@ -78,8 +72,8 @@ manual hardware checks on the real device:
   three of three spoken “Hey Tater” phrases at 0.991, 0.998, and 0.994, with
   zero queue drops, inference errors, or clipped samples.
 
-The two-mic processing is deliberately shallower than the controller's
-optional DTLN cleanup. Coherent speech recovers to unity quickly; diffuse noise
+The two-mic processing is deliberately shallower than Tater's optional
+ASR-side noise suppression. Coherent speech recovers to unity quickly; diffuse noise
 gets about 3 dB from the spatial postfilter in addition to the natural gain
 from combining two independent microphone signals. Wake-word audio therefore
 benefits from the array without being hard-gated, while Tater's per-device

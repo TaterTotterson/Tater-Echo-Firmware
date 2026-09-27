@@ -24,8 +24,8 @@ Two of those traps are baked in here and must not be simplified away:
     of its own request. `uname -a` "answers" with `uname -a; echo `, and the
     next check then reads the previous command's output.
 
-Both are the same traps `_EmosConsole` in controller/static/dashboard.jsx
-carries; this is that class in Python, and they should stay in step.
+Both rules come from the original USB-console bring-up and are covered here so
+future console tooling does not rediscover them.
 
 The device nodes do not survive a host reboot: the container sees the consoles
 in /sys but gets no /dev entries, so create them with

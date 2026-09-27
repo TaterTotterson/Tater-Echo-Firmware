@@ -13,9 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Device-link TLS credentials — pushed by the controller (provisioning
-// wizard over adb, or the dashboard "Secure link" action over the shell
-// plane). Paths are coupled with controller/em_api.py DEVICE_TLS_DIR.
+// Legacy device-link TLS credentials, retained for safe migration of older
+// installations. Native Tater mode uses its paired device credential.
 //
 //	ca.pem — the controller CA the device pins (chain verification uses
 //	         ONLY this pool; system roots are irrelevant)
@@ -27,8 +26,7 @@ const (
 	credCAPath    = "/data/local/etc/echomuse/ca.pem"
 	credTokenPath = "/data/local/etc/echomuse/token"
 
-	// Must match the DNS SAN in the controller's server cert
-	// (controller/em_pki.py TLS_SERVER_NAME). It is an identity label,
+	// Must match the DNS SAN used by legacy server certificates. It is an identity label,
 	// not a resolvable name — mDNS supplies the actual address.
 	tlsServerName = "echomuse-controller"
 )

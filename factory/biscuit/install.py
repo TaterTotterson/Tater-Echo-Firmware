@@ -211,8 +211,8 @@ def verified_partition_write(adb: Adb, image: Path, partition: str, label: str) 
 
 
 def load_packer():
-    path = ROOT / "tools" / "em_emos_build.py"
-    spec = importlib.util.spec_from_file_location("tater_em_emos_build", path)
+    path = ROOT / "tools" / "tater_emos_build.py"
+    spec = importlib.util.spec_from_file_location("tater_emos_build", path)
     if not spec or not spec.loader:
         raise InstallError("cannot load the bundled emOS image builder")
     module = importlib.util.module_from_spec(spec)

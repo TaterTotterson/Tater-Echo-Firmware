@@ -33,7 +33,7 @@
 //	Ch6 → MK7 → centre (omnidirectional)
 //	Ch7, Ch8   → unconnected
 //
-// Build inside echomuse-compiler Docker container:
+// Build inside tater-echo-compiler Docker container:
 //
 //	go build -tags server -o bf_capture .
 package main

@@ -2861,10 +2861,9 @@ static int svc_backoff(int fails)
  * this hardware at 0.32s — a login prompt, so nobody notices.
  *
  * The record is `<iterations>:<salt hex>:<hash hex>`, written by the firmware
- * from the controller's config push (config.WriteConsolePassword), and the
- * hash is sha256(salt||password) folded `iterations` times.
- * controller/em_console_pw.py is the other half of this and the two MUST
- * agree — tests/test_console_pw.py carries the shared vectors.
+ * from Tater's config push (config.WriteConsolePassword), and the hash is
+ * sha256(salt||password) folded `iterations` times. CI recomputes the vectors
+ * emitted by pwcheck.c with Python so the implementations cannot drift.
  *
  * A record we cannot read means NO password. That is deliberate: refusing
  * every login on the strength of a corrupt string would lock the owner out

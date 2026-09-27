@@ -114,7 +114,8 @@ RAMOOPS_CMDLINE = (
 
 # The partition holding the FireOS userspace this image is built beside,
 # stamped onto its own cmdline so emOS mounts the right one. Mirrors
-# SYSTEM_CMDLINE_KEY in controller/em_emos_build.py; test_agrees_with_mkboot
+# SYSTEM_CMDLINE_KEY in factory/biscuit/tools/tater_emos_build.py;
+# test_agrees_with_mkboot
 # pins the two together.
 #
 # Taken from the ENVIRONMENT rather than a seventh positional argument: the

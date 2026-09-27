@@ -1,10 +1,10 @@
 // Package outchain is the speaker output chain: EQ, bass guard and peak
 // limiter, run on the device after the voice/music mix and before the DAC.
 //
-// It is a port of the controller's em_eq / em_mbc / em_limiter, and those
-// remain the reference: testdata/ holds vectors generated from the Python,
-// and the tests hold this package to them sample for sample. A behaviour
-// change belongs in both halves, with the vectors regenerated.
+// testdata/ holds independent reference vectors from the original output
+// chain, and the tests hold this package to them sample for sample. An
+// intentional behavior change must update the implementation and fixtures
+// together with an independently verified generator.
 //
 // Why on the device at all: the device holds up to ~5.5s of audio already
 // queued, so an EQ change made on the controller cannot reach anything the

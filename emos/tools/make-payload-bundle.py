@@ -3,15 +3,15 @@
 
     make-payload-bundle.py <version> <out.zip> <file> [file ...]
 
-The format lives in controller/em_emos_build.py and is imported from there
-rather than reimplemented, for the reason emos/build.sh imports the kernel
-architecture sniffer from the same module: the controller READS this archive, so
-a second definition of the format here could disagree with the only consumer
-there is, and nothing in either tree would notice until a device took a flash.
+The format lives in factory/biscuit/tools/tater_emos_build.py and is imported
+from there rather than reimplemented, for the reason emos/build.sh imports the
+kernel architecture sniffer from the same module: a second definition of the
+format could disagree with the factory installer without either side noticing
+until a device took a flash.
 
-Imported by path because emos/ sits outside the controller package — the same
-trick controller/tests/test_emos_build.py uses in the other direction to load
-emos/mkboot.py.
+Imported by path because the script can also be invoked directly. The matching
+factory test uses the same technique in the other direction to load
+`emos/mkboot.py`.
 """
 import importlib.util
 import pathlib
@@ -25,7 +25,8 @@ def main(argv):
     version, out = argv[1], pathlib.Path(argv[2])
     paths = [pathlib.Path(p) for p in argv[3:]]
 
-    packer = pathlib.Path(__file__).resolve().parents[2] / "controller" / "em_emos_build.py"
+    packer = (pathlib.Path(__file__).resolve().parents[2] / "factory" / "biscuit" /
+              "tools" / "tater_emos_build.py")
     if not packer.is_file():
         print(f"cannot find the packer at {packer} — run this from a full "
               f"checkout rather than a copy of emos/ on its own", file=sys.stderr)
@@ -39,7 +40,7 @@ def main(argv):
         if not p.is_file():
             print(f"missing: {p}", file=sys.stderr)
             return 1
-        # Keyed on the BASENAME: the bundle is flat, and what the controller
+        # Keyed on the BASENAME: the bundle is flat, and what the installer
         # looks for is "init32", not wherever the release build happened to
         # leave it.
         files[p.name] = p.read_bytes()

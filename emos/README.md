@@ -45,10 +45,10 @@ Android-specific surface in the firmware is about twenty call sites, and the
 assumption was always that the remaining dependency was thin. It was thinner
 than that in one sense and much thicker in another:
 
-- SETUP.md claimed Amazon's audio HAL was what started the I2S clock and that
+- Early bring-up notes claimed Amazon's audio HAL was what started the I2S clock and that
   playback would hang without it. **That was reasoning, not measurement, and it
   is false.** Both directions clock with no HAL, no mediaserver and no
-  framework. (SETUP.md now carries the correction rather than the claim.)
+  framework. The verified result is recorded in `docs/biscuit-hardware.md`.
 - But the HAL *was* silently configuring the codec for us. Nothing in the
   firmware ever closed the codec's DAPM routes, because the HAL always got
   there first. On a device with no Android, both the microphones and the
@@ -923,7 +923,7 @@ is not proof it rebooted — compare uptime or a build fingerprint.
     cache, wipe data, sideload the FireOS 5 image, **and then flash
     `f1r30s.zip`**. That last step is not optional: a stock flash restores
     dm-verity against a partition table the unlock modified, so **the OS will
-    not boot without it** (`docs/rooting.md`). It is also the same four steps
+    not boot without it** (`factory/biscuit/README.md`). It is also the same four steps
     that prepare a device for EchoMuse in the first place, on FireOS or emOS,
     so this returns the device to the state an install starts from rather than
     to a factory one.

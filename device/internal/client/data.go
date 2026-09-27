@@ -1117,7 +1117,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	// owned by the existing silenceMax hysteresis below, same as before
 	// this change.
 	//
-	// Only armed when lockMic is true. Per SETUP.md's mic_start semantics:
+	// Only armed when lockMic is true. By mic_start semantics:
 	// mic_start with no lock_mic is the permanent, always-on ch6/omni
 	// wake-word listening stream (started once at connect, meant to run
 	// indefinitely) — mic_start with lock_mic:true is a bounded voice turn

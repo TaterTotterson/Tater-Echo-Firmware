@@ -1,4 +1,4 @@
-/* Prove init.c's SHA-256 and password folding agree with the controller's.
+/* Prove init.c's SHA-256 and password folding agree with an independent implementation.
  *
  * The two implementations are written in different languages by different
  * hands and can only be known to match by hashing the same inputs. If they
@@ -11,8 +11,8 @@
  *
  *   cc -O2 -o pwcheck pwcheck.c && ./pwcheck
  *
- * It prints `<iterations>:<salt hex>:<hash hex>` records that
- * controller/tests/test_console_pw.py must reproduce exactly.
+ * It prints password plus `<iterations>:<salt hex>:<hash hex>` records. CI
+ * recomputes each record with Python.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,8 +49,7 @@ static void emit(const char *pw, const char *salthex, long iters)
 
 int main(void)
 {
-    /* Same inputs as KNOWN_VECTORS in controller/tests/test_console_pw.py.
-     * Low iteration counts on purpose: a mistake in the LOOP shows up here
+    /* Low iteration counts on purpose: a mistake in the LOOP shows up here
      * rather than being buried under a hundred thousand identical rounds. */
     emit("hunter2", "0001020304050607", 1);
     emit("hunter2", "0001020304050607", 2);

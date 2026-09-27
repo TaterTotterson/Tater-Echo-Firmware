@@ -68,7 +68,7 @@ It lists what it's about to do and waits for `y`. Stages:
   - Stock `tinycap` can't record every mic format; the Dot 2's packed 24-bit
     array defeats it. For those devices the recording needs `pcm_capture`,
     which we build and attach to the issue for you. Or build it yourself:
-    `porting/pcm_capture/build.sh` (needs the `echomuse-compiler` Docker
+    `porting/pcm_capture/build.sh` (needs the `tater-echo-compiler` Docker
     image described in the root README).
 
 **`mics.raw` is a recording of your room.** If anyone spoke during those 10

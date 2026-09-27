@@ -1,6 +1,12 @@
-.idea
+.idea/
 .DS_Store
-__pycache__
+__pycache__/
+.pytest_cache/
+.claude/
+scratchpad/
+
+# Generated build and release output.
+/build/
 /device/build/
 /emos/build/
 /release/
@@ -9,49 +15,17 @@ __pycache__
 /screen/app/build/
 /screen/app/src/main/assets/tater-checkers-module.zip
 /screen/local.properties
-controller/.env
-controller/.venv/
-controller/data/
-controller/static/vendor/
-controller/static/dashboard.js
-.claude/
-scratchpad/
 
-# Per-device stock boot images and recovery escrow. These contain Amazon code
-# read from a user's own Echo and must never be committed or published.
+# Per-device recovery material contains Amazon code read from the user's Echo.
 device-backups/
 factory-backups/
 
-# DTLN NS models (vendored into the Docker image at build time; bare-metal
-# dev drops them here or points NS_MODEL_DIR elsewhere)
-controller/models/
-
-# SQLite databases and their sidecars. controller/data/ is already ignored,
-# but DB_PATH defaults to controller/echomuse.db, so a bare-metal run writes
-# a live database there — and merely READING any database creates -wal/-shm
-# beside it, which a `git add -A` then sweeps up. A committed live DB would
-# carry fleet config, device serials, turn history and transcripts.
+# Local state and credentials must never be committed.
 *.db
 *.db-wal
 *.db-shm
-
-# The device-link PKI. em_pki.py writes tls/ NEXT TO THE DATABASE, so the
-# rule above about DB_PATH defaulting into controller/ applies here in exactly
-# the same way and for the same reason — a bare-metal dev run leaves a private
-# CA in the working tree, one directory from the case this file already
-# guards. PR #313 then swept ca.key and server.key into a public branch on a
-# `git add -A`, which is precisely how the database rule was learned.
-#
-# What leaks is worse than it looks: ca.key signs the identity every device
-# verifies, so anyone holding it can impersonate the controller to any device
-# that trusts that CA. Deleting tls/ regenerates it, and every device then
-# needs credentials re-pushed — recoverable, but only if someone notices.
-#
-# Globs, not one path: DB_PATH moves, the add-on writes /data/tls/, and a
-# second checkout or a tools/ scratch run puts it somewhere neither of us
-# predicted. A key must never be committable from any of them.
 tls/
 *.key
 
-# speaker_profile generates its test signals; generate_signals.py is the source
+# Generated speaker-profile signals; generate_signals.py is the source.
 device/tools/speaker_profile/*.wav

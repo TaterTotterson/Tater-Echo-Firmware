@@ -13,8 +13,8 @@ a tone from known angles.
 
 **Ch7 and Ch8 are not mics.** They are a stereo loopback of the device's own
 playback — Ch7 left, Ch8 right — a hardware echo reference that is always
-present and needs no mixer change (measured 2026-08-29; see the Mic Array
-section of SETUP.md). Four stereo ADCs account for Ch0–Ch7, so one of those
+present and needs no mixer change (measured 2026-08-29; see
+[`docs/biscuit-hardware.md`](../../docs/biscuit-hardware.md)). Four stereo ADCs account for Ch0–Ch7, so one of those
 is an unused ADC input and the ninth channel has no ADC behind it at all.
 
 That is also why this tool's own procedure below cannot see them: it uses an
@@ -25,13 +25,13 @@ with the mics because they arrive in the same TDM frame.**
 
 ## Build
 
-Inside the `echomuse-compiler` Docker container:
+Inside the `tater-echo-compiler` Docker container:
 
 ```bash
 docker run --rm \
   -v "$(pwd)":/capture \
   -v "$(pwd)/../GoTinyAlsa":/GoTinyAlsa \
-  echomuse-compiler \
+  tater-echo-compiler \
   bash -c "cd /capture && go build -tags server -o capture_mics ."
 ```
 

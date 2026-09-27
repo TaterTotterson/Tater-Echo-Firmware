@@ -6,7 +6,7 @@
 // 6 perimeter mics at r=36mm, 60° intervals, 30° offset from 12 o'clock.
 // 1 centre mic. Ch7 and Ch8 are NOT mics: they are a stereo loopback of the
 // device's own playback — the hardware echo reference (see echoRefCh below
-// and SETUP.md's Mic Array section, measured 2026-08-29).
+// and docs/biscuit-hardware.md, measured 2026-08-29).
 //
 //	Ch0 → MK1 → 330°  (11 o'clock)  confirmed empirically 2026-05
 //	Ch1 → MK2 →  30°  ( 1 o'clock)
@@ -72,7 +72,7 @@ const (
 	// loopback of the device's own playback, arriving in the same TDM frame
 	// as the mic samples, and the internal driver plays the RIGHT channel
 	// only (measured 2026-08-29: left silent gives 55dB less at the mic; see
-	// SETUP.md's Mic Array section). So ch8 is the reference and ch7 carries
+	// docs/biscuit-hardware.md). So ch8 is the reference and ch7 carries
 	// a signal the speaker never emits — using ch7 would be cancelling
 	// against audio nobody heard.
 	echoRefCh = 8
