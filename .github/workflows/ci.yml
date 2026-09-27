@@ -119,7 +119,7 @@ jobs:
         working-directory: device
         run: go test ./internal/... ./pkg/...
       - name: Test factory installer safety logic
-        run: python3 -m unittest factory.biscuit.test_install factory.checkers.test_install factory.checkers.test_privacy tools.test_merge_release_manifests
+        run: python3 -m unittest factory.biscuit.test_install factory.checkers.test_install factory.checkers.test_privacy tools.test_checkers_module tools.test_merge_release_manifests
       - name: Test native microWakeWord runtime
         working-directory: device
         run: ./test_microwakeword_runtime.sh
@@ -140,6 +140,8 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Install pinned Android platform
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Embed Checkers boot module
+        run: python3 tools/checkers_module.py --version v0.0.0-dev --output screen/app/src/main/assets/tater-checkers-module.zip
       - name: Build APK
         run: ./screen/gradlew -p screen --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Verify APK archive

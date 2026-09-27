@@ -33,7 +33,7 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 		t.Fatal("checkers did not advertise its on-demand Room Vision camera")
 	}
 	if got["ota"] != true {
-		t.Fatal("checkers did not advertise coordinated native+APK OTA")
+		t.Fatal("checkers did not advertise coordinated native+APK+module OTA")
 	}
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
 		t.Fatal("checkers did not advertise its Android BLE presence relay")

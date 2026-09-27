@@ -12,6 +12,10 @@ MAX_FAST_EXITS=3
 OTA_DIR=/data/local/etc/tater/ota
 OTA_PENDING=$OTA_DIR/pending.env
 OTA_HEALTHY=$OTA_DIR/healthy
+OTA_MODULE=$OTA_DIR/module.zip
+MODULE_DIR=/data/adb/modules/tater_checkers
+MODULE_ROLLBACK=/data/adb/modules/tater_checkers.ota-rollback
+MODULE_FAILED=/data/adb/modules/tater_checkers.ota-failed
 SUPERVISOR_PID=$LOG_DIR/checkers-service.pid
 SCREEN_RECOVERY_STATE=$LOG_DIR/screen-recovery-count
 SCREEN_WATCHDOG_PID=
@@ -150,9 +154,11 @@ ota_value() {
 }
 
 rollback_pending_ota() {
+    module_rolled_back=0
     previous=$(ota_value previous_slot)
     rollback_apk=$(ota_value rollback_apk)
     staged_apk=$(ota_value staged_apk)
+    rollback_module=$(ota_value rollback_module)
     case "$previous" in
         server_a|server_b) ;;
         *)
@@ -176,9 +182,36 @@ rollback_pending_ota() {
     else
         service_log "OTA screen rollback APK missing"
     fi
-    rm -f "$OTA_PENDING" "$OTA_HEALTHY" "$staged_apk"
+    if { [ "$rollback_module" = "$MODULE_ROLLBACK" ] || [ -z "$rollback_module" ]; } \
+            && [ -d "$MODULE_ROLLBACK" ]; then
+        rm -rf "$MODULE_FAILED"
+        if mv "$MODULE_DIR" "$MODULE_FAILED" 2>/dev/null \
+                && mv "$MODULE_ROLLBACK" "$MODULE_DIR" 2>/dev/null; then
+            rm -rf "$MODULE_FAILED"
+            service_log "OTA Checkers boot module rolled back"
+            module_rolled_back=1
+        else
+            [ -d "$MODULE_DIR" ] || mv "$MODULE_FAILED" "$MODULE_DIR" 2>/dev/null
+            service_log "OTA Checkers boot module rollback failed"
+        fi
+    fi
+    rm -f "$OTA_PENDING" "$OTA_HEALTHY" "$staged_apk" "$OTA_MODULE"
     am force-stop "$PACKAGE" >/dev/null 2>&1
+    if [ $module_rolled_back -eq 1 ]; then
+        sync
+        service_log "OTA rollback rebooting to reactivate the preceding boot module"
+        reboot
+        sleep 60
+    fi
 }
+
+# A v0.2.2 supervisor can commit the first module-aware generation before the
+# controlled reboot. The new module is already active on disk in that case,
+# but the old script does not know to remove its rollback material.
+if [ ! -f "$OTA_PENDING" ]; then
+    rm -rf "$MODULE_DIR.ota-new" "$MODULE_ROLLBACK" "$MODULE_FAILED"
+    rm -f "$OTA_MODULE"
+fi
 
 # Magisk late_start normally runs after Android services exist, but the first
 # boot after an APK install can still reach us before PackageManager is ready.
@@ -244,8 +277,9 @@ while true; do
     service_log "start mode=$mode pid=$server_pid slot=$(readlink "$BIN" 2>/dev/null)"
 
     # A Checkers OTA is healthy only when the new native daemon has reached
-    # Tater and the matching-version APK has connected over the loopback
-    # screen protocol. Until then both old components remain recoverable.
+    # Tater, the matching-version APK has connected over loopback, and the
+    # matching Magisk module has been verified and installed. Until then the
+    # preceding generation remains recoverable.
     if [ "$mode" = native ] && [ -f "$OTA_PENDING" ]; then
         expected=$(ota_value version)
         healthy=0
@@ -261,8 +295,13 @@ while true; do
         if [ $healthy -eq 1 ]; then
             rollback_apk=$(ota_value rollback_apk)
             staged_apk=$(ota_value staged_apk)
-            rm -f "$OTA_PENDING" "$OTA_HEALTHY" "$rollback_apk" "$staged_apk"
-            service_log "OTA generation $expected committed after native+screen health"
+            rollback_module=$(ota_value rollback_module)
+            rm -f "$OTA_PENDING" "$OTA_HEALTHY" "$rollback_apk" "$staged_apk" \
+                "$OTA_MODULE"
+            if [ "$rollback_module" = "$MODULE_ROLLBACK" ] || [ -z "$rollback_module" ]; then
+                rm -rf "$MODULE_ROLLBACK" "$MODULE_FAILED" "$MODULE_DIR.ota-new"
+            fi
+            service_log "OTA generation $expected committed after native+screen+module health"
         else
             service_log "OTA generation $expected failed coordinated health after ${waited}s"
             kill "$server_pid" >/dev/null 2>&1

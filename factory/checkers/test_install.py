@@ -134,6 +134,8 @@ class CheckersInstallerTests(unittest.TestCase):
         self.assertIn("mv -f /data/local/bin/server_b.new /data/local/bin/server_b", script)
         self.assertIn("wpa_supplicant-ap.new", script)
         self.assertIn("mv -f /data/local/lib/tater/wpa_supplicant-ap.new", script)
+        self.assertIn("tater_checkers.ota-rollback", script)
+        self.assertIn("/data/local/etc/tater/ota/module.zip", script)
         self.assertIn("ln -sf server_a /data/local/bin/server", script)
         self.assertIn("/data/adb/modules/tater_checkers/service.sh", script)
         self.assertIn("/data/adb/modules/tater_checkers/post-fs-data.sh", script)
@@ -166,8 +168,19 @@ class CheckersInstallerTests(unittest.TestCase):
             install.uninstall(adb, root)
         script = "\n".join(root.commands)
         self.assertLess(script.index("uninstall.sh"), script.index("rm -rf /data/adb/modules/tater_checkers"))
+        self.assertIn("tater_checkers.ota-rollback", script)
+        self.assertIn("/data/local/etc/tater/ota/module.zip", script)
         self.assertIn("pm enable --user 0 com.amazon.ds2.oobe.efd", script)
         self.assertIn(("uninstall", install.PACKAGE), adb.runs)
+
+    def test_supervisor_commits_and_rolls_back_module_with_generation(self):
+        script = (MODULE.parent / "magisk" / "service.sh").read_text()
+        self.assertIn('rollback_module=$(ota_value rollback_module)', script)
+        self.assertIn('mv "$MODULE_ROLLBACK" "$MODULE_DIR"', script)
+        self.assertIn('rollback rebooting to reactivate the preceding boot module', script)
+        self.assertIn('committed after native+screen+module health', script)
+        self.assertIn('rm -rf "$MODULE_ROLLBACK"', script)
+        self.assertIn('if [ ! -f "$OTA_PENDING" ]', script)
 
 
 if __name__ == "__main__":

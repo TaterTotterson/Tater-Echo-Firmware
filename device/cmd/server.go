@@ -211,16 +211,30 @@ func main() {
 		if marked || !connected || appVersion == "" {
 			return
 		}
-		ok, err := taternative.MarkCheckersOTAHealthy(client.Version, appVersion)
+		ok, rebootRequired, err := taternative.MarkCheckersOTAHealthy(client.Version, appVersion)
 		if err != nil {
 			log.Printf("[ota] could not mark Checkers generation healthy: %v", err)
+			return
+		}
+		if rebootRequired {
+			checkersOTAHealth.Lock()
+			checkersOTAHealth.marked = true
+			checkersOTAHealth.Unlock()
+			log.Printf("[ota] Checkers boot module %s installed; rebooting once to prove it healthy", client.Version)
+			go func() {
+				time.Sleep(3 * time.Second)
+				syscall.Sync()
+				if err := exec.Command("/system/bin/reboot").Run(); err != nil {
+					log.Printf("[ota] reboot after Checkers boot module update failed: %v", err)
+				}
+			}()
 			return
 		}
 		if ok {
 			checkersOTAHealth.Lock()
 			checkersOTAHealth.marked = true
 			checkersOTAHealth.Unlock()
-			log.Printf("[ota] Checkers native and screen generation %s is healthy", client.Version)
+			log.Printf("[ota] Checkers native, screen, and boot-module generation %s is healthy", client.Version)
 		}
 	}
 	resetToSetup := func(source string, playSound bool) error {

@@ -166,8 +166,9 @@ The hardware-verified native build identifies capture as card
 0/device 22 (four-channel S24_3LE at 16 kHz) and playback as card 0/device 23
 (stereo S16 at 48 kHz). Native speaker, microWakeWord, Tater pairing, screen
 integration, and reboot supervision have passed on real hardware. Checkers OTA
-updates the native daemon and screen APK as a coordinated generation. The boot
-supervisor commits only after both new components report healthy and restores
-both on a timeout or early failure. Tagged builds must keep the same protected
-APK signing key across releases; changing that key requires a USB factory
-reinstall.
+updates the native daemon, screen APK, and Magisk support module as a
+coordinated generation. The boot supervisor commits only after the daemon and
+screen report healthy and the module is verified; a module change performs one
+controlled reboot. A timeout or early failure restores the preceding
+generation. Tagged builds must keep the same protected APK signing key across
+releases; changing that key requires a USB factory reinstall.

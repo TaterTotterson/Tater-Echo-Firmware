@@ -61,7 +61,7 @@ Machine-readable target data lives in [`targets/targets.json`](targets/targets.j
   forwards bounded batches to the same native Tater protocol.
 - First-boot Wi-Fi and Tater pairing portal—no browser USB wizard required.
 - SHA-256 verified A/B OTA with automatic rollback; Checkers coordinates its
-  native daemon and signed screen APK as one recoverable update generation.
+  native daemon, signed screen APK, and Magisk support module as one update.
 - A lightweight Checkers screen APK with live listening, thinking, tool-call,
   reply/DOA, media, timer, mute, volume, and push-to-intercom surfaces.
 - Explicit-request Room Vision on Checkers. Tater can capture one fresh still
@@ -209,7 +209,7 @@ An annotated `vX.Y.Z` tag builds two artifacts for each supported model:
 | `tater-echo-biscuit-vX.Y.Z-ota.bin` | Device-independent Tater userspace update over Wi-Fi |
 | `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Native Checkers installer, screen, setup AP, and boot supervisor |
 | `tater-echo-checkers-vX.Y.Z-screen-preview.apk` | Standalone signed Tater Show APK |
-| `tater-echo-checkers-vX.Y.Z-ota.zip` | Coordinated native daemon and signed screen APK update |
+| `tater-echo-checkers-vX.Y.Z-ota.zip` | Coordinated native daemon, signed screen APK, and boot-module update |
 | `firmware-manifest.json` | Target, compatibility, file sizes, and SHA-256 hashes |
 | `SHA256SUMS` | Human/tool verification of every release artifact |
 
@@ -238,12 +238,12 @@ containing the target's release URL, SHA-256, and size. Biscuit:
 3. atomically switches the active symlink and restarts; and
 4. rolls back after three fast startup failures.
 
-Checkers downloads a signed ZIP, verifies the outer artifact and both inner
-components, stages the inactive native slot, preserves the installed APK,
-installs the matching screen APK, and flips the native slot. Its Magisk
-supervisor commits only after the new native daemon reaches Tater and the
-same-version APK connects locally. A timeout or early exit restores both old
-components.
+Checkers downloads a signed ZIP, verifies the outer artifact and all three
+inner components, stages the inactive native slot and versioned Magisk module,
+preserves the installed APK, installs the matching screen APK, and flips the
+native slot. The module is activated only after the daemon and APK prove
+healthy, followed by one controlled reboot when required. A timeout or early
+exit restores the preceding generation.
 
 Tater resolves this repository's `firmware-manifest.json`, selects the OTA
 artifact matching the satellite's `firmware_target`, and sends the same OTA

@@ -19,10 +19,15 @@ import (
 )
 
 const (
-	checkersPackage        = "com.tatertotterson.show"
-	checkersOTAState       = "/data/local/etc/tater/ota"
-	checkersAndroidShell   = "/system/bin/sh"
-	checkersPackageManager = "/system/bin/pm"
+	checkersPackage          = "com.tatertotterson.show"
+	checkersOTAState         = "/data/local/etc/tater/ota"
+	checkersAndroidShell     = "/system/bin/sh"
+	checkersPackageManager   = "/system/bin/pm"
+	checkersModuleDir        = "/data/adb/modules/tater_checkers"
+	checkersModuleAsset      = "assets/tater-checkers-module.zip"
+	checkersMaxModuleBytes   = 8 * 1024 * 1024
+	checkersModuleStageName  = "module.zip"
+	checkersModuleBackupName = "tater_checkers.ota-rollback"
 )
 
 var checkersVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
@@ -38,6 +43,24 @@ type checkersBundleManifest struct {
 	Target  string                        `json:"target"`
 	Version string                        `json:"version"`
 	Files   map[string]checkersBundleFile `json:"files"`
+}
+
+type checkersModuleFile struct {
+	Path string
+	Mode os.FileMode
+}
+
+var checkersModuleFiles = []checkersModuleFile{
+	{Path: "module.prop", Mode: 0o644},
+	{Path: "sepolicy.rule", Mode: 0o644},
+	{Path: "post-fs-data.sh", Mode: 0o755},
+	{Path: "service.sh", Mode: 0o755},
+	{Path: "privacy.sh", Mode: 0o755},
+	{Path: "privacy-packages.txt", Mode: 0o644},
+	{Path: "privacy-components.txt", Mode: 0o644},
+	{Path: "system/priv-app/SpeechInteractionManager/.replace", Mode: 0o644},
+	{Path: "system/priv-app/com.amazon.bishop/.replace", Mode: 0o644},
+	{Path: "uninstall.sh", Mode: 0o755},
 }
 
 func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, report func(string, int, string)) error {
@@ -64,7 +87,7 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 	}
 	defer archive.Close()
 	if report != nil {
-		report("installing", 91, "Verifying native and screen components")
+		report("installing", 91, "Verifying native, screen, and boot components")
 	}
 
 	link, err := os.Readlink(activePath)
@@ -88,9 +111,11 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 	apkTemp := apkStaged + ".ota"
 	rollbackAPK := filepath.Join(stateDir, "rollback.apk")
 	rollbackTemp := rollbackAPK + ".ota"
+	moduleStaged := filepath.Join(stateDir, checkersModuleStageName)
+	moduleTemp := moduleStaged + ".ota"
 	pendingPath := filepath.Join(stateDir, "pending.env")
 	healthPath := filepath.Join(stateDir, "healthy")
-	for _, path := range []string{serverTemp, apkTemp, rollbackTemp, healthPath} {
+	for _, path := range []string{serverTemp, apkTemp, rollbackTemp, moduleTemp, healthPath} {
 		_ = os.Remove(path)
 	}
 
@@ -104,6 +129,12 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 		return fmt.Errorf("stage screen APK: %w", err)
 	}
 	if err := verifyAPK(apkTemp); err != nil {
+		return err
+	}
+	if err := extractCheckersFile(archive, manifest.Files["magisk_module"], moduleTemp, 0o600); err != nil {
+		return fmt.Errorf("stage Checkers boot module: %w", err)
+	}
+	if err := verifyCheckersModuleArchive(moduleTemp, manifest.Version); err != nil {
 		return err
 	}
 
@@ -123,6 +154,14 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 	if err := os.Rename(apkTemp, apkStaged); err != nil {
 		return fmt.Errorf("commit staged screen APK: %w", err)
 	}
+	if err := os.Rename(moduleTemp, moduleStaged); err != nil {
+		return fmt.Errorf("commit staged Checkers boot module: %w", err)
+	}
+	moduleDir := i.CheckersModuleDir
+	if moduleDir == "" {
+		moduleDir = checkersModuleDir
+	}
+	moduleRollback := filepath.Join(filepath.Dir(moduleDir), checkersModuleBackupName)
 
 	pending := strings.Join([]string{
 		"version=" + manifest.Version,
@@ -130,6 +169,8 @@ func (i *OTAInstaller) installCheckers(ctx context.Context, req OTARequest, repo
 		"new_slot=" + inactive,
 		"rollback_apk=" + rollbackAPK,
 		"staged_apk=" + apkStaged,
+		"staged_module=" + moduleStaged,
+		"rollback_module=" + moduleRollback,
 	}, "\n") + "\n"
 	if err := atomicWrite(pendingPath, []byte(pending), 0o600); err != nil {
 		return fmt.Errorf("write Checkers rollback state: %w", err)
@@ -233,7 +274,7 @@ func openCheckersBundle(path string) (checkersBundleManifest, *zip.ReadCloser, e
 		archive.Close()
 		return checkersBundleManifest{}, nil, errors.New("Checkers OTA manifest is invalid")
 	}
-	for _, key := range []string{"server", "screen_apk"} {
+	for _, key := range []string{"server", "screen_apk", "magisk_module"} {
 		file, ok := manifest.Files[key]
 		if !ok || file.Path == "" || filepath.Base(file.Path) != file.Path || file.Size <= 0 || len(file.SHA256) != 64 {
 			archive.Close()
@@ -387,32 +428,295 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(temporary, path)
 }
 
-// MarkCheckersOTAHealthy commits a pending generation only after both the
-// updated native daemon and the matching APK have connected to Tater. The
-// supervisor removes rollback material after observing this marker.
-func MarkCheckersOTAHealthy(version, appVersion string) (bool, error) {
+func verifyCheckersModuleArchive(path, version string) error {
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		return errors.New("Checkers boot module is not a ZIP archive")
+	}
+	defer archive.Close()
+	if len(archive.File) != len(checkersModuleFiles) {
+		return errors.New("Checkers boot module has an unexpected file set")
+	}
+	var total uint64
+	for _, expected := range checkersModuleFiles {
+		entry := zipEntry(archive.File, expected.Path)
+		if entry == nil || entry.FileInfo().IsDir() {
+			return fmt.Errorf("Checkers boot module is missing %s", expected.Path)
+		}
+		total += entry.UncompressedSize64
+		if entry.UncompressedSize64 > checkersMaxModuleBytes || total > checkersMaxModuleBytes {
+			return errors.New("Checkers boot module is oversized")
+		}
+	}
+	moduleProp := zipEntry(archive.File, "module.prop")
+	reader, err := moduleProp.Open()
+	if err != nil {
+		return err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(reader, 64*1024))
+	closeErr := reader.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	wanted := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	found := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "version=") {
+			found = strings.TrimSpace(strings.TrimPrefix(line, "version="))
+		}
+	}
+	if found == "" || found != wanted {
+		return fmt.Errorf("Checkers boot module version %q does not match %q", found, wanted)
+	}
+	return nil
+}
+
+func extractCheckersModuleArchive(path, destination string) error {
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	for _, expected := range checkersModuleFiles {
+		entry := zipEntry(archive.File, expected.Path)
+		if entry == nil {
+			return fmt.Errorf("Checkers boot module is missing %s", expected.Path)
+		}
+		target := filepath.Join(destination, filepath.FromSlash(expected.Path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		source, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, expected.Mode)
+		if err != nil {
+			source.Close()
+			return err
+		}
+		written, copyErr := io.Copy(output, io.LimitReader(source, int64(entry.UncompressedSize64)+1))
+		syncErr := output.Sync()
+		closeErr := output.Close()
+		sourceErr := source.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if syncErr != nil {
+			return syncErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if sourceErr != nil {
+			return sourceErr
+		}
+		if written != int64(entry.UncompressedSize64) {
+			return fmt.Errorf("Checkers boot module file %s was truncated", expected.Path)
+		}
+		if err := os.Chmod(target, expected.Mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkersModuleVersionMatches(moduleDir, version string) bool {
+	data, err := os.ReadFile(filepath.Join(moduleDir, "module.prop"))
+	if err != nil {
+		return false
+	}
+	wanted := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "version=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "version=")) == wanted
+		}
+	}
+	return false
+}
+
+func checkersModulePaths(moduleDir string) (string, string) {
+	return moduleDir + ".ota-new", filepath.Join(filepath.Dir(moduleDir), checkersModuleBackupName)
+}
+
+func installCheckersModuleGeneration(archivePath, moduleDir, version string) (string, error) {
+	if !filepath.IsAbs(moduleDir) || filepath.Clean(moduleDir) == string(filepath.Separator) {
+		return "", errors.New("Checkers boot module destination is unsafe")
+	}
+	if err := verifyCheckersModuleArchive(archivePath, version); err != nil {
+		return "", err
+	}
+	next, rollback := checkersModulePaths(moduleDir)
+	if err := os.RemoveAll(next); err != nil {
+		return "", fmt.Errorf("clear staged Checkers boot module: %w", err)
+	}
+	if err := os.MkdirAll(next, 0o755); err != nil {
+		return "", fmt.Errorf("create staged Checkers boot module: %w", err)
+	}
+	if err := extractCheckersModuleArchive(archivePath, next); err != nil {
+		_ = os.RemoveAll(next)
+		return "", fmt.Errorf("extract Checkers boot module: %w", err)
+	}
+	if err := os.RemoveAll(rollback); err != nil {
+		_ = os.RemoveAll(next)
+		return "", fmt.Errorf("clear prior Checkers module rollback: %w", err)
+	}
+	hadModule := false
+	if _, err := os.Stat(moduleDir); err == nil {
+		hadModule = true
+		if err := os.Rename(moduleDir, rollback); err != nil {
+			_ = os.RemoveAll(next)
+			return "", fmt.Errorf("preserve Checkers boot module: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		_ = os.RemoveAll(next)
+		return "", fmt.Errorf("inspect Checkers boot module: %w", err)
+	}
+	if err := os.Rename(next, moduleDir); err != nil {
+		if hadModule {
+			_ = os.Rename(rollback, moduleDir)
+		}
+		return "", fmt.Errorf("activate Checkers boot module: %w", err)
+	}
+	return rollback, nil
+}
+
+func stageCheckersModuleFromAPK(ctx context.Context, stateDir, version string) (string, error) {
+	apkPath := strings.TrimSpace(os.Getenv("TATER_CHECKERS_APK_PATH"))
+	if apkPath == "" {
+		installer := NewOTAInstallerForTarget("checkers")
+		path, err := installer.currentAPK(ctx, checkersPackage)
+		if err != nil {
+			return "", err
+		}
+		apkPath = path
+	}
+	apk, err := zip.OpenReader(apkPath)
+	if err != nil {
+		return "", fmt.Errorf("open installed Tater Show APK: %w", err)
+	}
+	defer apk.Close()
+	asset := zipEntry(apk.File, checkersModuleAsset)
+	if asset == nil || asset.UncompressedSize64 == 0 || asset.UncompressedSize64 > checkersMaxModuleBytes {
+		return "", errors.New("installed Tater Show APK has no valid Checkers boot module")
+	}
+	reader, err := asset.Open()
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	destination := filepath.Join(stateDir, checkersModuleStageName)
+	temporary := destination + ".bootstrap"
+	output, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	written, copyErr := io.Copy(output, io.LimitReader(reader, checkersMaxModuleBytes+1))
+	syncErr := output.Sync()
+	closeErr := output.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if syncErr != nil {
+		return "", syncErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if written != int64(asset.UncompressedSize64) {
+		return "", errors.New("embedded Checkers boot module was truncated")
+	}
+	if err := verifyCheckersModuleArchive(temporary, version); err != nil {
+		return "", err
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
+
+func readCheckersPending(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok && key != "" {
+			values[key] = strings.TrimSpace(value)
+		}
+	}
+	return values, nil
+}
+
+// MarkCheckersOTAHealthy commits a pending generation only after the updated
+// daemon and matching APK have connected to Tater and the versioned Magisk
+// module has survived its activation reboot. The bool results are healthy and
+// rebootRequired; they are mutually exclusive.
+func MarkCheckersOTAHealthy(version, appVersion string) (bool, bool, error) {
 	stateDir := strings.TrimSpace(os.Getenv("TATER_CHECKERS_OTA_STATE"))
 	if stateDir == "" {
 		stateDir = checkersOTAState
 	}
-	pending, err := os.ReadFile(filepath.Join(stateDir, "pending.env"))
+	pending, err := readCheckersPending(filepath.Join(stateDir, "pending.env"))
 	if os.IsNotExist(err) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	wanted := ""
-	for _, line := range strings.Split(string(pending), "\n") {
-		if strings.HasPrefix(line, "version=") {
-			wanted = strings.TrimSpace(strings.TrimPrefix(line, "version="))
+	wanted := pending["version"]
+	if wanted == "" || wanted != strings.TrimSpace(version) || wanted != strings.TrimSpace(appVersion) {
+		return false, false, nil
+	}
+	moduleDir := strings.TrimSpace(os.Getenv("TATER_CHECKERS_MODULE_DIR"))
+	if moduleDir == "" {
+		moduleDir = checkersModuleDir
+	}
+	moduleInstalled := false
+	rollback := ""
+	stagedModule := pending["staged_module"]
+	if stagedModule != "" {
+		if filepath.Clean(stagedModule) != filepath.Join(stateDir, checkersModuleStageName) {
+			return false, false, errors.New("pending Checkers boot module path is invalid")
+		}
+	} else if !checkersModuleVersionMatches(moduleDir, wanted) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		stagedModule, err = stageCheckersModuleFromAPK(ctx, stateDir, wanted)
+		if err != nil {
+			return false, false, fmt.Errorf("stage signed Checkers boot module: %w", err)
 		}
 	}
-	if wanted == "" || wanted != strings.TrimSpace(version) || wanted != strings.TrimSpace(appVersion) {
-		return false, nil
+	if stagedModule != "" {
+		_, existingRollback := checkersModulePaths(moduleDir)
+		if checkersModuleVersionMatches(moduleDir, wanted) {
+			if _, statErr := os.Stat(existingRollback); statErr == nil {
+				rollback = existingRollback
+			} else {
+				stagedModule = ""
+			}
+		}
+	}
+	if stagedModule != "" && rollback == "" {
+		rollback, err = installCheckersModuleGeneration(stagedModule, moduleDir, wanted)
+		if err != nil {
+			return false, false, err
+		}
+		moduleInstalled = true
+	}
+	if moduleInstalled {
+		// Do not publish health from the pre-reboot supervisor. The next boot
+		// must start the new module, daemon, and APK before the generation can
+		// consume its rollback material.
+		return false, true, nil
 	}
 	if err := atomicWrite(filepath.Join(stateDir, "healthy"), []byte(wanted+"\n"), 0o600); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return true, nil
+	return true, false, nil
 }

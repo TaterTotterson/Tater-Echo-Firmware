@@ -5,9 +5,9 @@
 The Checkers target is now a complete native hardware-test build on rooted
 stock Fire OS 6. The release installs the Tater Show APK, native audio daemon,
 microWakeWord runtime, setup hotspot, and a reversible Magisk supervisor. It
-does not write a partition or replace Fire OS. OTA treats the native daemon
-and signed screen APK as one generation and rolls both back together if the
-new pair cannot prove healthy.
+does not write a partition or replace Fire OS. OTA treats the native daemon,
+signed screen APK, and Magisk support module as one generation and restores the
+preceding generation if the update cannot prove healthy.
 
 ## Baseline
 
@@ -172,7 +172,7 @@ different room.
    screen controls while inspecting the native service log.
 7. From Tater, install a same-key Checkers release and confirm that native and
    APK versions advance together. Before publishing, exercise one deliberately
-   unhealthy generation and verify that both components roll back.
+   unhealthy generation and verify that the daemon, APK, and module roll back.
 
 ## APK signing and OTA
 
@@ -187,8 +187,12 @@ installed app. A Show currently running a debug-signed preview therefore needs
 one USB factory reinstall with the first stable-signed release. Every later
 Tater OTA can update normally as long as that release key is preserved.
 
-The Checkers OTA bundle contains the same-version native daemon and APK plus an
-inner hash manifest. Installation stages the inactive daemon slot, backs up the
-currently installed APK, installs the new APK, and atomically flips the daemon
-link. The supervisor waits up to 90 seconds for both a Tater connection and a
-matching-version `screen.ready`; otherwise it restores the old link and APK.
+The Checkers OTA bundle contains the same-version native daemon, APK, and
+versioned Magisk support module plus an inner hash manifest. Installation
+stages the inactive daemon slot and module, backs up the currently installed
+APK, installs the new APK, and atomically flips the daemon link. The signed APK
+also embeds the same module so devices upgrading from the original two-part
+updater can join the three-part transaction in one release. The supervisor
+waits up to 90 seconds for a Tater connection and matching-version
+`screen.ready`; the daemon then activates the verified module and requests one
+controlled reboot. A failed health check restores the preceding generation.

@@ -7,6 +7,7 @@ __pycache__
 /screen/.gradle/
 /screen/build/
 /screen/app/build/
+/screen/app/src/main/assets/tater-checkers-module.zip
 /screen/local.properties
 controller/.env
 controller/.venv/

@@ -15,6 +15,11 @@ import tarfile
 import tempfile
 import zipfile
 
+try:
+    from tools.checkers_module import build_module_archive, render_module_prop
+except ModuleNotFoundError:  # Direct execution adds tools/, not the repo root.
+    from checkers_module import build_module_archive, render_module_prop
+
 
 REPO = Path(__file__).resolve().parents[1]
 TARGETS = REPO / "targets" / "targets.json"
@@ -45,18 +50,8 @@ def write_json(path: Path, value: dict) -> None:
 
 
 def write_checkers_module_prop(source: Path, destination: Path, version: str) -> None:
-    match = re.fullmatch(
-        r"v([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+]([A-Za-z0-9.-]+))?",
-        version,
-    )
-    if not match:
-        raise SystemExit("version must look like v0.1.0")
-    major, minor, patch = (int(match.group(index)) for index in range(1, 4))
-    version_code = major * 100_000_000 + minor * 10_000 + patch * 100
-    rendered = source.read_text()
-    rendered = re.sub(r"(?m)^version=.*$", f"version={version.removeprefix('v')}", rendered)
-    rendered = re.sub(r"(?m)^versionCode=.*$", f"versionCode={version_code}", rendered)
-    destination.write_text(rendered)
+    del source
+    destination.write_bytes(render_module_prop(version))
     destination.chmod(0o644)
 
 
@@ -109,6 +104,16 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         with tempfile.TemporaryDirectory(prefix="tater-checkers-ota-") as temporary:
             staging = Path(temporary)
             server = REPO / "device/build/server"
+            module = build_module_archive(version, staging / "module.zip")
+            with zipfile.ZipFile(apk) as screen_archive:
+                try:
+                    embedded_module = screen_archive.read("assets/tater-checkers-module.zip")
+                except KeyError as error:
+                    raise SystemExit(
+                        "Tater Show APK is missing assets/tater-checkers-module.zip"
+                    ) from error
+            if embedded_module != module.read_bytes():
+                raise SystemExit("Tater Show APK carries a different Checkers module generation")
             manifest = staging / "manifest.json"
             write_json(manifest, {
                 "schema": 1,
@@ -117,10 +122,16 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 "files": {
                     "server": {"path": "server", **metadata(server)},
                     "screen_apk": {"path": "screen.apk", **metadata(apk)},
+                    "magisk_module": {"path": "module.zip", **metadata(module)},
                 },
             })
             ota = output / f"{stem}-ota.zip"
-            deterministic_zip({"manifest.json": manifest, "server": server, "screen.apk": apk}, ota)
+            deterministic_zip({
+                "manifest.json": manifest,
+                "module.zip": module,
+                "server": server,
+                "screen.apk": apk,
+            }, ota)
         artifacts["ota"] = ota
     else:
         raise SystemExit(f"factory packaging is not implemented for {target!r}")

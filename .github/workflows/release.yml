@@ -2,8 +2,9 @@ name: Tater Echo Firmware Release
 
 # One annotated vX.Y.Z tag builds every target independently, then publishes a
 # single compatibility manifest. Biscuit produces factory + OTA firmware;
-# Checkers produces partition-safe native userspace plus its screen APK. No
-# archive contains an Amazon kernel, device tree, or proprietary Android image.
+# Checkers produces partition-safe native userspace, its screen APK, and the
+# reversible Magisk support module. No archive contains an Amazon kernel,
+# device tree, or proprietary Android image.
 
 on:
   push:
@@ -217,7 +218,7 @@ jobs:
 
       - name: Run Checkers installer tests
         run: |
-          python3 -m unittest factory.checkers.test_install factory.checkers.test_privacy tools.test_merge_release_manifests
+          python3 -m unittest factory.checkers.test_install factory.checkers.test_privacy tools.test_checkers_module tools.test_merge_release_manifests
           cd device
           go test -race \
             ./internal/taternative \
@@ -242,6 +243,12 @@ jobs:
           test -n "$TATER_SHOW_STORE_PASSWORD" || { echo "::error::TATER_SHOW_STORE_PASSWORD is not configured"; exit 1; }
           printf '%s' "$TATER_SHOW_KEYSTORE_BASE64" | base64 --decode > /tmp/tater-show-release.jks
           chmod 600 /tmp/tater-show-release.jks
+
+      - name: Embed versioned Checkers boot module
+        run: >-
+          python3 tools/checkers_module.py
+          --version '${{ steps.version.outputs.version }}'
+          --output screen/app/src/main/assets/tater-checkers-module.zip
 
       - name: Build signed Tater Show APK
         env:

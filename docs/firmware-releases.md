@@ -28,9 +28,9 @@ partition. The installer then creates and verifies the final image locally.
 ## OTA artifacts
 
 Biscuit's OTA asset is the ARM userspace ELF. Checkers uses a deterministic ZIP
-containing the ARM daemon, signed screen APK, and an inner manifest with the
-version, sizes, and SHA-256 hashes. Tater sends the same target-independent
-command envelope for either format:
+containing the ARM daemon, signed screen APK, versioned Magisk support module,
+and an inner manifest with the version, sizes, and SHA-256 hashes. Tater sends
+the same target-independent command envelope for either format:
 
 ```json
 {
@@ -48,9 +48,11 @@ non-ELF download, an HTTP error, or an artifact over 128 MiB.
 
 On Biscuit, success writes the inactive userspace slot and atomically switches
 `/data/local/bin/server`; the supervisor switches back after three fast startup
-failures. On Checkers, the installer also backs up and upgrades the APK. The
-supervisor commits only when the new daemon connects to Tater and a
-matching-version APK reports ready over loopback, otherwise it restores both.
+failures. On Checkers, the installer also backs up and upgrades the APK and
+stages the support module. The module is activated only after the new daemon
+connects to Tater and a matching-version APK reports ready over loopback. A
+module change requests one controlled reboot; a failed generation restores its
+native slot, APK, and module rollback material.
 
 ## Manifest
 
