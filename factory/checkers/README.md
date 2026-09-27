@@ -150,7 +150,9 @@ When `Tater-Setup-XXXX` appears, connect a phone or computer and complete the
 captive portal. The Show joins normal Wi-Fi, redeems the Tater pairing code,
 stores its permanent device token, and reboots into the Tater screen.
 
-Use `./install.sh --profile` to also collect the redacted hardware profile.
+Maintainers diagnosing hardware differences can use `./install.sh --profile`
+to collect a redacted Checkers hardware profile; normal installations do not
+need it.
 Use `./install.sh --no-home` to install only the screen preview without native
 boot services, or `./install.sh --demo` to cycle its visual states.
 Use `./install.sh --uninstall` to restore the privacy changes and remove Tater

@@ -24,7 +24,7 @@
 #     touches the mic runs after `stop media`.
 #   - mediaserver is restarted on every exit path, Ctrl-C included, and a
 #     reboot restores everything this changes.
-#   - Refuses to run beside EchoMuse's own server, which holds the PCMs too.
+#   - Refuses to run beside Tater's native server, which holds the PCMs too.
 set -eu
 
 # Mixer dumps and kernel nodes are byte streams. In a UTF-8 macOS locale,
@@ -61,16 +61,16 @@ else echo "no root on the device — this needs it" >&2; exit 1; fi
 dev() { $ADB exec-out "$PFX$1$SFX" 2>&1 | tr -d '\r\000' || true; }
 
 model=$(dev "getprop ro.product.device" | tr -cd 'A-Za-z0-9_.-'); [ -n "$model" ] || model=unknown
-OUT="${1:-./echomuse-probe-$model-$(date +%Y%m%d-%H%M%S)}"
+OUT="${1:-./tater-echo-probe-$model-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT"
 P="$OUT/probe.txt"; : > "$P"
 say() { printf '%s\n' "$*" >&2; }
 sec() { printf '\n===== %s\n' "$1" >> "$P"; }
 
-# EchoMuse's server holds the PCMs; stock mediaserver is what we want to watch.
+# Tater's native server holds the PCMs; stock mediaserver is what we want to watch.
 if dev "ls -l /proc/*/exe" | grep -q '/data/local/bin/server'; then
-  say "EchoMuse's server is running on this device. Stop it first (stop echomuse),"
-  say "or run this on a device still on its stock firmware."
+  say "Tater's native satellite daemon is running on this device."
+  say "Porting probes must be run on rooted stock Fire OS before Tater is installed."
   exit 1
 fi
 
@@ -84,7 +84,7 @@ if [ $YES = 0 ]; then
   printf 'Continue? [y/N] ' >&2; read -r ans; case "$ans" in y|Y|yes) ;; *) exit 0 ;; esac
 fi
 
-{ echo "EchoMuse active probe"; echo "probe.sh format 1"; echo "host date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+{ echo "Tater Echo active probe"; echo "probe.sh format 1"; echo "host date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "build: $(dev "getprop ro.build.fingerprint")"; } >> "$P"
 
 # Every PCM's state, one line each, so a snapshot shows what just opened.
@@ -157,7 +157,7 @@ fi
 # input device, which key code) rather than a stream the operator has to
 # annotate. The device that fired is recorded, not the one that advertises
 # the code: biscuit's "keys" and "mtk-kpd" both claim KEY_VOLUMEDOWN, and the
-# board definition must open the one that actually reports it (#541).
+# board definition must open the one that actually reports it.
 BUTTON_NAMES="action mute volume_up volume_down"
 BUTTON_WAIT=12
 if [ $BUTTONS = 1 ]; then
@@ -294,7 +294,7 @@ if [ $MICS = 1 ]; then
     if [ -z "$tool" ]; then
       echo "format $fmt needs pcm_capture (stock tinycap cannot record it); pass --capture" >> "$P"
       say "Mics: this device records $fmt, which stock tinycap can't. Re-run with"
-      say "      --capture <pcm_capture binary> (see porting/README.md)."
+      say "      --capture <pcm_capture binary> (see the porting guide)."
     else
       restore() {
         [ -n "$svc" ] && dev "start $svc" >/dev/null

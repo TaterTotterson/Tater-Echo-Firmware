@@ -181,10 +181,12 @@ Useful technical references:
 
 ## Adding another Echo model
 
-Add its metadata to `targets/targets.json`, create a target-specific factory
-installer, and add hardware-backed boot, partition, audio, control, and recovery
-tests. Never assume another Echo shares Biscuit or Checkers partition maps,
-kernel architecture, microphones, LEDs, controls, or recovery procedure.
+Start with the read-only profiler and guided stock-firmware probe in the
+[`porting/` hardware-discovery guide](porting/README.md). After the hardware is
+understood, add its metadata to `targets/targets.json`, create a target-specific
+factory installer, and add hardware-backed boot, partition, audio, control, and
+recovery tests. Never assume another Echo shares Biscuit or Checkers partition
+maps, kernel architecture, microphones, LEDs, controls, or recovery procedure.
 
 ## Credits and license
 

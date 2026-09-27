@@ -1,10 +1,12 @@
-# Porting: profiling an Echo EchoMuse doesn't support yet
+# Hardware discovery for new Tater Echo targets
 
-Two scripts that tell us what a new Echo is made of and how its stock firmware
-drives it. Run them on an unlocked, rooted device, attach the results to the
-device's issue, and we can judge what support would take.
+These tools show what an unsupported Echo is made of and how its stock firmware
+drives the hardware. Run them on an unlocked, rooted device before installing
+Tater, review the redacted results, and attach them to a Tater Echo Firmware
+hardware-support issue so we can judge what a safe port would require.
 
-They don't make the device work with EchoMuse. They collect what a port needs.
+They do not install Tater or make an unsupported device work. They only collect
+the information needed to design and verify a new target.
 
 | Script | What it does | Changes anything? |
 |---|---|---|
@@ -20,8 +22,9 @@ They don't make the device work with EchoMuse. They collect what a port needs.
 - **Optional on your computer:** `python3` (analyses the mic recording) and
   `dtc` (turns the device tree into readable source; `apt install
   device-tree-compiler`, `brew install dtc`).
-- **Don't run these on a device running EchoMuse.** Its server holds the audio
-  devices. `probe.sh` refuses to run if it's there.
+- **Don't run these after Tater has been installed.** The native satellite
+  daemon owns the audio devices. `probe.sh` refuses to run when it detects the
+  daemon; use rooted stock Fire OS instead.
 
 ## Step 1: profile
 
@@ -96,11 +99,13 @@ analysis, which needs no audio.
 
 ## What to do with the results
 
-1. Post both `.tar.gz` files (minus `mics.raw` if in doubt) on the device's
-   issue: #527 for the Echo Dot 3, #535 for the
-   Echo 2. For anything else, the Echo Spot included, open a new issue.
-2. We read them and say whether a port looks practical and what's missing.
-3. If it does look practical, the next step is a **test build you run by
+1. Review both archives before sharing them. Remove `mics.raw` if anyone spoke,
+   and never post vendor audio-file contents collected with `profile.sh -v`.
+2. Open a [Tater Echo Firmware hardware-support issue](https://github.com/TaterTotterson/Tater-Echo-Firmware/issues/new)
+   with the device model, Fire OS build, unlock method, and the safe archives.
+3. We review the results and explain whether a port looks practical and what is
+   still missing.
+4. If it does look practical, the next step is a **test build you run by
    hand**. You copy it to the device, start it yourself, and send the logs
    back. It isn't installed and never goes out as an update. Expect a few
    rounds of that before anything is ready to ship.

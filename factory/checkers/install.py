@@ -389,8 +389,6 @@ def main() -> int:
             print("Tater Show screen preview is installed and running without native boot services.")
         if args.profile:
             collect_profile(adb)
-        else:
-            print("Next: run ./install.sh --profile and send the generated checkers profile archive.")
         return 0
     except (InstallError, KeyboardInterrupt) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)

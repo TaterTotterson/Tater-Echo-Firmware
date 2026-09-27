@@ -2,10 +2,11 @@
 # profile.sh — read-only hardware profile of an unlocked Echo, for porting.
 #
 # Runs on the HOST and drives the device over adb. Collects what a new board
-# needs resolving by name (#541): ALSA cards and mixer controls, input devices,
+# needs resolving by name: ALSA cards and mixer controls, input devices,
 # LEDs, i2c/IIO sensors, WiFi driver, kernel arch, and the boot/partition
-# layout emOS would have to live in. Output is a directory plus a .tar.gz meant
-# for attaching to a PUBLIC issue, so it is redacted before it is written out.
+# layout a safe Tater installer must respect. Output is a directory plus a
+# .tar.gz intended for a hardware-support issue, so it is redacted before it
+# is written out.
 #
 #     porting/profile.sh [-s <adb serial>] [-v] [output-dir]
 #
@@ -127,7 +128,7 @@ $ADB pull /proc/device-tree "$OUT/files/device-tree" >/dev/null 2>&1 || true
 # Some boards publish Amazon's idme block in the device tree too: the Dot 3
 # carries /idme with the serial, both MACs and mac_sec. idme is read above
 # through an allowlist, so the tree's copy goes before anything is built from
-# it, dts or raw. Found in a public attachment on #527, 2026-09-18.
+# it, dts or raw. This was found in an earlier public hardware profile.
 rm -rf "$OUT/files/device-tree/idme" "$OUT/files/device-tree/chosen"
 if command -v dtc >/dev/null && [ -d "$OUT/files/device-tree" ]; then
   dtc -q -I fs -O dts -o "$OUT/files/device-tree.dts" "$OUT/files/device-tree" 2>/dev/null || true
@@ -361,7 +362,7 @@ done
 if [ -n "$serial" ] && LC_ALL=C grep -a -r -l "$serial" "$OUT" >/dev/null 2>&1; then
   echo "STOPPED: the device serial is still present in:" >&2
   LC_ALL=C grep -a -r -l "$serial" "$OUT" >&2
-  echo "No archive was made. Please report this on #527 instead of posting the files." >&2
+  echo "No archive was made. Report the redaction failure without attaching these files." >&2
   exit 1
 fi
 tar -czf "$OUT.tar.gz" -C "$(dirname "$OUT")" "$(basename "$OUT")"
