@@ -231,6 +231,8 @@ def install_native(adb: Adb, root: RootShell) -> None:
         "libtater_microwakeword.so": "/data/local/share/tater/microwakeword/libtater_microwakeword.so",
         "hey_tater.tflite": "/data/local/share/tater/microwakeword/hey_tater.tflite",
         "hey_tater.json": "/data/local/share/tater/microwakeword/hey_tater.json",
+        "stop.tflite": "/data/local/share/tater/microwakeword/stop.tflite",
+        "stop.json": "/data/local/share/tater/microwakeword/stop.json",
         "wpa_supplicant-ap": "/data/local/lib/tater/wpa_supplicant-ap",
         "module.prop": "/data/adb/modules/tater_checkers/module.prop",
         "sepolicy.rule": "/data/adb/modules/tater_checkers/sepolicy.rule",
@@ -299,6 +301,8 @@ def install_native(adb: Adb, root: RootShell) -> None:
         "/data/adb/modules/tater_checkers/uninstall.sh; "
         "chmod 644 /data/local/share/tater/microwakeword/hey_tater.tflite "
         "/data/local/share/tater/microwakeword/hey_tater.json "
+        "/data/local/share/tater/microwakeword/stop.tflite "
+        "/data/local/share/tater/microwakeword/stop.json "
         "/data/adb/modules/tater_checkers/module.prop "
         "/data/adb/modules/tater_checkers/privacy-packages.txt "
         "/data/adb/modules/tater_checkers/privacy-components.txt "

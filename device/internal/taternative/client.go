@@ -179,6 +179,7 @@ type Hooks struct {
 	ResumeMedia         func(sessionID string)
 	VolumeMedia         func(sessionID string, percent int)
 	TimerAlarm          func(active bool, timer Timer)
+	TimerUpdate         func(timer TimerDisplay)
 	DisplayWeather      func(payload map[string]any)
 	DisplayNotification func(payload map[string]any)
 	CameraSnapshot      func(context.Context) (CameraSnapshot, error)
@@ -329,7 +330,7 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 		voiceQueue:     make(chan queuedVoice, 32),
 		voiceStop:      make(chan uint64, 1),
 	}
-	c.timers = NewTimerManager(c.sendJSON, hooks.TimerAlarm)
+	c.timers = NewTimerManager(c.sendJSON, hooks.TimerAlarm, hooks.TimerUpdate)
 	go c.voiceWorker()
 	return c, nil
 }
@@ -699,6 +700,26 @@ func (c *Client) Close() {
 		c.cancelCloseMiss()
 		c.timers.Close()
 	})
+}
+
+// TimerRinging is safe to call from local hardware and wake-word handlers.
+func (c *Client) TimerRinging() bool {
+	return c != nil && c.timers != nil && c.timers.Ringing()
+}
+
+// StopRingingTimers silences every local alarm without waiting for Tater.
+func (c *Client) StopRingingTimers(source string) int {
+	if c == nil || c.timers == nil {
+		return 0
+	}
+	return c.timers.StopRinging(source)
+}
+
+// StopDisplayedTimer stops the timer represented on a local display. While an
+// alarm is sounding it silences that alarm; otherwise it cancels the countdown
+// with the nearest deadline.
+func (c *Client) StopDisplayedTimer(source string) bool {
+	return c != nil && c.timers != nil && c.timers.StopDisplayed(source)
 }
 
 func (c *Client) Connected() bool { return c.connected.Load() }

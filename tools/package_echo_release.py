@@ -157,6 +157,10 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "device/build/microwakeword-testdata/hey_tater.tflite", 0o644),
                 "payload/hey_tater.json": (
                     REPO / "device/internal/wakeword/microwakeword/models/hey_tater.json", 0o644),
+                "payload/stop.tflite": (
+                    REPO / "device/build/microwakeword-testdata/stop.tflite", 0o644),
+                "payload/stop.json": (
+                    REPO / "device/internal/wakeword/microwakeword/models/stop.json", 0o644),
                 "payload/init32": (REPO / "emos/build/init32", 0o755),
                 "payload/wpa_supplicant": (REPO / "emos/build/wpa/wpa_supplicant", 0o755),
                 "payload/wpa_cli": (REPO / "emos/build/wpa/wpa_cli", 0o755),
@@ -185,6 +189,10 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "device/build/microwakeword-testdata/hey_tater.tflite", 0o644),
                 "payload/hey_tater.json": (
                     REPO / "device/internal/wakeword/microwakeword/models/hey_tater.json", 0o644),
+                "payload/stop.tflite": (
+                    REPO / "device/build/microwakeword-testdata/stop.tflite", 0o644),
+                "payload/stop.json": (
+                    REPO / "device/internal/wakeword/microwakeword/models/stop.json", 0o644),
                 "payload/wpa_supplicant-ap": (
                     REPO / "emos/build/wpa/wpa_supplicant", 0o755),
                 "payload/module.prop": (

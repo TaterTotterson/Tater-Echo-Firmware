@@ -108,7 +108,8 @@ class CheckersInstallerTests(unittest.TestCase):
         root = FakeRoot()
         names = {
             "server", "libtater_microwakeword.so", "hey_tater.tflite",
-            "hey_tater.json", "wpa_supplicant-ap", "module.prop",
+            "hey_tater.json", "stop.tflite", "stop.json",
+            "wpa_supplicant-ap", "module.prop",
             "sepolicy.rule", "post-fs-data.sh", "service.sh", "privacy.sh",
             "privacy-packages.txt", "privacy-components.txt",
             "speech-interaction-manager.replace", "bishop.replace", "uninstall.sh",

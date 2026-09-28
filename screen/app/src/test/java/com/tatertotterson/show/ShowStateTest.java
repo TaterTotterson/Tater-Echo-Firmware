@@ -16,6 +16,9 @@ public final class ShowStateTest {
                 + "\"device_name\":\"Kitchen Show\",\"room\":\"Kitchen\","
                 + "\"muted\":false,\"volume_percent\":180,\"audio_level\":-1,"
                 + "\"direction_degrees\":92.5,\"timer_active\":true,"
+                + "\"timer\":{\"active\":true,\"ringing\":false,\"count\":2,"
+                + "\"id\":\"tea\",\"label\":\"Tea\",\"original_duration_ms\":300000,"
+                + "\"remaining_ms\":120000,\"deadline_unix_ms\":1800000119000},"
                 + "\"tater_time_unix_ms\":1799999999000,"
                 + "\"tater_utc_offset_seconds\":-18000,\"tater_timezone\":\"CST\","
                 + "\"media\":{\"title\":\"Song\",\"artist\":\"Artist\"},"
@@ -35,6 +38,9 @@ public final class ShowStateTest {
         assertEquals(0f, state.audioLevel, 0f);
         assertEquals(92.5f, state.directionDegrees, 0f);
         assertTrue(state.timerActive);
+        assertEquals("tea", state.timer.id);
+        assertEquals("Tea", state.timer.label);
+        assertEquals(2, state.timer.count);
         assertEquals("Song", state.mediaTitle);
         assertEquals("Artist", state.mediaArtist);
         assertEquals("74°", state.weather.temperatureText);
@@ -145,5 +151,28 @@ public final class ShowStateTest {
         assertEquals(1f, TaterShowView.compactOrbAudioEnergy(1f), 0f);
         assertEquals(.070f, TaterShowView.compactOrbDistortion(0f), .001f);
         assertEquals(.250f, TaterShowView.compactOrbDistortion(1f), .001f);
+    }
+
+    @Test
+    public void timerCountdownUsesDeadlineAndFormatsForTheScreen() {
+        ShowState.Timer timer = new ShowState.Timer(
+                true, false, 1, 0, "tea", "Tea", "Tea",
+                300000L, 120000L, 1_000_120_000L);
+        assertEquals(120000L, TaterShowView.timerRemainingMs(timer, 1_000_000_000L));
+        assertEquals(.4f, TaterShowView.timerProgress(timer, 1_000_000_000L), .001f);
+        assertEquals("02:00", TaterShowView.formatTimerDuration(120000L));
+        assertEquals("1:01:02", TaterShowView.formatTimerDuration(3662000L));
+    }
+
+    @Test
+    public void ringingTimerRemainsVisibleWhenControllerDisconnects() throws Exception {
+        ShowState connected = ShowState.fromJson("{"
+                + "\"protocol\":1,\"type\":\"snapshot\",\"connected\":true,"
+                + "\"timer\":{\"active\":true,\"ringing\":true,\"count\":1,"
+                + "\"ringing_count\":1,\"id\":\"oven\"}}" );
+        ShowState disconnected = connected.disconnected();
+        assertEquals("oven", disconnected.timer.id);
+        assertTrue(disconnected.timer.ringing);
+        assertFalse(disconnected.isControllerConnecting());
     }
 }

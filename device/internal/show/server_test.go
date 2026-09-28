@@ -15,6 +15,7 @@ func TestSnapshotIsBoundedAndNormalized(t *testing.T) {
 	s := New("127.0.0.1:0", Snapshot{
 		Phase: "mystery", VolumePercent: 150, AudioLevel: -2,
 		Weather:         &Weather{TemperatureText: "74°", Condition: "Partly cloudy"},
+		Timer:           &Timer{Active: true, ID: "tea", Label: "Tea", Count: 1, RemainingMS: 120000},
 		TaterTimeUnixMS: 1_799_999_999_000, TaterUTCOffset: -18000, TaterTimezone: "CST",
 	}, nil)
 	got := s.Snapshot()
@@ -26,6 +27,9 @@ func TestSnapshotIsBoundedAndNormalized(t *testing.T) {
 	}
 	if got.Weather == nil || got.Weather.TemperatureText != "74°" || got.Weather.Condition != "Partly cloudy" {
 		t.Fatalf("weather snapshot = %#v", got.Weather)
+	}
+	if got.Timer == nil || got.Timer.ID != "tea" || got.Timer.RemainingMS != 120000 {
+		t.Fatalf("timer snapshot = %#v", got.Timer)
 	}
 	if got.TaterTimeUnixMS != 1_799_999_999_000 || got.TaterUTCOffset != -18000 || got.TaterTimezone != "CST" {
 		t.Fatalf("Tater clock = %#v", got)

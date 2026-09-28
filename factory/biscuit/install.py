@@ -250,6 +250,8 @@ def install_userspace(adb: Adb) -> None:
         "libtater_microwakeword.so": "/data/local/share/tater/microwakeword/libtater_microwakeword.so",
         "hey_tater.tflite": "/data/local/share/tater/microwakeword/hey_tater.tflite",
         "hey_tater.json": "/data/local/share/tater/microwakeword/hey_tater.json",
+        "stop.tflite": "/data/local/share/tater/microwakeword/stop.tflite",
+        "stop.json": "/data/local/share/tater/microwakeword/stop.json",
     }
     for name, destination in mapping.items():
         staged = f"{remote_payload}/{name}"
@@ -259,7 +261,9 @@ def install_userspace(adb: Adb) -> None:
         "chmod 755 /data/local/bin/server_a /data/local/bin/start_server.sh "
         "/data/local/share/tater/microwakeword/libtater_microwakeword.so; "
         "chmod 644 /data/local/share/tater/microwakeword/hey_tater.tflite "
-        "/data/local/share/tater/microwakeword/hey_tater.json; "
+        "/data/local/share/tater/microwakeword/hey_tater.json "
+        "/data/local/share/tater/microwakeword/stop.tflite "
+        "/data/local/share/tater/microwakeword/stop.json; "
         "cp /data/local/bin/server_a /data/local/bin/server_b; "
         "chmod 755 /data/local/bin/server_b; "
         "ln -sf server_a /data/local/bin/server; "

@@ -35,3 +35,7 @@ build scripts retain their upstream license files in the build output.
 Wake-word models retain the license and terms supplied by their publisher.
 Adding a model to a release does not relicense it under this repository's MIT
 license.
+
+The timer-stop model is published by Kevin Ahrendt and is pinned from the
+Tater-Wake-Words model collection. Its publisher metadata remains in
+`device/internal/wakeword/microwakeword/models/stop.json`.

@@ -49,11 +49,13 @@ final class TaterShowView extends View {
     private volatile Bitmap notificationImage;
     private volatile String notificationImageUrl = "";
     private final RectF intercomBounds = new RectF();
+    private final RectF timerStopBounds = new RectF();
     private float intercomCenterX;
     private float intercomCenterY;
     private float intercomRadius;
     private CommandSink commandSink;
     private boolean intercomPressed;
+    private boolean timerStopPressed;
 
     TaterShowView(Context context) {
         super(context);
@@ -101,6 +103,7 @@ final class TaterShowView extends View {
         if ((!next.connected || next.muted || "setup".equals(next.phase)) && intercomPressed) {
             intercomPressed = false;
         }
+        if (next.timer == null) timerStopPressed = false;
         String nextImageUrl = next.notification == null ? "" : next.notification.imageUrl;
         if (!nextImageUrl.equals(notificationImageUrl)) {
             notificationImageUrl = nextImageUrl;
@@ -127,6 +130,7 @@ final class TaterShowView extends View {
         long now = SystemClock.uptimeMillis();
         float seconds = (now - animationStart) / 1000f;
         int accent = accentFor(state.phase);
+        timerStopBounds.setEmpty();
 
         if ("setup".equals(state.phase)) {
             if (isSetupConnecting()) {
@@ -154,6 +158,8 @@ final class TaterShowView extends View {
         drawClock(canvas, margin, height, accent);
         if (notificationIsActive()) {
             drawNotification(canvas, width, height, seconds, accent);
+        } else if (state.timer != null) {
+            drawTimer(canvas, width, height, seconds, accent);
         } else if (state.weather == null) {
             drawOrb(canvas, width * .70f, height * .43f, height * .235f, seconds, accent);
         } else {
@@ -161,7 +167,7 @@ final class TaterShowView extends View {
         }
         drawStatus(canvas, margin, height, accent);
         drawIntercomControl(canvas, width, height, seconds, accent);
-        if (shouldDrawCompactVoiceOrb(state.phase, state.weather != null)) {
+        if (shouldDrawCompactVoiceOrb(state.phase, state.weather != null || state.timer != null)) {
             drawCompactVoiceOrb(canvas, width * .50f, height * .905f,
                     height * .058f, seconds, accent);
         }
@@ -176,6 +182,12 @@ final class TaterShowView extends View {
         float y = event.getY();
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                if (state.timer != null && timerStopBounds.contains(x, y)) {
+                    timerStopPressed = true;
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    invalidate();
+                    return true;
+                }
                 if (!state.connected || state.muted
                         || !pointInCircle(x, y, intercomCenterX, intercomCenterY, intercomRadius)) {
                     return false;
@@ -186,7 +198,26 @@ final class TaterShowView extends View {
                 invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
+                if (timerStopPressed) {
+                    boolean stop = timerStopBounds.contains(x, y);
+                    timerStopPressed = false;
+                    if (stop && commandSink != null) commandSink.send("timer.stop", null);
+                    if (stop) performClick();
+                    invalidate();
+                    return true;
+                }
+                if (!intercomPressed) return false;
+                intercomPressed = false;
+                if (commandSink != null) commandSink.send("intercom.stop", null);
+                performClick();
+                invalidate();
+                return true;
             case MotionEvent.ACTION_CANCEL:
+                if (timerStopPressed) {
+                    timerStopPressed = false;
+                    invalidate();
+                    return true;
+                }
                 if (!intercomPressed) return false;
                 intercomPressed = false;
                 if (commandSink != null) commandSink.send("intercom.stop", null);
@@ -194,7 +225,7 @@ final class TaterShowView extends View {
                 invalidate();
                 return true;
             default:
-                return intercomPressed;
+                return intercomPressed || timerStopPressed;
         }
     }
 
@@ -279,6 +310,108 @@ final class TaterShowView extends View {
 
     static float compactOrbDistortion(float audioEnergy) {
         return .070f + Math.max(0f, Math.min(1f, audioEnergy)) * .180f;
+    }
+
+    static long timerRemainingMs(ShowState.Timer timer, long nowUnixMs) {
+        if (timer == null || timer.ringing) return 0L;
+        if (timer.deadlineUnixMs > 0L) {
+            return Math.max(0L, timer.deadlineUnixMs - nowUnixMs);
+        }
+        return Math.max(0L, timer.remainingMs);
+    }
+
+    static float timerProgress(ShowState.Timer timer, long nowUnixMs) {
+        if (timer == null || timer.ringing || timer.originalDurationMs <= 0L) return 0f;
+        return Math.max(0f, Math.min(1f,
+                timerRemainingMs(timer, nowUnixMs) / (float) timer.originalDurationMs));
+    }
+
+    static String formatTimerDuration(long remainingMs) {
+        long seconds = Math.max(0L, (remainingMs + 999L) / 1000L);
+        long hours = seconds / 3600L;
+        long minutes = (seconds % 3600L) / 60L;
+        long remainder = seconds % 60L;
+        if (hours > 0L) {
+            return String.format(Locale.US, "%d:%02d:%02d", hours, minutes, remainder);
+        }
+        return String.format(Locale.US, "%02d:%02d", minutes, remainder);
+    }
+
+    private void drawTimer(Canvas canvas, float width, float height, float seconds, int accent) {
+        ShowState.Timer timer = state.timer;
+        if (timer == null) return;
+        float margin = height * .075f;
+        float left = width * .535f;
+        float right = width - margin;
+        float cx = (left + right) / 2f;
+        float cy = height * .405f;
+        float radius = height * .205f;
+        float pulse = .5f + .5f * (float) Math.sin(seconds * 4.8f);
+        int timerColor = timer.ringing ? Color.rgb(255, 105, 76) : Color.rgb(255, 147, 66);
+
+        paint.setShader(new RadialGradient(cx, cy, radius * 1.65f,
+                withAlpha(timerColor, timer.ringing ? 50 + (int) (pulse * 42f) : 45),
+                Color.TRANSPARENT, Shader.TileMode.CLAMP));
+        canvas.drawCircle(cx, cy, radius * 1.65f, paint);
+        paint.setShader(null);
+
+        paint.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.BOLD));
+        paint.setTextSize(height * .025f);
+        paint.setColor(withAlpha(timerColor, 235));
+        String heading = timer.count > 1 ? "TATER TIMERS  ·  " + timer.count : "TATER TIMER";
+        canvas.drawText(heading, left, height * .105f, paint);
+
+        stroke.setStrokeWidth(height * .012f);
+        stroke.setColor(withAlpha(timerColor, 38));
+        RectF ring = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
+        canvas.drawArc(ring, -90f, 360f, false, stroke);
+        stroke.setColor(withAlpha(timerColor, timer.ringing ? 225 : 245));
+        if (timer.ringing) {
+            canvas.drawArc(ring, -90f + seconds * 70f, 72f + pulse * 38f, false, stroke);
+            canvas.drawArc(ring, 90f + seconds * 70f, 72f + pulse * 38f, false, stroke);
+        } else {
+            canvas.drawArc(ring, -90f,
+                    360f * timerProgress(timer, System.currentTimeMillis()), false, stroke);
+        }
+
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setColor(Color.WHITE);
+        paint.setTypeface(android.graphics.Typeface.create("sans", android.graphics.Typeface.BOLD));
+        if (timer.ringing) {
+            paint.setTextSize(height * .071f);
+            canvas.drawText("TIME’S UP", cx, cy + height * .010f, paint);
+            paint.setTextSize(height * .020f);
+            paint.setColor(withAlpha(timerColor, 235));
+            canvas.drawText("SAY STOP OR TAP BELOW", cx, cy + height * .061f, paint);
+        } else {
+            String countdown = formatTimerDuration(
+                    timerRemainingMs(timer, System.currentTimeMillis()));
+            paint.setTextSize(countdown.length() > 5 ? height * .084f : height * .108f);
+            canvas.drawText(countdown, cx, cy + height * .026f, paint);
+        }
+
+        String name = timer.label.isEmpty() ? timer.name : timer.label;
+        if (!name.isEmpty()) {
+            paint.setTextSize(height * .026f);
+            paint.setColor(Color.rgb(205, 214, 226));
+            canvas.drawText(ellipsize(name, 26), cx, cy + radius + height * .052f, paint);
+        }
+
+        float buttonHeight = height * .105f;
+        float buttonWidth = Math.min(right - left, height * .48f);
+        float buttonTop = height * .715f;
+        timerStopBounds.set(cx - buttonWidth / 2f, buttonTop,
+                cx + buttonWidth / 2f, buttonTop + buttonHeight);
+        paint.setColor(withAlpha(timerColor, timerStopPressed ? 92 : 42));
+        canvas.drawRoundRect(timerStopBounds, buttonHeight / 2f, buttonHeight / 2f, paint);
+        stroke.setStrokeWidth(Math.max(2f, height * .004f));
+        stroke.setColor(withAlpha(timerColor, timerStopPressed ? 255 : 205));
+        canvas.drawRoundRect(timerStopBounds, buttonHeight / 2f, buttonHeight / 2f, stroke);
+        paint.setTextSize(height * .027f);
+        paint.setColor(Color.WHITE);
+        canvas.drawText(timer.ringing ? "STOP TIMER" : "CANCEL TIMER", cx,
+                timerStopBounds.centerY() - (paint.ascent() + paint.descent()) / 2f, paint);
+        paint.setTextAlign(Paint.Align.LEFT);
     }
 
     private void drawCompactVoiceOrb(Canvas canvas, float cx, float baseCy, float radius,

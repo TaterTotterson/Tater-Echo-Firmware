@@ -65,6 +65,22 @@ type Notification struct {
 	ExpiresAtUnixMS int64  `json:"expires_at_unix_ms,omitempty"`
 }
 
+// Timer is the compact countdown selected by the native timer manager for the
+// local screen. DeadlineUnixMS lets the APK animate smoothly without forcing
+// the daemon to broadcast a snapshot every second.
+type Timer struct {
+	Active             bool   `json:"active"`
+	Ringing            bool   `json:"ringing"`
+	Count              int    `json:"count"`
+	RingingCount       int    `json:"ringing_count"`
+	ID                 string `json:"id,omitempty"`
+	Name               string `json:"name,omitempty"`
+	Label              string `json:"label,omitempty"`
+	OriginalDurationMS int    `json:"original_duration_ms,omitempty"`
+	RemainingMS        int    `json:"remaining_ms,omitempty"`
+	DeadlineUnixMS     int64  `json:"deadline_unix_ms,omitempty"`
+}
+
 // Snapshot is the complete screen state. Complete snapshots make reconnects
 // deterministic: the APK never has to replay a missed transition.
 type Snapshot struct {
@@ -82,6 +98,7 @@ type Snapshot struct {
 	AudioLevel       float64       `json:"audio_level"`
 	DirectionDegrees *float64      `json:"direction_degrees,omitempty"`
 	TimerActive      bool          `json:"timer_active"`
+	Timer            *Timer        `json:"timer,omitempty"`
 	Media            *Media        `json:"media,omitempty"`
 	Weather          *Weather      `json:"weather,omitempty"`
 	Notification     *Notification `json:"notification,omitempty"`

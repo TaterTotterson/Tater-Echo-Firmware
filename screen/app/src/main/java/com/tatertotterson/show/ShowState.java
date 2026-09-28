@@ -109,6 +109,49 @@ final class ShowState {
         }
     }
 
+    static final class Timer {
+        final boolean active;
+        final boolean ringing;
+        final int count;
+        final int ringingCount;
+        final String id;
+        final String name;
+        final String label;
+        final long originalDurationMs;
+        final long remainingMs;
+        final long deadlineUnixMs;
+
+        Timer(boolean active, boolean ringing, int count, int ringingCount,
+              String id, String name, String label, long originalDurationMs,
+              long remainingMs, long deadlineUnixMs) {
+            this.active = active;
+            this.ringing = ringing;
+            this.count = Math.max(0, count);
+            this.ringingCount = Math.max(0, ringingCount);
+            this.id = clean(id, "");
+            this.name = clean(name, "");
+            this.label = clean(label, this.name);
+            this.originalDurationMs = Math.max(0L, originalDurationMs);
+            this.remainingMs = Math.max(0L, remainingMs);
+            this.deadlineUnixMs = Math.max(0L, deadlineUnixMs);
+        }
+
+        static Timer fromJson(JSONObject value) {
+            if (value == null || !value.optBoolean("active", false)) return null;
+            return new Timer(
+                    true,
+                    value.optBoolean("ringing", false),
+                    value.optInt("count", 1),
+                    value.optInt("ringing_count", 0),
+                    value.optString("id", ""),
+                    value.optString("name", ""),
+                    value.optString("label", ""),
+                    value.optLong("original_duration_ms", 0L),
+                    value.optLong("remaining_ms", 0L),
+                    value.optLong("deadline_unix_ms", 0L));
+        }
+    }
+
     final String phase;
     final boolean connected;
     final String deviceName;
@@ -121,6 +164,7 @@ final class ShowState {
     final float audioLevel;
     final Float directionDegrees;
     final boolean timerActive;
+    final Timer timer;
     final String mediaTitle;
     final String mediaArtist;
     final Weather weather;
@@ -231,6 +275,33 @@ final class ShowState {
             String taterTimezone,
             String toolName,
             String toolMessage) {
+        this(phase, connected, deviceName, room, message, muted, volumePercent,
+                audioLevel, directionDegrees, timerActive, mediaTitle, mediaArtist,
+                weather, notification, taterTimeUnixMs, taterUtcOffsetSeconds,
+                taterTimezone, toolName, toolMessage, null);
+    }
+
+    ShowState(
+            String phase,
+            boolean connected,
+            String deviceName,
+            String room,
+            String message,
+            boolean muted,
+            int volumePercent,
+            float audioLevel,
+            Float directionDegrees,
+            boolean timerActive,
+            String mediaTitle,
+            String mediaArtist,
+            Weather weather,
+            Notification notification,
+            long taterTimeUnixMs,
+            int taterUtcOffsetSeconds,
+            String taterTimezone,
+            String toolName,
+            String toolMessage,
+            Timer timer) {
         this.phase = normalizedPhase(phase);
         this.connected = connected;
         this.deviceName = clean(deviceName, "Tater Show");
@@ -243,6 +314,7 @@ final class ShowState {
         this.audioLevel = Math.max(0f, Math.min(1f, audioLevel));
         this.directionDegrees = directionDegrees;
         this.timerActive = timerActive;
+        this.timer = timer;
         this.mediaTitle = clean(mediaTitle, "");
         this.mediaArtist = clean(mediaArtist, "");
         this.weather = weather;
@@ -275,6 +347,7 @@ final class ShowState {
         JSONObject media = root.optJSONObject("media");
         JSONObject weather = root.optJSONObject("weather");
         JSONObject notification = root.optJSONObject("notification");
+        JSONObject timer = root.optJSONObject("timer");
         Float direction = root.has("direction_degrees") && !root.isNull("direction_degrees")
                 ? (float) root.getDouble("direction_degrees") : null;
         return new ShowState(
@@ -296,7 +369,8 @@ final class ShowState {
                 root.optInt("tater_utc_offset_seconds", 0),
                 root.optString("tater_timezone", "Tater"),
                 root.optString("tool_name", ""),
-                root.optString("tool_message", ""));
+                root.optString("tool_message", ""),
+                Timer.fromJson(timer));
     }
 
     ShowState disconnected() {
@@ -305,11 +379,12 @@ final class ShowState {
                 "Waiting for the Tater satellite service", muted, volumePercent,
                 0f, null, timerActive, mediaTitle, mediaArtist, weather,
                 notification,
-                taterTimeUnixMs, taterUtcOffsetSeconds, taterTimezone);
+                taterTimeUnixMs, taterUtcOffsetSeconds, taterTimezone,
+                "", "", timer);
     }
 
     boolean isControllerConnecting() {
-        return !connected && !"setup".equals(phase);
+        return !connected && !"setup".equals(phase) && timer == null;
     }
 
     static String timeGreeting(int hour) {

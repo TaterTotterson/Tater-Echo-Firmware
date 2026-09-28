@@ -511,6 +511,12 @@ func main() {
 		// or Wi-Fi is unavailable, so this deliberately runs before LinkDown.
 		if nativeMode && event.ClickType == pkgbuttons.DotClick {
 			if event.Down {
+				if nativeClient != nil && nativeClient.TimerRinging() {
+					if stopped := nativeClient.StopRingingTimers("action_button"); stopped > 0 {
+						log.Printf("[timer] action button stopped %d ringing timer(s)", stopped)
+						return
+					}
+				}
 				actionGesture.Press()
 			} else {
 				actionGesture.Release()
@@ -598,6 +604,36 @@ func main() {
 
 	if nativeMode {
 		nativePlayer = taternative.NewLocalPlayer(pcmSpeaker)
+		applyPrimaryWake := func() {
+			applyMWWConfig(dataClient, nil,
+				func(wakeWord string, score float32, _ time.Time) bool {
+					return nativeClient != nil && nativeClient.Wake(wakeWord, score)
+				},
+				func(wakeWord string, score float32, _ time.Time) {
+					if nativeClient != nil {
+						nativeClient.CloseMiss(wakeWord, score)
+					}
+				})
+		}
+		applyTimerStopWake := func() {
+			if err := applyMWWTimerStopConfig(dataClient, func(score float32, _ time.Time) {
+				if nativeClient == nil {
+					return
+				}
+				if stopped := nativeClient.StopRingingTimers("wake_word"); stopped > 0 {
+					log.Printf("[timer] local stop word score=%.3f stopped %d ringing timer(s)", score, stopped)
+				}
+			}); err != nil {
+				log.Printf("[timer] local stop word unavailable: %v", err)
+			}
+		}
+		applyCurrentWake := func() {
+			if nativeClient != nil && nativeClient.TimerRinging() {
+				applyTimerStopWake()
+				return
+			}
+			applyPrimaryWake()
+		}
 		otaInstaller := taternative.NewOTAInstallerForTarget(client.FirmwareTarget)
 		otaInstaller.Restart = func() {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
@@ -684,6 +720,10 @@ func main() {
 				case "intercom.stop":
 					if nativeClient != nil {
 						nativeClient.StopCapture(false)
+					}
+				case "timer.stop":
+					if nativeClient != nil {
+						nativeClient.StopDisplayedTimer("screen")
 					}
 				}
 			})
@@ -840,15 +880,7 @@ func main() {
 			},
 			Settings: func(values map[string]any) (map[string]any, error) {
 				applied, err := applyTaterSettings(values, s, canceller, dataClient, nativePlayer)
-				applyMWWConfig(dataClient, nil,
-					func(wakeWord string, score float32, _ time.Time) bool {
-						return nativeClient != nil && nativeClient.Wake(wakeWord, score)
-					},
-					func(wakeWord string, score float32, _ time.Time) {
-						if nativeClient != nil {
-							nativeClient.CloseMiss(wakeWord, score)
-						}
-					})
+				applyCurrentWake()
 				return applied, err
 			},
 			Status: func() map[string]any {
@@ -928,13 +960,30 @@ func main() {
 				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.TimerActive = active })
 				if active {
 					s.StartAnim(nativeTimerAnimation())
+					applyTimerStopWake()
 				} else {
+					applyPrimaryWake()
 					state := "idle"
 					if nativeClient != nil {
 						state = nativeClient.State()
 					}
 					s.StartAnim(nativeStateAnimation(state))
 				}
+			},
+			TimerUpdate: func(timer taternative.TimerDisplay) {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					if !timer.Active {
+						snapshot.Timer = nil
+						return
+					}
+					snapshot.Timer = &show.Timer{
+						Active: timer.Active, Ringing: timer.Ringing,
+						Count: timer.Count, RingingCount: timer.RingingCount,
+						ID: timer.ID, Name: timer.Name, Label: timer.Label,
+						OriginalDurationMS: timer.OriginalDurationMS,
+						RemainingMS:        timer.RemainingMS, DeadlineUnixMS: timer.DeadlineUnixMS,
+					}
+				})
 			},
 			SetupReset: func() error { return resetToSetup("Tater command", false) },
 			OTA:        otaInstaller.Install,
@@ -948,13 +997,7 @@ func main() {
 			bleScanner.SetEnabled(true)
 		}
 		dataClient.OnPCM(nativeClient.PushAudio)
-		applyMWWConfig(dataClient, nil,
-			func(wakeWord string, score float32, _ time.Time) bool {
-				return nativeClient.Wake(wakeWord, score)
-			},
-			func(wakeWord string, score float32, _ time.Time) {
-				nativeClient.CloseMiss(wakeWord, score)
-			})
+		applyCurrentWake()
 		s.SetLinkDown(true)
 		pulseCtx, cancel := context.WithCancel(ctx)
 		pulseCancel, pulseKind = cancel, "orange"
@@ -1891,6 +1934,49 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		mode = "active native wake"
 	}
 	log.Printf("[mww] scoring %s — %s", sc.Info(), mode)
+}
+
+// applyMWWTimerStopConfig temporarily replaces the regular wake phrase with a
+// dedicated local "stop" detector while a timer alarm is sounding. The stop
+// callback is launched after the scorer callback returns: replacing a scorer
+// synchronously from its own inference goroutine would wait on itself.
+func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Time)) error {
+	if err := microwakeword.EnsureBuiltinTimerStopPackage(); err != nil {
+		return err
+	}
+	mwwShadowState.RLock()
+	alreadyActive := mwwShadowState.enabled && mwwShadowState.ready &&
+		mwwShadowState.model == microwakeword.TimerStopPackage
+	mwwShadowState.RUnlock()
+	if dc.MWWShadowScorer() != nil && alreadyActive {
+		return nil
+	}
+	manifest, err := microwakeword.ReadPackageManifest(microwakeword.TimerStopPackage)
+	if err != nil {
+		return err
+	}
+	settings := manifest.RuntimeConfig()
+	scorer, err := microwakeword.OpenShadowTunedWithHooks(
+		microwakeword.TimerStopPackage,
+		microwakeword.ScorerOverrides{},
+		microwakeword.ShadowHooks{Cross: func(score float32, at time.Time) {
+			if onStop != nil {
+				go onStop(score, at)
+			}
+		}},
+	)
+	if err != nil {
+		return err
+	}
+	dc.SetMWWShadowScorer(scorer)
+	label := strings.TrimSpace(manifest.Label)
+	if label == "" {
+		label = manifest.WakeWord
+	}
+	setMWWState(true, true, microwakeword.TimerStopPackage, manifest.WakeWord, label,
+		"timer", "", "", float64(settings.Threshold), settings.SlidingWindow, 0, "")
+	log.Printf("[mww] scoring %s — timer stop mode", scorer.Info())
+	return nil
 }
 
 func deviceVolumePercent(level int) int {

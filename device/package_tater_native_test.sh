@@ -8,8 +8,10 @@ SERVER="$DEVICE_DIR/build/server"
 RUNTIME="$DEVICE_DIR/build/microwakeword-android/libtater_microwakeword.so"
 MODEL="$DEVICE_DIR/build/microwakeword-testdata/hey_tater.tflite"
 MANIFEST="$DEVICE_DIR/internal/wakeword/microwakeword/models/hey_tater.json"
+STOP_MODEL="$DEVICE_DIR/build/microwakeword-testdata/stop.tflite"
+STOP_MANIFEST="$DEVICE_DIR/internal/wakeword/microwakeword/models/stop.json"
 
-for required in "$SERVER" "$RUNTIME" "$MODEL" "$MANIFEST"; do
+for required in "$SERVER" "$RUNTIME" "$MODEL" "$MANIFEST" "$STOP_MODEL" "$STOP_MANIFEST"; do
   if [[ ! -f "$required" ]]; then
     echo "missing test artifact: $required" >&2
     echo "run ./compile.sh, ./build_microwakeword_runtime.sh, and ./test_microwakeword_runtime.sh first" >&2
@@ -26,6 +28,8 @@ install -m 0755 "$SERVER" "$BUNDLE_DIR/firmware/server"
 install -m 0755 "$RUNTIME" "$BUNDLE_DIR/microwakeword/libtater_microwakeword.so"
 install -m 0644 "$MODEL" "$BUNDLE_DIR/microwakeword/hey_tater.tflite"
 install -m 0644 "$MANIFEST" "$BUNDLE_DIR/microwakeword/hey_tater.json"
+install -m 0644 "$STOP_MODEL" "$BUNDLE_DIR/microwakeword/stop.tflite"
+install -m 0644 "$STOP_MANIFEST" "$BUNDLE_DIR/microwakeword/stop.json"
 install -m 0600 "$DEVICE_DIR/tater-native.example.json" "$BUNDLE_DIR/native.example.json"
 
 (

@@ -26,6 +26,7 @@ type Timer struct {
 	State              string `json:"state"`
 	Active             bool   `json:"active"`
 	Ringing            bool   `json:"ringing"`
+	DeadlineUnixMS     int64  `json:"deadline_unix_ms,omitempty"`
 	deadline           time.Time
 	handle             *time.Timer
 }
@@ -39,28 +40,47 @@ func (t *Timer) snapshot(now time.Time) Timer {
 	out.Active = true
 	if t.Ringing {
 		out.RemainingMS = 0
+		out.DeadlineUnixMS = 0
 		out.State = "ringing"
 	} else {
 		out.RemainingMS = max(0, int(t.deadline.Sub(now).Milliseconds()))
+		out.DeadlineUnixMS = t.deadline.UnixMilli()
 		out.State = "armed"
 	}
 	out.SecondsLeft = (out.RemainingMS + 999) / 1000
 	return out
 }
 
+// TimerDisplay is the compact, display-ready timer state exposed to local
+// hardware surfaces. A ringing timer wins; otherwise the soonest deadline is
+// shown. Count fields preserve the fact that more timers may exist.
+type TimerDisplay struct {
+	Active             bool   `json:"active"`
+	Ringing            bool   `json:"ringing"`
+	Count              int    `json:"count"`
+	RingingCount       int    `json:"ringing_count"`
+	ID                 string `json:"id,omitempty"`
+	Name               string `json:"name,omitempty"`
+	Label              string `json:"label,omitempty"`
+	OriginalDurationMS int    `json:"original_duration_ms,omitempty"`
+	RemainingMS        int    `json:"remaining_ms,omitempty"`
+	DeadlineUnixMS     int64  `json:"deadline_unix_ms,omitempty"`
+}
+
 type timerSend func(messageType, id string, payload map[string]any) bool
 
 // TimerManager owns countdowns across WebSocket reconnects.
 type TimerManager struct {
-	mu      sync.Mutex
-	timers  map[string]*Timer
-	send    timerSend
-	onAlarm func(active bool, timer Timer)
-	closed  bool
+	mu       sync.Mutex
+	timers   map[string]*Timer
+	send     timerSend
+	onAlarm  func(active bool, timer Timer)
+	onUpdate func(TimerDisplay)
+	closed   bool
 }
 
-func NewTimerManager(send timerSend, onAlarm func(active bool, timer Timer)) *TimerManager {
-	return &TimerManager{timers: map[string]*Timer{}, send: send, onAlarm: onAlarm}
+func NewTimerManager(send timerSend, onAlarm func(active bool, timer Timer), onUpdate func(TimerDisplay)) *TimerManager {
+	return &TimerManager{timers: map[string]*Timer{}, send: send, onAlarm: onAlarm, onUpdate: onUpdate}
 }
 
 func (m *TimerManager) Handle(messageType, messageID string, payload map[string]any) bool {
@@ -141,17 +161,23 @@ func (m *TimerManager) start(payload map[string]any, replyTo string, replace boo
 	if existing != nil && existing.handle != nil {
 		existing.handle.Stop()
 	}
+	wasRinging := existing != nil && existing.Ringing
 	t := &Timer{ID: id, Name: name, OriginalDurationMS: original, deadline: time.Now().Add(time.Duration(duration) * time.Millisecond), State: "armed"}
 	t.handle = time.AfterFunc(time.Duration(duration)*time.Millisecond, func() { m.expire(id, t) })
 	m.timers[id] = t
 	row := t.snapshot(time.Now())
+	remainingRinging := m.ringingLocked()
 	m.mu.Unlock()
+	if wasRinging && !remainingRinging && m.onAlarm != nil {
+		m.onAlarm(false, Timer{})
+	}
 	m.result(replyTo, "start", true, map[string]any{"timer": row})
 	event := "armed"
 	if replace && existing != nil {
 		event = "updated"
 	}
 	m.emit(event, row, true)
+	m.notifyUpdate()
 }
 
 func (m *TimerManager) expire(id string, expected *Timer) {
@@ -170,6 +196,7 @@ func (m *TimerManager) expire(id string, expected *Timer) {
 		m.onAlarm(true, row)
 	}
 	m.emit("expired", row, true)
+	m.notifyUpdate()
 }
 
 func (m *TimerManager) alarm(payload map[string]any) {
@@ -212,6 +239,7 @@ func (m *TimerManager) cancelTimers(payload map[string]any, replyTo string, clea
 	if wasRinging && !remainingRinging && m.onAlarm != nil {
 		m.onAlarm(false, Timer{})
 	}
+	m.notifyUpdate()
 	code, detail := "", ""
 	if ambiguous {
 		code, detail = "ambiguous", "More than one timer is running; specify a timer name or duration."
@@ -255,6 +283,7 @@ func (m *TimerManager) snooze(payload map[string]any, replyTo string) {
 	for _, row := range rows {
 		m.emit("snoozed", row, true)
 	}
+	m.notifyUpdate()
 	code, detail := "", ""
 	if ambiguous {
 		code, detail = "ambiguous", "More than one timer is running; specify a timer name or duration."
@@ -342,6 +371,7 @@ func timerMap(t Timer) map[string]any {
 		"remaining_ms": t.RemainingMS, "total_seconds": t.TotalSeconds,
 		"seconds_left": t.SecondsLeft, "state": t.State,
 		"active": t.Active, "ringing": t.Ringing,
+		"deadline_unix_ms": t.DeadlineUnixMS,
 	}
 }
 
@@ -368,6 +398,126 @@ func (m *TimerManager) Status() map[string]any {
 	}
 }
 
+// Ringing reports whether at least one local timer is sounding.
+func (m *TimerManager) Ringing() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ringingLocked()
+}
+
+// Display returns the timer a local screen should present right now.
+func (m *TimerManager) Display() TimerDisplay {
+	rows := m.rows()
+	return timerDisplay(rows)
+}
+
+func timerDisplay(rows []Timer) TimerDisplay {
+	display := TimerDisplay{Active: len(rows) > 0, Count: len(rows)}
+	if len(rows) == 0 {
+		return display
+	}
+	selected := rows[0]
+	for _, row := range rows {
+		if row.Ringing {
+			display.RingingCount++
+			if !selected.Ringing {
+				selected = row
+			}
+			continue
+		}
+		if !selected.Ringing && row.DeadlineUnixMS < selected.DeadlineUnixMS {
+			selected = row
+		}
+	}
+	display.Ringing = display.RingingCount > 0
+	display.ID = selected.ID
+	display.Name = selected.Name
+	display.Label = selected.Label
+	display.OriginalDurationMS = selected.OriginalDurationMS
+	display.RemainingMS = selected.RemainingMS
+	display.DeadlineUnixMS = selected.DeadlineUnixMS
+	return display
+}
+
+func (m *TimerManager) notifyUpdate() {
+	if m.onUpdate != nil {
+		m.onUpdate(m.Display())
+	}
+}
+
+// StopRinging stops every sounding timer. It is used by the dedicated local
+// "stop" detector and Biscuit's action button, so neither path depends on a
+// controller round trip.
+func (m *TimerManager) StopRinging(source string) int {
+	return m.stopSelected(source, true)
+}
+
+// StopDisplayed stops the timer currently presented by a local screen. A
+// ringing timer wins; otherwise it cancels the countdown with the nearest
+// deadline.
+func (m *TimerManager) StopDisplayed(source string) bool {
+	return m.stopSelected(source, false) > 0
+}
+
+func (m *TimerManager) stopSelected(source string, ringingOnly bool) int {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return 0
+	}
+	now := time.Now()
+	selected := make([]Timer, 0, len(m.timers))
+	for _, timer := range m.timers {
+		if ringingOnly && !timer.Ringing {
+			continue
+		}
+		selected = append(selected, timer.snapshot(now))
+	}
+	if !ringingOnly && len(selected) > 0 {
+		selected = []Timer{timerDisplay(selected).toTimer()}
+	}
+	removed := make([]Timer, 0, len(selected))
+	wasRinging := false
+	for _, row := range selected {
+		timer := m.timers[row.ID]
+		if timer == nil {
+			continue
+		}
+		if timer.handle != nil {
+			timer.handle.Stop()
+		}
+		wasRinging = wasRinging || timer.Ringing
+		removed = append(removed, timer.snapshot(now))
+		delete(m.timers, row.ID)
+	}
+	remainingRinging := m.ringingLocked()
+	m.mu.Unlock()
+
+	for _, row := range removed {
+		payload := timerMap(row)
+		payload["event"] = "stopped"
+		payload["source"] = strings.TrimSpace(source)
+		payload["active"] = false
+		payload["state"] = "stopped"
+		m.send("timer.event", "", payload)
+	}
+	if wasRinging && !remainingRinging && m.onAlarm != nil {
+		m.onAlarm(false, Timer{})
+	}
+	if len(removed) > 0 {
+		m.notifyUpdate()
+	}
+	return len(removed)
+}
+
+func (d TimerDisplay) toTimer() Timer {
+	return Timer{
+		ID: d.ID, Name: d.Name, Label: d.Label,
+		OriginalDurationMS: d.OriginalDurationMS, RemainingMS: d.RemainingMS,
+		DeadlineUnixMS: d.DeadlineUnixMS, Active: d.Active, Ringing: d.Ringing,
+	}
+}
+
 func (m *TimerManager) Close() {
 	m.mu.Lock()
 	m.closed = true
@@ -381,6 +531,7 @@ func (m *TimerManager) Close() {
 	if m.onAlarm != nil {
 		m.onAlarm(false, Timer{})
 	}
+	m.notifyUpdate()
 }
 
 func (t Timer) String() string {
