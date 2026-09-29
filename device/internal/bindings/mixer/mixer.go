@@ -163,6 +163,48 @@ func SetADCMute(muted bool) int {
 	return failed
 }
 
+// ADCMuteState reads every physical ADC mute control for the selected board.
+// The returned state is trustworthy only when consistent is true and err is
+// nil. Keeping the raw values makes a failed reconciliation diagnosable from
+// the satellite status API without requiring a serial console.
+func ADCMuteState() (muted bool, consistent bool, values map[string]string, err error) {
+	controls := profile().adcMute
+	values = make(map[string]string, len(controls))
+	consistent = true
+	var first bool
+	var problems []string
+	for _, control := range controls {
+		raw, readErr := Get(control)
+		if readErr != nil {
+			values[control] = "error"
+			problems = append(problems, readErr.Error())
+			consistent = false
+			continue
+		}
+		values[control] = raw
+		value, ok := boolValue(raw)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("mixer: %q returned invalid mute value %q", control, raw))
+			consistent = false
+			continue
+		}
+		controlMuted := value != 0
+		if !first {
+			muted = controlMuted
+			first = true
+		} else if controlMuted != muted {
+			consistent = false
+		}
+	}
+	if !first {
+		consistent = false
+	}
+	if len(problems) > 0 {
+		err = fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
+	return muted, consistent, values, err
+}
+
 // Backend is the device implementation. Values are strings as tinymix prints
 // and accepts them: enum names, "On"/"Off" for switches, decimal integers.
 type Backend interface {

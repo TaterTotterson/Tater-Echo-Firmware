@@ -54,6 +54,35 @@ func TestFailuresAreReturnedEveryTime(t *testing.T) {
 	}
 }
 
+func TestADCMuteStateRequiresEveryControlToAgree(t *testing.T) {
+	values := map[string]string{
+		"ADC_A Left Mute": "On", "ADC_A Right Mute": "On",
+		"ADC_B Left Mute": "On", "ADC_B Right Mute": "On",
+		"ADC_C Left Mute": "On", "ADC_C Right Mute": "On",
+		"ADC_D Left Mute": "On", "ADC_D Right Mute": "On",
+	}
+	Use(&fake{values: values})
+	ConfigureTarget("biscuit")
+	defer Use(unavailable{})
+
+	muted, consistent, snapshot, err := ADCMuteState()
+	if err != nil || !consistent || !muted {
+		t.Fatalf("all muted = muted %v consistent %v err %v", muted, consistent, err)
+	}
+	if len(snapshot) != 8 {
+		t.Fatalf("snapshot has %d controls, want 8", len(snapshot))
+	}
+
+	values["ADC_D Right Mute"] = "Off"
+	muted, consistent, _, err = ADCMuteState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consistent {
+		t.Fatalf("mixed controls reported consistent (muted=%v)", muted)
+	}
+}
+
 func TestHostBuildHasNoBackend(t *testing.T) {
 	Use(unavailable{})
 	if Set(SpeakerAmp, "On") == nil {

@@ -134,14 +134,27 @@ func NewServer(buttonController buttons.Controller, microphone mic.Microphone, s
 		server.paintBaseLEDs()
 	}
 
-	// Restore persisted mute state before the persist hook is wired, so the
-	// restore itself doesn't rewrite the file. Mute is device-sovereign —
-	// it must come back with or without a controller.
-	if st, ok := loadDeviceState(statePath); ok && st.Muted {
-		server.mute.RestoreMuted() // ADC only; LEDs painted after init below
+	// Reconcile the persisted state in BOTH directions before any microphone
+	// pipeline can start. emOS restarts this process without resetting codec
+	// registers, so an unmuted state must actively clear and verify every ADC
+	// mute control rather than assuming kernel defaults. Missing state is a
+	// first boot and deliberately means unmuted.
+	desiredMuted := false
+	if st, ok := loadDeviceState(statePath); ok {
+		desiredMuted = st.Muted
+	}
+	restoreErr := server.mute.restore(desiredMuted)
+	if restoreErr != nil {
+		log.Printf("Mute: startup reconciliation: %v", restoreErr)
 	}
 	server.mute.persist = func() {
 		saveDeviceState(statePath, deviceState{Muted: server.mute.IsMuted()})
+	}
+	// An unverifiable unmute fails closed. Persist that truthful effective
+	// state now that the hook exists; the next physical unmute retries all
+	// controls and changes it back only after successful readback.
+	if desiredMuted != server.mute.IsMuted() {
+		server.mute.persist()
 	}
 
 	// Audio direction estimates arrive in comparatively coarse batches. Keep
@@ -169,7 +182,6 @@ func NewServer(buttonController buttons.Controller, microphone mic.Microphone, s
 		server.ledMu.Lock()
 		server.ledController = ledController
 		server.ledMu.Unlock()
-		clearLeds(ledController)
 
 		// Discrete red LED under the mic-off button (GPIO, separate from
 		// the ring) — export + off. Non-fatal: an unmuted boot without a
@@ -178,13 +190,10 @@ func NewServer(buttonController buttons.Controller, microphone mic.Microphone, s
 			log.Printf("Mute button LED init failed: %v", err)
 		}
 
-		// A muted state restored from state.json was applied to the ADC
-		// before the LED hardware was ready — paint the red ring and
-		// button LED now.
-		if server.mute.IsMuted() {
-			server.mute.showMuteLEDs()
-			setMuteButtonLED(true)
-		}
+		// The ADC state was reconciled synchronously above. The visual hardware
+		// becomes available later, so reconcile both its muted and unmuted
+		// states now—with retries—instead of only painting the muted case.
+		server.mute.reconcileVisual()
 	}()
 
 	return server
@@ -260,6 +269,41 @@ func (s *Server) IsMuted() bool {
 	return s.mute.IsMuted()
 }
 
+// ReconcileMuteHardware reasserts codec and visual state after a controller
+// reconnect. It is safe to call repeatedly; readback decides success.
+func (s *Server) ReconcileMuteHardware() error {
+	return s.mute.reconcile()
+}
+
+// MuteStatus exposes the last verified hardware state for diagnostics.
+func (s *Server) MuteStatus() map[string]any {
+	return s.mute.status()
+}
+
+// LEDOwner names the subsystem that currently has priority over the ring.
+// It is diagnostic only and intentionally describes ownership, not colour.
+func (s *Server) LEDOwner() string {
+	if s.setupFeedback.Load() {
+		return "setup"
+	}
+	if s.volume != nil && s.volume.DisplayActive() {
+		return "volume"
+	}
+	if s.LinkDown() {
+		return "link"
+	}
+	if s.mute != nil && s.mute.IsMuted() {
+		return "mute"
+	}
+	s.ledModeMu.Lock()
+	mode := s.ledMode
+	s.ledModeMu.Unlock()
+	if mode == ledModeDirection {
+		return "direction"
+	}
+	return "controller"
+}
+
 // CancelVolumeDisplay releases the volume arc's 2s hold on the ring so a
 // turn's listening frame can paint immediately. See volumeController.
 func (s *Server) CancelVolumeDisplay() {
@@ -281,10 +325,7 @@ func (s *Server) CancelVolumeDisplay() {
 // gates on IsMuted(), and volume.go's display-expiry gates on isMuted(). This
 // was the one that did not.
 func (s *Server) RestoreMuteRing() {
-	if !s.mute.IsMuted() {
-		return
-	}
-	s.mute.showMuteLEDs()
+	s.mute.restoreMutedVisual()
 }
 
 // SetLinkDown records whether the device currently has a controller session.

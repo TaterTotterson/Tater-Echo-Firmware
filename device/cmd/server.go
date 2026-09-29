@@ -797,6 +797,9 @@ func main() {
 				}
 				pulseKind = ""
 				s.SetLinkDown(false)
+				if err := s.ReconcileMuteHardware(); err != nil {
+					log.Printf("[tater-native] mute reconciliation on connect: %v", err)
+				}
 				if s.IsMuted() {
 					s.RestoreMuteRing()
 				} else {
@@ -906,10 +909,13 @@ func main() {
 					checkersBLE.Unlock()
 				}
 				status := map[string]any{
-					"volume_percent": deviceVolumePercent(s.VolumeLevel()),
-					"muted":          s.IsMuted(),
-					"wake_engine":    wakeEngine,
-					"ble":            bleStatus,
+					"volume_percent":             deviceVolumePercent(s.VolumeLevel()),
+					"muted":                      s.IsMuted(),
+					"mute_hardware":              s.MuteStatus(),
+					"microphone_pipeline_active": dataClient.MicrophonePipelineActive(),
+					"led_owner":                  s.LEDOwner(),
+					"wake_engine":                wakeEngine,
+					"ble":                        bleStatus,
 					"memory": map[string]any{
 						"heap_alloc_kb": memory.HeapAlloc / 1024,
 						"heap_sys_kb":   memory.HeapSys / 1024,
@@ -1059,6 +1065,9 @@ func main() {
 		// Session restored: the ring goes back to the controller, the mute
 		// ring reasserts below if it applies, and the buttons work again.
 		s.SetLinkDown(false)
+		if err := s.ReconcileMuteHardware(); err != nil {
+			log.Printf("[control] mute reconciliation on connect: %v", err)
+		}
 		// Always report mute state on (re)connect — the controller may have
 		// restarted and lost its record of our state. Volume is only
 		// reported once the device holds an authoritative level (seeded

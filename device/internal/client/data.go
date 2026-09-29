@@ -742,6 +742,16 @@ func (d *DataClient) TurnStreamActive() bool {
 	return d.micActive && d.micWantedLock
 }
 
+// MicrophonePipelineActive reports whether the device currently owns and is
+// draining the microphone stream. Unlike TurnStreamActive it includes the
+// permanent local wake-word pipeline, which is the important signal when
+// diagnosing a mute state that looks unmuted but cannot hear a wake word.
+func (d *DataClient) MicrophonePipelineActive() bool {
+	d.micMu.Lock()
+	defer d.micMu.Unlock()
+	return d.micActive
+}
+
 func (d *DataClient) stopMic() {
 	d.micMu.Lock()
 	defer d.micMu.Unlock()
