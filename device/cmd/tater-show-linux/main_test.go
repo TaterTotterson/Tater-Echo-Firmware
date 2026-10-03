@@ -163,6 +163,46 @@ func TestCompactVoiceOrbVisibility(t *testing.T) {
 	}
 }
 
+func TestToolCallKeepsWeatherCardAndHasNoSpinningFallback(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	weather := &show.Weather{TemperatureText: "72°", Condition: "Partly cloudy", ConditionKind: "partly"}
+	r := &renderer{faces: faces, state: show.Snapshot{Phase: "idle", Weather: weather}}
+	idle := image.NewRGBA(image.Rect(0, 0, 960, 480))
+	r.drawRight(idle, now, 960, 480, 2, color.RGBA{255, 147, 66, 255})
+	r.state.Phase = "tool_call"
+	r.state.ToolName = "home_assistant"
+	working := image.NewRGBA(idle.Rect)
+	r.drawRight(working, now, 960, 480, 2, color.RGBA{255, 147, 66, 255})
+	if bytes.Equal(idle.Pix, working.Pix) {
+		t.Fatal("tool status did not update the weather heading")
+	}
+	if !bytes.Equal(idle.Pix[65*idle.Stride:], working.Pix[65*working.Stride:]) {
+		t.Fatal("tool call replaced more than the weather heading")
+	}
+
+	r.state.Weather = nil
+	first := image.NewRGBA(idle.Rect)
+	second := image.NewRGBA(idle.Rect)
+	r.drawRight(first, now, 960, 480, 2, color.RGBA{255, 147, 66, 255})
+	r.drawRight(second, now, 960, 480, 9, color.RGBA{255, 147, 66, 255})
+	if !bytes.Equal(first.Pix, second.Pix) {
+		t.Fatal("tool status fallback is still animated")
+	}
+}
+
+func TestConnectedStatusUsesAssistantFirstName(t *testing.T) {
+	if got := connectedStatus("Jarvis"); got != "Jarvis Connected" {
+		t.Fatalf("connected status = %q", got)
+	}
+	if got := connectedStatus("  "); got != "Tater Connected" {
+		t.Fatalf("empty assistant name fallback = %q", got)
+	}
+}
+
 func TestWeatherIconMovesAcrossFrames(t *testing.T) {
 	for _, kind := range []string{"sun", "partly", "cloud", "rain", "storm", "snow", "fog", "wind"} {
 		first := image.NewRGBA(image.Rect(0, 0, 120, 120))

@@ -685,6 +685,9 @@ func main() {
 			DisplayWeather: func(payload map[string]any) {
 				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 					snapshot.Weather = showWeather(payload)
+					if name := showPayloadText(payload, "assistant_name"); name != "" {
+						snapshot.AssistantName = name
+					}
 					snapshot.TaterTimeUnixMS = int64(nativeNumber(payload["clock_unix_ms"], 0))
 					snapshot.TaterUTCOffset = int(nativeNumber(payload["utc_offset_seconds"], 0))
 					snapshot.TaterTimezone = firstNonEmpty(showPayloadText(payload, "timezone"), "Tater")

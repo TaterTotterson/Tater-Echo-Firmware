@@ -44,7 +44,9 @@ Target metadata used by builds and Tater lives in
 - Verified OTA with rollback. Checkers 2.x stages its daemon and native screen
   together in a Biscuit-style application slot on writable `/data`.
 - Checkers weather, selected room sensors, notifications, Room Vision, live
-  tool status, audio-reactive orb, and on-screen press-and-hold intercom.
+  tool status without hiding the current card, a connected label using Tater's
+  configured first name, audio-reactive orb, and on-screen press-and-hold
+  intercom.
 
 ## Install Biscuit (Echo Dot 2)
 

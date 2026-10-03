@@ -206,10 +206,10 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 	status := "Native service offline"
 	if r.state.Connected {
 		statusColor = color.RGBA{77, 223, 158, 255}
-		status = "Tater connected"
+		status = connectedStatus(r.state.AssistantName)
 	}
 	circle(canvas, 49, 352, 6, statusColor)
-	r.text(canvas, 64, 359, status, 16, false, color.RGBA{150, 163, 181, 255})
+	r.text(canvas, 64, 359, fitTextToWidth(status, r.faces.regular[16], leftWidth-22), 16, false, color.RGBA{150, 163, 181, 255})
 
 	r.drawRight(canvas, now, width, height, seconds, accent)
 	r.drawIntercom(canvas, accent)
@@ -308,16 +308,23 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		r.drawTimer(canvas, now, width, seconds, accent)
 		return
 	}
-	if r.state.Phase == "tool_call" {
-		r.drawToolCall(canvas, seconds, accent)
-		return
-	}
 	if r.state.Weather != nil {
 		r.drawWeather(canvas, width, seconds, accent)
 		return
 	}
+	if r.state.Phase == "tool_call" {
+		pane := rightPane(width, height)
+		cx := (pane.Min.X + pane.Max.X) / 2
+		r.centeredText(canvas, cx, 220, "WORKING", 18, true, color.White)
+		r.centeredText(canvas, cx, 257, ellipsize(titleWords(r.state.ToolName), 23), 20, false, color.RGBA{180, 190, 207, 255})
+		return
+	}
 	pane := rightPane(width, height)
 	r.drawOrb(canvas, (pane.Min.X+pane.Max.X)/2, 220, 120, seconds, accent)
+}
+
+func connectedStatus(name string) string {
+	return firstNonEmpty(strings.TrimSpace(name), "Tater") + " Connected"
 }
 
 func (r *renderer) drawOrb(canvas *image.RGBA, cx, cy, radius int, seconds float64, accent color.RGBA) {
@@ -357,48 +364,19 @@ func (r *renderer) drawOrb(canvas *image.RGBA, cx, cy, radius int, seconds float
 	}
 }
 
-func (r *renderer) drawToolCall(canvas *image.RGBA, seconds float64, accent color.RGBA) {
-	cx, cy, radius := 680, 220, 120
-	pulse := .5 + .5*math.Sin(seconds*math.Pi*1.35)
-	circle(canvas, cx, cy, int(float64(radius)*(1.35+pulse*.08)), color.RGBA{accent.R, accent.G, accent.B, 34})
-	for ring := 0; ring < 3; ring++ {
-		r := int(float64(radius) * (.56 + float64(ring)*.20))
-		rotation := seconds * 54
-		if ring%2 == 1 {
-			rotation = seconds * -42
-		}
-		arc(canvas, cx, cy, r, rotation+float64(ring*96), 82+float64(ring*12), 4, color.RGBA{accent.R, accent.G, accent.B, uint8(120 + ring*28)})
-		arc(canvas, cx, cy, r, rotation+180+float64(ring*96), 38+float64(ring*8), 4, color.RGBA{255, 255, 255, uint8(90 + ring*20)})
-	}
-	for dot := 0; dot < 4; dot++ {
-		speed := 1.8
-		if dot%2 == 1 {
-			speed = -1.35
-		}
-		angle := seconds*speed + float64(dot)*math.Pi/2
-		orbit := float64(radius) * .72
-		if dot >= 2 {
-			orbit = float64(radius) * .94
-		}
-		circle(canvas, cx+int(math.Cos(angle)*orbit), cy+int(math.Sin(angle)*orbit), 6, color.RGBA{255, 255, 255, 190})
-	}
-	circle(canvas, cx, cy, 42+int(pulse*3), mix(accent, color.RGBA{255, 255, 255, 255}, .24))
-	for dot := -1; dot <= 1; dot++ {
-		circle(canvas, cx+dot*15, cy-4, 5, color.RGBA{255, 255, 255, 210})
-	}
-	r.centeredText(canvas, cx, cy+35, "WORKING", 14, true, color.White)
-	tool := titleWords(r.state.ToolName)
-	if tool != "" {
-		r.centeredText(canvas, cx, cy+150, ellipsize(tool, 23), 20, true, color.White)
-	}
-}
-
 func (r *renderer) drawWeather(canvas *image.RGBA, width int, seconds float64, accent color.RGBA) {
 	weather := r.state.Weather
 	pane := rightPane(width, canvas.Rect.Dy())
 	left, right := pane.Min.X, pane.Max.X
 	weatherAccent := weatherColor(weather.ConditionKind)
-	r.text(canvas, left, 52, "OUTSIDE CONDITIONS", 16, true, accent)
+	heading := "OUTSIDE CONDITIONS"
+	if r.state.Phase == "tool_call" {
+		heading = "WORKING"
+		if tool := titleWords(r.state.ToolName); tool != "" {
+			heading = "USING " + strings.ToUpper(tool)
+		}
+	}
+	r.text(canvas, left, 52, fitTextToWidth(heading, r.faces.bold[16], right-left-64), 16, true, accent)
 	r.drawWeatherIcon(canvas, right-68, 98, 62, weather.ConditionKind, seconds, weatherAccent)
 	temperature := ellipsize(firstNonEmpty(weather.TemperatureText, "--°"), 6)
 	r.text(canvas, left, 154, temperature, 82, true, color.White)
