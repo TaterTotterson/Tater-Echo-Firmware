@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "targets": {
+    "biscuit": {
+      "display_name": "Amazon Echo Dot 2nd Generation (2016)",
+      "amazon_codename": "biscuit",
+      "cpu": "armv7a",
+      "unlock": "amonet-biscuit-v2.0.0",
+      "factory_install": true,
+      "ota": true,
+      "factory_installer": "factory/biscuit/install.py",
+      "status": "hardware-tested"
+    },
+    "checkers": {
+      "display_name": "Amazon Echo Show 5 1st Generation (2019)",
+      "amazon_codename": "checkers",
+      "cpu": "armv7a",
+      "unlock": "amonet-checkers-v2.0.1+",
+      "native_base_os": "tater-linux",
+      "factory_transport": "usb-twrp",
+      "factory_install": true,
+      "ota": true,
+      "factory_installer": "factory/checkers-linux/install.py",
+      "native_framebuffer_ui": true,
+      "rootfs_slots": "a-b",
+      "ota_slots": "application-a-b-on-data",
+      "status": "hardware-tested"
+    }
+  }
+}

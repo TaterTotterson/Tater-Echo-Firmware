@@ -1,0 +1,1468 @@
+package client
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/als"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/discovery"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/board"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/buttons"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
+	"github.com/gorilla/websocket"
+)
+
+// Version is set at build time via ldflags:
+//
+//	-ldflags "-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=v2.1.0"
+var Version = "dev"
+
+// FirmwareTarget is the release target embedded by the build. It is separate
+// from runtime board detection: the former selects the OTA artifact while the
+// latter proves which hardware is actually beneath it.
+var FirmwareTarget = "biscuit"
+
+// monoEpoch anchors MonoMs. A time.Time from time.Now carries a monotonic
+// reading, so a difference between two of them ignores the wall clock being
+// stepped — which the controller does on every ack (time_ms).
+var monoEpoch = time.Now()
+
+// MonoMs is t on this process's monotonic clock, in ms. It rides ping replies
+// and wakes so the controller can map it onto its own clock through the
+// cleanest exchange it has seen (em_listen.DeviceClock) and date a wake by
+// when it was captured, however long the message spent in flight.
+func MonoMs(t time.Time) int64 { return t.Sub(monoEpoch).Milliseconds() }
+
+// ─── Message types ────────────────────────────────────────────────────────────
+
+type controlMessage struct {
+	Type      string          `json:"type"`
+	DeviceID  string          `json:"device_id,omitempty"`
+	ClickType int             `json:"clickType,omitempty"`
+	Down      bool            `json:"down,omitempty"`
+	LEDs      json.RawMessage `json:"leds,omitempty"`
+	LockMic   bool            `json:"lock_mic,omitempty"`
+	// Features is the controller's own capability list, sent on the ack.
+	// It is the mirror of the device's `capabilities` in the register
+	// message, and exists for the same reason: negotiate by capability,
+	// never by version string. Absent on older controllers, which is
+	// exactly how absence should read — as "does not do this".
+	Features []string `json:"features,omitempty"`
+	// TimeMs is the controller's wall clock in unix milliseconds, sent on the
+	// ack. An Echo has no RTC that survives a power cut and boots reading
+	// 2010; under emOS nothing ever corrects that, because bionic resolves
+	// through Android's property service and so no bionic-linked binary there
+	// has DNS for an NTP pool. Absent from older controllers, which correctly
+	// reads as "no opinion" — see clock.ShouldStep.
+	TimeMs int64 `json:"time_ms,omitempty"`
+	// Session is the private-listening session a listen_ack or listen_close
+	// refers to (docs/listening.md).
+	Session uint32 `json:"session,omitempty"`
+}
+
+// ─── Callbacks ────────────────────────────────────────────────────────────────
+
+// LEDCallback receives a ring frame plus the controller's optional
+// listening hint: non-nil when the message carried "listening", telling
+// the server explicitly whether this frame is the listening ring (which
+// enables the direction overlay). Nil on frames from older controllers —
+// the server falls back to its all-green heuristic.
+type LEDCallback func(leds []led.Led, listening *bool)
+
+// LEDAnimCallback receives the raw led_anim spec JSON (the "anim" object);
+// the server package unmarshals it into its own AnimSpec type.
+type LEDAnimCallback func(spec json.RawMessage)
+type MicStartCallback func(lockMic bool)
+type MicStopCallback func()
+type StateCallback func()
+type ConfigAppliedCallback func(msg config.ConfigMessage)
+type VolumeSetCallback func(level int)
+type BeamLockCallback func(lock bool)
+
+// ListenCallback receives listen_ack / listen_close, by type.
+type ListenCallback func(kind string, session uint32)
+
+// WifiChangeCallback receives a wifi_change request, with the SSID as its exact
+// bytes (see internal/wifi/ssid.go). It must return
+// quickly (the executor runs in its own goroutine) — the control
+// connection is about to drop when the network switches.
+type WifiChangeCallback func(ssid []byte, psk string)
+
+// ─── ControlClient ────────────────────────────────────────────────────────────
+
+type ControlClient struct {
+	deviceID string
+
+	ledCallback           LEDCallback
+	ledAnimCallback       LEDAnimCallback
+	micStartCallback      MicStartCallback
+	micStopCallback       MicStopCallback
+	disconnectedCallback  StateCallback
+	connectedCallback     StateCallback
+	pendingCallback       StateCallback
+	configAppliedCallback ConfigAppliedCallback
+	volumeSetCallback     VolumeSetCallback
+	beamLockCallback      BeamLockCallback
+	speakerFlushCallback  StateCallback
+	musicFlushCallback    StateCallback
+	duckCallback          func(on bool)
+	wifiChangeCallback    WifiChangeCallback
+	wifiCommitCallback    StateCallback
+	wifiScanCallback      StateCallback
+	listenCallback        ListenCallback
+
+	conn   *websocket.Conn
+	connMu sync.Mutex
+
+	// features is what the CONTROLLER announced on the ack. Guarded by its
+	// own mutex rather than connMu: HasFeature is read on the scanner's
+	// flush path, and making it wait on the connection write mutex would
+	// couple the two things this change exists to separate.
+	featureMu sync.Mutex
+	features  map[string]bool
+
+	// serverBaseURL is the WebSocket base URL actually in use
+	// ("ws://host:port" or "wss://host:tlsport"), set on successful
+	// connect. Used by the shell dialler to connect back to the
+	// controller on the same plane. lastServer keeps the discovered
+	// controller info (incl. TLS port) for the mDNS-skipping fast path.
+	serverBaseURL string
+	lastServer    *discovery.ServerInfo
+	serverAddrMu  sync.RWMutex
+
+	// shellCancel cancels a running shell session when shell_close is received.
+	shellCancel context.CancelFunc
+	shellMu     sync.Mutex
+}
+
+func NewControlClient(
+	deviceID string,
+	ledCallback LEDCallback,
+	micStartCallback MicStartCallback,
+	micStopCallback MicStopCallback,
+) *ControlClient {
+	return &ControlClient{
+		deviceID:         deviceID,
+		ledCallback:      ledCallback,
+		micStartCallback: micStartCallback,
+		micStopCallback:  micStopCallback,
+	}
+}
+
+func (c *ControlClient) OnLEDAnim(cb LEDAnimCallback)             { c.ledAnimCallback = cb }
+func (c *ControlClient) OnListen(cb ListenCallback)               { c.listenCallback = cb }
+func (c *ControlClient) OnDisconnected(cb StateCallback)          { c.disconnectedCallback = cb }
+func (c *ControlClient) OnConnected(cb StateCallback)             { c.connectedCallback = cb }
+func (c *ControlClient) OnPending(cb StateCallback)               { c.pendingCallback = cb }
+func (c *ControlClient) OnConfigApplied(cb ConfigAppliedCallback) { c.configAppliedCallback = cb }
+func (c *ControlClient) OnVolumeSet(cb VolumeSetCallback)         { c.volumeSetCallback = cb }
+func (c *ControlClient) OnBeamLock(cb BeamLockCallback)           { c.beamLockCallback = cb }
+func (c *ControlClient) OnSpeakerFlush(cb StateCallback)          { c.speakerFlushCallback = cb }
+func (c *ControlClient) OnMusicFlush(cb StateCallback)            { c.musicFlushCallback = cb }
+func (c *ControlClient) OnDuck(cb func(on bool))                  { c.duckCallback = cb }
+func (c *ControlClient) OnWifiChange(cb WifiChangeCallback)       { c.wifiChangeCallback = cb }
+func (c *ControlClient) OnWifiCommit(cb StateCallback)            { c.wifiCommitCallback = cb }
+func (c *ControlClient) OnWifiScan(cb StateCallback)              { c.wifiScanCallback = cb }
+
+// IsConnected reports whether the control WebSocket is registered and
+// live — the wifi change executor's "controller reachable" gate.
+func (c *ControlClient) IsConnected() bool {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	return c.conn != nil
+}
+
+var errPending = fmt.Errorf("pending approval")
+
+// maxStaticAttempts is how many consecutive dial failures one configured
+// endpoint gets before Run moves to the next target in the pass. 1 would
+// tour the whole list on a single transient blip — a brief drop on the
+// endpoint actually in front of the device costing a lap through every
+// backup before trying it again, which is slower than just retrying it.
+//
+// maxMDNSAttempts is the same idea for the bounded mDNS slot at the end of a
+// pass, and is deliberately 1, not maxStaticAttempts: the "don't abandon the
+// endpoint in front of you too eagerly" argument is about a specific
+// configured address, which mDNS has none of — a second browse immediately
+// after the first found nothing is not "retrying the endpoint you're at",
+// it's just a slower pass.
+const (
+	maxStaticAttempts = 2
+	maxMDNSAttempts   = 1
+)
+
+// staticBackoff is the per-attempt wait after a failed static pass, indexed
+// by how many full passes (every configured endpoint, then one bounded mDNS
+// try) have failed in a row. Modelled on how VoIP phones hunt for DHCP
+// options and a config server (settled design, #106): two fast passes so a
+// genuinely brief blip resolves quickly, then a widening backoff so a
+// controller that is really gone isn't hammered. Holds at the last value.
+//
+// Applied per attempt, not per pass, so the wall-clock time to tour the
+// whole list scales with how many endpoints are configured — a pass at the
+// 60s tier costs roughly (len(endpoints)+1)*60s, not a flat 60s. Chosen
+// deliberately over a per-pass wait: it keeps individual dials evenly
+// spaced regardless of backoff tier, and a static list is expected to stay
+// short (the design's own examples show two or three entries), where the
+// difference is seconds, not minutes. Reconsider this if a real deployment
+// configures a long list.
+var staticBackoff = []time.Duration{
+	5 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+	60 * time.Second,
+}
+
+func staticRetryDelay(passNum int) time.Duration {
+	if passNum >= len(staticBackoff) {
+		return staticBackoff[len(staticBackoff)-1]
+	}
+	return staticBackoff[passNum]
+}
+
+func (c *ControlClient) Run(ctx context.Context, data *DataClient) error {
+	// Position within a configured static pass — a pass being every
+	// endpoint in order plus one bounded mDNS attempt, computed as passLen
+	// below. All three are in-memory only: losing them across a restart is
+	// harmless since the file is re-read every attempt anyway, and a fresh
+	// process restarting the pass from the top is the documented
+	// behaviour, not a bug.
+	targetIdx := 0
+	targetAttempts := 0
+	passNum := 0
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Re-read every attempt, the same contract loadLinkCreds follows for
+		// the TLS credential files: a device stuck on a dead endpoint is
+		// exactly the one an operator cannot easily restart, so editing the
+		// file has to take effect on the very next reconnect, not at
+		// process start.
+		//
+		// A parse/validation error deliberately fails OPEN to mDNS below,
+		// same as an absent file: the overriding goal is that a device is
+		// never left unable to reach a controller, and that includes a typo
+		// in the config it cannot fix itself. This also applies to a pinned
+		// mdns:false fleet — a broken file there browses too. TLS
+		// verification bounds the blast radius (a browsed-to controller
+		// outside the fleet's CA is refused), so the failure mode is a
+		// delayed reconnect to the RIGHT controller, not a connection to
+		// the wrong one. Revisit if that stops being true.
+		static, staticErr := discovery.ConfiguredEndpoints()
+		if staticErr != nil {
+			log.Printf("[control] Static controller config invalid — using mDNS: %v", staticErr)
+		}
+		usingStatic := static != nil && len(static.Endpoints) > 0
+
+		// A pass is every configured endpoint in order, plus one bounded
+		// mDNS attempt at the end unless the config opts out — the settled
+		// resolution order from #106 is "configured list → mDNS, unless
+		// mdns:false", collapsed here since the persisted last-known tier
+		// is a separate, not-yet-built piece. Meaningless (0) when not
+		// usingStatic.
+		var passLen int
+		if usingStatic {
+			passLen = len(static.Endpoints)
+			if static.MDNS {
+				passLen++
+			}
+		}
+
+		var server *discovery.ServerInfo
+		var dialErr error
+
+		if usingStatic {
+			if targetIdx >= passLen {
+				// A config edit mid-pass can shrink the list out from under
+				// an in-flight index — restart the pass rather than index
+				// out of range.
+				targetIdx, targetAttempts = 0, 0
+			}
+
+			if targetIdx == 0 && targetAttempts == 0 && c.disconnectedCallback != nil {
+				// Once per full pass, not once per target: otherwise the
+				// ring goes orange during every routine controller restart,
+				// which is one endpoint failing, not an outage.
+				c.disconnectedCallback()
+			}
+
+			if targetIdx < len(static.Endpoints) {
+				server = static.Endpoints[targetIdx]
+				log.Printf("[control] Static endpoint %d/%d (attempt %d/%d): %s",
+					targetIdx+1, passLen, targetAttempts+1, maxStaticAttempts, server.Addr)
+			} else {
+				// The list is exhausted for this pass: one bounded mDNS
+				// browse, never the indefinitely-retrying FindServer — that
+				// would park the device there and defeat the point of
+				// having somewhere to fall through TO. maxMDNSAttempts (not
+				// maxStaticAttempts) below is what keeps this to one try.
+				log.Printf("[control] Static list exhausted — one mDNS attempt (%d/%d)",
+					targetAttempts+1, maxMDNSAttempts)
+				found, err := discovery.FindServerOnce(ctx)
+				if err != nil || found == nil {
+					dialErr = fmt.Errorf("no controller found via mDNS this round")
+				} else {
+					server = found
+				}
+			}
+		} else {
+			if c.disconnectedCallback != nil {
+				c.disconnectedCallback()
+			}
+
+			// Fast path: try the last-known controller address before mDNS.
+			// Speeds up ordinary reconnects, and after a WiFi network change
+			// it's what makes a controller on a different subnet reachable at
+			// all (multicast rarely crosses subnets, so mDNS alone would fail
+			// the change's reconnect gate and revert a working network).
+			// The probe targets the plain port — it's a reachability check,
+			// not a plane choice; connect() re-decides ws vs wss every dial.
+			server = c.lastKnownServer()
+			if server != nil && server.TLSPort == 0 && loadLinkCreds().tlsConf != nil {
+				// CA installed but the cached endpoint predates the
+				// controller's TLS listener (e.g. controller upgraded, or a
+				// Secure-link push just landed, mid-run). One fresh browse so
+				// the tls_port TXT is picked up; keep the cached endpoint if
+				// mDNS fails — after a WiFi change the controller can sit on
+				// another subnet where multicast doesn't reach.
+				if found, err := discovery.FindServerOnce(ctx); err == nil && found != nil {
+					server = found
+				}
+			}
+			if server != nil && probeTCP(server.Addr, 3*time.Second) {
+				log.Printf("[control] Last-known controller %s reachable — skipping mDNS", server.Addr)
+			} else {
+				found, err := discovery.FindServer(ctx)
+				if err != nil {
+					return err
+				}
+				server = found
+			}
+		}
+
+		var err error
+		var healthy bool
+		if server != nil {
+			dataCtx, cancelData := context.WithCancel(ctx)
+			go func() {
+				if err := data.Run(dataCtx); err != nil && err != context.Canceled {
+					log.Printf("[data] stopped: %v", err)
+				}
+			}()
+
+			healthy, err = c.connect(ctx, server, data)
+
+			cancelData()
+		} else {
+			// The bounded mDNS slot came up empty this round — no server to
+			// dial, so treat it exactly like any other failed target rather
+			// than special-casing "nothing to try." healthy stays false: no
+			// connection was even attempted.
+			err = dialErr
+		}
+
+		switch err {
+		case errPending:
+			log.Printf("[control] Device pending approval — retrying in 30s")
+			if usingStatic {
+				// The endpoint answered, and registration itself worked —
+				// pending-approval is success for discovery purposes.
+				// Falling through here would send a device waiting for its
+				// own approval off hunting for a different controller.
+				targetAttempts, passNum = 0, 0
+			}
+			if c.pendingCallback != nil {
+				c.pendingCallback()
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(30 * time.Second):
+			}
+		default:
+			if usingStatic {
+				if healthy {
+					// A connection that lasted staticHealthyDuration is a
+					// real recovery rather than a connect-then-drop flap, so
+					// restart the pass at the top and reset the backoff.
+					// Without this the device drifts down the list and never
+					// climbs back to its preferred endpoint.
+					//
+					// Test healthy, not err == nil: connect's read loop
+					// always exits with an error, so err == nil never fires.
+					targetIdx, targetAttempts, passNum = 0, 0, 0
+				} else {
+					targetAttempts++
+					maxAttempts := maxStaticAttempts
+					if targetIdx == len(static.Endpoints) {
+						maxAttempts = maxMDNSAttempts
+					}
+					if targetAttempts >= maxAttempts {
+						targetAttempts = 0
+						targetIdx++
+						if targetIdx >= passLen {
+							targetIdx = 0
+							passNum++
+						}
+					}
+				}
+			}
+
+			wait := 5 * time.Second
+			if usingStatic {
+				wait = staticRetryDelay(passNum)
+			}
+			if err != nil {
+				log.Printf("[control] Connection lost: %v — reconnecting in %s", err, wait)
+			}
+			if !usingStatic && c.disconnectedCallback != nil {
+				// The static path already showed this once at the top of
+				// the pass; re-showing it here on every single target would
+				// reintroduce the per-endpoint flashing the pass-level check
+				// above exists to avoid.
+				c.disconnectedCallback()
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+	}
+}
+
+// staticHealthyDuration is how long a connection has to stay up before Run
+// treats it as a genuine recovery rather than a connect-then-drop flap. Set
+// comfortably above one keepalive round trip (wsPingInterval, 20s) so a
+// connection that resets the pass/backoff state has actually proven itself,
+// not just completed a handshake before dying again.
+const staticHealthyDuration = 30 * time.Second
+
+// connect dials server and runs the control-plane read loop until it exits.
+// The bool return reports whether the connection stayed up at least
+// staticHealthyDuration before that happened — false at every early return
+// (a dial failure, a registration error, errPending: nothing before
+// c.connectedCallback fires counts as "connected" yet), computed for real
+// only at the read loop's exit, the one place a healthy connection can
+// still end up back here.
+func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInfo, data *DataClient) (bool, error) {
+	var connectedAt time.Time
+
+	// Credentials are re-read on every dial: a "Secure link" push from the
+	// controller lands mid-run, and the very next reconnect should pick it
+	// up without a restart.
+	creds := loadLinkCreds()
+	baseURL := "ws://" + server.Addr
+	if creds.tlsConf != nil {
+		if server.TLSPort > 0 {
+			baseURL = "wss://" + net.JoinHostPort(server.Host, strconv.Itoa(server.TLSPort))
+		} else {
+			// CA on disk but controller has no TLS listener (or a pre-TLS
+			// controller). Deliberate fallback during rollout — flipping
+			// REQUIRE_DEVICE_TLS controller-side is what eventually closes
+			// this downgrade path.
+			log.Printf("[control] CA installed but controller advertises no tls_port — dialling plain ws")
+		}
+	}
+
+	log.Printf("[control] Connecting to %s", baseURL)
+	dialer := creds.dialer()
+	conn, _, err := dialer.DialContext(ctx, baseURL+"/control", creds.header())
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	// Store base URL for outbound shell connections + the discovered
+	// server for the reconnect fast path.
+	c.serverAddrMu.Lock()
+	c.serverBaseURL = baseURL
+	c.lastServer = server
+	c.serverAddrMu.Unlock()
+
+	reg := map[string]interface{}{
+		"type":      "register",
+		"device_id": c.deviceID,
+		"version":   Version,
+		// Capabilities, not version strings, are how the controller decides
+		// what a device can be asked to do. A version comparison has to encode
+		// knowledge of our release history in the controller and gets it wrong
+		// the first time someone runs a dev build; a capability is the device
+		// stating what it implements. Unsupported legacy OpenWakeWord features
+		// are deliberately absent rather than advertised behind a version.
+		"capabilities": capabilities(),
+		// Why the ambient light sensor is or is not available. A capability
+		// list says WHAT a device has; when the answer is "nothing", nobody
+		// can tell an absent chip from an unbound driver without a shell
+		// session on the user's own hardware — which is exactly where #90
+		// got stuck, twice, because the reason is written only to a log file
+		// the support bundle does not collect. Costs one small object per
+		// registration.
+		"ambient_light_status": als.Report(),
+		// Which userspace this firmware booted on — see internal/platform.
+		//
+		// On REGISTRATION and not the stats tick, which is where it was first
+		// put and where it was useless: its consumer is the payload reconcile,
+		// which runs the moment a device connects, ~30s before the first stats
+		// report. So the field resolved to "unknown" exactly when it was
+		// asked, the controller pushed Android payloads at an emOS device, and
+		// each one sat for the full 120s transfer timeout waiting for a
+		// TRANSFER_OK that a write into Magisk's absent overlay can never
+		// send. Measured on EFF, 2026-09-04: 240s across two attempts.
+		//
+		// It belongs here anyway. This is a static property of the boot, known
+		// before the network is up, exactly like ambient_light_status above —
+		// nothing about it needs re-reporting every 30 seconds.
+		"base_os": platform.Base(),
+		// Which board detection matched (pkg/board), "unknown" when none did.
+		// Unread by current controllers, so safe to add unnegotiated.
+		"board": board.IDOf(board.Detect("")),
+	}
+	// The running kernel, `uname -m` and `uname -r`. Generic across boards, and
+	// on biscuit the only thing that separates emOS on FireOS 5's 64-bit
+	// kernel from emOS on FireOS 6's 32-bit one. Unread by older controllers,
+	// so safe to add unnegotiated; omitted if uname fails.
+	if m, r := platform.Kernel(); m != "" {
+		reg["kernel_arch"] = m
+		reg["kernel_release"] = r
+	}
+	// Resolved fresh per registration: a cached-at-startup value goes stale
+	// after a WiFi change, and if the process started while the network was
+	// down (e.g. wifi.RecoverIfPending bouncing WiFi) it cached 127.0.0.1
+	// forever. Omitted on failure so the controller falls back to the WS
+	// peer address.
+	if ip := getLocalIP(); ip != "127.0.0.1" {
+		reg["ip"] = ip
+	}
+	regBytes, _ := json.Marshal(reg)
+	// Send register BEFORE publishing conn — prevents concurrent SendButton /
+	// SendMuteState from racing this write on the same gorilla conn.
+	if err := conn.WriteMessage(websocket.TextMessage, regBytes); err != nil {
+		return false, err
+	}
+
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var first controlMessage
+	if err := conn.ReadJSON(&first); err != nil {
+		return false, err
+	}
+	conn.SetReadDeadline(time.Time{})
+
+	switch first.Type {
+	case "pending":
+		return false, errPending
+	case "ack":
+		// The controller tells us what IT can do here. Recorded before conn
+		// is published, so a caller reading it can never see a stale set
+		// from the previous connection.
+		c.setFeatures(first.Features)
+		// ...and what time it is. Deliberately AFTER the connection exists,
+		// so nothing a connection depends on can depend on this: TLS keeps
+		// verifying against the build-time clamp, which is there precisely
+		// because the clock cannot be trusted at dial time.
+		//
+		// Every reconnect is the refresh. Once the clock is right the
+		// threshold makes this a no-op, so it costs a comparison.
+		if clock.ShouldStep(time.Now(), first.TimeMs) {
+			if err := clock.Step(first.TimeMs); err != nil {
+				// Not fatal, and not retried: a device that cannot set its
+				// own clock still does everything else, and the only cost is
+				// log lines that do not line up with the controller's.
+				log.Printf("[clock] could not set the clock from the controller: %v", err)
+			} else {
+				log.Printf("[clock] stepped to %s (from the controller)",
+					time.Now().Format(time.RFC3339))
+			}
+		}
+	default:
+		return false, fmt.Errorf("unexpected first message: %s", first.Type)
+	}
+
+	log.Printf("[control] Registered as %s (version %s)", c.deviceID, Version)
+
+	// Handshake complete — now safe to publish conn for concurrent use.
+	// done is closed when this connection exits, stopping the pong ticker.
+	done := make(chan struct{})
+	defer close(done)
+
+	c.connMu.Lock()
+	c.conn = conn
+	c.connMu.Unlock()
+	defer func() {
+		c.connMu.Lock()
+		c.conn = nil
+		c.connMu.Unlock()
+	}()
+
+	if c.connectedCallback != nil {
+		c.connectedCallback()
+	}
+	connectedAt = time.Now()
+	data.NotifyReady(baseURL)
+
+	// Keepalive — same mechanism as the data client (see wsPingInterval in
+	// data.go). The app-level "pong" keeps the controller's last_seen fresh;
+	// the WS ping/pong + read deadline is what detects a half-open socket.
+	// Both error paths close the conn: a returning ticker goroutine that left
+	// the conn open left the read loop wedged forever on a dead TCP path.
+	conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsPongWait))
+		return nil
+	})
+
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := c.writeJSON(map[string]string{"type": "pong"}); err != nil {
+					log.Printf("[control] keepalive pong failed: %v — closing connection", err)
+					conn.Close()
+					return
+				}
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+					log.Printf("[control] keepalive ping failed: %v — closing connection", err)
+					conn.Close()
+					return
+				}
+			}
+		}
+	}()
+
+	for {
+		var raw json.RawMessage
+		if err := conn.ReadJSON(&raw); err != nil {
+			return time.Since(connectedAt) >= staticHealthyDuration, err
+		}
+		conn.SetReadDeadline(time.Now().Add(wsPongWait))
+
+		var peek struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &peek); err != nil {
+			continue
+		}
+
+		switch peek.Type {
+		case "leds":
+			var msg struct {
+				LEDs      json.RawMessage `json:"leds"`
+				Listening *bool           `json:"listening"`
+			}
+			if err := json.Unmarshal(raw, &msg); err == nil && c.ledCallback != nil {
+				var leds []led.Led
+				if err := json.Unmarshal(msg.LEDs, &leds); err == nil {
+					c.ledCallback(leds, msg.Listening)
+				}
+			}
+
+		case "led_anim":
+			// Device-rendered ring animation — the device animates locally
+			// until a newer led_anim/leds message replaces it (or its TTL
+			// dead-man expires). The raw anim object is forwarded opaquely;
+			// the server package owns the schema.
+			var msg struct {
+				Anim json.RawMessage `json:"anim"`
+			}
+			if err := json.Unmarshal(raw, &msg); err == nil && c.ledAnimCallback != nil {
+				c.ledAnimCallback(msg.Anim)
+			}
+
+		case "mic_start":
+			if c.micStartCallback != nil {
+				var msg controlMessage
+				_ = json.Unmarshal(raw, &msg)
+				c.micStartCallback(msg.LockMic)
+			}
+
+		case "mic_stop":
+			if c.micStopCallback != nil {
+				c.micStopCallback()
+			}
+
+		// beam_lock/beam_unlock: controller-driven beamformer control for the
+		// continuous wake stream. Sent at wake detection (lock onto the
+		// speaker's perimeter mic mid-utterance, no stream restart) and at
+		// turn end (back to ch6 omni for wake listening).
+		case "beam_lock":
+			if c.beamLockCallback != nil {
+				c.beamLockCallback(true)
+			}
+
+		case "beam_unlock":
+			if c.beamLockCallback != nil {
+				c.beamLockCallback(false)
+			}
+
+		case "volume_set":
+			// Controller forwarding a volume command from HA (MediaPlayerCommandRequest).
+			// level is an integer in the device's native tinymix range, capped
+			// at the codec's unity gain — see internal/server/volume.go.
+			var msg struct {
+				Level int `json:"level"`
+			}
+			if err := json.Unmarshal(raw, &msg); err == nil && c.volumeSetCallback != nil {
+				c.volumeSetCallback(msg.Level)
+			}
+
+		case "config":
+			var msg config.ConfigMessage
+			if err := json.Unmarshal(raw, &msg); err == nil {
+				cfg := config.Get()
+				cfg.Apply(msg)
+				// Persisted here rather than through OnConfigApplied,
+				// because emOS's init reads the file and the firmware only
+				// ever writes it — there is no in-process consumer for a
+				// callback to serve, and a callback nobody registers is a
+				// feature that silently does nothing. Absent field means the
+				// controller said nothing about it, which must not be read as
+				// "remove"; hence the pointer.
+				if msg.ConsolePassword != nil {
+					changed, err := config.WriteConsolePassword(*msg.ConsolePassword)
+					if err != nil {
+						log.Printf("[control] Console password: %v", err)
+					} else if changed {
+						log.Printf("[control] Console password %s",
+							map[bool]string{true: "set", false: "cleared"}[*msg.ConsolePassword != ""])
+					}
+				}
+				// Same shape and the same reasons: a pointer so zero can
+				// mean "no timeout" rather than "not mentioned", written to
+				// disk for init, never acted on here.
+				if msg.ConsoleTimeoutMin != nil {
+					changed, err := config.WriteConsoleTimeout(*msg.ConsoleTimeoutMin)
+					if err != nil {
+						log.Printf("[control] Console timeout: %v", err)
+					} else if changed {
+						if *msg.ConsoleTimeoutMin == 0 {
+							log.Printf("[control] Console timeout cleared")
+						} else {
+							log.Printf("[control] Console timeout %dm", *msg.ConsoleTimeoutMin)
+						}
+					}
+				}
+				snap := cfg.Snapshot() // read back under the config lock
+				log.Printf("[control] Config applied: vad_threshold=%.4f", snap.VadThreshold)
+				if c.configAppliedCallback != nil {
+					c.configAppliedCallback(msg)
+				}
+			}
+
+		case "shell_open":
+			// Controller is requesting a shell session.
+			// Dial outbound to ws://controller/shell/{device_id} and pipe sh stdio.
+			// pty:true (dashboard terminal) requests an interactive PTY session;
+			// absent (programmatic sessions — OTA transfers, _shell_run) keeps
+			// the plain pipe, whose unechoed, prompt-free output those callers
+			// parse.
+			var shellMsg struct {
+				Pty bool `json:"pty"`
+			}
+			_ = json.Unmarshal(raw, &shellMsg)
+			log.Printf("[control] shell_open received (pty=%v) — dialling controller shell endpoint", shellMsg.Pty)
+			c.shellMu.Lock()
+			if c.shellCancel != nil {
+				// Close any existing session first
+				c.shellCancel()
+			}
+			shellCtx, shellCancel := context.WithCancel(ctx)
+			c.shellCancel = shellCancel
+			c.shellMu.Unlock()
+
+			c.serverAddrMu.RLock()
+			baseURL := c.serverBaseURL
+			c.serverAddrMu.RUnlock()
+
+			go c.runShellSession(shellCtx, baseURL, shellMsg.Pty)
+
+		case "shell_close":
+			log.Printf("[control] shell_close received — closing shell session")
+			c.shellMu.Lock()
+			if c.shellCancel != nil {
+				c.shellCancel()
+				c.shellCancel = nil
+			}
+			c.shellMu.Unlock()
+
+		case "wifi_change":
+			// Safe network switch (see internal/wifi). The executor owns
+			// the whole sequence device-side — this connection is about to
+			// die when the network flips.
+			//
+			// ssid_hex carries the SSID's exact bytes, which is the only way
+			// to name a network whose SSID is not valid UTF-8 (any 0–32
+			// octets are valid). An older controller sends only ssid, whose
+			// UTF-8 bytes are the SSID for every name it could offer. A
+			// malformed ssid_hex becomes an empty SSID, which the change
+			// refuses with a reason rather than guessing.
+			var msg struct {
+				SSID    string `json:"ssid"`
+				SSIDHex string `json:"ssid_hex"`
+				PSK     string `json:"psk"`
+			}
+			if err := json.Unmarshal(raw, &msg); err == nil && c.wifiChangeCallback != nil {
+				ssid := []byte(msg.SSID)
+				if msg.SSIDHex != "" {
+					ssid, _ = hex.DecodeString(msg.SSIDHex)
+				}
+				log.Printf("[control] wifi_change received (ssid=%q)", msg.SSID)
+				c.wifiChangeCallback(ssid, msg.PSK)
+			}
+
+		case "wifi_commit":
+			// Controller acknowledged a successful change — finalise it.
+			if c.wifiCommitCallback != nil {
+				c.wifiCommitCallback()
+			}
+
+		case "wifi_scan":
+			if c.wifiScanCallback != nil {
+				c.wifiScanCallback()
+			}
+
+		// Private-listening sessions (docs/listening.md). A message about a
+		// session that is not the open one is ignored further down, by the
+		// gate: it is a late message about a session already gone.
+		case "listen_ack", "listen_close":
+			var msg controlMessage
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Session != 0 && c.listenCallback != nil {
+				c.listenCallback(peek.Type, msg.Session)
+			}
+
+		case "speaker_flush":
+			// Barge-in: controller detected the wake word during TTS
+			// playback and wants the buffered audio cut immediately.
+			log.Printf("[control] speaker_flush received — discarding buffered playback")
+			if c.speakerFlushCallback != nil {
+				c.speakerFlushCallback()
+			}
+
+		case "music_flush":
+			// The user genuinely stopped or paused. A voice turn must NOT
+			// send this — it ducks instead, which is the whole reason the
+			// music plane is separate. Flushing discards the buffered audio
+			// that makes ducking instant, and on a non-seekable stream that
+			// audio is gone for good.
+			log.Printf("[control] music_flush received — discarding buffered music")
+			if c.musicFlushCallback != nil {
+				c.musicFlushCallback()
+			}
+
+		case "duck":
+			// Duck the music under a voice turn. Sent at turn start and
+			// released at turn end; the DEPTH is config (duckDb), so it can
+			// be tuned by ear in a real room without a firmware push.
+			var msg struct {
+				On bool `json:"on"`
+			}
+			if err := json.Unmarshal(raw, &msg); err == nil && c.duckCallback != nil {
+				c.duckCallback(msg.On)
+			}
+
+		case "ping":
+			// Echo the controller's sequence id so it can pair the reply
+			// with the send it timed. RTT is measured entirely
+			// controller-side against one monotonic clock; the device's
+			// wall clock is never sent (Echos boot with bogus clocks
+			// pre-NTP, the same reason TLS verification is clamped to
+			// build time). `mono` is the device's MONOTONIC time, which is
+			// what lets the controller map a wake's capture instant onto
+			// its own clock. Without an id, the unsolicited keepalive
+			// pongs below are indistinguishable from replies and would be
+			// paired with whatever ping happened to be outstanding.
+			var ping struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &ping); err == nil && len(ping.ID) > 0 {
+				c.writeJSON(map[string]any{"type": "pong", "id": ping.ID,
+					"mono": MonoMs(time.Now())})
+			} else {
+				c.writeJSON(map[string]string{"type": "pong"})
+			}
+
+		case "pong":
+			// ignore
+
+		default:
+			log.Printf("[control] Unknown message type: %s", peek.Type)
+		}
+	}
+}
+
+// Shell input frame types (PTY sessions only). The dashboard sends framed
+// binary messages; the controller proxies them verbatim. Plain-pipe
+// sessions receive raw unframed bytes, as before.
+const (
+	shellFrameStdin  = 0x00 // payload: raw stdin bytes
+	shellFrameResize = 0x01 // payload: cols uint16 BE, rows uint16 BE
+)
+
+// runShellSession dials the controller's /shell/{device_id} endpoint,
+// spawns sh, and pipes its stdio bidirectionally until ctx is cancelled
+// or the connection drops.
+//
+// pty=true attaches sh to a pseudo-terminal (interactive mksh: prompt,
+// line editing, job control, SIGWINCH) and expects framed input; the
+// ?pty=1 query tells the controller which mode was actually established
+// so the dashboard can match its framing. pty=false is the legacy raw
+// pipe used by programmatic sessions. If PTY allocation fails, the
+// session falls back to the pipe so a shell is always available.
+func (c *ControlClient) runShellSession(ctx context.Context, baseURL string, pty bool) {
+	var master, slave *os.File
+	if pty {
+		var err error
+		master, slave, err = openPty()
+		if err != nil {
+			log.Printf("[shell] PTY allocation failed (%v) — falling back to pipe", err)
+			pty = false
+		}
+	}
+
+	shellURL := baseURL + "/shell/" + c.deviceID
+	if pty {
+		shellURL += "?pty=1"
+	}
+	log.Printf("[shell] Connecting to controller: %s", shellURL)
+
+	creds := loadLinkCreds()
+	dialer := creds.dialer()
+	conn, _, err := dialer.DialContext(ctx, shellURL, creds.header())
+	if err != nil {
+		log.Printf("[shell] Failed to connect to controller: %v", err)
+		if master != nil {
+			master.Close()
+			slave.Close()
+		}
+		return
+	}
+	defer conn.Close()
+
+	log.Printf("[shell] Connected — spawning sh (pty=%v)", pty)
+
+	cmd := exec.CommandContext(ctx, "/system/bin/sh")
+
+	// output is the fd read for shell output; input the fd written for
+	// stdin — the PTY master serves as both.
+	var output io.Reader
+	var input io.WriteCloser
+
+	if pty {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
+		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+		// New session with the PTY slave (child fd 0) as controlling TTY —
+		// this is what gives mksh an interactive terminal.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+		output = master
+		input = master
+	} else {
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			log.Printf("[shell] StdinPipe: %v", err)
+			return
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			log.Printf("[shell] StdoutPipe: %v", err)
+			return
+		}
+		cmd.Stderr = cmd.Stdout // merge stderr into stdout
+		output = stdout
+		input = stdin
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("[shell] cmd.Start: %v", err)
+		if master != nil {
+			master.Close()
+			slave.Close()
+		}
+		return
+	}
+	if pty {
+		// Child holds its own slave fd now; keeping ours open would stop
+		// the master from ever reading EOF after the shell exits.
+		slave.Close()
+	}
+
+	done := make(chan struct{})
+
+	// shell output → WebSocket
+	go func() {
+		defer close(done)
+		buf := make([]byte, 4096)
+		for {
+			n, err := output.Read(buf)
+			if n > 0 {
+				if werr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+					log.Printf("[shell] write to WS: %v", werr)
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// WebSocket → shell input (framed in PTY mode, raw in pipe mode)
+	go func() {
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+			if !pty {
+				if _, err := input.Write(data); err != nil {
+					return
+				}
+				continue
+			}
+			if len(data) == 0 {
+				continue
+			}
+			switch data[0] {
+			case shellFrameStdin:
+				if _, err := input.Write(data[1:]); err != nil {
+					return
+				}
+			case shellFrameResize:
+				if len(data) >= 5 {
+					cols := binary.BigEndian.Uint16(data[1:3])
+					rows := binary.BigEndian.Uint16(data[3:5])
+					if err := setWinsize(master, cols, rows); err != nil {
+						log.Printf("[shell] TIOCSWINSZ: %v", err)
+					}
+				}
+			}
+		}
+		input.Close()
+	}()
+
+	// Wait for shell exit, ctx cancel, or connection drop
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+
+	cmd.Process.Kill()
+	cmd.Wait()
+	if master != nil {
+		master.Close()
+	}
+	log.Println("[shell] Session closed")
+}
+
+// capabilities is what this firmware implements, negotiated by capability
+// rather than by version so the controller needs no knowledge of our release
+// history. "ambient_light" is conditional on the hardware
+// actually having a readable sensor — the controller advertises an HA entity
+// off the back of it, and an entity that can never produce a reading is worse
+// than no entity at all.
+func capabilities() []string {
+	// "audio_mix": this firmware holds music on its own plane and mixes it
+	// with voice at the ALSA write, so the controller can duck instead of
+	// pausing. Without it the controller must keep the pause/resume path —
+	// a device that cannot mix would simply never play the 0x04 stream.
+	//
+	// "aec_hw_ref": this firmware can take the AEC far-end reference from a
+	// hardware playback loopback in the mic capture itself, and detects at
+	// runtime whether the board provides one — falling back to the software
+	// tap at the ALSA write when it does not. It gates the AEC delay
+	// control: that slider compensates write-to-ear latency for the
+	// software tap, and on the hardware path there is nothing to
+	// compensate, so leaving it live offers a knob that does nothing.
+	//
+	// Announced statically, like every other entry, because it describes the
+	// firmware. Whether the reference was actually found is a runtime answer
+	// and rides the stats report as aecRef.
+	//
+	// "output_chain": this firmware can run the speaker output chain (EQ,
+	// bass guard, limiter) itself, at the ALSA write. It runs it only when
+	// the controller's ack carries the same feature, which is the controller
+	// saying it has stopped: either half alone keeps the old path, and both
+	// together must never process the same audio twice.
+	caps := []string{"mic", "speaker", "leds", "led_anim", "buttons",
+		"mww_shadow", "button_hold", "audio_mix", "aec_hw_ref", "output_chain"}
+	if als.Present() {
+		caps = append(caps, "ambient_light")
+	}
+	return caps
+}
+
+func (c *ControlClient) SendButton(event buttons.ButtonClickEvent) {
+	log.Printf("[control] SendButton: clickType=%d down=%v heldMs=%d muted=%v", event.ClickType, event.Down, event.HeldMs, event.Muted)
+	msg := map[string]interface{}{
+		"type":      "button",
+		"clickType": int(event.ClickType),
+		"down":      event.Down,
+		// Absent on a press and on firmware predating this, which the
+		// controller must read as "a tap" — an unknown hold time becoming a
+		// long press would silently stop the action button starting voice
+		// turns on older devices.
+		"heldMs": event.HeldMs,
+		// Always sent, never omitempty: absent must mean "this firmware does
+		// not report it" so the controller can fall back to mute_state, and
+		// omitempty would make an unmuted press indistinguishable from that.
+		"muted": event.Muted,
+		"button": map[string]string{
+			"type": string(event.Button.Type),
+		},
+	}
+	if err := c.writeJSON(msg); err != nil {
+		log.Printf("[control] SendButton failed: %v", err)
+	}
+}
+
+// SendMuteState notifies the controller of the current mute state.
+// Safe for concurrent use — silently drops if not connected.
+func (c *ControlClient) SendMuteState(muted bool) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":  "mute_state",
+		"muted": muted,
+	})
+}
+
+// SendAmbientLight reports a SIGNIFICANT change in room light level.
+//
+// Sent only on a real change (see als.Significant), not on a schedule: the
+// steady-state value already rides the ~30s stats report, and this exists for
+// the timing — a light switching on should reach Home Assistant now, not up
+// to 30 seconds later. Same split as shadow-mode threshold crossings.
+//
+// Silently dropped if not connected, like the other state reports: a light
+// change is not worth blocking on.
+func (c *ControlClient) SendAmbientLight(lux int) {
+	log.Printf("[als] ambient light changed: %d lux", lux)
+	_ = c.writeJSON(map[string]interface{}{
+		"type": "ambient_light",
+		"lux":  lux,
+	})
+}
+
+// SendVolumeState notifies the controller of the current volume level
+// (0–volumeMax, the raw tinymix ctl 61 index).
+// Called on connect (to sync controller state) and after every local change.
+// Safe for concurrent use — silently drops if not connected.
+func (c *ControlClient) SendVolumeState(level int) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":  "volume_state",
+		"level": level,
+	})
+}
+
+// SendLog sends a structured log entry to the controller.
+// Safe for concurrent use — silently drops if not connected.
+func (c *ControlClient) SendLog(level, message string) {
+	_ = c.writeJSON(map[string]string{
+		"type":    "log",
+		"level":   level,
+		"message": message,
+	})
+}
+
+// SendWifiResult reports the outcome of a wifi_change attempt.
+// Safe for concurrent use — silently drops if not connected.
+func (c *ControlClient) SendWifiResult(ok bool, ssid, errMsg string) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":  "wifi_result",
+		"ok":    ok,
+		"ssid":  ssid,
+		"error": errMsg,
+	})
+}
+
+// SendPlaybackStats reports one completed speaker stream: periods played,
+// mid-stream underruns, and the delivery-margin fields (buffer low-water
+// mark, prime wait, arrival span and worst arrival gap) that say how close
+// the stream came to starving even when it did not.
+//
+// Sent once per TTS response/announcement — not per frame; the controller
+// attaches it to the voice turn it just persisted. stats is passed as an
+// opaque interface so the speaker package owns the field set and adding a
+// metric never has to touch this signature. Safe for concurrent use —
+// silently drops if not connected (the stat is diagnostic, not state).
+//
+// periods/underruns are ALSO sent flat at the top level, duplicating two
+// fields of stats. That is deliberate: device firmware and controller are
+// released independently, so this firmware must keep working against a
+// controller that predates the nested payload. Don't "tidy" the duplication
+// away until every controller in the fleet reads stats.
+//
+// barge, when non-nil, is the on-device scorer's view of the stream:
+// {peak, bar, frames} at the barge-in bar (shadow.TakeBargeWindow).
+func (c *ControlClient) SendPlaybackStats(periods, underruns uint64, stats interface{},
+	barge map[string]interface{}) {
+	msg := map[string]interface{}{
+		"type":      "playback_stats",
+		"periods":   periods,
+		"underruns": underruns,
+		"stats":     stats,
+	}
+	if barge != nil {
+		msg["barge"] = barge
+	}
+	_ = c.writeJSON(msg)
+}
+
+// SendMWWShadowCross reports a Tater microWakeWord sliding-window crossing.
+// It is strictly observational and is sent only when the controller announced
+// FeatureMWWShadow, so older controllers never receive an unknown event type.
+func (c *ControlClient) SendMWWShadowCross(score float32, ageMs int64) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":  "mww_shadow_cross",
+		"score": score,
+		"ageMs": ageMs,
+	})
+}
+
+// SendListenState reports what the device is actually doing with its wake
+// stream — the "is it" to oww_local_only's "could it". Sent on every change
+// and after every ack, since the controller keeps no memory of it across a
+// reconnect.
+func (c *ControlClient) SendListenState(state, reason string) error {
+	msg := map[string]interface{}{"type": "listen_state", "state": state}
+	if reason != "" {
+		msg["reason"] = reason
+	}
+	return c.writeJSON(msg)
+}
+
+// SendListenEnd reports a session the device closed without being told to.
+func (c *ControlClient) SendListenEnd(session uint32, reason string) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":    "listen_end",
+		"session": session,
+		"reason":  reason,
+	})
+}
+
+// setFeatures records the controller's capability list from the ack,
+// replacing any set from a previous connection — a reconnect can land on a
+// different controller, or the same one after an upgrade.
+func (c *ControlClient) setFeatures(features []string) {
+	m := make(map[string]bool, len(features))
+	for _, f := range features {
+		m[f] = true
+	}
+	c.featureMu.Lock()
+	c.features = m
+	c.featureMu.Unlock()
+}
+
+// HasFeature reports whether the controller announced a capability on the
+// ack. False for every feature on an older controller, which is the correct
+// reading: it cannot do the thing, so keep doing what already worked.
+func (c *ControlClient) HasFeature(name string) bool {
+	c.featureMu.Lock()
+	defer c.featureMu.Unlock()
+	return c.features[name]
+}
+
+// FeatureBleAdvertsData is announced by a controller that can read BLE
+// advertisement batches off the DATA plane (frameTypeBleAdverts). Without
+// it the device must keep using the control plane, because an old
+// controller ignores unknown frame types and would drop every advert in
+// silence.
+const FeatureBleAdvertsData = "ble_adverts_data"
+
+// FeatureMWWShadow is announced by a controller that can correlate immediate
+// microWakeWord crossings. Periodic mwwShadow stats remain backwards-compatible
+// telemetry and do not depend on this feature.
+const FeatureMWWShadow = "mww_shadow"
+
+// FeatureOutputChain is announced by a controller that sends this device's
+// audio UNPROCESSED and leaves EQ, bass guard and limiter to the device.
+// Absent, the controller is still processing and the device must not.
+const FeatureOutputChain = "output_chain"
+
+// SendBleAdverts forwards a batch of BLE advertisements to the controller
+// (bluetooth_proxy path). adverts is marshalled as-is — []bluetooth.Advert,
+// whose Data field JSON-encodes as base64. Safe for concurrent use —
+// silently drops if not connected (adverts are ephemeral by nature).
+func (c *ControlClient) SendBleAdverts(adverts interface{}) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":    "ble_adverts",
+		"adverts": adverts,
+	})
+}
+
+// SendWifiScanResult reports scan results (or a scan error) upstream.
+// networks is marshalled as-is; pass nil with errMsg on failure.
+func (c *ControlClient) SendWifiScanResult(networks interface{}, errMsg string) {
+	_ = c.writeJSON(map[string]interface{}{
+		"type":     "wifi_scan_result",
+		"networks": networks,
+		"error":    errMsg,
+	})
+}
+
+func (c *ControlClient) writeJSON(v interface{}) error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	if c.conn == nil {
+		return nil
+	}
+	c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	return c.conn.WriteJSON(v)
+}
+
+func (c *ControlClient) lastKnownServer() *discovery.ServerInfo {
+	c.serverAddrMu.RLock()
+	defer c.serverAddrMu.RUnlock()
+	return c.lastServer
+}
+
+// probeTCP reports whether addr (host:port) accepts a TCP connection
+// within timeout.
+func probeTCP(addr string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// idmePath is Amazon's ID Manager, exported by their kernel driver. It holds
+// this unit's factory identity — serial, board_id, MAC addresses, per-unit ALS
+// and microphone calibration — and the files are world-readable.
+//
+// A variable so tests can point it elsewhere.
+var idmePath = "/proc/idme/serial"
+
+// GetSerialNo returns this unit's serial. The whole fleet is keyed on it, so a
+// wrong or missing answer is not cosmetic: every device that cannot resolve one
+// registers as "unknown-device" and they collide with each other.
+//
+// Three sources, in descending order of how much has to be working for them to
+// answer:
+//
+//  1. /proc/idme/serial — the hardware value, straight from Amazon's kernel
+//     driver. No property service, no bootloader argument, and it answers
+//     identically under FireOS, emOS and TWRP. Verified 2026-09-15 on a v1
+//     (FireOS 5, matching getprop exactly) and a v2 (FireOS 6, in recovery).
+//  2. getprop ro.serialno — needs Android's property service, so FireOS only.
+//  3. androidboot.serialno on the kernel command line, where the property came
+//     from — needs Android's init NOT to have run, since it consumes every
+//     androidboot.* argument and strips it from /proc/cmdline.
+//
+// idme leads because the cmdline is not reliably there to be read. On FireOS 6
+// the kernel is 32-bit, COMMAND_LINE_SIZE is 1024, and emOS's own cmdline is
+// 385 bytes against stock's 70 — which pushes androidboot.serialno, near the
+// end of what LK appends, to byte 1040. It is truncated away before the kernel
+// ever sees it, and both this and emOS's init then correctly find nothing.
+// Measured on the spare, 2026-09-15.
+func GetSerialNo() string {
+	if serial := serialFromIdme(); serial != "" {
+		return serial
+	}
+	out, err := exec.Command("getprop", "ro.serialno").Output()
+	if err == nil {
+		if serial := sanitiseSerial(string(out)); serial != "" {
+			return serial
+		}
+	}
+	// Last resort, and the only source that can be WRONG rather than absent.
+	// The kernel truncates at COMMAND_LINE_SIZE wherever it lands, so a cut
+	// mid-value leaves a short but well-formed serial — and it cannot be told
+	// apart from a real one, because procfs appends a newline either way and a
+	// serial legitimately last on the line looks identical. Hence the log line:
+	// the fallback being used at all is the thing worth seeing, since every
+	// device with an idme node should never reach here.
+	if serial := serialFromCmdline(); serial != "" {
+		log.Printf("[control] Serial came from the kernel cmdline, not idme — "+
+			"%q may be truncated; check /proc/idme/serial", serial)
+		return serial
+	}
+	log.Printf("[control] Warning: no serial from idme, getprop or cmdline: %v", err)
+	return "unknown-device"
+}
+
+func serialFromIdme() string {
+	// Not cached, for the reason als.resolve() documents: this is first asked
+	// at registration, moments after boot, and a negative answer frozen there
+	// would outlive the condition that caused it.
+	b, err := os.ReadFile(idmePath)
+	if err != nil {
+		return ""
+	}
+	return sanitiseSerial(string(b))
+}
+
+// sanitiseSerial trims and validates a serial read from a device file.
+//
+// procfs hands back a value with no trailing newline, other sources add one,
+// and a partially written or absent field can read as NULs. Anything that is
+// not printable ASCII is rejected outright rather than passed on: a serial is
+// an identifier the controller stores, logs and keys rows on, and a plausible
+// but corrupt one is worse than none, since "unknown-device" at least says so.
+func sanitiseSerial(raw string) string {
+	if i := strings.IndexByte(raw, 0); i >= 0 {
+		raw = raw[:i]
+	}
+	s := strings.TrimSpace(raw)
+	if s == "" || len(s) > 64 {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return ""
+		}
+	}
+	return s
+}
+
+// A variable so tests can point it elsewhere, like idmePath.
+var cmdlinePath = "/proc/cmdline"
+
+func serialFromCmdline() string {
+	b, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return ""
+	}
+	const key = "androidboot.serialno="
+	for _, field := range strings.Fields(string(b)) {
+		if strings.HasPrefix(field, key) {
+			return sanitiseSerial(strings.TrimPrefix(field, key))
+		}
+	}
+	return ""
+}
+
+func getLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	ip := addr.IP.String()
+	if idx := strings.IndexByte(ip, '%'); idx >= 0 {
+		ip = ip[:idx]
+	}
+	return ip
+}

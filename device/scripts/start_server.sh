@@ -1,0 +1,1 @@
+../../controller/device_payloads/start_server.sh

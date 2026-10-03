@@ -1,0 +1,15 @@
+# This is an additive builder for the microWakeWord runtime. It deliberately
+# starts from the exact EchoMuse compiler image rather than changing that image
+# or its NDK underneath the existing firmware build.
+FROM ghcr.io/binozo/echogo@sha256:c9456551c639290b1cc3e1df891177beadb5d0d7621a5c2ec81079a276019147
+
+# CMake and Ninja orchestrate the build; the compiler, linker, sysroot and C++
+# runtime all come from the already-pinned Android NDK 21.4.7075529 above.
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
+      cmake \
+      ninja-build && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /sdk

@@ -1,0 +1,351 @@
+name: Tater Echo Firmware Release
+
+# One annotated vX.Y.Z tag builds every target independently, then publishes a
+# single compatibility manifest. Biscuit produces factory + OTA firmware;
+# Checkers 2.x produces a Biscuit-style A/B application OTA and a USB Linux
+# factory bundle around pinned, hash-verified TECHO5 hardware enablement.
+# Biscuit remains on its existing emOS path.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version for a non-release validation run (vX.Y.Z)'
+        required: false
+        default: 'v0.0.0-dev'
+
+env:
+  ALPINE_ARMV7_DIGEST: >-
+    sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+
+jobs:
+  biscuit:
+    name: Echo Dot 2 (biscuit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::version must look like v0.1.0"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+
+      - name: Run firmware regression tests
+        run: |
+          cd device
+          go test -race \
+            ./internal/actionbutton \
+            ./internal/show \
+            ./internal/taternative \
+            ./internal/wakeword/microwakeword \
+            ./internal/aec \
+            ./internal/beamformer \
+            ./internal/processor \
+            ./internal/server \
+            ./internal/bindings/speaker
+          python3 -m py_compile scripts/silent_stream_server.py
+
+      - name: Build Android compiler image
+        run: docker build -t tater-echo-compiler device/compiler/
+
+      - name: Compile Tater Echo userspace
+        run: |
+          mkdir -p device/build
+          build_unix=$(date +%s)
+          docker run --rm --entrypoint bash \
+            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
+            -v "${{ github.workspace }}/device":/sdk \
+            tater-echo-compiler -c "cd /sdk && go build -tags server \
+              -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
+              -o build/server ./cmd/"
+
+      - name: Build ARMv7 microWakeWord runtime
+        run: device/build_microwakeword_runtime.sh
+
+      - name: Fetch pinned wake models
+        shell: bash
+        run: |
+          mkdir -p device/build/microwakeword-testdata
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV6/hey_tater.tflite \
+            -o device/build/microwakeword-testdata/hey_tater.tflite
+          echo 'd3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9  device/build/microwakeword-testdata/hey_tater.tflite' | sha256sum -c -
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV1/stop.tflite \
+            -o device/build/microwakeword-testdata/stop.tflite
+          echo '020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea  device/build/microwakeword-testdata/stop.tflite' | sha256sum -c -
+
+      - name: Compile emOS init32
+        run: |
+          mkdir -p emos/build
+          docker run --rm -v "${{ github.workspace }}/emos":/emos -w /emos \
+            tater-echo-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
+
+      - name: Build static Wi-Fi tools
+        run: |
+          mkdir -p emos/build/wpa
+          docker run --rm -v "${{ github.workspace }}/emos":/emos \
+            -v "${{ github.workspace }}/emos/build/wpa":/out -w /tmp \
+            tater-echo-compiler bash -lc '/emos/tools/build-wpa-supplicant.sh /out'
+          cp emos/device/em-wifi emos/build/wpa/em-wifi
+
+      - name: Set up qemu for BusyBox
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Build static BusyBox and corresponding source
+        run: |
+          mkdir -p emos/build/bb
+          docker run --rm --platform linux/arm/v7 \
+            -v "${{ github.workspace }}/emos":/emos \
+            -v "${{ github.workspace }}/emos/build/bb":/out -w /tmp \
+            alpine@${{ env.ALPINE_ARMV7_DIGEST }} \
+            sh /emos/tools/build-busybox.sh /out
+
+      - name: Verify release inputs
+        shell: bash
+        run: |
+          file device/build/server device/build/microwakeword-android/libtater_microwakeword.so \
+            emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
+          file device/build/server | grep -q '32-bit.*ARM'
+          file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
+          file emos/build/init32 | grep -q '32-bit LSB executable, ARM'
+          file emos/build/init32 | grep -q 'statically linked'
+          file emos/build/wpa/wpa_supplicant | grep -q '32-bit LSB executable, ARM'
+          file emos/build/wpa/wpa_supplicant | grep -q 'statically linked'
+          file emos/build/bb/busybox | grep -q '32-bit LSB executable, ARM'
+          file emos/build/bb/busybox | grep -q 'statically linked'
+          strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
+          python3 -m unittest factory.biscuit.test_install
+
+      - name: Exercise emOS invariants
+        run: |
+          cc -O2 -Wall -o /tmp/ringsim emos/init/ringsim.c -lm
+          /tmp/ringsim --check
+          for check in pwcheck tmoutcheck wpacheck cmdlinecheck serialcheck; do
+            cc -O2 -o "/tmp/$check" "emos/init/$check.c"
+            "/tmp/$check"
+          done
+
+      - name: Package factory and OTA firmware
+        run: |
+          python3 tools/package_echo_release.py \
+            --version '${{ steps.version.outputs.version }}' \
+            --target biscuit --output release
+          mkdir /tmp/tater-factory-check
+          tar -xzf release/tater-echo-biscuit-${{ steps.version.outputs.version }}-factory.tar.gz \
+            -C /tmp/tater-factory-check
+          /tmp/tater-factory-check/*/install.sh --verify-bundle
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tater-echo-biscuit-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
+  checkers:
+    name: Echo Show 5 (checkers) Tater Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::version must look like v0.1.0"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+
+      - name: Run Checkers Linux regression tests
+        run: |
+          python3 -m unittest discover -s linux/checkers -p 'test_*.py'
+          python3 -m unittest discover -s factory/checkers-linux -p 'test_*.py'
+          python3 -m py_compile \
+            linux/checkers/build_rootfs.py \
+            linux/checkers/brand_boot.py \
+            linux/checkers/build_rescue_fbprobe.py \
+            linux/checkers/provision_console.py \
+            factory/checkers-linux/install.py
+          cd device
+          go test -race \
+            ./cmd/tater-show-linux \
+            ./internal/bluetooth \
+            ./internal/platform \
+            ./internal/taternative \
+            ./internal/wifi \
+            ./internal/show \
+            ./internal/linuxinput \
+            ./internal/linuxscreen \
+            ./internal/wakeword/microwakeword \
+            ./internal/aec \
+            ./internal/beamformer \
+            ./internal/bindings/mixer \
+            ./pkg/board
+
+      - name: Fetch pinned wake models
+        shell: bash
+        run: |
+          mkdir -p device/build/microwakeword-testdata
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV6/hey_tater.tflite \
+            -o device/build/microwakeword-testdata/hey_tater.tflite
+          echo 'd3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9  device/build/microwakeword-testdata/hey_tater.tflite' | sha256sum -c -
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV1/stop.tflite \
+            -o device/build/microwakeword-testdata/stop.tflite
+          echo '020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea  device/build/microwakeword-testdata/stop.tflite' | sha256sum -c -
+
+      - name: Set up ARMv7 emulation
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Fetch pinned Checkers Linux platform
+        run: |
+          mkdir -p linux/checkers/inputs
+          curl -fL \
+            https://github.com/HuskerMinion/techo5/releases/download/v0.9.26/rootfs-v0.9.26.tar.gz \
+            -o linux/checkers/inputs/rootfs-v0.9.26.tar.gz
+          echo 'a72bbdfd0d26f536552b44aa9258f136e05d5243220c761a22c0f691a943f14e  linux/checkers/inputs/rootfs-v0.9.26.tar.gz' | sha256sum -c -
+          curl -fL \
+            https://github.com/HuskerMinion/techo5/releases/download/v0.7.16/techo5-boot-checkers-v0.7.16.img \
+            -o linux/checkers/inputs/techo5-boot-checkers-v0.7.16.img
+          echo '46c19fd23c210714e29eb2bf88c77b540f3290c0cf50b680b22032e7a4771da7  linux/checkers/inputs/techo5-boot-checkers-v0.7.16.img' | sha256sum -c -
+          git clone --filter=blob:none https://github.com/HuskerMinion/techo5.git /tmp/techo5
+          git -C /tmp/techo5 checkout 0f042360fbc22d798930cfd683d251606bfb7412
+
+      - name: Build Checkers Tater Linux image
+        env:
+          TATER_ALPINE_ARMV7_IMAGE: alpine@${{ env.ALPINE_ARMV7_DIGEST }}
+        run: |
+          linux/checkers/build_linux.sh \
+            --version '${{ steps.version.outputs.version }}' \
+            --base-rootfs linux/checkers/inputs/rootfs-v0.9.26.tar.gz \
+            --techo5 /tmp/techo5 \
+            --output device/build/tater-checkers-rootfs-${{ steps.version.outputs.version }}.tar.gz
+
+      - name: Package and verify Checkers Linux firmware
+        env:
+          TATER_CHECKERS_ROOTFS: device/build/tater-checkers-rootfs-${{ steps.version.outputs.version }}.tar.gz
+          TATER_CHECKERS_BOOT_IMAGE: linux/checkers/inputs/techo5-boot-checkers-v0.7.16.img
+        run: |
+          python3 tools/package_echo_release.py \
+            --version '${{ steps.version.outputs.version }}' \
+            --target checkers --output release
+          mkdir /tmp/tater-checkers-factory-check
+          tar -xzf release/tater-echo-checkers-${{ steps.version.outputs.version }}-factory.tar.gz \
+            -C /tmp/tater-checkers-factory-check
+          /tmp/tater-checkers-factory-check/*/install.sh --verify-bundle
+          tar -tzf release/tater-echo-checkers-${{ steps.version.outputs.version }}-ota.tar.gz \
+            | grep -Ex 'manifest.json|tater-echo|tater-show'
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tater-echo-checkers-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish combined release
+    if: github.ref_type == 'tag'
+    needs: [biscuit, checkers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download Biscuit artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-biscuit-${{ steps.version.outputs.version }}
+          path: staging/biscuit
+
+      - name: Download Checkers artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-checkers-${{ steps.version.outputs.version }}
+          path: staging/checkers
+
+      - name: Verify and merge target manifests
+        run: |
+          python3 tools/merge_release_manifests.py \
+            --version '${{ steps.version.outputs.version }}' --output release \
+            staging/biscuit/firmware-manifest.json \
+            staging/checkers/firmware-manifest.json
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Read annotated tag notes
+        shell: bash
+        run: |
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          if [[ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]]; then
+            echo "::error::$GITHUB_REF_NAME is lightweight; releases require an annotated tag"
+            exit 1
+          fi
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/release-notes.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Tater Echo Firmware ${{ steps.version.outputs.version }}
+          files: release/*
+          body_path: /tmp/release-notes.md
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

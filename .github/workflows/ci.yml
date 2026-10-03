@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  device-tests:
+    name: Firmware and installer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run Go tests
+        working-directory: device
+        run: go test ./internal/... ./pkg/... ./cmd/tater-show-linux
+      - name: Run factory and release tests
+        run: |
+          python3 -m unittest \
+            factory.biscuit.test_install \
+            tools.test_merge_release_manifests
+          python3 -m unittest discover -s linux/checkers -p 'test_*.py'
+          python3 -m unittest discover -s factory/checkers-linux -p 'test_*.py'
+      - name: Verify the factory emOS packer
+        run: |
+          python3 -m pip install pytest
+          python3 -m pytest -q factory/biscuit/test_emos_build.py
+      - name: Test native microWakeWord runtime
+        working-directory: device
+        run: ./test_microwakeword_runtime.sh
+
+  firmware-build:
+    name: ARM firmware and emOS builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build pinned compiler image
+        run: docker build -t tater-echo-compiler device/compiler/
+      - name: Build Biscuit firmware
+        working-directory: device
+        run: ./compile.sh
+      - name: Verify ARM userspace output
+        run: |
+          file device/build/server
+          file device/build/server | grep -q "ARM" || {
+            echo "::error::firmware is not an ARM binary"; exit 1; }
+      - name: Build static emOS init for aarch64
+        run: |
+          mkdir -p emos/build
+          docker run --rm -v "$PWD/emos":/emos -w /emos tater-echo-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang -static -O2 -Wall -o build/init init/init.c'
+          file emos/build/init | grep -q "ARM aarch64"
+          file emos/build/init | grep -q "statically linked"
+      - name: Build static emOS init for armv7a
+        run: |
+          docker run --rm -v "$PWD/emos":/emos -w /emos tater-echo-compiler bash -lc \
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
+          file emos/build/init32 | grep -q "32-bit LSB executable, ARM"
+          file emos/build/init32 | grep -q "statically linked"
+
+  emos-checks:
+    name: emOS safety checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify boot-ring invariants
+        run: |
+          cc -O2 -Wall -o /tmp/ringsim emos/init/ringsim.c -lm
+          /tmp/ringsim --check
+      - name: Verify console and boot parsers
+        run: |
+          cc -O2 -o /tmp/tmoutcheck emos/init/tmoutcheck.c
+          /tmp/tmoutcheck
+          cc -O2 -o /tmp/wpacheck emos/init/wpacheck.c
+          /tmp/wpacheck
+          cc -O2 -o /tmp/cmdlinecheck emos/init/cmdlinecheck.c
+          /tmp/cmdlinecheck
+          cc -O2 -o /tmp/serialcheck emos/init/serialcheck.c
+          /tmp/serialcheck
+      - name: Verify C and Python password hashes agree
+        run: |
+          cc -O2 -o /tmp/pwcheck emos/init/pwcheck.c
+          /tmp/pwcheck > /tmp/vectors.txt
+          python3 - /tmp/vectors.txt <<'PY'
+          import hashlib, sys
+          vectors = [line.rstrip("\n") for line in open(sys.argv[1]) if line.strip()]
+          if len(vectors) < 4:
+              raise SystemExit(f"expected at least 4 vectors, got {len(vectors)}")
+          for line in vectors:
+              password, record = line.split("\t", 1)
+              iterations, salt, expected = record.split(":")
+              value = hashlib.sha256(bytes.fromhex(salt) + password.encode()).digest()
+              for _ in range(int(iterations) - 1):
+                  value = hashlib.sha256(value).digest()
+              if value.hex() != expected:
+                  raise SystemExit(f"hash mismatch for {password!r}")
+          PY
+
+  static-analysis:
+    name: Firmware static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+      - name: Run go vet
+        working-directory: device
+        run: go vet ./internal/... ./pkg/...
+      - name: Run govulncheck
+        working-directory: device
+        run: |
+          GOTOOLCHAIN=auto go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./internal/... ./pkg/... || true
+      - name: Check Python packers for undefined names
+        run: |
+          python3 -m pip install pyflakes
+          python3 -m pyflakes emos/mkboot.py factory/biscuit/tools/tater_emos_build.py

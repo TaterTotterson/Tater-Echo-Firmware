@@ -1,0 +1,38 @@
+{
+  "type": "micro",
+  "wake_word": "Stop",
+  "label": "Stop",
+  "author": "Kevin Ahrendt",
+  "website": "https://www.kevinahrendt.com/",
+  "model": "stop.tflite",
+  "trained_languages": [
+    "en"
+  ],
+  "version": 2,
+  "model_format": "tflite_stream_state_internal_quant",
+  "quantization": "int8",
+  "sample_rate": 16000,
+  "micro": {
+    "probability_cutoff": 0.5,
+    "sliding_window_size": 5,
+    "feature_step_size": 10,
+    "tensor_arena_size": 30000,
+    "minimum_esphome_version": "2024.7.0"
+  },
+  "tater_native": {
+    "format_version": 1,
+    "wake_threshold": 0.5,
+    "wake_sliding_window": 5,
+    "close_miss_threshold": 0,
+    "frontend": {
+      "name": "tflm_microfrontend",
+      "sample_rate": 16000,
+      "feature_duration_ms": 30,
+      "feature_step_ms": 10,
+      "feature_size": 40,
+      "input_feature_frames": 2,
+      "lower_band_limit": 125.0,
+      "upper_band_limit": 7500.0
+    }
+  }
+}

@@ -1,0 +1,30 @@
+.idea/
+.DS_Store
+__pycache__/
+.pytest_cache/
+.claude/
+scratchpad/
+
+# Generated build and release output.
+/build/
+/device/build/
+/emos/build/
+/release/
+/linux/checkers/inputs/
+/factory/checkers-linux/backups/
+/factory/checkers-linux/build/
+/GoTinyAlsa/
+
+# Per-device recovery material contains Amazon code read from the user's Echo.
+device-backups/
+factory-backups/
+
+# Local state and credentials must never be committed.
+*.db
+*.db-wal
+*.db-shm
+tls/
+*.key
+
+# Generated speaker-profile signals; generate_signals.py is the source.
+device/tools/speaker_profile/*.wav

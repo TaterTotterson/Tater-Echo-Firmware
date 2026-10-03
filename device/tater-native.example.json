@@ -1,0 +1,6 @@
+{
+  "url": "http://tater.local:8501",
+  "token": "REPLACE_WITH_PAIRING_CODE",
+  "device_name": "Kitchen Echo",
+  "room": "Kitchen"
+}
