@@ -42,9 +42,11 @@ docker run --rm \
   "$BUILDER_IMAGE" \
   -lc "set -euo pipefail
        library=$BUILD_DIR/libtater_microwakeword.so
-       $READELF -h \"\$library\" | grep -q 'Class:.*ELF32'
-       $READELF -h \"\$library\" | grep -q 'Machine:.*ARM'
-       ! $READELF -d \"\$library\" | grep -q 'libc++_shared'
+       header=\$($READELF -h \"\$library\")
+       grep -q 'Class:.*ELF32' <<< \"\$header\"
+       grep -q 'Machine:.*ARM' <<< \"\$header\"
+       dynamic=\$($READELF -d \"\$library\")
+       ! grep -q 'libc++_shared' <<< \"\$dynamic\"
        exports=\$($NM -D --defined-only \"\$library\" | awk '{print \$3}' | grep '^tater_mww_' | sort)
        count=\$(printf '%s\n' \"\$exports\" | grep -c '^tater_mww_')
        test \"\$count\" -eq 10
