@@ -579,7 +579,7 @@ func (r *renderer) drawNotification(canvas *image.RGBA, now time.Time, width int
 		noticeColor = color.RGBA{255, 92, 92, 255}
 	}
 	r.text(canvas, left, 52, fitTextToWidth("AWARENESS  ·  "+strings.ToUpper(firstNonEmpty(item.CameraName, item.Title)), r.faces.bold[16], pane.Dx()), 16, true, noticeColor)
-	panel := image.Rect(left, 72, right, 290)
+	panel := image.Rect(left, 72, right, 260)
 	roundedRect(canvas, panel, 18, color.RGBA{20, 27, 39, 245})
 	if r.notificationImage != nil {
 		drawCover(canvas, panel, r.notificationImage)
@@ -588,7 +588,10 @@ func (r *renderer) drawNotification(canvas *image.RGBA, now time.Time, width int
 		circleOutline(canvas, (left+right)/2, 181, int(24+pulse*9), 4, color.RGBA{noticeColor.R, noticeColor.G, noticeColor.B, uint8(95 + pulse*80)})
 		circle(canvas, (left+right)/2, 181, 9, noticeColor)
 	}
-	r.wrappedText(canvas, left, 328, item.Description, 48, 3, 26, color.RGBA{215, 224, 236, 255})
+	size, baseline, lineHeight, lines := notificationDescriptionLayout(r.faces, item.Description, pane.Dx())
+	for index, value := range lines {
+		r.text(canvas, left, baseline+index*lineHeight, fitTextToWidth(value, r.faces.regular[size], pane.Dx()), size, false, color.RGBA{215, 224, 236, 255})
+	}
 	if item.ExpiresAtUnixMS > 0 {
 		remaining := float64(item.ExpiresAtUnixMS-r.currentTaterUnixMS(now)) / 90000
 		progress := math.Max(0, math.Min(1, remaining))
@@ -746,26 +749,43 @@ func (r *renderer) centeredText(canvas *image.RGBA, centerX, baseline int, value
 	r.text(canvas, centerX-width/2, baseline, value, size, bold, ink)
 }
 
-func (r *renderer) wrappedText(canvas *image.RGBA, x, baseline int, value string, characterLimit, maxLines, lineHeight int, ink color.Color) {
+func wrapTextToWidth(value string, face font.Face, maxWidth int) []string {
 	words := strings.Fields(value)
+	lines := make([]string, 0, 4)
 	lineValue := ""
-	lineIndex := 0
 	for _, word := range words {
 		candidate := strings.TrimSpace(lineValue + " " + word)
-		if lineValue != "" && len([]rune(candidate)) > characterLimit {
-			r.text(canvas, x, baseline+lineIndex*lineHeight, ellipsize(lineValue, characterLimit), 18, false, ink)
-			lineIndex++
-			if lineIndex >= maxLines {
-				return
-			}
+		if lineValue != "" && font.MeasureString(face, candidate).Round() > maxWidth {
+			lines = append(lines, lineValue)
 			lineValue = word
 		} else {
 			lineValue = candidate
 		}
 	}
-	if lineValue != "" && lineIndex < maxLines {
-		r.text(canvas, x, baseline+lineIndex*lineHeight, ellipsize(lineValue, characterLimit), 18, false, ink)
+	if lineValue != "" {
+		lines = append(lines, lineValue)
 	}
+	return lines
+}
+
+func notificationDescriptionLayout(faces *faceSet, description string, maxWidth int) (size, baseline, lineHeight int, lines []string) {
+	// Use the larger type for brief alerts; longer descriptions still fit below
+	// the image without covering the response bubble or expiry indicator.
+	for _, option := range []struct{ size, baseline, lineHeight, maxLines int }{
+		{36, 296, 40, 3},
+		{30, 290, 32, 4},
+	} {
+		wrapped := wrapTextToWidth(description, faces.regular[option.size], maxWidth)
+		if len(wrapped) <= option.maxLines {
+			return option.size, option.baseline, option.lineHeight, wrapped
+		}
+		if option.size == 30 {
+			wrapped = wrapped[:option.maxLines]
+			wrapped[len(wrapped)-1] = fitTextToWidth(wrapped[len(wrapped)-1]+"…", faces.regular[option.size], maxWidth)
+			return option.size, option.baseline, option.lineHeight, wrapped
+		}
+	}
+	return 30, 290, 32, nil
 }
 
 func (r *renderer) currentTaterUnixMS(now time.Time) int64 {

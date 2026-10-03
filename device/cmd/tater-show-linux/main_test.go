@@ -55,6 +55,27 @@ func TestIntercomGlyphIsWhiteAndVisible(t *testing.T) {
 	}
 }
 
+func TestAwarenessDescriptionUsesReadableTypeWithoutCoveringControls(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	width := rightPane(960, 480).Dx()
+	shortSize, shortBaseline, shortLineHeight, shortLines := notificationDescriptionLayout(faces, "A person was detected at the front door", width)
+	if shortSize != 36 || len(shortLines) == 0 || len(shortLines) > 3 ||
+		shortBaseline+(len(shortLines)-1)*shortLineHeight+faces.regular[shortSize].Metrics().Descent.Ceil() >= 396 {
+		t.Fatalf("short awareness description size=%d lines=%d, want 36px in up to 3 lines", shortSize, len(shortLines))
+	}
+	long := strings.Repeat("The front door camera detected motion nearby. ", 5)
+	size, baseline, lineHeight, lines := notificationDescriptionLayout(faces, long, width)
+	if size != 30 || len(lines) != 4 || baseline+(len(lines)-1)*lineHeight+faces.regular[size].Metrics().Descent.Ceil() >= 396 {
+		t.Fatalf("long awareness description size=%d lines=%d last baseline=%d", size, len(lines), baseline+(len(lines)-1)*lineHeight)
+	}
+	if !strings.HasSuffix(lines[len(lines)-1], "…") {
+		t.Fatal("truncated awareness description has no ellipsis")
+	}
+}
+
 func TestIntercomTouchStartsAndStopsOnlyInVisibleCorner(t *testing.T) {
 	var commands bytes.Buffer
 	client := &socketClient{writer: bufio.NewWriter(&commands)}
