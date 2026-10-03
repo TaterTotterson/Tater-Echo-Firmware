@@ -258,6 +258,15 @@ jobs:
           git clone --filter=blob:none https://github.com/HuskerMinion/techo5.git /tmp/techo5
           git -C /tmp/techo5 checkout 0f042360fbc22d798930cfd683d251606bfb7412
 
+      # The pinned TECHO5 camera and rescue helpers require Go 1.26. The
+      # preceding Tater regression suite continues to use device/go.mod's
+      # Go 1.24; build_linux.sh cross-builds these helpers on the host.
+      - name: Set up Go for pinned TECHO5 helpers
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: false
+
       - name: Build Checkers Tater Linux image
         env:
           TATER_ALPINE_ARMV7_IMAGE: alpine@${{ env.ALPINE_ARMV7_DIGEST }}
