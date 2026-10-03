@@ -52,6 +52,13 @@ jobs:
           file device/build/server
           file device/build/server | grep -q "ARM" || {
             echo "::error::firmware is not an ARM binary"; exit 1; }
+          # Biscuit's installed libtinyalsa.so has pcm_read, not pcm_readi.
+          # An undefined pcm_readi makes the OTA binary abort before main.
+          if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
+            echo "::error::Biscuit firmware requires unavailable pcm_readi"; exit 1;
+          fi
+          readelf -Ws device/build/server | grep -E 'UND.* pcm_read(@|$)' >/dev/null || {
+            echo "::error::Biscuit firmware is missing the compatible pcm_read import"; exit 1; }
       - name: Build static emOS init for aarch64
         run: |
           mkdir -p emos/build

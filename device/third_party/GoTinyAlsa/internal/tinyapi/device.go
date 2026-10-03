@@ -88,26 +88,7 @@ func (d *PcmDevice) ReadFrames(buffer []byte, size int) error {
 		return fmt.Errorf("PCM read size %d is not a whole number of %d-byte frames", size, bytesPerFrame)
 	}
 
-	// pcm_read is a deprecated byte-count compatibility wrapper.  Alpine's
-	// tinyalsa 2.0 can report success from that wrapper before the Checkers
-	// capture DMA has advanced, producing hours of duplicate audio in seconds.
-	// pcm_readi is the supported frame API and blocks until the kernel has
-	// supplied the requested capture frames.  Complete short reads here so the
-	// caller still receives exactly one configured ALSA buffer per callback.
-	remaining := size / bytesPerFrame
-	offset := 0
-	for remaining > 0 {
-		read := int(C.pcm_readi(d.pcmDevice, unsafe.Pointer(&buffer[offset]), C.uint(remaining)))
-		if read < 0 {
-			return fmt.Errorf("couldn't read frames: %s", d.GetError())
-		}
-		if read == 0 {
-			return errors.New("couldn't read frames: zero-length PCM read")
-		}
-		offset += read * bytesPerFrame
-		remaining -= read
-	}
-	return nil
+	return d.readFrames(buffer, size, bytesPerFrame)
 }
 
 func (d *PcmDevice) WriteFrames(buffer []byte, size int) error {

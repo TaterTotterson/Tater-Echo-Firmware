@@ -116,53 +116,6 @@ func TestTimerTouchMatchesExpandedButton(t *testing.T) {
 	}
 }
 
-func TestThermostatSwipeAndOneCommitPerDrag(t *testing.T) {
-	var commands bytes.Buffer
-	client := &socketClient{writer: bufio.NewWriter(&commands)}
-	r := &renderer{state: show.Snapshot{Connected: true, Phase: "idle", Weather: &show.Weather{
-		Available: true, EnvironmentInstalled: true,
-		Thermostat: &show.Thermostat{Available: true, Writable: true, ModeWritable: true, TargetWritable: true, ID: "homekit:thermostat-1", Unit: "F", Target: 72, Current: 68, Mode: "cool"},
-	}}}
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Down, X: 600, Y: 320})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Move, X: 600, Y: 240})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: 600, Y: 240})
-	if !r.thermostatOpen || commands.Len() != 0 {
-		t.Fatalf("swipe opened=%v commands=%q", r.thermostatOpen, commands.String())
-	}
-	cx, cy, radius := thermostatDial(960)
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Down, X: cx, Y: cy - radius})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Move, X: cx + radius, Y: cy})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: cx + radius, Y: cy})
-	if got := strings.Count(commands.String(), `"action":"thermostat.set"`); got != 1 {
-		t.Fatalf("drag sent %d writes, want one: %s", got, commands.String())
-	}
-	if !strings.Contains(commands.String(), `"thermostat_id":"homekit:thermostat-1"`) {
-		t.Fatalf("thermostat selection omitted: %s", commands.String())
-	}
-}
-
-func TestThermostatUnavailableNeverSendsCommandAndTimesOut(t *testing.T) {
-	var commands bytes.Buffer
-	client := &socketClient{writer: bufio.NewWriter(&commands)}
-	now := time.Now()
-	faces, err := newFaceSet()
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := &renderer{faces: faces, state: show.Snapshot{Connected: true, Phase: "idle", Weather: &show.Weather{EnvironmentInstalled: false}}, thermostatOpen: true, thermostatTouched: now}
-	button := thermostatModeBounds(960, "heat")
-	x, y := (button.Min.X+button.Max.X)/2, (button.Min.Y+button.Max.Y)/2
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Down, X: x, Y: y})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: x, Y: y})
-	if commands.Len() != 0 {
-		t.Fatalf("unavailable thermostat sent command: %s", commands.String())
-	}
-	r.drawRight(image.NewRGBA(image.Rect(0, 0, 960, 480)), now.Add(thermostatIdleTimeout+time.Second), 960, 480, 0, color.RGBA{255, 140, 65, 255})
-	if r.thermostatOpen {
-		t.Fatal("thermostat did not return to weather after idle timeout")
-	}
-}
-
 func TestTranslucentRoundedRectKeepsItsColor(t *testing.T) {
 	canvas := image.NewRGBA(image.Rect(0, 0, 60, 40))
 	for index := 0; index < len(canvas.Pix); index += 4 {
@@ -236,14 +189,14 @@ func TestRepresentativeStatesRenderDistinctFrames(t *testing.T) {
 		}(),
 		"weather": func() show.Snapshot {
 			state := base
-			state.Weather = &show.Weather{Available: true, EnvironmentInstalled: true, TemperatureText: "72°", TemperatureUnit: "F", Condition: "Partly cloudy", ConditionKind: "cloudy", FeelsLikeText: "Feels like 74°", FeelsLikeRelation: "warmer", HumidityText: "44%", WindText: "8 mph", RainText: "10%", IndoorTemperatureText: "71°", IndoorHumidityText: "42%"}
+			state.Weather = &show.Weather{TemperatureText: "72°", TemperatureUnit: "F", Condition: "Partly cloudy", ConditionKind: "cloudy", FeelsLikeText: "Feels like 74°", FeelsLikeRelation: "warmer", HumidityText: "44%", WindText: "8 mph", RainText: "10%", IndoorTemperatureText: "71°", IndoorHumidityText: "42%"}
 			return state
 		}(),
 		"weather-voice": func() show.Snapshot {
 			state := base
 			state.Phase = "speaking"
 			state.AudioLevel = .68
-			state.Weather = &show.Weather{Available: true, EnvironmentInstalled: true, TemperatureText: "72°", ConditionKind: "rain", Condition: "Rain showers"}
+			state.Weather = &show.Weather{TemperatureText: "72°", ConditionKind: "rain", Condition: "Rain showers"}
 			return state
 		}(),
 		"timer": func() show.Snapshot {
@@ -345,7 +298,6 @@ func TestRenderPreview(t *testing.T) {
 		AudioLevel:      .68,
 		TaterTimeUnixMS: now.UnixMilli(),
 		Weather: &show.Weather{
-			Available: true, EnvironmentInstalled: true,
 			TemperatureText: "72°", TemperatureUnit: "F", Condition: "Rain showers",
 			ConditionKind: "rain", FeelsLikeText: "Feels like 69°", FeelsLikeRelation: "cooler",
 			HumidityText: "68%", WindText: "8 mph", RainText: "65%",
@@ -366,24 +318,9 @@ func TestRenderPreview(t *testing.T) {
 		state = show.Snapshot{Phase: "setup", Connected: false, DeviceName: "Tater Checkers", Room: "Tater-Setup-D4B7", Message: "192.168.4.1"}
 	case "connecting":
 		state = show.Snapshot{Phase: "connecting", Connected: false, DeviceName: "Tater Checkers", Message: "Connecting to Tater"}
-	case "thermostat":
-		state.Phase = "idle"
-		state.Weather.Thermostat = &show.Thermostat{
-			Available: true, Writable: true, ModeWritable: true, TargetWritable: true,
-			ID: "homekit:demo", Name: "Family Room", Current: 68, Target: 72, Unit: "F", Mode: "cool",
-		}
-	case "thermostat-no-device":
-		state.Phase = "idle"
-		state.Weather.Thermostat = &show.Thermostat{Message: "No thermostat connected"}
-	case "weather-missing-core":
-		state.Phase = "idle"
-		state.Weather = &show.Weather{EnvironmentInstalled: false}
 	}
 	canvas := image.NewRGBA(image.Rect(0, 0, 960, 480))
 	r := &renderer{faces: faces, state: state, received: now, animationStart: now.Add(-2 * time.Second)}
-	if strings.HasPrefix(os.Getenv("TATER_SHOW_PREVIEW_STATE"), "thermostat") {
-		r.thermostatOpen, r.thermostatTouched = true, now
-	}
 	r.render(canvas, now)
 	file, err := os.Create(path)
 	if err != nil {

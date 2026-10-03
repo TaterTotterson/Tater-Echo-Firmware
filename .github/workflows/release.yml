@@ -144,6 +144,11 @@ jobs:
           file emos/build/bb/busybox | grep -q '32-bit LSB executable, ARM'
           file emos/build/bb/busybox | grep -q 'statically linked'
           strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
+          if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
+            echo '::error::Biscuit firmware requires unavailable pcm_readi'; exit 1;
+          fi
+          readelf -Ws device/build/server | grep -E 'UND.* pcm_read(@|$)' >/dev/null || {
+            echo '::error::Biscuit firmware is missing the compatible pcm_read import'; exit 1; }
           python3 -m unittest factory.biscuit.test_install
 
       - name: Exercise emOS invariants
