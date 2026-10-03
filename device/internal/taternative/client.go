@@ -371,6 +371,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["touchscreen"] = true
 		capabilities["screen_protocol"] = 1
 		capabilities["screen_weather"] = true
+		capabilities["screen_thermostat"] = true
 		capabilities["screen_notifications"] = true
 		capabilities["camera_snapshot"] = true
 		capabilities["camera_snapshot_version"] = 1
@@ -720,6 +721,17 @@ func (c *Client) StopRingingTimers(source string) int {
 // with the nearest deadline.
 func (c *Client) StopDisplayedTimer(source string) bool {
 	return c != nil && c.timers != nil && c.timers.StopDisplayed(source)
+}
+
+// SetThermostat forwards one completed screen gesture. Tater checks the ID,
+// writable state and temperature range before it touches an integration.
+func (c *Client) SetThermostat(id, mode string, target *float64, unit string) bool {
+	if c == nil || strings.TrimSpace(id) == "" {
+		return false
+	}
+	return c.sendJSON("thermostat.set", "", map[string]any{
+		"thermostat_id": id, "mode": mode, "target": target, "unit": unit,
+	})
 }
 
 func (c *Client) Connected() bool { return c.connected.Load() }

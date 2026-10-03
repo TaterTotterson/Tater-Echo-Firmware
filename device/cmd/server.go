@@ -652,6 +652,10 @@ func main() {
 					if nativeClient != nil {
 						nativeClient.StopDisplayedTimer("screen")
 					}
+				case "thermostat.set":
+					if nativeClient != nil && command.ThermostatID != "" {
+						nativeClient.SetThermostat(command.ThermostatID, command.Mode, command.Target, command.Unit)
+					}
 				}
 			})
 			showServerPtr.Store(screen)
@@ -2259,10 +2263,9 @@ func showMessage(state string, payload map[string]any) string {
 }
 
 func showWeather(payload map[string]any) *show.Weather {
-	if !nativeBool(payload["available"], false) {
-		return nil
-	}
 	weather := &show.Weather{
+		Available:             nativeBool(payload["available"], false),
+		EnvironmentInstalled:  nativeBool(payload["environment_installed"], nativeBool(payload["available"], false)),
 		TemperatureText:       showPayloadText(payload, "temperature_text"),
 		TemperatureUnit:       showPayloadText(payload, "temperature_unit"),
 		IndoorTemperatureText: showPayloadText(payload, "indoor_temperature_text"),
@@ -2278,8 +2281,16 @@ func showWeather(payload map[string]any) *show.Weather {
 		Source:                showPayloadText(payload, "source"),
 		Stale:                 nativeBool(payload["stale"], false),
 	}
-	if weather.TemperatureText == "" && weather.Condition == "" {
-		return nil
+	if raw, ok := payload["thermostat"].(map[string]any); ok {
+		weather.Thermostat = &show.Thermostat{
+			ID: showPayloadText(raw, "id"), Name: showPayloadText(raw, "name"),
+			Available: nativeBool(raw["available"], false), Message: showPayloadText(raw, "message"),
+			Current: nativeNumber(raw["current"], 0), Target: nativeNumber(raw["target"], 0),
+			Unit: showPayloadText(raw, "unit"), Mode: showPayloadText(raw, "mode"),
+			Writable:       nativeBool(raw["writable"], false),
+			ModeWritable:   nativeBool(raw["mode_writable"], nativeBool(raw["writable"], false)),
+			TargetWritable: nativeBool(raw["target_writable"], nativeBool(raw["writable"], false)),
+		}
 	}
 	return weather
 }

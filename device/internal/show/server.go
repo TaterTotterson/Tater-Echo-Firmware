@@ -36,20 +36,39 @@ type Media struct {
 // It deliberately contains display-ready values only; provider credentials and
 // the full sensor feed never leave Tater.
 type Weather struct {
-	TemperatureText       string `json:"temperature_text,omitempty"`
-	TemperatureUnit       string `json:"temperature_unit,omitempty"`
-	IndoorTemperatureText string `json:"indoor_temperature_text,omitempty"`
-	IndoorHumidityText    string `json:"indoor_humidity_text,omitempty"`
-	Condition             string `json:"condition,omitempty"`
-	ConditionKind         string `json:"condition_kind,omitempty"`
-	FeelsLikeText         string `json:"feels_like_text,omitempty"`
-	FeelsLikeRelation     string `json:"feels_like_relation,omitempty"`
-	HumidityText          string `json:"humidity_text,omitempty"`
-	WindText              string `json:"wind_text,omitempty"`
-	RainText              string `json:"rain_text,omitempty"`
-	LightningText         string `json:"lightning_text,omitempty"`
-	Source                string `json:"source,omitempty"`
-	Stale                 bool   `json:"stale,omitempty"`
+	Available             bool        `json:"available"`
+	EnvironmentInstalled  bool        `json:"environment_installed"`
+	TemperatureText       string      `json:"temperature_text,omitempty"`
+	TemperatureUnit       string      `json:"temperature_unit,omitempty"`
+	IndoorTemperatureText string      `json:"indoor_temperature_text,omitempty"`
+	IndoorHumidityText    string      `json:"indoor_humidity_text,omitempty"`
+	Condition             string      `json:"condition,omitempty"`
+	ConditionKind         string      `json:"condition_kind,omitempty"`
+	FeelsLikeText         string      `json:"feels_like_text,omitempty"`
+	FeelsLikeRelation     string      `json:"feels_like_relation,omitempty"`
+	HumidityText          string      `json:"humidity_text,omitempty"`
+	WindText              string      `json:"wind_text,omitempty"`
+	RainText              string      `json:"rain_text,omitempty"`
+	LightningText         string      `json:"lightning_text,omitempty"`
+	Source                string      `json:"source,omitempty"`
+	Stale                 bool        `json:"stale,omitempty"`
+	Thermostat            *Thermostat `json:"thermostat,omitempty"`
+}
+
+// Thermostat is a display-safe summary. The ID is an opaque selection token;
+// Tater validates it again before changing any physical device.
+type Thermostat struct {
+	ID             string  `json:"id,omitempty"`
+	Name           string  `json:"name,omitempty"`
+	Available      bool    `json:"available"`
+	Message        string  `json:"message,omitempty"`
+	Current        float64 `json:"current,omitempty"`
+	Target         float64 `json:"target,omitempty"`
+	Unit           string  `json:"unit,omitempty"`
+	Mode           string  `json:"mode,omitempty"`
+	Writable       bool    `json:"writable"`
+	ModeWritable   bool    `json:"mode_writable"`
+	TargetWritable bool    `json:"target_writable"`
 }
 
 // Notification is a temporary right-side visual supplied by Tater's display
@@ -111,9 +130,13 @@ type Snapshot struct {
 // Command is a bounded request from the local screen. Only actions explicitly
 // handled by cmd/server.go have an effect.
 type Command struct {
-	Protocol int    `json:"protocol"`
-	Type     string `json:"type"`
-	Action   string `json:"action"`
+	Protocol     int      `json:"protocol"`
+	Type         string   `json:"type"`
+	Action       string   `json:"action"`
+	ThermostatID string   `json:"thermostat_id,omitempty"`
+	Mode         string   `json:"mode,omitempty"`
+	Target       *float64 `json:"target,omitempty"`
+	Unit         string   `json:"unit,omitempty"`
 }
 
 type client struct {

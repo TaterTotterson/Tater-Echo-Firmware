@@ -88,7 +88,11 @@ func (client *socketClient) run(ctx context.Context) {
 }
 
 func (client *socketClient) send(action string) {
-	command := show.Command{Protocol: show.ProtocolVersion, Type: "command", Action: action}
+	client.sendCommand(show.Command{Protocol: show.ProtocolVersion, Type: "command", Action: action})
+}
+
+func (client *socketClient) sendCommand(command show.Command) {
+	command.Protocol, command.Type = show.ProtocolVersion, "command"
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.writer == nil {
@@ -135,18 +139,24 @@ func newFaceSet() (*faceSet, error) {
 }
 
 type renderer struct {
-	faces             *faceSet
-	state             show.Snapshot
-	received          time.Time
-	animationStart    time.Time
-	notificationID    string
-	notificationImage image.Image
-	intercomPressed   bool
-	timerPressed      bool
-	bubbleRaster      *vector.Rasterizer
-	bubbleCanvas      *image.RGBA
-	intercomIcon      *image.RGBA
-	connectingBase    *image.RGBA
+	faces              *faceSet
+	state              show.Snapshot
+	received           time.Time
+	animationStart     time.Time
+	notificationID     string
+	notificationImage  image.Image
+	intercomPressed    bool
+	timerPressed       bool
+	bubbleRaster       *vector.Rasterizer
+	bubbleCanvas       *image.RGBA
+	intercomIcon       *image.RGBA
+	connectingBase     *image.RGBA
+	thermostatOpen     bool
+	thermostatTouched  time.Time
+	thermostatDown     image.Point
+	thermostatTracking bool
+	thermostatDrag     bool
+	thermostatPreview  *float64
 }
 
 const (
@@ -213,7 +223,7 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 
 	r.drawRight(canvas, now, width, height, seconds, accent)
 	r.drawIntercom(canvas, accent)
-	if shouldDrawCompactVoiceOrb(r.state.Phase, r.state.Weather != nil || r.state.Timer != nil || r.notificationActive(now)) {
+	if shouldDrawCompactVoiceOrb(r.state.Phase, true) {
 		r.drawCompactVoiceOrb(canvas, width/2, 434, 28, seconds, accent)
 	}
 	if r.state.Muted {
@@ -300,6 +310,9 @@ func (r *renderer) status(local time.Time) (string, string) {
 }
 
 func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height int, seconds float64, accent color.RGBA) {
+	if r.thermostatOpen && now.Sub(r.thermostatTouched) > thermostatIdleTimeout {
+		r.thermostatOpen, r.thermostatPreview = false, nil
+	}
 	if r.notificationActive(now) {
 		r.drawNotification(canvas, now, width, seconds, accent)
 		return
@@ -312,12 +325,15 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		r.drawToolCall(canvas, seconds, accent)
 		return
 	}
-	if r.state.Weather != nil {
+	if r.thermostatOpen {
+		r.drawThermostat(canvas, width, height, accent)
+		return
+	}
+	if r.state.Weather != nil && r.state.Weather.Available {
 		r.drawWeather(canvas, width, seconds, accent)
 		return
 	}
-	pane := rightPane(width, height)
-	r.drawOrb(canvas, (pane.Min.X+pane.Max.X)/2, 220, 120, seconds, accent)
+	r.drawWeatherUnavailable(canvas, width, accent)
 }
 
 func (r *renderer) drawOrb(canvas *image.RGBA, cx, cy, radius int, seconds float64, accent color.RGBA) {
@@ -418,6 +434,7 @@ func (r *renderer) drawWeather(canvas *image.RGBA, width int, seconds float64, a
 		r.text(canvas, feelsLeft, 145, ellipsize(trimFeelsLike(weather.FeelsLikeText), 10), 24, true, feelsColor)
 	}
 	r.text(canvas, left, 207, fitTextToWidth(weather.Condition, r.faces.bold[24], right-left-70), 24, true, color.RGBA{235, 240, 248, 255})
+	r.text(canvas, right-157, 237, "↑  THERMOSTAT", 14, true, accent)
 	type metric struct {
 		kind, label, value string
 		ink                color.RGBA
@@ -907,6 +924,9 @@ func main() {
 			if state.Phase != renderer.state.Phase || notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) || timerIdentity(state.Timer) != timerIdentity(renderer.state.Timer) {
 				renderer.animationStart = time.Now()
 			}
+			if state.Weather != nil && !renderer.thermostatDrag {
+				renderer.thermostatPreview = nil
+			}
 			renderer.state = state
 			renderer.received = time.Now()
 			renderer.loadNotificationImage(ctx)
@@ -946,6 +966,9 @@ func main() {
 }
 
 func handleTouch(renderer *renderer, client *socketClient, event linuxinput.TouchEvent) {
+	if renderer.handleThermostatTouch(client, event) {
+		return
+	}
 	intercom := inCircle(event.X, event.Y, intercomCenterX, intercomCenterY, intercomRadius)
 	timer := image.Pt(event.X, event.Y).In(timerStopBounds(960, 480))
 	switch event.Kind {
