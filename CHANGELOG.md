@@ -1,13 +1,5 @@
 # Changelog
 
-## v2.1.1 — 2026-10-04
-
-### What's Changed
-
-- Fixes the Rook release workflow so its pinned, hash-verified wake and Stop models are downloaded before the root filesystem is assembled.
-- Adds a release regression check that prevents the Rook build from losing either required model or moving the download after firmware assembly.
-- Biscuit and Checkers firmware content remains unchanged from v2.1.0; all three targets are republished together so the combined release and OTA manifest are complete.
-
 ## v2.1.0 — 2026-10-04
 
 ### What's Changed
@@ -16,6 +8,7 @@
 - **Echo Dot 2nd generation (Biscuit):** improved seven-microphone wake and speech beamforming, cleaner wake-verifier and trainer audio, automatic calibrated echo cancellation, safer mute recovery across Tater reconnects, and timer stopping from either the Stop wake word or action button.
 - **Echo Show 5 1st generation (Checkers):** improved two-microphone voice processing, automatic calibrated echo cancellation, display themes, timer controls, and more reliable synchronized playback, camera, touch, and application OTA behavior.
 - **All Echo satellites:** stronger wake arbitration and pre-roll handling, improved playback/AEC reference timing, and shared factory/OTA release validation. Tater now owns the user-facing experience while each Echo target automatically applies its appropriate echo-cancellation path.
+- **Release reliability:** the Rook build downloads and verifies its pinned wake and Stop models before firmware assembly, with a regression check protecting both required inputs.
 
 The v2.1.0 release publishes factory and OTA artifacts for Biscuit, Checkers, and Rook in one target-aware manifest.
 
