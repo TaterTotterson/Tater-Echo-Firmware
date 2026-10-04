@@ -493,7 +493,7 @@ jobs:
             staging/rook/firmware-manifest.json
           (cd release && sha256sum -c SHA256SUMS)
 
-      - name: Read annotated tag notes
+      - name: Read versioned changelog notes
         shell: bash
         run: |
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
@@ -501,7 +501,8 @@ jobs:
             echo "::error::$GITHUB_REF_NAME is lightweight; releases require an annotated tag"
             exit 1
           fi
-          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > /tmp/release-notes.md
+          python3 tools/release_notes.py "$GITHUB_REF_NAME" > /tmp/release-notes.md
+          test -s /tmp/release-notes.md
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3

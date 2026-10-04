@@ -27,7 +27,8 @@ jobs:
           python3 -m unittest \
             factory.biscuit.test_install \
             tools.test_merge_release_manifests \
-            tools.test_package_echo_release
+            tools.test_package_echo_release \
+            tools.test_release_notes
           python3 -m unittest discover -s linux/checkers -p 'test_*.py'
           python3 -m unittest discover -s factory/checkers-linux -p 'test_*.py'
           python3 -m unittest discover -s linux/rook -p 'test_*.py'
