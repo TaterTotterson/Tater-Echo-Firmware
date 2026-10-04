@@ -8,7 +8,7 @@ from tools.release_notes import extract
 class ReleaseNotesTests(unittest.TestCase):
     CHANGELOG = """# Changelog
 
-## v2.1.0 — 2026-10-04
+## v2.1.0
 
 ### What's Changed
 
@@ -16,7 +16,7 @@ class ReleaseNotesTests(unittest.TestCase):
 - Biscuit beamforming update.
 - Checkers voice processing update.
 
-## v2.0.4 — 2026-10-03
+## v2.0.4
 
 - Older change.
 """

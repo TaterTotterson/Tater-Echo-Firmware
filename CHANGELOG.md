@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.1.0 — 2026-10-04
+## v2.1.0
 
 ### What's Changed
 
@@ -12,7 +12,7 @@
 
 The v2.1.0 release publishes factory and OTA artifacts for Biscuit, Checkers, and Rook in one target-aware manifest.
 
-## v2.0.4 — 2026-10-03
+## v2.0.4
 
 ### What's Changed
 
