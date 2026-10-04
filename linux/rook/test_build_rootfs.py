@@ -15,6 +15,32 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class RookRootfsTests(unittest.TestCase):
+    def test_release_workflow_fetches_pinned_wake_models_before_build(self):
+        workflow = (
+            Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
+        ).read_text()
+        rook_job = workflow.split("\n  rook:\n", 1)[1].split("\n  publish:\n", 1)[0]
+
+        fetch_at = rook_job.index("- name: Fetch pinned wake models")
+        build_at = rook_job.index("- name: Build Rook boot and root filesystem")
+        self.assertLess(fetch_at, build_at)
+        self.assertIn(
+            "device/build/microwakeword-testdata/hey_tater.tflite",
+            rook_job,
+        )
+        self.assertIn(
+            "device/build/microwakeword-testdata/stop.tflite",
+            rook_job,
+        )
+        self.assertIn(
+            "d3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9",
+            rook_job,
+        )
+        self.assertIn(
+            "020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea",
+            rook_job,
+        )
+
     def test_setup_ap_uses_primary_interface_without_changing_checkers_default(self):
         rook_script = Path(__file__).with_name("setup-ap.sh")
         shared_script = Path(__file__).resolve().parents[1] / "checkers/setup-ap.sh"

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.1 — 2026-10-04
+
+### What's Changed
+
+- Fixes the Rook release workflow so its pinned, hash-verified wake and Stop models are downloaded before the root filesystem is assembled.
+- Adds a release regression check that prevents the Rook build from losing either required model or moving the download after firmware assembly.
+- Biscuit and Checkers firmware content remains unchanged from v2.1.0; all three targets are republished together so the combined release and OTA manifest are complete.
+
 ## v2.1.0 — 2026-10-04
 
 ### What's Changed

@@ -361,6 +361,19 @@ jobs:
             ./internal/bindings/speaker \
             ./pkg/board
 
+      - name: Fetch pinned wake models
+        shell: bash
+        run: |
+          mkdir -p device/build/microwakeword-testdata
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV6/hey_tater.tflite \
+            -o device/build/microwakeword-testdata/hey_tater.tflite
+          echo 'd3bf0d87c5c00ccfeda3cebba528c5d4012a5aaae51e61b7b01ae5af9008b4b9  device/build/microwakeword-testdata/hey_tater.tflite' | sha256sum -c -
+          curl -fL \
+            https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV1/stop.tflite \
+            -o device/build/microwakeword-testdata/stop.tflite
+          echo '020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea  device/build/microwakeword-testdata/stop.tflite' | sha256sum -c -
+
       - name: Fetch pinned Rook platform and boot inputs
         run: |
           mkdir -p linux/rook/inputs
