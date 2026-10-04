@@ -26,9 +26,19 @@ jobs:
         run: |
           python3 -m unittest \
             factory.biscuit.test_install \
-            tools.test_merge_release_manifests
+            tools.test_merge_release_manifests \
+            tools.test_package_echo_release
           python3 -m unittest discover -s linux/checkers -p 'test_*.py'
           python3 -m unittest discover -s factory/checkers-linux -p 'test_*.py'
+          python3 -m unittest discover -s linux/rook -p 'test_*.py'
+          python3 -m unittest discover -s factory/rook-linux -p 'test_*.py'
+          python3 -m py_compile \
+            linux/rook/build_boot.py \
+            linux/rook/build_rescue_fbprobe.py \
+            linux/rook/build_rootfs.py \
+            linux/rook/preflight.py \
+            factory/rook-linux/build_factory.py \
+            factory/rook-linux/install.py
       - name: Verify the factory emOS packer
         run: |
           python3 -m pip install pytest

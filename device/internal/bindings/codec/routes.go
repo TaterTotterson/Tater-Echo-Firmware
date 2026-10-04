@@ -103,6 +103,28 @@ var CheckersRoutes = []Write{
 	{"OUT Playback Switch", "1"},
 }
 
+// Rook has two TLV320AIC3101 microphone ADCs and the TLV320AIC32x4 speaker
+// codec. Unlike Biscuit's four ADCs or Checkers' RT5616 DAC, only A/B and the
+// Dot-style HPL/HPR output routes are present (TECHO5 Spot's measured path).
+var RookRoutes = []Write{
+	{"ADC_A Left Ip Select ADC_A DIF1_L switch", "1"},
+	{"ADC_A Right Ip Select ADC_A DIF1_R switch", "1"},
+	{"ADC_B Left Ip Select ADC_B DIF1_L switch", "1"},
+	{"ADC_B Right Ip Select ADC_B DIF1_R switch", "1"},
+	{"ADC_A DIF1_L Input Gain", "0"},
+	{"ADC_A DIF1_R Input Gain", "0"},
+	{"ADC_B DIF1_L Input Gain", "0"},
+	{"ADC_B DIF1_R Input Gain", "0"},
+	{"ADC_A MICPGA Volume Ctrl", "40"},
+	{"ADC_B MICPGA Volume Ctrl", "40"},
+	{"ADC_A Left Mute", "Off"},
+	{"ADC_A Right Mute", "Off"},
+	{"ADC_B Left Mute", "Off"},
+	{"ADC_B Right Mute", "Off"},
+	{"HPL Output Mixer L_DAC Switch", "1"},
+	{"HPR Output Mixer R_DAC Switch", "1"},
+}
+
 var once sync.Once
 
 // EnsureRoutes applies Routes exactly once per process.
@@ -118,6 +140,8 @@ func EnsureRoutes(target string) {
 		routes := Routes
 		if strings.EqualFold(strings.TrimSpace(target), "checkers") {
 			routes = CheckersRoutes
+		} else if strings.EqualFold(strings.TrimSpace(target), "rook") {
+			routes = RookRoutes
 		}
 		var failed int
 		for _, w := range routes {

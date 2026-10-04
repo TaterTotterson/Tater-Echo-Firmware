@@ -34,8 +34,10 @@ sha256 46c19fd23c210714e29eb2bf88c77b540f3290c0cf50b680b22032e7a4771da7
 
 The Linux generation keeps the existing satellite protocol and feature set:
 
-- native microphone capture, beam selection, VAD, AEC, barge-in, and
-  microWakeWord;
+- native microphone capture with a physically measured 18 mm two-mic array,
+  independently scored left/right wake beams, winning-beam handoff,
+  winning-beam STT verification/trainer/pre-roll, speech-locked steering and
+  off-axis attenuation, VAD, per-path AEC, barge-in, and microWakeWord;
 - TTS, media, synchronized group audio, timers, alarms, announcements,
   intercom, mute, and volume;
 - BLE presence advertisement forwarding;

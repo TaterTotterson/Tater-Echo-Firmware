@@ -6,5 +6,6 @@ package speaker
 // release build it does nothing and compiles away.
 type writeLoopMeter struct{}
 
-func (*writeLoopMeter) beforeWrite() {}
-func (*writeLoopMeter) afterWrite()  {}
+func (*writeLoopMeter) beforeWrite()              {}
+func (*writeLoopMeter) afterWrite()               {}
+func (*writeLoopMeter) observeAudio([]byte, bool) {}

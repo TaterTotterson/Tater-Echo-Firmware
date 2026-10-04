@@ -1,5 +1,5 @@
-// Package beamformer implements directional mic selection for the
-// Echo Dot Gen 2 (biscuit) 7-microphone array.
+// Package beamformer implements direction finding and true steered-array
+// pickup for the Echo Dot Gen 2 (biscuit) 7-microphone array.
 //
 // # Mic geometry (confirmed empirically, 2026-05)
 //
@@ -25,11 +25,11 @@
 // Process five periods at once, so treating a call as one observation makes
 // every time constant five times slower than its name and comment.
 //
-// Output channel is determined by lock state, not by the config flag:
-//   - Unlocked: always ch6 (centre/omni). Covers OWW listening and any turn
-//     where Lock() was a no-op (beamforming disabled).
-//   - Locked: the perimeter mic selected at Lock() time, or the mic nearest
-//     to BeamAngle if a fixed steering direction is configured.
+// Output is determined by lock state, not by the config flag:
+//   - Unlocked: ch6 remains the transport/pre-roll signal, while two stable
+//     seven-mic candidate beams are scored independently for local wake.
+//   - Locked: a fractional-delay sum of all seven microphones aimed
+//     at the direction selected at Lock() time, or at BeamAngle when fixed.
 //
 // BeamformingEnabled only gates Lock() — if false, Lock() is a no-op and
 // the device stays on ch6 for both OWW and voice turns.
@@ -187,8 +187,24 @@ type Beamformer struct {
 	// batch size so DOA analyzes all 160ms rather than sampling only its first
 	// 32ms. extractChannel still returns a fresh allocation because data.go's
 	// preroll ring retains those slices across batches.
-	chanBuf [nDirections][]float32
+	chanBuf [7][]float32
 	hfBuf   [nDirections][]float32
+
+	// Two stable wake candidates cover the strongest source bearings without
+	// running six neural models. They only retarget on convincing acoustic
+	// evidence; DataClient resets that lane and replays raw-array pre-roll when
+	// either identity changes.
+	wakeDirections [2]int
+	wakeReady      bool
+	healthyMics    [7]bool
+	healthyCount   int
+
+	// Fractional steering delays need a handful of samples from the previous
+	// ALSA batch.  Keeping this history warm even during centre-mic wake
+	// listening means the first locked speech batch has no artificial zero
+	// prefix.  Six microphones at 36mm span only 3.36 samples at 16kHz; eight
+	// samples deliberately leaves margin for interpolation.
+	beamHistory [7][beamHistorySamples]float32
 }
 
 // New creates a Beamformer.
@@ -197,23 +213,30 @@ func New() *Beamformer {
 		lockedChannel:   -1,
 		visualDirection: -1,
 		outputChannel:   centreCh,
+		wakeDirections:  [2]int{0, 3},
+	}
+	for ci := 0; ci < len(b.chanBuf); ci++ {
+		b.chanBuf[ci] = make([]float32, periodFrames)
 	}
 	for ci := 0; ci < nDirections; ci++ {
-		b.chanBuf[ci] = make([]float32, periodFrames)
 		b.hfBuf[ci] = make([]float32, periodFrames)
 	}
 	return b
 }
 
 func (b *Beamformer) ensureAnalysisFrames(frames int) {
-	for ci := 0; ci < nDirections; ci++ {
+	for ci := 0; ci < len(b.chanBuf); ci++ {
 		if cap(b.chanBuf[ci]) < frames {
 			b.chanBuf[ci] = make([]float32, frames)
-			b.hfBuf[ci] = make([]float32, frames)
+			if ci < nDirections {
+				b.hfBuf[ci] = make([]float32, frames)
+			}
 			continue
 		}
 		b.chanBuf[ci] = b.chanBuf[ci][:frames]
-		b.hfBuf[ci] = b.hfBuf[ci][:frames]
+		if ci < nDirections {
+			b.hfBuf[ci] = b.hfBuf[ci][:frames]
+		}
 	}
 }
 
@@ -285,6 +308,23 @@ func (b *Beamformer) Lock(enabled bool) {
 			directionToChannel[best], candidateAngles[best], mode, bestScore, confidence)
 	}
 	b.lockedChannel = directionToChannel[best]
+}
+
+// LockWakeDirection carries the winning wake scorer's acoustic path into the
+// voice turn. This avoids re-estimating the bearing after neural detection
+// latency, when the wake phrase may already be over.
+func (b *Beamformer) LockWakeDirection(direction int, enabled bool) {
+	b.trackSpeech = false
+	if !enabled || direction < 0 || direction >= nDirections {
+		if !enabled {
+			log.Printf("[beam] wake-beam lock disabled — staying on ch6 (omni)")
+		}
+		return
+	}
+	b.lockedChannel = directionToChannel[direction]
+	b.visualDirection = direction
+	log.Printf("[beam] locked to winning wake beam ch%d (%.0f°)",
+		b.lockedChannel, candidateAngles[direction])
 }
 
 // PrepareSpeechLock switches to live visual DOA while the audio path waits for
@@ -484,13 +524,13 @@ func (b *Beamformer) LockedAngle() float64 {
 // direction estimation always runs so the baseline stays warm regardless of
 // config state. The flag only affects Lock() behaviour (see Lock() docs).
 //
-// Output channel is determined by lock state alone:
-//   - Unlocked (lockedChannel == -1): always ch6 (centre/omni). This covers
-//     OWW listening and any voice turn where Lock() was a no-op (beamforming
-//     disabled). ch6 is equidistant from all directions — no directional bias.
-//   - Locked, steerAngle >= 0 (fixed-beam): mic nearest to steerAngle. Config-
-//     driven direction, ignores the energy-based lock channel.
-//   - Locked, steerAngle < 0 (auto): the perimeter mic selected at Lock() time.
+// Output is determined by lock state alone:
+//   - Unlocked (lockedChannel == -1): transport audio stays on ch6 while the
+//     optional WakeArray interface supplies two seven-mic scorer lanes.
+//   - Locked, steerAngle >= 0 (fixed-beam): seven-mic delay-and-sum steered at
+//     that direction, ignoring the energy-based lock channel.
+//   - Locked, steerAngle < 0 (auto): seven-mic delay-and-sum steered at the
+//     direction selected at Lock() time.
 //
 // angle is the estimated dominant source direction (0–360°, clockwise from
 // 12 o'clock), or -1 during ordinary unlocked wake listening. Continued-chat
@@ -507,6 +547,9 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 	// continuously regardless of BeamformingEnabled. This keeps the baseline
 	// warm so Lock() gets a good onset ratio the moment beamforming is enabled.
 	b.decodeChannels(raw)
+	// Update only after this call has produced its output: negative fractional
+	// sample positions below must still refer to the preceding ALSA batch.
+	defer b.rememberBeamHistory()
 	b.bandDiff()
 	b.batchScores = [nDirections]float64{}
 	b.batchSpatial = [nDirections]float64{}
@@ -571,7 +614,10 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 		}
 
 		energyWinner, _, _ := bestDirection(periodScores)
-		if b.trackSpeech {
+		// Wake candidate selection needs the same phase evidence as live DOA,
+		// even though ordinary idle listening deliberately hides its angle from
+		// the LED renderer. Locked turns do not need candidate maintenance.
+		if b.lockedChannel < 0 {
 			spatial := b.spatialScores(start, end)
 			for di := range spatial {
 				b.batchSpatial[di] += spatial[di]
@@ -593,6 +639,9 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 		_, _, b.lastSpatialConf = bestDirection(b.batchSpatial)
 	}
 	_, _, b.lastConfidence = bestDirection(b.batchScores)
+	if b.lockedChannel < 0 {
+		b.updateWakeDirections()
+	}
 
 	// Restore the initial-turn behavior validated on the physical Echo: while
 	// unlocked, ordinary wake listening reports no DOA; once locked, its visual
@@ -635,22 +684,76 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 
 	// Locked — select output channel and reported angle.
 
-	var ch int
+	var ch, beamDirection int
 	if steerAngle >= 0 {
 		// Preserve the original initial-turn fixed-beam indicator. Follow-up
 		// visual DOA remains live and independent of its audio pickup.
 		fixedDir := nearestDirection(steerAngle)
 		ch = directionToChannel[fixedDir]
+		beamDirection = fixedDir
 		if !b.trackSpeech {
 			angle = candidateAngles[fixedDir]
 		}
 	} else {
-		// Auto: use the channel selected at Lock() time
+		// Auto: use the direction selected at Lock() time.
 		ch = b.lockedChannel
+		beamDirection = nearestDirection(micAngles[ch])
 	}
 
+	// outputChannel remains the direction/path identity used by AEC's retained
+	// state bank.  The signal is now a stable seven-mic beam rather than that one
+	// physical capsule, but every bearing still has its own acoustic path.
 	b.outputChannel = ch
-	return b.extractChannel(raw, ch, gain), angle
+	return b.extractSteered(beamDirection, gain), angle
+}
+
+// updateWakeDirections maintains two scorer lanes. The first follows the
+// strongest source; the second keeps the runner-up so an ambiguous bearing or
+// a source between fixed steering angles does not lose the wake phrase. Once
+// established, a lane only moves on clear evidence, preventing background
+// noise from repeatedly resetting the neural model.
+func (b *Beamformer) updateWakeDirections() {
+	scores := b.batchScores
+	best, _, confidence := bestDirection(scores)
+	spatialBest, spatialScore, spatialConfidence := bestDirection(b.batchSpatial)
+	if spatialScore >= minSpatialScore && spatialConfidence >= minLockConfidence {
+		scores = b.batchSpatial
+		best, confidence = spatialBest, spatialConfidence
+	}
+	second := runnerUpDirection(scores, best)
+	if !b.wakeReady {
+		b.wakeDirections = [2]int{best, second}
+		b.wakeReady = true
+		return
+	}
+	if best == b.wakeDirections[0] {
+		if second != best {
+			b.wakeDirections[1] = second
+		}
+		return
+	}
+	// A new primary must be substantially clearer than the general lock
+	// threshold. Speech onsets clear this immediately; stationary room noise
+	// and silence do not churn the scorer lanes.
+	if confidence >= 0.12 {
+		b.wakeDirections = [2]int{best, second}
+	}
+}
+
+func runnerUpDirection(scores [nDirections]float64, best int) int {
+	second := -1
+	for direction, score := range scores {
+		if direction == best {
+			continue
+		}
+		if second < 0 || score > scores[second] {
+			second = direction
+		}
+	}
+	if second < 0 {
+		return (best + nDirections/2) % nDirections
+	}
+	return second
 }
 
 // hfEnergy returns the mean squared HF energy for direction di.
@@ -686,10 +789,41 @@ func playbackRefActive(raw []byte, start, end int) bool {
 }
 
 const (
-	micRadiusMetres = 0.036
-	speedOfSound    = 343.0
-	maxSpatialLag   = 4 // opposite mics span at most 3.36 samples at 16kHz
+	micRadiusMetres    = 0.036
+	speedOfSound       = 343.0
+	maxSpatialLag      = 4 // opposite mics span at most 3.36 samples at 16kHz
+	beamHistorySamples = 8
 )
+
+// steeringDelays returns the causal delay for all seven microphones when
+// listening toward one of candidateAngles. A wave reaches the capsule nearest
+// the source first; delaying those early channels to the latest arrival makes
+// desired speech add coherently while sound from other bearings decorrelates.
+func steeringDelays(direction int) (delays [7]float64) {
+	if direction < 0 || direction >= nDirections {
+		return delays
+	}
+	theta := candidateAngles[direction] * math.Pi / 180
+	sx, sy := math.Sin(theta), math.Cos(theta)
+	var arrival [7]float64
+	latest := -math.MaxFloat64
+	for channel := 0; channel < len(arrival); channel++ {
+		a := micAngles[channel] * math.Pi / 180
+		radius := micRadiusMetres
+		if channel == centreCh {
+			radius = 0
+		}
+		x, y := radius*math.Sin(a), radius*math.Cos(a)
+		arrival[channel] = -(x*sx + y*sy) * sampleRate / speedOfSound
+		if arrival[channel] > latest {
+			latest = arrival[channel]
+		}
+	}
+	for channel := range delays {
+		delays[channel] = latest - arrival[channel]
+	}
+	return delays
+}
 
 // spatialScores evaluates six fixed source bearings from inter-microphone
 // arrival-time evidence. It is a small-lag steered-response calculation: all
@@ -789,16 +923,197 @@ func (b *Beamformer) bandDiff() {
 	}
 }
 
-// decodeChannels decodes all 6 perimeter channels from a raw S24_3LE period
+// decodeChannels decodes all seven real microphone channels from a raw
+// S24_3LE period
 // into chanBuf as float32 normalised to [-1, 1]. Reuses chanBuf across
 // periods (§3.5) — every element is overwritten, no clearing needed.
 func (b *Beamformer) decodeChannels(raw []byte) {
+	b.healthyMics = [7]bool{}
+	b.healthyCount = 0
 	for i := 0; i < len(b.chanBuf[0]); i++ {
 		base := i * frameSize
-		for ci := 0; ci < nDirections; ci++ {
+		for ci := 0; ci < len(b.chanBuf); ci++ {
 			offset := base + ci*byteSample
-			b.chanBuf[ci][i] = decodeS24Sample(raw[offset], raw[offset+1], raw[offset+2])
+			value := decodeS24Sample(raw[offset], raw[offset+1], raw[offset+2])
+			b.chanBuf[ci][i] = value
+			if value != 0 {
+				b.healthyMics[ci] = true
+			}
 		}
+	}
+	for _, healthy := range b.healthyMics {
+		if healthy {
+			b.healthyCount++
+		}
+	}
+}
+
+// extractSteered forms a real delay-and-sum beam from all seven microphones,
+// including the centre capsule at its calibrated zero-radius position.
+// microphones. Fractional linear interpolation matters here: the complete
+// array aperture is only 3.36 samples, so rounding every path to an integer
+// would throw away much of the useful phase alignment in the speech band.
+//
+// The average, rather than the raw sum, preserves the level expected by VAD,
+// AGC and AEC. Coherent speech therefore stays near one-microphone amplitude,
+// while uncorrelated room sound falls by up to sqrt(7) before controller-side
+// neural suppression sees it.
+func (b *Beamformer) extractSteered(direction int, gain float64) []byte {
+	frames := len(b.chanBuf[0])
+	out := make([]byte, frames*2)
+	delays := steeringDelays(direction)
+	path := directionToChannel[direction]
+	for frame := 0; frame < frames; frame++ {
+		var sum float64
+		for channel := 0; channel < len(b.chanBuf); channel++ {
+			sum += float64(b.steeredSample(channel, frame, delays[channel]))
+		}
+		value := math.Round(sum * gain * 32768.0 / float64(len(b.chanBuf)))
+		if value > 32767 {
+			value = 32767
+			b.clippedSamples++
+			b.clippedByChannel[path]++
+		} else if value < -32768 {
+			value = -32768
+			b.clippedSamples++
+			b.clippedByChannel[path]++
+		}
+		v := int16(value)
+		out[frame*2] = byte(v)
+		out[frame*2+1] = byte(uint16(v) >> 8)
+	}
+	return out
+}
+
+// WakeBeamCount reports the bounded number of neural scorer lanes used for
+// Biscuit. Six simultaneous models cost materially more CPU and memory while
+// the strongest and runner-up beams retain the useful array gain.
+func (b *Beamformer) WakeBeamCount() int { return 2 }
+
+// WakeBeams forms the two currently selected wake views. A raw batch in which
+// any array channel is bit-exact dead falls back to the centre microphone;
+// this is deliberately conservative so a wiring/ADC fault cannot turn a
+// seven-way average into a permanently deaf wake path.
+func (b *Beamformer) WakeBeams(raw []byte, gain float64) []WakeBeam {
+	if b.healthyCount < len(b.healthyMics) {
+		fallback := centreCh
+		if !b.healthyMics[fallback] {
+			for channel := 0; channel < nDirections; channel++ {
+				if b.healthyMics[channel] {
+					fallback = channel
+					break
+				}
+			}
+		}
+		angle := -1.0
+		if fallback < nDirections {
+			angle = micAngles[fallback]
+		}
+		return []WakeBeam{{Direction: fallback, Angle: angle, PCM: b.extractChannel(raw, fallback, gain)}}
+	}
+	out := make([]WakeBeam, 0, len(b.wakeDirections))
+	for _, direction := range b.wakeDirections {
+		out = append(out, b.WakeBeam(raw, direction, gain))
+	}
+	return out
+}
+
+// WakeBeam forms one stateless beam from arbitrary raw-array history. It is
+// stateless on purpose: DataClient can concatenate its short raw pre-roll and
+// replay it through a retargeted scorer without disturbing live DOA or the
+// locked voice beam's interpolation history.
+func (b *Beamformer) WakeBeam(raw []byte, direction int, gain float64) WakeBeam {
+	if direction < 0 || direction >= nDirections {
+		return WakeBeam{Direction: centreCh, Angle: -1, PCM: b.extractChannel(raw, centreCh, gain)}
+	}
+	return WakeBeam{
+		Direction: direction,
+		Angle:     candidateAngles[direction],
+		PCM:       b.extractSteeredRaw(raw, direction, gain),
+	}
+}
+
+func (b *Beamformer) extractSteeredRaw(raw []byte, direction int, gain float64) []byte {
+	frames := len(raw) / frameSize
+	if frames == 0 {
+		return nil
+	}
+	out := make([]byte, frames*2)
+	delays := steeringDelays(direction)
+	path := directionToChannel[direction]
+	for frame := 0; frame < frames; frame++ {
+		var sum float64
+		for channel := 0; channel < 7; channel++ {
+			position := float64(frame) - delays[channel]
+			base := int(math.Floor(position))
+			fraction := position - float64(base)
+			if base < 0 {
+				base = 0
+				fraction = 0
+			}
+			next := base + 1
+			if next >= frames {
+				next = frames - 1
+			}
+			a := rawMicSample(raw, base, channel)
+			c := rawMicSample(raw, next, channel)
+			sum += a + fraction*(c-a)
+		}
+		value := math.Round(sum * gain * 32768.0 / 7.0)
+		if value > 32767 {
+			value = 32767
+			b.clippedSamples++
+			b.clippedByChannel[path]++
+		} else if value < -32768 {
+			value = -32768
+			b.clippedSamples++
+			b.clippedByChannel[path]++
+		}
+		v := int16(value)
+		out[frame*2] = byte(v)
+		out[frame*2+1] = byte(uint16(v) >> 8)
+	}
+	return out
+}
+
+func rawMicSample(raw []byte, frame, channel int) float64 {
+	offset := frame*frameSize + channel*byteSample
+	return float64(decodeS24Sample(raw[offset], raw[offset+1], raw[offset+2]))
+}
+
+func (b *Beamformer) steeredSample(channel, frame int, delay float64) float32 {
+	position := float64(frame) - delay
+	base := int(math.Floor(position))
+	fraction := float32(position - float64(base))
+	a := b.beamSample(channel, base)
+	c := b.beamSample(channel, base+1)
+	return a + fraction*(c-a)
+}
+
+func (b *Beamformer) beamSample(channel, frame int) float32 {
+	if frame >= 0 {
+		if frame >= len(b.chanBuf[channel]) {
+			return b.chanBuf[channel][len(b.chanBuf[channel])-1]
+		}
+		return b.chanBuf[channel][frame]
+	}
+	index := beamHistorySamples + frame
+	if index < 0 {
+		index = 0
+	}
+	return b.beamHistory[channel][index]
+}
+
+func (b *Beamformer) rememberBeamHistory() {
+	for channel := 0; channel < len(b.chanBuf); channel++ {
+		samples := b.chanBuf[channel]
+		if len(samples) >= beamHistorySamples {
+			copy(b.beamHistory[channel][:], samples[len(samples)-beamHistorySamples:])
+			continue
+		}
+		shift := beamHistorySamples - len(samples)
+		copy(b.beamHistory[channel][:shift], b.beamHistory[channel][len(samples):])
+		copy(b.beamHistory[channel][shift:], samples)
 	}
 }
 
@@ -913,8 +1228,10 @@ func (b *Beamformer) ClippedSamples() uint64 {
 // ClippedByChannel returns the seven real microphones' clamp counters.
 func (b *Beamformer) ClippedByChannel() [7]uint64 { return b.clippedByChannel }
 
-// OutputChannel identifies the physical mic used for the most recent Process
-// result. DataClient selects the matching AEC state before cancellation.
+// OutputChannel identifies the acoustic path used for the most recent Process
+// result. Unlocked audio is physical centre mic ch6; locked audio uses the
+// path index of its seven-mic steering direction. DataClient selects the matching
+// retained AEC state before cancellation.
 func (b *Beamformer) OutputChannel() int { return b.outputChannel }
 
 // Diagnostics is a cheap snapshot read on the mic goroutine for periodic

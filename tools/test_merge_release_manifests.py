@@ -32,12 +32,14 @@ class MergeReleaseManifestTests(unittest.TestCase):
             root = Path(directory)
             first = self.target(root / "a", "biscuit", "biscuit.bin", b"a")
             second = self.target(root / "b", "checkers", "checkers-ota.tar.gz", b"b")
+            third = self.target(root / "c", "rook", "rook-ota.tar.gz", b"c")
             output = root / "out"
-            merge("v1.2.3", [first, second], output)
+            merge("v1.2.3", [first, second, third], output)
             result = json.loads((output / "firmware-manifest.json").read_text())
-            self.assertEqual(set(result["targets"]), {"biscuit", "checkers"})
+            self.assertEqual(set(result["targets"]), {"biscuit", "checkers", "rook"})
             self.assertEqual((output / "biscuit.bin").read_bytes(), b"a")
             self.assertEqual((output / "checkers-ota.tar.gz").read_bytes(), b"b")
+            self.assertEqual((output / "rook-ota.tar.gz").read_bytes(), b"c")
 
     def test_rejects_tampered_artifact(self):
         with tempfile.TemporaryDirectory() as directory:

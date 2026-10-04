@@ -1,6 +1,6 @@
 //go:build linux
 
-// tater-show-linux is the native Checkers renderer. The Tater daemon remains
+// tater-show-linux is the native Checkers and Rook renderer. The Tater daemon remains
 // the source of truth; this process handles screen, touch, and loopback commands.
 package main
 
@@ -121,7 +121,7 @@ func newFaceSet() (*faceSet, error) {
 		return nil, err
 	}
 	result := &faceSet{regular: map[int]font.Face{}, bold: map[int]font.Face{}}
-	for _, size := range []int{14, 15, 16, 18, 20, 22, 24, 26, 30, 36, 48, 64, 82, 96} {
+	for _, size := range []int{14, 15, 16, 18, 20, 22, 24, 26, 30, 36, 48, 64, 74, 82, 96} {
 		result.regular[size], err = opentype.NewFace(regular, &opentype.FaceOptions{Size: float64(size), DPI: 72, Hinting: font.HintingFull})
 		if err != nil {
 			return nil, err
@@ -136,6 +136,7 @@ func newFaceSet() (*faceSet, error) {
 
 type renderer struct {
 	faces             *faceSet
+	spotScreen        bool
 	state             show.Snapshot
 	received          time.Time
 	animationStart    time.Time
@@ -143,10 +144,15 @@ type renderer struct {
 	notificationImage image.Image
 	intercomPressed   bool
 	timerPressed      bool
-	bubbleRaster      *vector.Rasterizer
-	bubbleCanvas      *image.RGBA
 	intercomIcon      *image.RGBA
 	connectingBase    *image.RGBA
+	spotBase          *image.RGBA
+	spotBaseAccent    color.RGBA
+	spotTouchDown     bool
+	spotTouchAt       time.Time
+	spotTimerDown     bool
+	spotReplyGlow     float64
+	checkersReplyGlow float64
 }
 
 const (
@@ -160,8 +166,8 @@ const (
 	micIconHeight   = 48
 )
 
-// The right-hand content can use the lower half of the display, but leaves a
-// narrow gutter beside the clock/status and the bottom-center voice bubble.
+// The right-hand content can use the lower half of the display while leaving
+// a narrow gutter beside the clock and connection status.
 func rightPane(width, height int) image.Rectangle {
 	return image.Rect(width*45/100, 24, width-36, height-20)
 }
@@ -174,10 +180,17 @@ func timerStopBounds(width, height int) image.Rectangle {
 
 func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
-	accent := accentFor(r.state.Phase)
+	accent := accentForTheme(r.state.Phase, r.state.DisplayTheme)
 	seconds := now.Sub(r.animationStart).Seconds()
 	if r.animationStart.IsZero() {
 		seconds = 0
+	}
+	if width == height {
+		r.renderSpot(canvas, now, seconds, accent)
+		return
+	}
+	if r.state.Phase != "speaking" {
+		r.checkersReplyGlow = 0
 	}
 	if r.state.Phase == "setup" {
 		r.drawSetup(canvas, seconds, accent)
@@ -188,6 +201,9 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 		return
 	}
 	fillGradient(canvas, color.RGBA{6, 11, 19, 255}, mix(color.RGBA{6, 11, 19, 255}, accent, .13))
+	if r.state.Phase == "speaking" {
+		r.drawCheckersReplyRim(canvas, accent)
+	}
 
 	local := r.localTime(now)
 	r.text(canvas, 42, 120, local.Format("3:04"), 96, false, color.White)
@@ -213,9 +229,6 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 
 	r.drawRight(canvas, now, width, height, seconds, accent)
 	r.drawIntercom(canvas, accent)
-	if shouldDrawCompactVoiceOrb(r.state.Phase, r.state.Weather != nil || r.state.Timer != nil || r.notificationActive(now)) {
-		r.drawCompactVoiceOrb(canvas, width/2, 434, 28, seconds, accent)
-	}
 	if r.state.Muted {
 		roundedRect(canvas, image.Rect(width-174, 22, width-26, 58), 18, color.RGBA{101, 27, 38, 225})
 		r.text(canvas, width-153, 48, "MIC MUTED", 16, true, color.RGBA{255, 191, 197, 255})
@@ -320,7 +333,58 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		return
 	}
 	pane := rightPane(width, height)
+	if label := checkersVoiceStageLabel(r.state.Phase); label != "" {
+		r.centeredText(canvas, (pane.Min.X+pane.Max.X)/2, 228, label, 20, true, accent)
+		return
+	}
 	r.drawOrb(canvas, (pane.Min.X+pane.Max.X)/2, 220, 120, seconds, accent)
+}
+
+func checkersVoiceStageLabel(phase string) string {
+	switch phase {
+	case "listening":
+		return "LISTENING"
+	case "thinking":
+		return "THINKING"
+	case "speaking":
+		return "SPEAKING"
+	case "intercom":
+		return "INTERCOM"
+	default:
+		return ""
+	}
+}
+
+// Match the Spot's audio-following rim on Checkers' rectangular display.
+// Painting only the outer 24 pixels keeps the content readable and the per-
+// frame work bounded on the Show 5's small CPU.
+func (r *renderer) drawCheckersReplyRim(canvas *image.RGBA, replyColor color.RGBA) {
+	target := math.Pow(math.Min(1, math.Max(0, r.state.AudioLevel)/.22), .65)
+	response := .30
+	if target > r.checkersReplyGlow {
+		response = .60
+	}
+	r.checkersReplyGlow += (target - r.checkersReplyGlow) * response
+	level := r.checkersReplyGlow
+	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
+	ink := mix(replyColor, color.RGBA{255, 255, 255, 255}, .04+.10*level)
+	for inset := 0; inset < 24 && inset*2 < width && inset*2 < height; inset++ {
+		fade := 1 - float64(inset)/24
+		ink.A = uint8((12 + 220*level) * fade * fade)
+		if ink.A == 0 {
+			continue
+		}
+		left, right := inset, width-inset-1
+		top, bottom := inset, height-inset-1
+		for x := left; x <= right; x++ {
+			blendPixel(canvas, x, top, ink)
+			blendPixel(canvas, x, bottom, ink)
+		}
+		for y := top + 1; y < bottom; y++ {
+			blendPixel(canvas, left, y, ink)
+			blendPixel(canvas, right, y, ink)
+		}
+	}
 }
 
 func connectedStatus(name string) string {
@@ -334,31 +398,11 @@ func (r *renderer) drawOrb(canvas *image.RGBA, cx, cy, radius int, seconds float
 	circle(canvas, cx, cy, int(float64(activeRadius)*1.30), color.RGBA{accent.R, accent.G, accent.B, 24})
 	circle(canvas, cx, cy, int(float64(activeRadius)*1.12), color.RGBA{accent.R, accent.G, accent.B, 50})
 	circle(canvas, cx, cy, int(float64(activeRadius)*.76), mix(accent, color.RGBA{15, 20, 31, 255}, .34))
-	if r.state.DirectionDegrees != nil && (r.state.Phase == "listening" || r.state.Phase == "speaking") {
-		arc(canvas, cx, cy, radius, *r.state.DirectionDegrees-102, 24, 4, color.RGBA{255, 255, 255, 190})
+	label := phaseLabel(r.state.Phase)
+	if r.state.Muted {
+		label = "MUTED"
 	}
-	if isVoicePhase(r.state.Phase) {
-		lastX, lastY := 0, 0
-		for index := 0; index <= 32; index++ {
-			x := cx - radius*4/10 + radius*8/10*index/32
-			envelope := math.Sin(math.Pi * float64(index) / 32)
-			phaseSpeed := 6.0
-			if r.state.Phase == "listening" {
-				phaseSpeed = 10
-			}
-			y := cy + int(math.Sin(seconds*phaseSpeed+float64(index)*.68)*float64(radius)*(.06+.12*audio)*envelope)
-			if index > 0 {
-				line(canvas, lastX, lastY, x, y, 4, color.RGBA{255, 255, 255, 220})
-			}
-			lastX, lastY = x, y
-		}
-	} else {
-		label := phaseLabel(r.state.Phase)
-		if r.state.Muted {
-			label = "MUTED"
-		}
-		r.centeredText(canvas, cx, cy+7, label, 18, true, color.White)
-	}
+	r.centeredText(canvas, cx, cy+7, label, 18, true, color.White)
 	if r.state.TimerActive {
 		circle(canvas, cx+radius*3/4, cy-radius*7/10, 11, color.RGBA{255, 208, 92, 255})
 	}
@@ -505,7 +549,7 @@ func (r *renderer) drawTimer(canvas *image.RGBA, now time.Time, width int, secon
 	pane := rightPane(width, canvas.Rect.Dy())
 	left, right := pane.Min.X, pane.Max.X
 	cx, cy, radius := (left+right)/2, 202, 112
-	timerAccent := color.RGBA{255, 147, 66, 255}
+	timerAccent := accent
 	if timer.Ringing {
 		timerAccent = color.RGBA{255, 105, 76, 255}
 	}
@@ -552,7 +596,7 @@ func (r *renderer) drawNotification(canvas *image.RGBA, now time.Time, width int
 	item := r.state.Notification
 	pane := rightPane(width, canvas.Rect.Dy())
 	left, right := pane.Min.X, pane.Max.X
-	noticeColor := color.RGBA{255, 147, 66, 255}
+	noticeColor := accent
 	if item.Priority == "critical" {
 		noticeColor = color.RGBA{255, 92, 92, 255}
 	}
@@ -573,67 +617,10 @@ func (r *renderer) drawNotification(canvas *image.RGBA, now time.Time, width int
 	if item.ExpiresAtUnixMS > 0 {
 		remaining := float64(item.ExpiresAtUnixMS-r.currentTaterUnixMS(now)) / 90000
 		progress := math.Max(0, math.Min(1, remaining))
-		progressLeft := left + 110 // clear the bottom-center response bubble
+		progressLeft := left
 		line(canvas, progressLeft, pane.Max.Y-7, progressLeft+int(float64(right-progressLeft)*progress), pane.Max.Y-7, 3,
 			color.RGBA{noticeColor.R, noticeColor.G, noticeColor.B, 160})
 	}
-}
-
-func (r *renderer) drawCompactVoiceOrb(canvas *image.RGBA, cx, cy, radius int, seconds float64, accent color.RGBA) {
-	audio := math.Max(0, math.Min(1, r.state.AudioLevel*2.2))
-	breath := .5 + .5*math.Sin(seconds*2.15)
-	voice := .5 + .5*math.Sin(seconds*12.4)
-	cy += int(math.Sin(seconds*1.7) * float64(radius) * .08)
-	shell := float64(radius) * (1 + breath*.025 + audio*(.08+voice*.045))
-	circle(canvas, cx, cy, int(shell*1.75), color.RGBA{accent.R, accent.G, accent.B, uint8(12 + audio*18)})
-	circle(canvas, cx, cy, int(shell*1.38), color.RGBA{accent.R, accent.G, accent.B, uint8(14 + audio*23)})
-	if r.bubbleRaster == nil {
-		r.bubbleRaster = vector.NewRasterizer(128, 128)
-		r.bubbleCanvas = image.NewRGBA(image.Rect(0, 0, 128, 128))
-	} else {
-		r.bubbleRaster.Reset(128, 128)
-	}
-	clear(r.bubbleCanvas.Pix)
-	var xs, ys [32]float64
-	distortion := .070 + audio*.180
-	squash := math.Sin(seconds*2.9+.35) * (.060 + audio*.075)
-	sway := math.Sin(seconds*2.15) * float64(radius) * (.025 + audio*.025)
-	for index := range xs {
-		angle := math.Pi * 2 * float64(index) / float64(len(xs))
-		wobble := math.Sin(angle*3+seconds*3.2)*distortion*.62 +
-			math.Sin(angle*5-seconds*4.4)*distortion*.25 +
-			math.Sin(angle*2+seconds*2.1)*distortion*.13
-		localRadius := shell * (1 + wobble)
-		xs[index] = 64 + sway + math.Cos(angle)*localRadius*(1+squash)
-		ys[index] = 64 + math.Sin(angle)*localRadius*(1-squash*.72)
-	}
-	last := len(xs) - 1
-	r.bubbleRaster.MoveTo(float32((xs[last]+xs[0])/2), float32((ys[last]+ys[0])/2))
-	for index := range xs {
-		next := (index + 1) % len(xs)
-		r.bubbleRaster.QuadTo(float32(xs[index]), float32(ys[index]),
-			float32((xs[index]+xs[next])/2), float32((ys[index]+ys[next])/2))
-	}
-	r.bubbleRaster.ClosePath()
-	r.bubbleRaster.Draw(r.bubbleCanvas, r.bubbleCanvas.Rect,
-		image.NewUniform(color.NRGBA{R: accent.R, G: accent.G, B: accent.B, A: uint8(35 + audio*24)}), image.Point{})
-	draw.Draw(canvas, image.Rect(cx-64, cy-64, cx+64, cy+64), r.bubbleCanvas, image.Point{}, draw.Over)
-	for index := range xs {
-		next := (index + 1) % len(xs)
-		line(canvas, cx-64+int(xs[index]), cy-64+int(ys[index]),
-			cx-64+int(xs[next]), cy-64+int(ys[next]), 2,
-			color.RGBA{R: 228, G: 240, B: 255, A: uint8(110 + audio*95)})
-	}
-	for index := -2; index <= 2; index++ {
-		weight := 1 - math.Abs(float64(index))*.12
-		motion := .55 + .45*math.Sin(seconds*13.5+float64(index)*.92)
-		flutter := .5 + .5*math.Sin(seconds*20.5-float64(index)*1.17)
-		half := float64(radius) * (.055 + audio*(.20+.48*motion+.10*flutter)*weight)
-		drift := math.Sin(seconds*10.8+float64(index)*.74) * float64(radius) * audio * .075
-		line(canvas, cx+index*7, cy+int(drift-half), cx+index*7, cy+int(drift+half), 3,
-			color.RGBA{255, 255, 255, uint8(112 + audio*125)})
-	}
-	circle(canvas, cx-int(shell*.31), cy-int(shell*.36), 2, color.RGBA{255, 255, 255, 140})
 }
 
 func (r *renderer) drawIntercom(canvas *image.RGBA, accent color.RGBA) {
@@ -748,7 +735,7 @@ func wrapTextToWidth(value string, face font.Face, maxWidth int) []string {
 
 func notificationDescriptionLayout(faces *faceSet, description string, maxWidth int) (size, baseline, lineHeight int, lines []string) {
 	// Use the larger type for brief alerts; longer descriptions still fit below
-	// the image without covering the response bubble or expiry indicator.
+	// the image without covering the expiry indicator.
 	for _, option := range []struct{ size, baseline, lineHeight, maxLines int }{
 		{36, 296, 40, 3},
 		{30, 290, 32, 4},
@@ -889,7 +876,13 @@ func main() {
 			}
 		}()
 	}
-	renderer := &renderer{faces: faces, state: show.Snapshot{Phase: "offline", Message: "Connecting to Tater", DeviceName: "Tater Checkers"}, animationStart: time.Now()}
+	screenWidth, screenHeight := screenDevice.Canvas().Rect.Dx(), screenDevice.Canvas().Rect.Dy()
+	spotScreen := screenWidth == screenHeight
+	deviceName := "Tater Checkers"
+	if spotScreen {
+		deviceName = "Tater Spot"
+	}
+	renderer := &renderer{faces: faces, spotScreen: spotScreen, state: show.Snapshot{Phase: "offline", Message: "Connecting to Tater", DeviceName: deviceName}, animationStart: time.Now()}
 	// The old Show renderer targeted 30 FPS. Drive animation from wall time so
 	// dropped ticks slow the frame rate, not the motion itself.
 	ticker := time.NewTicker(time.Second / 30)
@@ -912,6 +905,9 @@ func main() {
 			handleTouch(renderer, client, event)
 		case <-ticker.C:
 			started := time.Now()
+			if renderer.spotScreen {
+				renderer.updateSpotHold(client, started)
+			}
 			renderer.render(screenDevice.Canvas(), started)
 			rendered := time.Since(started)
 			presentStarted := time.Now()
@@ -944,6 +940,10 @@ func main() {
 }
 
 func handleTouch(renderer *renderer, client *socketClient, event linuxinput.TouchEvent) {
+	if renderer.spotScreen {
+		renderer.handleSpotTouch(client, event)
+		return
+	}
 	intercom := inCircle(event.X, event.Y, intercomCenterX, intercomCenterY, intercomRadius)
 	timer := image.Pt(event.X, event.Y).In(timerStopBounds(960, 480))
 	switch event.Kind {
@@ -1160,23 +1160,66 @@ func mix(left, right color.RGBA, amount float64) color.RGBA {
 }
 
 func accentFor(phase string) color.RGBA {
+	return accentForTheme(phase, "tater")
+}
+
+type displayPalette struct {
+	primary   color.RGBA
+	listening color.RGBA
+	thinking  color.RGBA
+	intercom  color.RGBA
+	music     color.RGBA
+}
+
+func paletteForTheme(theme string) displayPalette {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "ocean":
+		return displayPalette{
+			primary: color.RGBA{62, 203, 255, 255}, listening: color.RGBA{73, 230, 194, 255},
+			thinking: color.RGBA{102, 134, 255, 255}, intercom: color.RGBA{127, 224, 255, 255}, music: color.RGBA{73, 230, 194, 255},
+		}
+	case "violet":
+		return displayPalette{
+			primary: color.RGBA{176, 124, 255, 255}, listening: color.RGBA{239, 141, 255, 255},
+			thinking: color.RGBA{117, 140, 255, 255}, intercom: color.RGBA{255, 181, 220, 255}, music: color.RGBA{141, 190, 255, 255},
+		}
+	case "forest":
+		return displayPalette{
+			primary: color.RGBA{117, 214, 110, 255}, listening: color.RGBA{85, 230, 183, 255},
+			thinking: color.RGBA{212, 185, 95, 255}, intercom: color.RGBA{201, 242, 124, 255}, music: color.RGBA{92, 204, 180, 255},
+		}
+	case "sunset":
+		return displayPalette{
+			primary: color.RGBA{255, 111, 97, 255}, listening: color.RGBA{255, 173, 85, 255},
+			thinking: color.RGBA{198, 116, 255, 255}, intercom: color.RGBA{255, 208, 106, 255}, music: color.RGBA{255, 145, 159, 255},
+		}
+	default:
+		return displayPalette{
+			primary: color.RGBA{255, 132, 48, 255}, listening: color.RGBA{52, 226, 183, 255},
+			thinking: color.RGBA{154, 112, 255, 255}, intercom: color.RGBA{255, 105, 140, 255}, music: color.RGBA{86, 206, 255, 255},
+		}
+	}
+}
+
+func accentForTheme(phase, theme string) color.RGBA {
+	palette := paletteForTheme(theme)
 	switch phase {
 	case "listening":
-		return color.RGBA{52, 226, 183, 255}
+		return palette.listening
 	case "thinking":
-		return color.RGBA{154, 112, 255, 255}
+		return palette.thinking
 	case "tool_call", "setup":
-		return color.RGBA{255, 132, 48, 255}
+		return palette.primary
 	case "speaking":
-		return color.RGBA{76, 157, 255, 255}
+		return palette.primary
 	case "intercom":
-		return color.RGBA{255, 105, 140, 255}
+		return palette.intercom
 	case "music":
-		return color.RGBA{86, 206, 255, 255}
+		return palette.music
 	case "error":
 		return color.RGBA{255, 94, 94, 255}
 	default:
-		return color.RGBA{255, 132, 48, 255}
+		return palette.primary
 	}
 }
 
@@ -1195,18 +1238,6 @@ func phaseLabel(phase string) string {
 	default:
 		return "TATER"
 	}
-}
-
-func isVoicePhase(phase string) bool {
-	return phase == "listening" || phase == "speaking" || phase == "intercom"
-}
-
-func shouldDrawCompactVoiceOrb(phase string, hasPrimaryContent bool) bool {
-	if !hasPrimaryContent {
-		return false
-	}
-	return phase == "listening" || phase == "thinking" || phase == "tool_call" ||
-		phase == "speaking" || phase == "intercom"
 }
 
 func weatherColor(kind string) color.RGBA {

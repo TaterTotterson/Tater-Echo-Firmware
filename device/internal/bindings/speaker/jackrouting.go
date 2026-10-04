@@ -1,6 +1,10 @@
 package speaker
 
-import "github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+import (
+	"strings"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
+)
 
 // Jack routing: the codec state each plug position needs.
 //
@@ -82,6 +86,32 @@ func jackRouting(inserted bool) []mixerWrite {
 	}
 }
 
+// The Spot shares the DAC family with Biscuit, but not its complete analog
+// speaker path. These values are from the Rook-specific TECHO5 path, measured
+// against the Spot's Fire OS audio_device.xml on LineageOS.
+func jackRoutingForTarget(target string, inserted bool) []mixerWrite {
+	if !strings.EqualFold(strings.TrimSpace(target), "rook") {
+		return jackRouting(inserted)
+	}
+	if inserted {
+		return []mixerWrite{
+			{Ctl: ctlSpeakerAmp, Args: []string{"Off"}},
+			{Ctl: "Audio_LineOut_Setting", Args: []string{"Off"}},
+			{Ctl: "Ignore Ramp Up", Args: []string{"On"}},
+			{Ctl: ctlHPDriverGain, Args: []string{"11", "11"}},
+			{Ctl: "Right Channel Only", Args: []string{"Off"}},
+		}
+	}
+	return []mixerWrite{
+		{Ctl: "Audio_LineOut_Setting", Args: []string{"Off"}},
+		{Ctl: "Ignore Ramp Up", Args: []string{"Off"}},
+		{Ctl: "Right Channel Only", Args: []string{"On"}},
+		{Ctl: ctlHPDriverGain, Args: []string{"9", "9"}},
+		{Ctl: "Amp Fault Enable", Args: []string{"On"}},
+		{Ctl: ctlSpeakerAmp, Args: []string{"On"}},
+	}
+}
+
 // ── Drift ────────────────────────────────────────────────────────────────────
 //
 // Applying the routing once on a jack edge is not enough, and this is measured
@@ -106,8 +136,12 @@ func jackRouting(inserted bool) []mixerWrite {
 // exactly as it does to the controller's asset reconcile — rewriting on a
 // failed read would rewrite it every interval forever.
 func jackRoutingDrift(inserted bool, current map[string]string) []mixerWrite {
+	return jackRoutingDriftForTarget("biscuit", inserted, current)
+}
+
+func jackRoutingDriftForTarget(target string, inserted bool, current map[string]string) []mixerWrite {
 	var out []mixerWrite
-	for _, w := range jackRouting(inserted) {
+	for _, w := range jackRoutingForTarget(target, inserted) {
 		got, ok := current[w.Ctl]
 		if !ok {
 			continue

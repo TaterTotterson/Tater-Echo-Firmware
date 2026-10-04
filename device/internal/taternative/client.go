@@ -201,6 +201,7 @@ type wakeVerification struct {
 	enforce  bool
 	wakeWord string
 	score    float32
+	preRoll  [][]byte
 	timer    *time.Timer
 }
 
@@ -360,11 +361,12 @@ func DefaultCapabilities() map[string]any {
 }
 
 // CapabilitiesForTarget removes hardware claims that do not apply to a
-// target and adds target-specific surfaces. Checkers renders Tater state on
-// its LCD; its first bring-up must not claim Biscuit's LED ring.
+// target and adds target-specific surfaces. Screen targets render Tater state
+// on their LCDs and must not claim Biscuit's LED ring.
 func CapabilitiesForTarget(target string) map[string]any {
 	capabilities := DefaultCapabilities()
-	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "checkers" || target == "rook" {
 		capabilities["led_ring"] = false
 		capabilities["ota"] = true
 		capabilities["screen"] = true
@@ -372,8 +374,10 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen_protocol"] = 1
 		capabilities["screen_weather"] = true
 		capabilities["screen_notifications"] = true
-		capabilities["camera_snapshot"] = true
-		capabilities["camera_snapshot_version"] = 1
+		if target == "checkers" || target == "rook" {
+			capabilities["camera_snapshot"] = true
+			capabilities["camera_snapshot_version"] = 1
+		}
 	}
 	return capabilities
 }

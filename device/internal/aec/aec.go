@@ -68,10 +68,10 @@ const (
 	// cover the delay error between the speaker write and the mic batches.
 	hwTailMs = 64
 
-	// One learned acoustic path per real microphone. Only the selected state
-	// is processed, so CPU remains one canceller; the extra cost is filter
-	// memory. Switching from centre to a perimeter mic no longer asks a filter
-	// trained on a different physical path to cancel the first word.
+	// One learned state per selectable acoustic path. Biscuit paths are its six
+	// steered bearings plus centre fallback; Rook paths are four steered beams
+	// plus its stable omni mix. Only the selected state is processed, so CPU
+	// remains one canceller; the extra cost is filter memory.
 	aecPaths      = 7
 	defaultPathID = 6 // centre microphone
 )
@@ -313,12 +313,16 @@ func New() *Canceller {
 }
 
 // NewForTarget returns a canceller sized for the acoustic paths exposed by
-// target. Checkers' four-channel ALSA endpoint has two live channels that are
-// combined into one stable mono stream, so it needs only one learned path.
-// Biscuit and unknown future targets retain the established seven-path bank.
+// target. Checkers keeps its measured left/right beams plus centre/omni.
+// Rook keeps one path for its unlocked four-mic omni mix plus one for each of
+// its four measured steering directions. Biscuit and unknown targets retain
+// the seven-path bank.
 func NewForTarget(target string) *Canceller {
 	if target == "checkers" {
-		return newWithPaths(1, 0)
+		return newWithPaths(3, 2)
+	}
+	if target == "rook" {
+		return newWithPaths(5, 4)
 	}
 	return New()
 }
@@ -341,9 +345,9 @@ func newWithPaths(pathCount, defaultPath int) *Canceller {
 	return c
 }
 
-// SelectPath chooses the learned echo path for the physical microphone that
-// produced the current mono buffer. States are retained across turns; only one
-// is processed at a time. Out-of-range ids fall back to the centre mic.
+// SelectPath chooses the learned echo path that produced the current mono
+// buffer. States are retained across turns; only one is processed at a time.
+// Out-of-range ids fall back to the target's default centre/omni path.
 func (c *Canceller) SelectPath(id int) {
 	if id < 0 || id >= c.pathCount {
 		id = c.defaultPath
@@ -872,7 +876,11 @@ func threeBandEnergy(samples []int16) (energy [3]float64) {
 // it again from nothing while the first reply plays. The header ties it to
 // the filter shape it came from; speex's own blob is only meaningful to a
 // state of the same frame size, filter length and rate.
-const stateMagic = "EMAEC1"
+// EMAEC2 invalidates Biscuit paths learned against the former single-capsule
+// output. A steered seven-mic sum is a different linear acoustic path; importing
+// the old coefficients would make the first reply after OTA substantially
+// worse than an honest cold start.
+const stateMagic = "EMAEC2"
 
 const stateHeader = len(stateMagic) + 2 + 2 + 4 + 4 // magic, frame, tailMs, rate, payload
 

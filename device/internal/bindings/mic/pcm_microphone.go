@@ -54,13 +54,15 @@ func NewMicrophone() (*PcmMicrophone, error) {
 }
 
 // NewMicrophoneForTarget opens the measured raw capture endpoint for a board.
-// Checkers exposes one four-channel TLV320AIC3101 stream; its channel layout
-// is normalized by the target audio front end, never by pretending it is
-// Biscuit's nine-channel array.
+// Checkers exposes four channels, Rook six (four microphones plus two
+// loopback), and Biscuit nine. Each uses its own decoding front end.
 func NewMicrophoneForTarget(target string) (*PcmMicrophone, error) {
 	card, deviceNr, channels := biscuitCardNr, biscuitDeviceNr, 9
-	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+	normalized := strings.ToLower(strings.TrimSpace(target))
+	if normalized == "checkers" {
 		card, deviceNr, channels = 0, 22, 4
+	} else if normalized == "rook" {
+		card, deviceNr, channels = 0, 22, 6
 	}
 	device := tinyalsa.NewDevice(card, deviceNr, pcm.Config{
 		Channels:    channels,
@@ -72,7 +74,7 @@ func NewMicrophoneForTarget(target string) (*PcmMicrophone, error) {
 	m := &PcmMicrophone{
 		device:       &device,
 		target:       target,
-		linuxCapture: strings.EqualFold(strings.TrimSpace(target), "checkers") && platform.Base() == platform.TaterLinux,
+		linuxCapture: (normalized == "checkers" || normalized == "rook") && platform.Base() == platform.TaterLinux,
 		ready:        make(chan struct{}),
 	}
 	if err := m.Init(); err != nil {
@@ -87,7 +89,7 @@ func (p *PcmMicrophone) Init() error {
 	// Biscuit's mixer daemon owns pcm24c. Checkers' direct TLV endpoint is
 	// free while the Android framework is idle; stopping audioserver there
 	// would destabilize the screen userspace and is neither needed nor safe.
-	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") && !strings.EqualFold(strings.TrimSpace(p.target), "rook") {
 		cmd := exec.Command("stop", "mixer")
 		if err := cmd.Run(); err != nil {
 			log.Printf("mic: stop mixer: %v (continuing)", err)

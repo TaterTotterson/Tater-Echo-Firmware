@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package linuxinput reads the Checkers Goodix touchscreen directly from evdev.
+// Package linuxinput reads Checkers and Rook touchscreens directly from evdev.
 // Its small evdev reader is derived from TECHO5 (MIT).
 package linuxinput
 
@@ -29,6 +29,8 @@ const (
 	absMTPositionX  = 0x35
 	absMTPositionY  = 0x36
 	absMTTrackingID = 0x39
+	absPositionX    = 0x00
+	absPositionY    = 0x01
 	kernelLongBytes = strconv.IntSize / 8
 	inputEventBytes = 2*kernelLongBytes + 8
 	inputEventType  = 2 * kernelLongBytes
@@ -70,6 +72,7 @@ type Device struct {
 	path      string
 	rawWidth  int
 	rawHeight int
+	protocolA bool
 	closeOnce sync.Once
 }
 
@@ -80,23 +83,36 @@ func Open() (*Device, error) {
 	}
 	for _, path := range paths {
 		name, err := os.ReadFile("/sys/class/input/" + filepath.Base(path) + "/device/name")
-		if err != nil || strings.TrimSpace(string(name)) != "goodix-ts" {
+		if err != nil {
+			continue
+		}
+		inputName := strings.TrimSpace(string(name))
+		if inputName != "goodix-ts" && inputName != "mtk-tpd" {
 			continue
 		}
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
 		}
-		device := &Device{file: file, path: path, rawWidth: 480, rawHeight: 960}
-		if x, errX := device.absolute(absMTPositionX); errX == nil && x.Max > x.Min {
+		device := &Device{file: file, path: path, rawWidth: 480, rawHeight: 960, protocolA: inputName == "mtk-tpd"}
+		xAxis, yAxis := uint16(absMTPositionX), uint16(absMTPositionY)
+		if device.protocolA {
+			device.rawHeight = 480
+		}
+		if device.protocolA {
+			if x, errX := device.absolute(xAxis); errX != nil || x.Max <= x.Min {
+				xAxis, yAxis = absPositionX, absPositionY
+			}
+		}
+		if x, errX := device.absolute(xAxis); errX == nil && x.Max > x.Min {
 			device.rawWidth = int(x.Max-x.Min) + 1
 		}
-		if y, errY := device.absolute(absMTPositionY); errY == nil && y.Max > y.Min {
+		if y, errY := device.absolute(yAxis); errY == nil && y.Max > y.Min {
 			device.rawHeight = int(y.Max-y.Min) + 1
 		}
 		return device, nil
 	}
-	return nil, fmt.Errorf("no input device named goodix-ts")
+	return nil, fmt.Errorf("no input device named goodix-ts or mtk-tpd")
 }
 
 func (d *Device) String() string {
@@ -143,6 +159,9 @@ func (d *Device) read() (rawEvent, error) {
 func (d *Device) Run(ctx context.Context, events chan<- TouchEvent) error {
 	stop := context.AfterFunc(ctx, func() { _ = d.Close() })
 	defer stop()
+	if d.protocolA {
+		return d.runProtocolA(ctx, events)
+	}
 	slots := map[int]*position{}
 	slot, activeSlot := 0, -1
 	active := false
@@ -213,9 +232,69 @@ func (d *Device) Run(ctx context.Context, events chan<- TouchEvent) error {
 	}
 }
 
+// Rook's mtk-tpd sends protocol-A positions and BTN_TOUCH transitions, not
+// Checkers' slots and tracking IDs. Emit Down at SYN_REPORT so both coordinates
+// have arrived before a tap can activate an on-screen control.
+func (d *Device) runProtocolA(ctx context.Context, events chan<- TouchEvent) error {
+	point := &position{}
+	touching, active := false, false
+	lastX, lastY := -1, -1
+	for {
+		event, err := d.read()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("read %s: %w", d.path, err)
+		}
+		switch event.typeCode {
+		case evAbs:
+			switch event.code {
+			case absMTPositionX, absPositionX:
+				point.x, point.seenX = event.value, true
+			case absMTPositionY, absPositionY:
+				point.y, point.seenY = event.value, true
+			}
+		case evKey:
+			if event.code == btnTouch {
+				touching = event.value != 0
+				if !touching && active {
+					deliver(ctx, events, TouchEvent{Kind: Up, X: lastX, Y: lastY})
+					active = false
+				}
+			}
+		case evSyn:
+			if event.code == synDropped {
+				if active {
+					deliver(ctx, events, TouchEvent{Kind: Up, X: lastX, Y: lastY})
+				}
+				touching, active = false, false
+				point = &position{}
+				continue
+			}
+			if event.code != synReport || !touching || !point.seenX || !point.seenY {
+				continue
+			}
+			x, y := d.frame(point)
+			if !active {
+				active = true
+				deliver(ctx, events, TouchEvent{Kind: Down, X: x, Y: y})
+			} else if x != lastX || y != lastY {
+				deliver(ctx, events, TouchEvent{Kind: Move, X: x, Y: y})
+			}
+			lastX, lastY = x, y
+		}
+	}
+}
+
 func (d *Device) frame(position *position) (int, int) {
 	if position == nil || !position.seenX || !position.seenY {
 		return 0, 0
+	}
+	if d.protocolA {
+		x := int(position.x) * 480 / max(d.rawWidth, 1)
+		y := int(position.y) * 480 / max(d.rawHeight, 1)
+		return min(max(x, 0), 479), min(max(y, 0), 479)
 	}
 	x := int(position.y) * 960 / max(d.rawHeight, 1)
 	y := (d.rawWidth - 1 - int(position.x)) * 480 / max(d.rawWidth, 1)

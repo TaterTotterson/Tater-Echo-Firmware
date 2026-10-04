@@ -75,7 +75,7 @@ def setup_binary(cache: Path, name: str, digest: str, member: str, destination: 
         destination.chmod(0o755)
 
 
-def patch_boot(root: Path) -> None:
+def patch_boot(root: Path, *, target: str = "checkers") -> None:
     path = root / "etc/techo5/boot.sh"
     contents = path.read_text()
     contents = contents.replace("/data/techo5-linux", "/data/tater-linux")
@@ -84,27 +84,34 @@ def patch_boot(root: Path) -> None:
         "\t\tpid=$(pidof tater-echo | cut -d' ' -f1)\n"
         "\t\tif [ -n \"$pid\" ]; then"
     )
+    camera_health = " && pidof tater-camera >/dev/null" if target in ("checkers", "rook") else ""
     health_replacement = (
         "\t\tpid=$(pidof tater-echo | cut -d' ' -f1)\n"
         "\t\t# Commit only while the daemon is actually connected to Tater and\n"
-        "\t\t# both native display services are alive. A daemon that merely stays\n"
+        "\t\t# the native display service is alive. A daemon that merely stays\n"
         "\t\t# resident while BLE has wedged Wi-Fi is not a healthy slot.\n"
         "\t\tif [ -n \"$pid\" ] && [ -s /run/tater-connected ] && \\\n"
-        "\t\t   pidof tater-show >/dev/null && pidof tater-camera >/dev/null; then"
+        "\t\t   pidof tater-show >/dev/null" + camera_health + "; then"
     )
     if health_probe not in contents:
         raise SystemExit("pinned base boot script no longer has the expected trial health probe")
     contents = contents.replace(health_probe, health_replacement, 1)
     device_scan = "mdev -s"
+    console_note = (
+        "# The Checkers kernel can hold console_lock while verbose vendor Wi-Fi\n"
+        "# messages flood its consoles. FBIOPAN_DISPLAY waits on that lock and\n"
+        "# the panel freezes. Keep messages in dmesg, but only print emergencies\n"
+        "# to the consoles. Apply before the Wi-Fi module is loaded below.\n"
+        if target == "checkers" else
+        "# Keep verbose vendor messages out of the screen's console while\n"
+        "# retaining them in dmesg.\n"
+    )
     loopback = (
         device_scan
-        + "\n# The Checkers kernel can hold console_lock while verbose vendor Wi-Fi\n"
-        + "# messages flood its consoles. FBIOPAN_DISPLAY waits on that lock and\n"
-        + "# the panel freezes. Keep messages in dmesg, but only print emergencies\n"
-        + "# to the consoles. Apply before the Wi-Fi module is loaded below.\n"
+        + "\n" + console_note
         + "echo 1 4 1 7 > /proc/sys/kernel/printk\n"
-        + "\n# Tater's screen and camera services are loopback-only. The pinned base\n"
-        + "# leaves lo without 127.0.0.1 on Checkers, so listeners otherwise fail.\n"
+        + "\n# Tater's screen service is loopback-only. The pinned base\n"
+        + "# leaves lo without 127.0.0.1, so listeners otherwise fail.\n"
         + "ip link set lo up\n"
         + "ip -4 addr show lo | grep -q '127\\.0\\.0\\.1/' || ip addr add 127.0.0.1/8 dev lo"
     )
@@ -137,9 +144,10 @@ def patch_boot(root: Path) -> None:
         'log "bt: driver load failed: $(cat /tmp/insmod-bt.err)"\n'
         'fi'
     )
-    if bluetooth_line not in contents:
-        raise SystemExit("pinned base boot script no longer has its Bluetooth setup line")
-    contents = contents.replace(bluetooth_line, bluetooth_replacement, 1)
+    if target == "checkers":
+        if bluetooth_line not in contents:
+            raise SystemExit("pinned base boot script no longer has its Bluetooth setup line")
+        contents = contents.replace(bluetooth_line, bluetooth_replacement, 1)
 
     # BusyBox's reboot applet can stop init-managed services without reaching
     # the kernel restart on Checkers. Tater's helper issues the reboot syscall
@@ -475,6 +483,9 @@ rollback)
     a|b)
         [ -x "$APP/slots/$previous/tater-echo" ] && [ -x "$APP/slots/$previous/tater-show" ] || exit 1
         ln -s "slots/$previous" "$APP/current.rollback" || exit 1
+        # Plain mv follows a symlink to a directory and moves the rollback
+        # link inside that slot. Remove the old link first on all mv variants.
+        rm -f "$APP/current" || exit 1
         mv -f "$APP/current.rollback" "$APP/current" || exit 1
         ;;
     *) exit 1;;

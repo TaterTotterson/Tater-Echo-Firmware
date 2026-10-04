@@ -53,11 +53,18 @@ func (c *Client) wakeVerifierSettings() (windowMS, timeoutMS int) {
 }
 
 func (c *Client) wakeVerifierAudio(windowMS int) []byte {
+	return c.wakeVerifierAudioWithFrames(windowMS, nil)
+}
+
+func (c *Client) wakeVerifierAudioWithFrames(windowMS int, preferredFrames [][]byte) []byte {
 	requested := SampleRate * 2 * windowMS / 1000
 	minimum := SampleRate * 2 * wakeVerifierMinMS / 1000
-	c.audioMu.Lock()
-	frames := cloneFrames(c.preRoll)
-	c.audioMu.Unlock()
+	frames := cloneFrames(preferredFrames)
+	if len(frames) == 0 {
+		c.audioMu.Lock()
+		frames = cloneFrames(c.preRoll)
+		c.audioMu.Unlock()
+	}
 	total := 0
 	for _, frame := range frames {
 		total += len(frame)
@@ -76,12 +83,16 @@ func (c *Client) wakeVerifierAudio(windowMS int) []byte {
 }
 
 func (c *Client) queueWakeVerification(wakeWord string, score float32, enforce bool) bool {
+	return c.queueWakeVerificationWithFrames(wakeWord, score, enforce, nil)
+}
+
+func (c *Client) queueWakeVerificationWithFrames(wakeWord string, score float32, enforce bool, preferredFrames [][]byte) bool {
 	windowMS, timeoutMS := c.wakeVerifierSettings()
-	pcm := c.wakeVerifierAudio(windowMS)
+	pcm := c.wakeVerifierAudioWithFrames(windowMS, preferredFrames)
 	if len(pcm) == 0 {
 		log.Printf("[tater-native] wake verification skipped: capture ring not ready")
 		if enforce {
-			return c.startWake(wakeWord, score)
+			return c.startWakeWithPreRoll(wakeWord, score, preferredFrames)
 		}
 		return false
 	}
@@ -111,7 +122,10 @@ func (c *Client) queueWakeVerification(wakeWord string, score float32, enforce b
 			}
 		}
 	}
-	pending := &wakeVerification{enforce: enforce, wakeWord: wakeWord, score: score}
+	pending := &wakeVerification{
+		enforce: enforce, wakeWord: wakeWord, score: score,
+		preRoll: cloneTailFrames(preferredFrames, preRollChunks),
+	}
 	c.verifyRequests[requestID] = pending
 	c.verifyLastReason = "pending"
 	if enforce {
@@ -176,7 +190,7 @@ func (c *Client) completeWakeVerification(requestID uint32, accepted, available 
 
 	log.Printf("[tater-native] wake verification result request=%d accepted=%t available=%t enforced=%t reason=%s", requestID, accepted, available, pending.enforce, reason)
 	if pending.enforce && (accepted || failOpen) {
-		return c.startWake(pending.wakeWord, pending.score)
+		return c.startWakeWithPreRoll(pending.wakeWord, pending.score, pending.preRoll)
 	}
 	return false
 }

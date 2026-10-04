@@ -279,6 +279,20 @@ func NewButtonControllerForTarget(target string) (*EvDevController, error) {
 		// in the GPIO boot log is not this control.
 		controller.muteCode = 116
 		controller.stopAceButton = false
+	} else if strings.EqualFold(strings.TrimSpace(target), "rook") {
+		data, err := os.ReadFile("/proc/bus/input/devices")
+		if err != nil {
+			return nil, err
+		}
+		mutePath := inputPathByName(data, "mtk-kpd")
+		volumePath := inputPathByName(data, "keys")
+		if mutePath == "" || volumePath == "" {
+			return nil, errors.New("rook mtk-kpd or keys input device not found")
+		}
+		controller.dotPath, controller.volumePath = mutePath, volumePath
+		controller.actionCode = 0 // touchscreen hold handles intercom
+		controller.muteCode = 116 // KEY_POWER on the Spot's mtk-kpd
+		controller.stopAceButton = false
 	}
 	if err := controller.Init(); err != nil {
 		return nil, err

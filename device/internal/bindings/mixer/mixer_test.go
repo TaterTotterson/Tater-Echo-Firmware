@@ -166,3 +166,24 @@ func TestBiscuitSpeakerAmpIsActiveHigh(t *testing.T) {
 		t.Fatalf("biscuit amp writes = %v", f.sets)
 	}
 }
+
+func TestRookMixerUsesTwoADCsAndActiveHighAmp(t *testing.T) {
+	f := &fake{}
+	Use(f)
+	ConfigureTarget("rook")
+	defer func() { ConfigureTarget("biscuit"); Use(unavailable{}) }()
+	if err := SetSpeakerEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if failed := SetADCMute(true); failed != 0 {
+		t.Fatalf("SetADCMute failed %d writes", failed)
+	}
+	want := [][]string{
+		{"Ext_Speaker_Amp_Switch", "On"},
+		{"ADC_A Left Mute", "1"}, {"ADC_A Right Mute", "1"},
+		{"ADC_B Left Mute", "1"}, {"ADC_B Right Mute", "1"},
+	}
+	if !reflect.DeepEqual(f.sets, want) {
+		t.Fatalf("rook mixer writes = %v, want %v", f.sets, want)
+	}
+}

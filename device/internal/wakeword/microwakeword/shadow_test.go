@@ -150,6 +150,28 @@ func TestShadowPushBytesDecodesLittleEndian(t *testing.T) {
 	}
 }
 
+func TestShadowPushBytesAtPreservesCaptureIdentity(t *testing.T) {
+	engine := &fakeShadowEngine{batches: [][]float32{{0.9}}}
+	crossed := make(chan time.Time, 1)
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, func(_ float32, at time.Time) {
+		crossed <- at
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	marker := time.Now().Add(-2 * time.Second)
+	s.PushBytesAt(make([]byte, 1280*2), marker)
+	select {
+	case got := <-crossed:
+		if !got.Equal(marker) {
+			t.Fatalf("crossing timestamp = %v, want %v", got, marker)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for timestamped crossing")
+	}
+}
+
 func TestShadowPushNeverBlocksAndCountsDrops(t *testing.T) {
 	engine := &fakeShadowEngine{delay: 200 * time.Millisecond}
 	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)

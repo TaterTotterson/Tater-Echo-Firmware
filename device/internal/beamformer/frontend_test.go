@@ -40,6 +40,11 @@ func TestTargetFrontEndsStayDistinct(t *testing.T) {
 	if _, ok := NewForTarget("checkers").(*CheckersFrontEnd); !ok {
 		t.Fatal("checkers did not get four-channel front end")
 	}
+	for _, target := range []string{"biscuit", "rook", "checkers"} {
+		if _, ok := NewForTarget(target).(WakeArray); !ok {
+			t.Fatalf("%s did not expose its independent wake beams", target)
+		}
+	}
 }
 
 func checkersRaw(left, right []int32) []byte {
@@ -76,7 +81,7 @@ func pcmRMS(pcm []byte) float64 {
 }
 
 func TestCheckersFrontEndFindsAndAlignsInterMicDelay(t *testing.T) {
-	const delay = 3
+	const delay = 1
 	left := checkersNoise(periodFrames, 1, 300000)
 	right := make([]int32, periodFrames)
 	copy(right[delay:], left[:periodFrames-delay])
@@ -84,7 +89,7 @@ func TestCheckersFrontEndFindsAndAlignsInterMicDelay(t *testing.T) {
 	front := NewCheckers()
 	mono, _ := front.Process(checkersRaw(left, right), -1, 1)
 	diag := front.Diagnostics()
-	if diag.DelaySamples < 2.5 || diag.DelaySamples > 3.5 {
+	if diag.DelaySamples < 0.5 || diag.DelaySamples > 1.5 {
 		t.Fatalf("delay = %.3f samples, want about %d", diag.DelaySamples, delay)
 	}
 	if diag.Confidence < 0.90 || diag.Coherence < 0.90 {
@@ -130,7 +135,7 @@ func TestCheckersFrontEndCanCalibrateFromBroadsideSpeech(t *testing.T) {
 }
 
 func TestCheckersFrontEndDoesNotLearnDirectionalSpeechAsADCMismatch(t *testing.T) {
-	const delay = 3
+	const delay = 1
 	front := NewCheckers()
 	for block := 0; block < 30; block++ {
 		left := checkersNoise(periodFrames, uint32(600+block), 280000)
@@ -154,7 +159,7 @@ func TestCheckersSpatialSuppressionAndFastSpeechRecovery(t *testing.T) {
 		right := checkersNoise(periodFrames, uint32(900+block), 250000)
 		noisy, _ = front.Process(checkersRaw(left, right), -1, 1)
 	}
-	if gain := front.Diagnostics().NoiseGain; gain >= 0.80 || gain < checkersNoiseMinGain {
+	if gain := front.Diagnostics().NoiseGain; gain >= 0.80 || gain < checkersWakeNoiseMinGain {
 		t.Fatalf("diffuse-noise gain = %.3f, want calibrated conservative suppression", gain)
 	}
 	if pcmRMS(noisy) == 0 {
@@ -172,6 +177,52 @@ func TestCheckersSpatialSuppressionAndFastSpeechRecovery(t *testing.T) {
 	}
 }
 
+func TestCheckersSpeechLockDoesNotChaseCompetingDirection(t *testing.T) {
+	const delay = 1
+	front := NewCheckers()
+
+	// The user's speech arrives at the right microphone one sample later,
+	// matching Checkers' measured physical aperture.
+	user := checkersNoise(periodFrames, 801, 260000)
+	right := make([]int32, periodFrames)
+	copy(right[delay:], user[:periodFrames-delay])
+	front.PrepareSpeechLock()
+	front.Process(checkersRaw(user, right), -1, 1)
+	front.LockCurrent(true)
+	locked := front.Diagnostics().DelaySamples
+	if locked < 0.5 || locked > 1.5 {
+		t.Fatalf("locked delay = %.2f, want user near +%d", locked, delay)
+	}
+
+	// A sustained source from the opposite side must be treated as off-beam,
+	// not become the new steering target while the user's turn is active.
+	for block := 0; block < 40; block++ {
+		opposite := checkersNoise(periodFrames, uint32(900+block), 260000)
+		left := make([]int32, periodFrames)
+		copy(left[delay:], opposite[:periodFrames-delay])
+		front.Process(checkersRaw(left, opposite), -1, 1)
+	}
+	diag := front.Diagnostics()
+	if math.Abs(diag.DelaySamples-locked) > 0.01 {
+		t.Fatalf("competing source moved locked delay %.2f -> %.2f", locked, diag.DelaySamples)
+	}
+	if diag.NoiseGain >= 0.65 || diag.NoiseGain < checkersLockedNoiseMinGain {
+		t.Fatalf("off-beam gain = %.3f, want stronger locked-turn rejection", diag.NoiseGain)
+	}
+
+	// Ending the turn restores adaptive acquisition for the next user.
+	front.Unlock()
+	for block := 0; block < 12; block++ {
+		opposite := checkersNoise(periodFrames, uint32(1200+block), 260000)
+		left := make([]int32, periodFrames)
+		copy(left[delay:], opposite[:periodFrames-delay])
+		front.Process(checkersRaw(left, opposite), -1, 1)
+	}
+	if got := front.Diagnostics().DelaySamples; got > -0.5 {
+		t.Fatalf("unlocked pair did not acquire next direction: delay %.2f", got)
+	}
+}
+
 func TestCheckersFrontEndFallsBackWhenOneMicIsSilent(t *testing.T) {
 	left := checkersNoise(periodFrames, 42, 300000)
 	right := make([]int32, periodFrames)
@@ -183,5 +234,71 @@ func TestCheckersFrontEndFallsBackWhenOneMicIsSilent(t *testing.T) {
 	want := float64(300000) / math.Sqrt(3) / 256
 	if got := pcmRMS(mono); got < want*0.90 {
 		t.Fatalf("fallback RMS = %.1f, want unhalved live mic near %.1f", got, want)
+	}
+	beams := front.WakeBeams(checkersRaw(left, right), 1)
+	if len(beams) != 1 || beams[0].Direction != checkersOmniPath || pcmRMS(beams[0].PCM) < want*0.90 {
+		t.Fatalf("one-mic wake fallback = %+v, want one unhalved omni path", beams)
+	}
+}
+
+func TestCheckersMeasuredWakeBeamsCoverBothSides(t *testing.T) {
+	source := checkersNoise(periodFrames, 991, 300000)
+
+	// A source on the physical left reaches ch1 first; the measured left beam
+	// delays ch1 by 0.86 samples to align it with ch0.
+	leftDelayed := make([]int32, periodFrames)
+	copy(leftDelayed[1:], source[:periodFrames-1])
+	leftFront := NewCheckers()
+	leftRaw := checkersRaw(leftDelayed, source)
+	leftFront.Process(leftRaw, -1, 1)
+	leftBeams := leftFront.WakeBeams(leftRaw, 1)
+	if len(leftBeams) != 2 || leftBeams[0].Direction != checkersLeftPath || leftBeams[1].Direction != checkersRightPath {
+		t.Fatalf("left-source wake beams = %+v", leftBeams)
+	}
+	if good, wrong := pcmRMS(leftBeams[0].PCM), pcmRMS(leftBeams[1].PCM); good < wrong*1.20 {
+		t.Fatalf("left beam did not improve measured-side pickup: correct=%.1f wrong=%.1f", good, wrong)
+	}
+
+	// The right side is the mirror: ch0 first and ch1 delayed.
+	rightDelayed := make([]int32, periodFrames)
+	copy(rightDelayed[1:], source[:periodFrames-1])
+	rightFront := NewCheckers()
+	rightRaw := checkersRaw(source, rightDelayed)
+	rightFront.Process(rightRaw, -1, 1)
+	rightBeams := rightFront.WakeBeams(rightRaw, 1)
+	if good, wrong := pcmRMS(rightBeams[1].PCM), pcmRMS(rightBeams[0].PCM); good < wrong*1.20 {
+		t.Fatalf("right beam did not improve measured-side pickup: correct=%.1f wrong=%.1f", good, wrong)
+	}
+}
+
+func TestCheckersWinningWakeBeamCarriesIntoTurn(t *testing.T) {
+	source := checkersNoise(periodFrames, 707, 260000)
+	delayed := make([]int32, periodFrames)
+	copy(delayed[1:], source[:periodFrames-1])
+	raw := checkersRaw(delayed, source)
+	front := NewCheckers()
+	front.Process(raw, -1, 1)
+	front.LockWakeDirection(checkersLeftPath, true)
+	front.Process(raw, -1, 1)
+	diag := front.Diagnostics()
+	if diag.OutputChannel != checkersLeftPath || math.Abs(diag.DelaySamples+checkersBeamDelaySamples) > 0.001 {
+		t.Fatalf("winning left beam was not preserved: %+v", diag)
+	}
+}
+
+func TestCheckersBatchKeepsSpeechBearingWhenFinalPeriodIsQuiet(t *testing.T) {
+	const periods = 5
+	source := checkersNoise(periodFrames*(periods-1), 818, 280000)
+	delayed := make([]int32, len(source))
+	copy(delayed[1:], source[:len(source)-1])
+	left := append(source, make([]int32, periodFrames)...)
+	right := append(delayed, make([]int32, periodFrames)...)
+
+	front := NewCheckers()
+	front.PrepareSpeechLock()
+	front.Process(checkersRaw(left, right), -1, 1)
+	front.LockCurrent(true)
+	if got := front.Diagnostics().DelaySamples; got < 0.5 || got > 1.5 {
+		t.Fatalf("quiet final period replaced the speech-bearing batch delay: %.2f", got)
 	}
 }

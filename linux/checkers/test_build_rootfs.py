@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +14,29 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class BootPatchTests(unittest.TestCase):
+    def test_app_rollback_replaces_active_slot_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            for slot in ("a", "b"):
+                path = app / "slots" / slot
+                path.mkdir(parents=True)
+                for name in ("tater-echo", "tater-show"):
+                    binary = path / name
+                    binary.write_text("#!/bin/sh\n")
+                    binary.chmod(0o755)
+            (app / "current").symlink_to("slots/b")
+            (app / "pending.env").write_text("previous=a\n")
+            script = Path(directory) / "tater-app"
+            script.write_text(build_rootfs.TATER_APP.replace(
+                "APP=/data/tater-linux/app", f"APP={shlex.quote(str(app))}", 1))
+
+            result = subprocess.run(["sh", str(script), "rollback"],
+                                    capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("slots/a", os.readlink(app / "current"))
+            self.assertFalse((app / "pending.env").exists())
+            self.assertFalse((app / "slots/b/current.rollback").exists())
+
     def test_patch_boot_adds_tater_health_and_hardware_contract(self):
         source = """#!/bin/sh
 LOGDIR=/data/techo5-linux

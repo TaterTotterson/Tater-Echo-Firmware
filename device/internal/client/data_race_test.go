@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/beamformer"
 	"github.com/gorilla/websocket"
 )
 
@@ -40,6 +41,88 @@ func TestNativeListeningStateAlwaysUsesSpeechLock(t *testing.T) {
 	d.ApplyNativeBeamState("idle")
 	if got := atomic.LoadInt32(&d.beamReq); got != beamReqUnlock {
 		t.Fatalf("native idle request = %d, want unlock %d", got, beamReqUnlock)
+	}
+}
+
+func TestNativeWakeCarriesWinningBeamIntoListening(t *testing.T) {
+	d := NewDataClient("winner-test", nil, nil, aec.New())
+	d.wakeLaneDir[1].Store(4)
+	if !d.ClaimWakeLane(1, time.Now()) {
+		t.Fatal("first wake lane was not accepted")
+	}
+	d.ApplyNativeBeamState("listening")
+	if got := atomic.LoadInt32(&d.beamReq); got != beamReqLock {
+		t.Fatalf("winning wake request = %d, want exact lock %d", got, beamReqLock)
+	}
+	d.lockWakeOrBest(true)
+	if got := d.beam.(*beamformer.Beamformer).LockedAngle(); got != 210 {
+		t.Fatalf("winning wake angle = %.0f, want 210", got)
+	}
+}
+
+func TestWakeScorerCountIsTargetSpecific(t *testing.T) {
+	if got := NewDataClientForTarget("biscuit", nil, nil, aec.New(), "biscuit").WakeScorerCount(); got != 2 {
+		t.Fatalf("Biscuit wake scorer count = %d, want 2", got)
+	}
+	checkers := NewDataClientForTarget("checkers", nil, nil, aec.New(), "checkers")
+	if got := checkers.WakeScorerCount(); got != 2 {
+		t.Fatalf("Checkers wake scorer count = %d, want 2", got)
+	}
+	if !checkers.ClaimWakeLane(0, time.Now()) {
+		t.Fatal("Checkers first beam crossing was not accepted")
+	}
+	checkers.ApplyNativeBeamState("listening")
+	if got := atomic.LoadInt32(&checkers.beamReq); got != beamReqLock {
+		t.Fatalf("Checkers listening request = %d, want winning-beam lock %d", got, beamReqLock)
+	}
+}
+
+func TestAdjacentWakeBeamCrossingsCollapseToOneClaim(t *testing.T) {
+	d := NewDataClient("claim-test", nil, nil, aec.New())
+	d.wakeLaneDir[0].Store(2)
+	d.wakeLaneDir[1].Store(3)
+	now := time.Now()
+	if !d.ClaimWakeLane(0, now) {
+		t.Fatal("first candidate crossing was rejected")
+	}
+	if d.ClaimWakeLane(1, now) {
+		t.Fatal("adjacent candidate crossing escaped shared refractory")
+	}
+	if got := d.wakeWinnerDir.Load(); got != 2 {
+		t.Fatalf("winner direction = %d, want first lane direction 2", got)
+	}
+}
+
+func TestWakeLaneClaimUsesDirectionAtCaptureTime(t *testing.T) {
+	d := NewDataClient("assignment-test", nil, nil, aec.New())
+	first := time.Now()
+	d.assignWakeLane(0, 1, first)
+	d.assignWakeLane(0, 4, first.Add(time.Second))
+	if !d.ClaimWakeLane(0, first.Add(500*time.Millisecond)) {
+		t.Fatal("historical candidate crossing was rejected")
+	}
+	if got := d.wakeWinnerDir.Load(); got != 1 {
+		t.Fatalf("historical winner direction = %d, want 1", got)
+	}
+}
+
+func TestWakeLaneClaimSnapshotsWinningBeamThroughCallback(t *testing.T) {
+	d := NewDataClient("winner-audio-test", nil, nil, aec.New())
+	base := time.Now()
+	d.recordWakeLaneAudio(0, base, []byte{1, 0})
+	d.recordWakeLaneAudio(1, base, []byte{7, 0})
+	d.recordWakeLaneAudio(1, base.Add(80*time.Millisecond), []byte{8, 0})
+	d.recordWakeLaneAudio(1, base.Add(160*time.Millisecond), []byte{9, 0})
+	d.wakeLaneDir[1].Store(1)
+	if !d.ClaimWakeLane(1, base.Add(80*time.Millisecond)) {
+		t.Fatal("winning wake lane was not accepted")
+	}
+	frames := d.TakeWinningWakeAudio()
+	if len(frames) != 3 || frames[0][0] != 7 || frames[1][0] != 8 || frames[2][0] != 9 {
+		t.Fatalf("winning pre-roll = %v, want only lane 1 through its callback", frames)
+	}
+	if again := d.TakeWinningWakeAudio(); len(again) != 0 {
+		t.Fatalf("winning pre-roll was not one-shot: %v", again)
 	}
 }
 

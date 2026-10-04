@@ -8,10 +8,12 @@ import gzip
 import hashlib
 import io
 import json
+import lzma
 import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -77,6 +79,39 @@ def deterministic_files_tar(entries: dict[str, bytes], destination: Path,
                     info.mtime = 0
                     archive.addfile(info, io.BytesIO(contents))
 
+
+def verify_rook_factory_inputs(rootfs: Path, boot: Path, version: str) -> None:
+    image = boot.read_bytes()
+    if len(image) > 16 * 1024 * 1024 or image[:8] != b"ANDROID!":
+        raise SystemExit("Rook boot image is invalid or exceeds the boot partition")
+    try:
+        kernel_size, _, ramdisk_size, _, _, _, _, page, header_version = struct.unpack_from(
+            "<9I", image, 8)
+        if header_version != 0 or page != 2048:
+            raise ValueError("unexpected Rook boot header")
+        ramdisk_at = page + ((kernel_size + page - 1) // page) * page
+        ramdisk = lzma.decompress(image[ramdisk_at:ramdisk_at + ramdisk_size])
+    except (struct.error, lzma.LZMAError, ValueError) as error:
+        raise SystemExit(f"Rook boot image has no valid rescue ramdisk: {error}") from error
+    if b"INSTALLING TATER" not in ramdisk or b"TATER RECOVERY" not in ramdisk or \
+            b"TATER LINUX" not in ramdisk:
+        raise SystemExit("Rook boot image lacks the branded rescue screen")
+    with tarfile.open(rootfs, "r:gz") as archive:
+        members = {member.name.lstrip("./"): member for member in archive.getmembers()}
+        if any(name.startswith("vendor/") and member.isfile() for name, member in members.items()):
+            raise SystemExit("Rook rootfs must not include device-specific vendor files")
+        release = members.get("etc/tater-release")
+        board = members.get("etc/techo5/device.conf")
+        if release is None or board is None:
+            raise SystemExit("Rook rootfs is missing release or board metadata")
+        release_file = archive.extractfile(release)
+        board_file = archive.extractfile(board)
+        if release_file is None or board_file is None:
+            raise SystemExit("Rook rootfs release or board metadata is unreadable")
+        if f"Rook {version}" not in release_file.read().decode() or \
+                "STORE_DEV=/dev/mmcblk0p11" not in board_file.read().decode():
+            raise SystemExit("Rook rootfs target, version, or slot partition is wrong")
+
 def build(version: str, target: str, output: Path) -> list[Path]:
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
         raise SystemExit("version must look like v0.1.0")
@@ -91,14 +126,18 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         ota = output / f"{stem}-ota.bin"
         copy(REPO / "device/build/server", ota, 0o755)
         artifacts["ota"] = ota
-    elif target == "checkers":
-        configured_rootfs = os.getenv("TATER_CHECKERS_ROOTFS", "").strip()
+    elif target in {"checkers", "rook"}:
+        prefix = target.upper()
+        configured_rootfs = os.getenv(f"TATER_{prefix}_ROOTFS", "").strip()
         rootfs_source = (
             Path(configured_rootfs) if configured_rootfs
-            else REPO / "device/build" / f"tater-checkers-rootfs-{version}.tar.gz"
+            else REPO / "device/build" / (f"tater-checkers-rootfs-{version}.tar.gz"
+                                           if target == "checkers"
+                                           else f"rook/tater-rook-rootfs-{version}.tar.gz")
         )
-        server = REPO / "device/build/tater-echo"
-        show = REPO / "device/build/tater-show-linux"
+        build_dir = REPO / "device/build" / ("rook" if target == "rook" else "")
+        server = build_dir / "tater-echo"
+        show = build_dir / ("tater-show" if target == "rook" else "tater-show-linux")
         for source in (rootfs_source, server, show):
             if not source.is_file():
                 raise SystemExit(f"required release input is missing: {source}")
@@ -106,7 +145,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         app_files = {"tater-echo": server.read_bytes(), "tater-show": show.read_bytes()}
         app_manifest = {
             "schema": 1,
-            "target": "checkers",
+            "target": target,
             "base_os": "tater-linux",
             "version": version,
             "files": {
@@ -160,7 +199,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 raise SystemExit("expected exactly one BusyBox source tarball")
             inputs[f"sources/{busybox_sources[0].name}"] = (busybox_sources[0], 0o644)
             inputs["sources/busybox-LICENSE"] = (REPO / "emos/build/bb/busybox-LICENSE", 0o644)
-        else:
+        elif target == "checkers":
             configured_boot = os.getenv("TATER_CHECKERS_BOOT_IMAGE", "").strip()
             boot_source = (
                 Path(configured_boot) if configured_boot
@@ -177,6 +216,26 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "linux/checkers/provision_console.py", 0o755),
                 "tools/techo5/install-show.py": (
                     REPO / "factory/checkers-linux/tools/techo5/install-show.py", 0o755),
+                "tools/techo5/techo5lib.py": (
+                    REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
+                "tools/techo5/LICENSE": (
+                    REPO / "factory/checkers-linux/tools/techo5/LICENSE", 0o644),
+            }
+        else:
+            configured_boot = os.getenv("TATER_ROOK_BOOT_IMAGE", "").strip()
+            boot_source = (Path(configured_boot) if configured_boot else
+                           REPO / "device/build/rook/tater-rook-boot.img")
+            if not boot_source.is_file():
+                raise SystemExit(f"required Rook boot image is missing: {boot_source}")
+            verify_rook_factory_inputs(rootfs_source, boot_source, version)
+            inputs = {
+                "install.sh": (REPO / "factory/rook-linux/install.sh", 0o755),
+                "install.py": (REPO / "factory/rook-linux/install.py", 0o755),
+                "README.md": (REPO / "factory/rook-linux/README.md", 0o644),
+                "LICENSE": (REPO / "LICENSE", 0o644),
+                "NOTICE.md": (REPO / "NOTICE.md", 0o644),
+                "payload/rootfs.tar.gz": (rootfs_source, 0o644),
+                "payload/boot.img": (boot_source, 0o644),
                 "tools/techo5/techo5lib.py": (
                     REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
                 "tools/techo5/LICENSE": (
@@ -205,7 +264,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             "version": version,
             "files": bundle_files,
         }
-        if target == "checkers":
+        if target in {"checkers", "rook"}:
             bundle_manifest["base_os"] = "tater-linux"
         write_json(factory / "bundle-manifest.json", bundle_manifest)
         archive = output / f"{stem}-factory.tar.gz"

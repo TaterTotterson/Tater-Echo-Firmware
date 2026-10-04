@@ -91,6 +91,7 @@ type Snapshot struct {
 	DeviceName       string        `json:"device_name"`
 	AssistantName    string        `json:"assistant_name,omitempty"`
 	Room             string        `json:"room"`
+	DisplayTheme     string        `json:"display_theme,omitempty"`
 	Message          string        `json:"message,omitempty"`
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolMessage      string        `json:"tool_message,omitempty"`

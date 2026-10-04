@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const checkersLinuxState = "/data/tater-linux"
+const linuxAppState = "/data/tater-linux"
 
 type linuxAppFile struct {
 	SHA256 string `json:"sha256"`
@@ -37,14 +37,14 @@ type linuxAppManifest struct {
 var linuxAppRequiredFiles = []string{"tater-echo", "tater-show"}
 var linuxAppVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
 
-// installCheckersLinux follows Biscuit's fast A/B application transaction.
+// installLinuxApp follows Biscuit's fast A/B application transaction.
 // The immutable Linux rootfs and vendor layer change only through USB/rescue.
 // Routine OTA stages the daemon and renderer on writable /data and atomically
 // flips one symlink, so it never remounts its own live root filesystem.
-func (i *OTAInstaller) installCheckersLinux(ctx context.Context, req OTARequest, report func(string, int, string)) error {
+func (i *OTAInstaller) installLinuxApp(ctx context.Context, req OTARequest, report func(string, int, string)) error {
 	stateDir := i.StateDir
 	if stateDir == "" {
-		stateDir = checkersLinuxState
+		stateDir = linuxAppState
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("create Tater Linux OTA state: %w", err)
@@ -54,7 +54,7 @@ func (i *OTAInstaller) installCheckersLinux(ctx context.Context, req OTARequest,
 	if err := i.downloadLinuxApp(ctx, req, bundle, report); err != nil {
 		return err
 	}
-	manifest, err := readLinuxAppManifest(bundle)
+	manifest, err := readLinuxAppManifest(bundle, i.Target)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (i *OTAInstaller) downloadLinuxApp(ctx context.Context, req OTARequest, des
 	return nil
 }
 
-func readLinuxAppManifest(filename string) (linuxAppManifest, error) {
+func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 	archive, closeArchive, err := openLinuxAppArchive(filename)
 	if err != nil {
 		return linuxAppManifest{}, err
@@ -190,7 +190,7 @@ func readLinuxAppManifest(filename string) (linuxAppManifest, error) {
 			return manifest, fmt.Errorf("Linux application contains unexpected path %q", header.Name)
 		}
 	}
-	if manifest.Schema != 1 || manifest.Target != "checkers" || manifest.BaseOS != "tater-linux" || !linuxAppVersionPattern.MatchString(manifest.Version) {
+	if manifest.Schema != 1 || manifest.Target != target || manifest.BaseOS != "tater-linux" || !linuxAppVersionPattern.MatchString(manifest.Version) {
 		return manifest, errors.New("Linux application identity is incomplete")
 	}
 	if len(manifest.Files) != len(linuxAppRequiredFiles) {

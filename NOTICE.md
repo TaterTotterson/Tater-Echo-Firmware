@@ -13,7 +13,9 @@ with redistributed binaries and factory bundles.
 | TFLite Micro and microfrontend dependencies | `device/internal/wakeword/microwakeword/native/` build | Apache-2.0 and BSD-3-Clause |
 | EchoMuse emOS and Biscuit hardware work | `emos/`, `factory/biscuit/`, Biscuit firmware | MIT (Wil Bowes) |
 | TECHO5 Checkers Linux tooling, camera driver, and direct ALSA speaker path | `linux/checkers/`, `device/internal/checkersalsa/`, generated rootfs, factory bundle | MIT |
+| TECHO5 Spot Rook Linux hardware enablement and rescue platform | `linux/rook/`, generated rootfs, Rook factory bundle | MIT |
 | Linux kernel in the pinned TECHO5 Checkers boot image | Checkers factory bundle `payload/boot.img` | GPL-2.0 |
+| Linux kernel in the pinned TECHO5 Spot Rook boot image | Rook factory bundle `payload/boot.img` | GPL-2.0 |
 
 SpeexDSP is copyright Xiph.Org Foundation, Jean-Marc Valin, Analog Devices,
 and CSIRO. EchoMuse is copyright Wil Bowes; its MIT notice is preserved in
@@ -27,10 +29,17 @@ rootfs and factory bundle and included with the speaker source. Detailed wake-ru
 attribution is in
 [`device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md`](device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md).
 
+Rook Linux hardware enablement and rescue behavior derive from TECHO5 Spot by
+HuskerMinion. Its MIT license is embedded in the generated Rook rootfs and
+factory bundle. The Rook camera helper derives from TECHO5's MIT-licensed
+camera driver.
+
 The Checkers boot image contains a Linux 4.9.337 kernel rebuilt by TECHO5
 from [Amazon's published kernel source](https://github.com/amazon-oss/android_kernel_amazon_mt8163)
 with the Checkers changes described in [TECHO5's kernel notice](https://github.com/HuskerMinion/techo5/blob/main/NOTICE).
 Its GPL-2.0 terms are separate from this repository's MIT license.
+The Rook boot image likewise contains the TECHO5 Spot Linux 4.9.337 kernel;
+its GPL-2.0 terms remain separate from this repository's MIT license.
 
 ## BusyBox
 

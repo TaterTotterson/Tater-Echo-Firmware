@@ -169,9 +169,9 @@ func (d *Device) loadDefaults() {
 	d.BeamformingEnabled = envBool("BEAMFORMING_ENABLED", true)
 	agcEnabled := envBool("AGC_ENABLED", true)
 	d.AgcEnabled = &agcEnabled
-	// true to match em_db.DEFAULT_DEVICE_CONFIG, which now defaults AEC on
-	// because barge-in does. The controller's value reaches us on the first
-	// config push either way; this only governs the window before it.
+	// Echo AEC is firmware-owned and starts enabled. AEC_ENABLED remains an
+	// engineering/recovery override, but controller config cannot change it:
+	// the reference source and timing are calibrated per Echo target.
 	aecEnabled := envBool("AEC_ENABLED", true)
 	d.AecEnabled = &aecEnabled
 	d.AecDelayMs = envInt("AEC_DELAY_MS", 0)
@@ -259,12 +259,9 @@ func (d *Device) Apply(msg ConfigMessage) {
 	if msg.AgcEnabled != nil {
 		d.AgcEnabled = msg.AgcEnabled
 	}
-	if msg.AecEnabled != nil {
-		d.AecEnabled = msg.AecEnabled
-	}
-	if msg.AecDelayMs != nil {
-		d.AecDelayMs = *msg.AecDelayMs
-	}
+	// AecEnabled and AecDelayMs are deliberately ignored. Echo targets own
+	// their calibrated AEC policy locally, so even an older controller cannot
+	// disable it or replace its write-to-ear delay.
 	if msg.AecTailMs > 0 {
 		d.AecTailMs = msg.AecTailMs
 	}

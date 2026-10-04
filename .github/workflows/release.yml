@@ -2,8 +2,8 @@ name: Tater Echo Firmware Release
 
 # One annotated vX.Y.Z tag builds every target independently, then publishes a
 # single compatibility manifest. Biscuit produces factory + OTA firmware;
-# Checkers 2.x produces a Biscuit-style A/B application OTA and a USB Linux
-# factory bundle around pinned, hash-verified TECHO5 hardware enablement.
+# Checkers and Rook produce A/B application OTAs and USB Linux factory bundles
+# around pinned, hash-verified TECHO5 hardware enablement.
 # Biscuit remains on its existing emOS path.
 
 on:
@@ -305,10 +305,139 @@ jobs:
           path: release/
           if-no-files-found: error
 
+  rook:
+    name: Echo Spot 2017 (rook) Tater Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${{ inputs.version }}"
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::version must look like v0.1.0"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: device/go.mod
+          cache-dependency-path: device/go.sum
+
+      - name: Run Rook regression tests
+        run: |
+          python3 -m unittest discover -s linux/rook -p 'test_*.py'
+          python3 -m unittest discover -s factory/rook-linux -p 'test_*.py'
+          python3 -m unittest tools.test_package_echo_release
+          python3 -m py_compile \
+            linux/rook/build_boot.py \
+            linux/rook/build_rescue_fbprobe.py \
+            linux/rook/build_rootfs.py \
+            linux/rook/preflight.py \
+            factory/rook-linux/build_factory.py \
+            factory/rook-linux/install.py
+          cd device
+          go test -race \
+            ./cmd/tater-show-linux \
+            ./internal/bluetooth \
+            ./internal/platform \
+            ./internal/taternative \
+            ./internal/wifi \
+            ./internal/show \
+            ./internal/linuxinput \
+            ./internal/linuxscreen \
+            ./internal/wakeword/microwakeword \
+            ./internal/aec \
+            ./internal/beamformer \
+            ./internal/bindings/mixer \
+            ./internal/bindings/speaker \
+            ./pkg/board
+
+      - name: Fetch pinned Rook platform and boot inputs
+        run: |
+          mkdir -p linux/rook/inputs
+          base=https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25
+          for name in techo5-spot-rootfs.tar.gz techo5-spot-kernel-bt.Image.gz-dtb techo5-spot-rescue.tar; do
+            curl -fL "$base/$name" -o "linux/rook/inputs/$name"
+          done
+          curl -fL \
+            https://github.com/amazon-oss/releases/releases/download/lineage-18.1-rook-v0.3/lineage-18.1-20251108-UNOFFICIAL-rook.zip \
+            -o linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip
+          curl -fL \
+            https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.1-armv7.tar.gz \
+            -o linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz
+          echo 'c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2  linux/rook/inputs/techo5-spot-rootfs.tar.gz' | sha256sum -c -
+          echo '368738ee20b86dc3dc0268d3b4b145e67cca9666379ac26b2379abd6c9136298  linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb' | sha256sum -c -
+          echo 'a6f3860d0e3bd5b298ff310d8fe0d6a9a7885a2f6aa792e4134783df4cbf15bf  linux/rook/inputs/techo5-spot-rescue.tar' | sha256sum -c -
+          echo '2755428c124df88ffd3bc6a9c36db16bbe3b7e639883fd1092dc839ac5ae9d13  linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip' | sha256sum -c -
+          echo '50942d567e6ee422c16cb46d5c282ed9d8adc9007c2a483faf4148a18c64ce32  linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz' | sha256sum -c -
+          git clone --filter=blob:none https://github.com/HuskerMinion/techo5-spot.git /tmp/techo5-spot
+          git -C /tmp/techo5-spot checkout 8253a4a1d52dd37dd152dd1d435b97e541e0a191
+          git clone --filter=blob:none https://github.com/HuskerMinion/techo5.git /tmp/techo5
+          git -C /tmp/techo5 checkout 0f042360fbc22d798930cfd683d251606bfb7412
+
+      - name: Set up ARMv7 emulation
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Set up Go for pinned TECHO5 camera helper
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: false
+
+      - name: Build Rook boot and root filesystem
+        env:
+          TATER_ALPINE_ARMV7_IMAGE: alpine@${{ env.ALPINE_ARMV7_DIGEST }}
+        run: |
+          python3 linux/rook/build_boot.py \
+            --lineage-zip linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip \
+            --kernel linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb \
+            --rescue linux/rook/inputs/techo5-spot-rescue.tar \
+            --alpine-rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz \
+            --spot-source /tmp/techo5-spot \
+            --techo5 /tmp/techo5 \
+            --output device/build/rook/tater-rook-boot.img
+          sh linux/rook/build_linux.sh \
+            --version '${{ steps.version.outputs.version }}' \
+            --base-rootfs linux/rook/inputs/techo5-spot-rootfs.tar.gz \
+            --spot-source /tmp/techo5-spot --techo5 /tmp/techo5 \
+            --output device/build/rook/tater-rook-rootfs-${{ steps.version.outputs.version }}.tar.gz
+
+      - name: Package and verify Rook firmware
+        env:
+          TATER_ROOK_BOOT_IMAGE: device/build/rook/tater-rook-boot.img
+        run: |
+          python3 tools/package_echo_release.py \
+            --version '${{ steps.version.outputs.version }}' --target rook --output release
+          mkdir /tmp/tater-rook-factory-check
+          tar -xzf release/tater-echo-rook-${{ steps.version.outputs.version }}-factory.tar.gz \
+            -C /tmp/tater-rook-factory-check
+          /tmp/tater-rook-factory-check/*/install.sh --verify-bundle
+          tar -tzf release/tater-echo-rook-${{ steps.version.outputs.version }}-ota.tar.gz \
+            | grep -Ex 'manifest.json|tater-echo|tater-show'
+          (cd release && sha256sum -c SHA256SUMS)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tater-echo-rook-${{ steps.version.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
   publish:
     name: Publish combined release
     if: github.ref_type == 'tag'
-    needs: [biscuit, checkers]
+    needs: [biscuit, checkers, rook]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -336,12 +465,19 @@ jobs:
           name: tater-echo-checkers-${{ steps.version.outputs.version }}
           path: staging/checkers
 
+      - name: Download Rook artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-rook-${{ steps.version.outputs.version }}
+          path: staging/rook
+
       - name: Verify and merge target manifests
         run: |
           python3 tools/merge_release_manifests.py \
             --version '${{ steps.version.outputs.version }}' --output release \
             staging/biscuit/firmware-manifest.json \
-            staging/checkers/firmware-manifest.json
+            staging/checkers/firmware-manifest.json \
+            staging/rook/firmware-manifest.json
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Read annotated tag notes

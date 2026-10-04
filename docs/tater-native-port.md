@@ -10,20 +10,24 @@ Tater remains the authority for turns, settings, groups, media, and updates.
 Echo microphones
   -> target-specific capture and beam selection
   -> echo cancellation and signal conditioning
-  -> 16 kHz mono PCM
-       |-> microWakeWord -> wake event
-       |-> pre-roll and trainer rings
-       `-> Tater voice stream after acknowledgement
+  -> one or two 16 kHz mono wake beams
+       |-> microWakeWord -> winning beam
+       |-> winning-beam verifier and trainer pre-roll
+       `-> winning-beam STT pre-roll, then the locked live beam
 
 Tater
   -> reply/media audio, timers, settings, LED/display state, and OTA
-  -> Echo speaker, controls, LED ring, or Checkers screen
+  -> Echo speaker, controls, LED ring, or native Echo display
 ```
 
 Microphone capture never waits on inference or networking. Wake inference runs
 on its own bounded queue; a discontinuity resets the streaming frontend before
-scoring continues. The wake engine receives the same post-AEC PCM sent to Tater
-for speech recognition, preventing training/runtime audio skew.
+scoring continues. Each array lane retains a bounded timestamped audio ring.
+When a lane crosses, its exact post-AEC/high-pass audio is frozen and used by
+the optional STT wake verifier, wake-audio trainer upload, and the first two
+seconds sent to speech recognition. The live microphone then locks to that
+same acoustic path. Degraded and non-array capture safely retains the shared
+mono pre-roll.
 
 ## Wake engine
 
@@ -52,8 +56,10 @@ Each installation carries:
 ```
 
 Wake models, sounds, sensitivity, verification policy, and trainer behavior can
-change live from Tater. A two-second pre-roll protects the first command word
-while the server acknowledges and arbitrates a wake heard by multiple rooms.
+change live from Tater. A little over three seconds of each candidate beam is
+available to the trainer and verifier; the final two seconds protect the first
+command word while the server acknowledges and arbitrates a wake heard by
+multiple rooms.
 
 ## Target integrations
 
@@ -65,8 +71,8 @@ detects its kernel architecture, builds the matching image locally, verifies a
 byte-for-byte packer round trip, and reads back partition writes before reboot.
 No Amazon kernel or device tree is included in a release.
 
-The seven-mic capture, hardware playback reference, direction selection, and
-audio boundaries are documented in
+The seven-mic capture, hardware playback reference, two-lane beamformed wake
+frontend, seven-microphone steered speech beam, and audio boundaries are documented in
 [`biscuit-hardware.md`](biscuit-hardware.md).
 
 ### Checkers
@@ -77,14 +83,38 @@ touch, and a loopback-only camera helper owns the MediaTek ISP. The former
 system partition is an A/B rootfs store, persistent Tater state remains on
 userdata, and TWRP stays in recovery.
 
+Its two live microphone channels are level-calibrated and coherently combined.
+Measured left/right beams have independent wake state; the winning beam and its
+pre-roll carry through verification, training, and STT. Continued chat still
+acquires from the user's speech onset, then freezes the inter-microphone delay
+so competing dialogue cannot pull the pickup toward a new direction.
+
 See [`checkers.md`](checkers.md) and
 [`../factory/checkers-linux/README.md`](../factory/checkers-linux/README.md).
+
+### Rook
+
+Rook (the 2017 Echo Spot) runs Tater Linux with a native 480×480 round display,
+touch, BLE presence, and a loopback-only camera helper. Its measured PCM22
+layout has four microphones followed by two playback-loopback channels. The
+microphones form a compact square in front-right, rear-right, rear-left,
+front-left channel order.
+
+Rook continuously evaluates four geometry-correct fractional-delay beams and
+scores the two strongest with independent microWakeWord state. The accepted
+wake beam is held for STT; continued chat reacquires from its own speech onset
+through the same path. Its unlocked four-mic mix and four steered paths keep
+independent AEC state, and microphone-health fallback excludes failed channels
+without inventing a bearing.
+
+See [`../linux/rook/README.md`](../linux/rook/README.md) and
+[`../factory/rook-linux/README.md`](../factory/rook-linux/README.md).
 
 ## Setup and credentials
 
 An unconfigured Biscuit starts `Tater-Setup-XXXX`. Its captive portal stores
-Wi-Fi and a one-time Tater pairing code. A fresh Checkers does the same after
-USB installation; USB pairing is also available. After the first accepted hello,
+Wi-Fi and a one-time Tater pairing code. Fresh Checkers and Rook installations
+do the same after USB installation; USB pairing is also available. After the first accepted hello,
 the permanent device credential is written atomically with mode `0600` and
 used on later boots.
 

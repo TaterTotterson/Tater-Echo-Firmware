@@ -55,7 +55,7 @@ start_server.sh, which restarts it; do not run a second copy by hand).
   version         print the firmware version and build time
   platform-init   apply the board's platform settings, for emOS's boot
   setup-portal    serve the emOS first-boot captive portal on port 80
-  setup-mode      show Checkers' setup hotspot and pairing page
+  setup-mode      show the screen satellite's setup hotspot and pairing page
   help            this text
 `
 
@@ -74,8 +74,8 @@ func main() {
 			}
 			os.Exit(0)
 		case "setup-mode":
-			if err := runCheckersSetupMode(); err != nil {
-				log.Fatalf("Tater Checkers setup mode: %v", err)
+			if err := runScreenSetupMode(); err != nil {
+				log.Fatalf("Tater screen setup mode: %v", err)
 			}
 			os.Exit(0)
 		case "version", "--version", "-v":
@@ -155,6 +155,9 @@ func main() {
 	}
 
 	s := server.NewServer(buttonController, microphone, pcmSpeaker)
+	if client.FirmwareTarget == "rook" {
+		s.EnsureMuteStateFile()
+	}
 	srvPtr.Store(s)
 
 	// Local duck at the device's own wake crossing, confirmed or released by
@@ -175,9 +178,9 @@ func main() {
 			s.VolumeStepDown()
 		}
 	})
-	var checkersSetupResetting atomic.Bool
+	var screenSetupResetting atomic.Bool
 	buttonController.SetMuteCallback(func() {
-		if checkersSetupResetting.Load() {
+		if screenSetupResetting.Load() {
 			return // the held sixth press belongs to setup, not mute toggle
 		}
 		s.MuteToggle()
@@ -215,12 +218,12 @@ func main() {
 			cancel()
 		}
 		resetOptions := taternative.SetupResetOptions{}
-		if strings.EqualFold(client.FirmwareTarget, "checkers") {
-			// Checkers' /data/emos/wpa.conf is only a symlink. Clear the
+		if isScreenTarget(client.FirmwareTarget) {
+			// Screen targets' /data/emos/wpa.conf is only a symlink. Clear the
 			// actual station credentials when returning to hotspot setup.
 			resetOptions.WiFiPath = "/data/tater-linux/wpa_supplicant.conf"
 			resetOptions.Restart = func() {
-				if err := restartCheckersAfterSetup(); err != nil {
+				if err := restartScreenAfterSetup(); err != nil {
 					log.Printf("[setup] restart after reset: %v", err)
 				}
 			}
@@ -262,14 +265,14 @@ func main() {
 			}
 		},
 	})
-	// Checkers has no action button. Keep intercom on the touchscreen and use
+	// Screen targets have no action button. Keep intercom on the touchscreen and use
 	// a deliberately awkward physical recovery gesture instead: five short
 	// Mute presses, then hold the sixth for five seconds. Ordinary mute presses
 	// still work, so setup remains reachable even if the screen or Tater
 	// connection is unhealthy without adding an easy-to-hit setup button.
-	if strings.EqualFold(client.FirmwareTarget, "checkers") {
+	if isScreenTarget(client.FirmwareTarget) {
 		var mutedBeforeGesture atomic.Bool
-		checkersSetupGesture := actionbutton.New(actionbutton.Config{IntercomHold: 24 * time.Hour}, actionbutton.Callbacks{
+		screenSetupGesture := actionbutton.New(actionbutton.Config{IntercomHold: 24 * time.Hour}, actionbutton.Callbacks{
 			ShowClicks: func(count, target int) {
 				if count == 1 {
 					// The edge callback precedes the normal release toggle.
@@ -294,23 +297,23 @@ func main() {
 				})
 			},
 			SetupComplete: func() {
-				checkersSetupResetting.Store(true)
+				screenSetupResetting.Store(true)
 				// Five short Mute taps invert mute. Restore the starting state
 				// before reboot so setup does not unexpectedly start muted.
 				if s.IsMuted() != mutedBeforeGesture.Load() {
 					s.MuteToggle()
 				}
-				if err := resetToSetup("Checkers mute gesture", true); err != nil {
-					checkersSetupResetting.Store(false)
+				if err := resetToSetup("screen satellite mute gesture", true); err != nil {
+					screenSetupResetting.Store(false)
 					log.Printf("[tater-native] physical setup reset failed: %v", err)
 				}
 			},
 		})
 		buttonController.SetMuteEventCallback(func(down bool, _ int64) {
 			if down {
-				checkersSetupGesture.Press()
+				screenSetupGesture.Press()
 			} else {
-				checkersSetupGesture.Release()
+				screenSetupGesture.Release()
 			}
 		})
 	}
@@ -440,7 +443,7 @@ func main() {
 	// would either strand the adverts or put them back on the liveness
 	// channel. It is two map reads on a path that runs a few times a second.
 	nativeBLEEnabled := nativeMode && (strings.EqualFold(client.FirmwareTarget, "biscuit") ||
-		strings.EqualFold(client.FirmwareTarget, "checkers"))
+		isScreenTarget(client.FirmwareTarget))
 	bleScanner := bluetooth.NewScanner(func(batch []bluetooth.Advert) {
 		if nativeBLEEnabled {
 			if nativeClient == nil {
@@ -576,7 +579,10 @@ func main() {
 		applyPrimaryWake := func() {
 			applyMWWConfig(dataClient, nil,
 				func(wakeWord string, score float32, _ time.Time) bool {
-					return nativeClient != nil && nativeClient.Wake(wakeWord, score)
+					if nativeClient == nil {
+						return false
+					}
+					return nativeClient.WakeWithPreRoll(wakeWord, score, dataClient.TakeWinningWakeAudio())
 				},
 				func(wakeWord string, score float32, _ time.Time) {
 					if nativeClient != nil {
@@ -631,7 +637,7 @@ func main() {
 			deviceName = "Tater Echo " + deviceID
 		}
 		room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
-		if client.FirmwareTarget == "checkers" {
+		if isScreenTarget(client.FirmwareTarget) {
 			screen := show.New(show.DefaultAddress, show.Snapshot{
 				Phase: "offline", DeviceName: deviceName, Room: room,
 				Message: "Connecting to Tater", Muted: s.IsMuted(),
@@ -674,9 +680,15 @@ func main() {
 		}, taternative.Hooks{
 			ReplyDirection: s.SetReplyDirectionDegrees,
 			CameraSnapshot: func(captureCtx context.Context) (taternative.CameraSnapshot, error) {
+				if s.IsMuted() {
+					return taternative.CameraSnapshot{}, fmt.Errorf("camera unavailable while muted")
+				}
 				snapshot, err := show.CaptureCameraSnapshot(captureCtx, "")
 				if err != nil {
 					return taternative.CameraSnapshot{}, err
+				}
+				if s.IsMuted() {
+					return taternative.CameraSnapshot{}, fmt.Errorf("camera unavailable while muted")
 				}
 				return taternative.CameraSnapshot{
 					Image: snapshot.Image, ContentType: snapshot.ContentType,
@@ -814,6 +826,13 @@ func main() {
 			},
 			Settings: func(values map[string]any) (map[string]any, error) {
 				applied, err := applyTaterSettings(values, s, canceller, dataClient, nativePlayer)
+				if err == nil {
+					if value, ok := applied["display_theme"]; ok {
+						updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+							snapshot.DisplayTheme = normalizeDisplayTheme(value)
+						})
+					}
+				}
 				applyCurrentWake()
 				return applied, err
 			},
@@ -1318,9 +1337,13 @@ func main() {
 	os.Exit(0)
 }
 
-func runCheckersSetupMode() error {
-	if !strings.EqualFold(strings.TrimSpace(client.FirmwareTarget), "checkers") {
-		return fmt.Errorf("setup-mode is only supported by a checkers-target build")
+func isScreenTarget(target string) bool {
+	return strings.EqualFold(strings.TrimSpace(target), "checkers") || strings.EqualFold(strings.TrimSpace(target), "rook")
+}
+
+func runScreenSetupMode() error {
+	if !isScreenTarget(client.FirmwareTarget) {
+		return fmt.Errorf("setup-mode is only supported by a screen-target build")
 	}
 	log.SetOutput(os.Stdout)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -1328,12 +1351,16 @@ func runCheckersSetupMode() error {
 
 	ssidBytes, _ := os.ReadFile("/run/tater-setup-ssid")
 	ssid := strings.TrimSpace(string(ssidBytes))
-	room, message := "USB SETUP", "Connect USB and run the Tater Checkers installer"
+	deviceLabel, defaultName := "Echo Show 5", "Tater Checkers"
+	if strings.EqualFold(client.FirmwareTarget, "rook") {
+		deviceLabel, defaultName = "Echo Spot", "Tater Spot"
+	}
+	room, message := "USB SETUP", "Connect USB and run the Tater installer"
 	if ssid != "" {
 		room, message = ssid, "192.168.4.1"
 	}
 	screen := show.New(show.DefaultAddress, show.Snapshot{
-		Phase: "setup", Connected: false, DeviceName: "Tater Checkers",
+		Phase: "setup", Connected: false, DeviceName: defaultName,
 		Room:          room,
 		Message:       message,
 		VolumePercent: 50,
@@ -1349,14 +1376,14 @@ func runCheckersSetupMode() error {
 			options := taternative.SetupPortalOptions{
 				Listen:        "192.168.4.1:80",
 				WiFiPath:      "/data/tater-linux/wpa_supplicant.conf",
-				DeviceLabel:   "Echo Show 5",
-				DefaultName:   "Tater Checkers",
+				DeviceLabel:   deviceLabel,
+				DefaultName:   defaultName,
 				SetupSSID:     ssid,
 				SetupAddress:  "192.168.4.1",
 				WiFiConfig:    wifi.LinuxProvisioningConfig,
 				BootstrapLast: true,
 				Restart: func() {
-					if err := restartCheckersAfterSetup(); err != nil {
+					if err := restartScreenAfterSetup(); err != nil {
 						log.Printf("[setup] restart after pairing: %v", err)
 					}
 				},
@@ -1395,7 +1422,7 @@ func rebootTaterLinux() error {
 // direct restart; slotctl syncs its write and may leave /store writable only
 // because this path immediately reboots. Older rootfs images lack rearm, so
 // keep their existing recovery behavior if that command is unavailable.
-func restartCheckersAfterSetup() error {
+func restartScreenAfterSetup() error {
 	rearm := exec.Command("/usr/local/sbin/slotctl", "rearm")
 	rearm.Env = append(os.Environ(), "SLOTCTL_LEAVE_RW=1")
 	if output, err := rearm.CombinedOutput(); err != nil {
@@ -1410,12 +1437,46 @@ func restartCheckersAfterSetup() error {
 // sliding maxima are both retained: the former diagnoses model activity while
 // the latter is the actual value tested against the manifest threshold.
 func mwwShadowStats(dc *client.DataClient) interface{} {
-	sc := dc.MWWShadowScorer()
-	if sc == nil {
+	scorers := dc.MWWShadowScorers()
+	if len(scorers) == 0 {
 		return nil
 	}
-	st := sc.Drain()
+	var st microwakeword.ShadowStats
+	ready := true
+	for _, scorer := range scorers {
+		lane := scorer.Drain()
+		st.Chunks += lane.Chunks
+		st.Samples += lane.Samples
+		st.Scores += lane.Scores
+		st.Drops += lane.Drops
+		st.StaleDrops += lane.StaleDrops
+		st.Resets += lane.Resets
+		st.Crossings += lane.Crossings
+		st.CloseMisses += lane.CloseMisses
+		st.Errors += lane.Errors
+		if lane.MaxRawScore > st.MaxRawScore {
+			st.MaxRawScore = lane.MaxRawScore
+		}
+		if lane.MaxScore > st.MaxScore {
+			st.MaxScore = lane.MaxScore
+		}
+		if lane.MaxInferMs > st.MaxInferMs {
+			st.MaxInferMs = lane.MaxInferMs
+		}
+		if lane.MaxGapMs > st.MaxGapMs {
+			st.MaxGapMs = lane.MaxGapMs
+		}
+		if lane.MaxQueueMs > st.MaxQueueMs {
+			st.MaxQueueMs = lane.MaxQueueMs
+		}
+		if lane.LastErr != "" {
+			st.LastErr = lane.LastErr
+		}
+		st.Threshold, st.CloseMiss, st.WindowSize = lane.Threshold, lane.CloseMiss, lane.WindowSize
+		ready = ready && scorer.Ready()
+	}
 	return map[string]interface{}{
+		"beamScorers": len(scorers),
 		"chunks":      st.Chunks,
 		"samples":     st.Samples,
 		"scores":      st.Scores,
@@ -1431,7 +1492,7 @@ func mwwShadowStats(dc *client.DataClient) interface{} {
 		"windowSize":  st.WindowSize,
 		"errors":      st.Errors,
 		"lastErr":     st.LastErr,
-		"ready":       sc.Ready(),
+		"ready":       ready,
 		"maxInferMs":  st.MaxInferMs,
 		"maxGapMs":    st.MaxGapMs,
 		"maxQueueMs":  st.MaxQueueMs,
@@ -1841,7 +1902,8 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		mwwShadowState.closeMiss == closeMiss
 	previousErr := mwwShadowState.lastErr
 	mwwShadowState.RUnlock()
-	if dc.MWWShadowScorer() != nil && same {
+	expectedScorers := dc.WakeScorerCount()
+	if len(dc.MWWShadowScorers()) == expectedScorers && same {
 		return
 	}
 	manifest, manifestErr := microwakeword.ReadPackageManifest(model)
@@ -1857,45 +1919,61 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		}
 	}
 
-	sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
-		Threshold: float32(threshold), SlidingWindow: slidingWindow,
-		CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
-	}, microwakeword.ShadowHooks{
-		Cross: func(score float32, at time.Time) {
-			ageMs := time.Since(at).Milliseconds()
-			if onWake != nil && onWake(wakeWord, score, at) {
-				log.Printf("[mww] local wake score=%.3f age=%dms — native wake claimed", score, ageMs)
-				return
-			}
-			log.Printf("[mww-shadow] crossing score=%.3f age=%dms (report only)", score, ageMs)
-			if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
-				cc.SendMWWShadowCross(score, ageMs)
-			}
-		},
-		CloseMiss: func(score float32, at time.Time) {
-			if onCloseMiss != nil {
-				onCloseMiss(wakeWord, score, at)
-			}
-		},
-	})
-	if err != nil {
-		if msg := err.Error(); msg != previousErr {
-			log.Printf("[mww-shadow] not started: %v", err)
+	scorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
+	var openErr error
+	for lane := 0; lane < expectedScorers; lane++ {
+		lane := lane
+		sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
+			Threshold: float32(threshold), SlidingWindow: slidingWindow,
+			CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
+		}, microwakeword.ShadowHooks{
+			Cross: func(score float32, at time.Time) {
+				if !dc.ClaimWakeLane(lane, at) {
+					return
+				}
+				ageMs := time.Since(at).Milliseconds()
+				if onWake != nil && onWake(wakeWord, score, at) {
+					log.Printf("[mww] local wake lane=%d score=%.3f age=%dms — native wake claimed", lane, score, ageMs)
+					return
+				}
+				log.Printf("[mww-shadow] lane=%d crossing score=%.3f age=%dms (report only)", lane, score, ageMs)
+				if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
+					cc.SendMWWShadowCross(score, ageMs)
+				}
+			},
+			CloseMiss: func(score float32, at time.Time) {
+				if lane == 0 && onCloseMiss != nil {
+					onCloseMiss(wakeWord, score, at)
+				}
+			},
+		})
+		if err != nil {
+			openErr = err
+			break
+		}
+		scorers = append(scorers, sc)
+	}
+	if openErr != nil {
+		for _, scorer := range scorers {
+			scorer.Close()
+		}
+		if msg := openErr.Error(); msg != previousErr {
+			log.Printf("[mww-shadow] not started: %v", openErr)
 		}
 		dc.SetMWWShadowScorer(nil)
 		setMWWState(true, false, model, wakeWord, label, source, sensitivity, environment,
-			threshold, slidingWindow, closeMiss, err.Error())
+			threshold, slidingWindow, closeMiss, openErr.Error())
 		return
 	}
 
-	dc.SetMWWShadowScorer(sc)
+	dc.SetMWWShadowScorers(scorers)
 	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
 	mode := "shadow/report-only"
 	if onWake != nil {
 		mode = "active native wake"
 	}
-	log.Printf("[mww] scoring %s — %s", sc.Info(), mode)
+	log.Printf("[mww] scoring %s — %s (%d independent beam lane(s))", scorers[0].Info(), mode, len(scorers))
 }
 
 // applyMWWTimerStopConfig temporarily replaces the regular wake phrase with a
@@ -1910,7 +1988,8 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 	alreadyActive := mwwShadowState.enabled && mwwShadowState.ready &&
 		mwwShadowState.model == microwakeword.TimerStopPackage
 	mwwShadowState.RUnlock()
-	if dc.MWWShadowScorer() != nil && alreadyActive {
+	expectedScorers := dc.WakeScorerCount()
+	if len(dc.MWWShadowScorers()) == expectedScorers && alreadyActive {
 		return nil
 	}
 	manifest, err := microwakeword.ReadPackageManifest(microwakeword.TimerStopPackage)
@@ -1918,26 +1997,37 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 		return err
 	}
 	settings := manifest.RuntimeConfig()
-	scorer, err := microwakeword.OpenShadowTunedWithHooks(
-		microwakeword.TimerStopPackage,
-		microwakeword.ScorerOverrides{},
-		microwakeword.ShadowHooks{Cross: func(score float32, at time.Time) {
-			if onStop != nil {
-				go onStop(score, at)
+	scorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
+	for lane := 0; lane < expectedScorers; lane++ {
+		lane := lane
+		scorer, openErr := microwakeword.OpenShadowTunedWithHooks(
+			microwakeword.TimerStopPackage,
+			microwakeword.ScorerOverrides{},
+			microwakeword.ShadowHooks{Cross: func(score float32, at time.Time) {
+				if !dc.ClaimWakeLane(lane, at) {
+					return
+				}
+				if onStop != nil {
+					go onStop(score, at)
+				}
+			}},
+		)
+		if openErr != nil {
+			for _, opened := range scorers {
+				opened.Close()
 			}
-		}},
-	)
-	if err != nil {
-		return err
+			return openErr
+		}
+		scorers = append(scorers, scorer)
 	}
-	dc.SetMWWShadowScorer(scorer)
+	dc.SetMWWShadowScorers(scorers)
 	label := strings.TrimSpace(manifest.Label)
 	if label == "" {
 		label = manifest.WakeWord
 	}
 	setMWWState(true, true, microwakeword.TimerStopPackage, manifest.WakeWord, label,
 		"timer", "", "", float64(settings.Threshold), settings.SlidingWindow, 0, "")
-	log.Printf("[mww] scoring %s — timer stop mode", scorer.Info())
+	log.Printf("[mww] scoring %s — timer stop mode (%d independent beam lane(s))", scorers[0].Info(), len(scorers))
 	return nil
 }
 
@@ -2052,10 +2142,19 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 	dc *client.DataClient, player *taternative.LocalPlayer) (map[string]any, error) {
 	applied := make(map[string]any, len(values))
 	for key, value := range values {
+		// AEC is calibrated and owned by each Echo target. Ignore these legacy
+		// controller settings instead of claiming that the firmware applied them.
+		switch key {
+		case "aec_enabled", "aec_strength_percent", "aec_delay_ms":
+			continue
+		}
 		applied[key] = value
 	}
 	msg := config.ConfigMessage{}
 	applyNativeVisualSettings(values, applied)
+	if value, ok := values["display_theme"]; ok {
+		applied["display_theme"] = normalizeDisplayTheme(value)
+	}
 	if player != nil {
 		if err := player.ConfigureWakeSound(values); err != nil {
 			return applied, err
@@ -2151,21 +2250,6 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 			applied["wake_word"] = "hey_tater"
 		}
 	}
-	if value, ok := values["aec_enabled"]; ok {
-		enabled := nativeBool(value, true)
-		msg.AecEnabled = &enabled
-		applied["aec_enabled"] = enabled
-	}
-	if value, ok := values["aec_delay_ms"]; ok {
-		delay := int(math.Round(nativeNumber(value, 0)))
-		if delay < 0 {
-			delay = 0
-		} else if delay > 1000 {
-			delay = 1000
-		}
-		msg.AecDelayMs = &delay
-		applied["aec_delay_ms"] = delay
-	}
 	if value, ok := values["barge_in_enabled"]; ok {
 		enabled := nativeBool(value, true)
 		msg.BargeInEnabled = &enabled
@@ -2174,6 +2258,16 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 	config.Get().Apply(msg)
 	applyAecConfig(canceller, dc)
 	return applied, nil
+}
+
+func normalizeDisplayTheme(value any) string {
+	theme := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	switch theme {
+	case "tater", "ocean", "violet", "forest", "sunset":
+		return theme
+	default:
+		return "tater"
+	}
 }
 
 func nativeStateAnimation(state string) server.AnimSpec {

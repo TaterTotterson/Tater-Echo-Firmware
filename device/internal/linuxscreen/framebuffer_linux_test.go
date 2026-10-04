@@ -59,3 +59,33 @@ func TestPresentTracksEachFramebufferPageSeparately(t *testing.T) {
 		}
 	}
 }
+
+func TestSquarePanelKeepsNativeOrientationAndPerPageUpdates(t *testing.T) {
+	file, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	const side, pages = 4, 2
+	const rowBytes = side * 4
+	const pageBytes = side * rowBytes
+	d := &Device{
+		file: file, memory: make([]byte, pageBytes*pages),
+		panelWidth: side, panelHeight: side, lineBytes: rowBytes,
+		pageBytes: pageBytes, pages: pages,
+		shifts: [4]uint{0, 8, 16, 24},
+		canvas: image.NewRGBA(image.Rect(0, 0, side, side)),
+	}
+	d.canvas.SetRGBA(1, 2, color.RGBA{R: 255, A: 255})
+	_ = d.Present()
+	if got := d.memory[pageBytes+2*rowBytes+1*4 : pageBytes+2*rowBytes+1*4+4]; got[0] != 255 || got[3] != 255 {
+		t.Fatalf("square panel rotated pixel (1,2): %v", got)
+	}
+	d.canvas.SetRGBA(1, 2, color.RGBA{B: 255, A: 255})
+	_ = d.Present()
+	d.page = 0
+	_ = d.Present()
+	if got := d.memory[pageBytes+2*rowBytes+1*4 : pageBytes+2*rowBytes+1*4+4]; got[2] != 255 || got[0] != 0 {
+		t.Fatalf("square panel did not update prior page: %v", got)
+	}
+}

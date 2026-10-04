@@ -38,8 +38,8 @@ func NewOTAInstaller() *OTAInstaller {
 }
 
 // NewOTAInstallerForTarget selects the transaction appropriate to the target.
-// Biscuit remains a single ELF A/B update. Checkers uses coordinated Linux
-// daemon/renderer slots on /data; a pre-Linux unit needs the USB converter.
+// Biscuit remains a single ELF A/B update. The Linux screen targets use
+// coordinated daemon/renderer slots on /data; a pre-Linux unit needs USB.
 func NewOTAInstallerForTarget(target string) *OTAInstaller {
 	installer := NewOTAInstaller()
 	installer.Target = strings.ToLower(strings.TrimSpace(target))
@@ -56,11 +56,11 @@ func (i *OTAInstaller) Install(ctx context.Context, req OTARequest, report func(
 	if _, err := hex.DecodeString(req.SHA256); err != nil {
 		return errors.New("OTA SHA-256 is invalid")
 	}
-	if strings.EqualFold(i.Target, "checkers") {
+	if strings.EqualFold(i.Target, "checkers") || strings.EqualFold(i.Target, "rook") {
 		if i.baseOS() != platform.TaterLinux {
-			return errors.New("Checkers Linux firmware requires Tater Linux; use the USB factory installer for conversion")
+			return fmt.Errorf("%s Linux firmware requires Tater Linux; use the USB factory installer for conversion", i.Target)
 		}
-		return i.installCheckersLinux(ctx, req, report)
+		return i.installLinuxApp(ctx, req, report)
 	}
 	activePath := i.ActivePath
 	if activePath == "" {

@@ -16,8 +16,9 @@ the matching init by reading your own boot image.
 **Status: 0.4, bench-proven, not field-proven.** Still a small number of
 devices over a handful of days. A complete voice turn has run on it — wake word
 scored on-device, Home Assistant pipeline, spoken answer — along with WiFi, the
-9-channel mic array, hardware AEC, the BLE proxy, buttons, ambient light, jack
-detect and the LED ring. The known gaps are listed at the bottom and none of
+9-channel mic array, synchronized hardware echo reference with software AEC,
+the BLE proxy, buttons, ambient light, jack detect and the LED ring. The known
+gaps are listed at the bottom and none of
 them is a research problem.
 
 Three things changed since 0.1 that are worth knowing before you try it:

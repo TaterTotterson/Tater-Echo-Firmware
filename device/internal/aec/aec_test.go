@@ -564,24 +564,45 @@ func TestInvalidMicrophonePathFallsBackToCentre(t *testing.T) {
 	}
 }
 
-func TestCheckersUsesOneEchoPath(t *testing.T) {
+func TestCheckersKeepsLeftRightAndOmniEchoPaths(t *testing.T) {
 	c := NewForTarget("checkers")
-	if c.pathCount != 1 || c.defaultPath != 0 || c.activePath != 0 {
-		t.Fatalf("checkers paths: count=%d default=%d active=%d, want 1/0/0",
+	if c.pathCount != 3 || c.defaultPath != 2 || c.activePath != 2 {
+		t.Fatalf("checkers paths: count=%d default=%d active=%d, want 3/2/2",
 			c.pathCount, c.defaultPath, c.activePath)
 	}
 	c.SetParams(true, 0, 200)
-	if c.states[0] == nil {
-		t.Fatal("checkers primary echo path was not allocated")
+	for path := 0; path < 3; path++ {
+		if c.states[path] == nil {
+			t.Fatalf("checkers echo path %d was not allocated", path)
+		}
 	}
-	for path := 1; path < len(c.states); path++ {
+	for path := 3; path < len(c.states); path++ {
 		if c.states[path] != nil {
 			t.Fatalf("checkers allocated unused echo path %d", path)
 		}
 	}
 	c.SelectPath(6)
-	if c.activePath != 0 || c.st != c.states[0] {
+	if c.activePath != 2 || c.st != c.states[2] {
 		t.Fatalf("checkers invalid selection changed path: active=%d", c.activePath)
+	}
+}
+
+func TestRookKeepsOmniAndFourSteeredEchoPaths(t *testing.T) {
+	c := NewForTarget("rook")
+	if c.pathCount != 5 || c.defaultPath != 4 || c.activePath != 4 {
+		t.Fatalf("rook paths: count=%d default=%d active=%d, want 5/4/4",
+			c.pathCount, c.defaultPath, c.activePath)
+	}
+	c.SetParams(true, 0, 200)
+	for path := 0; path < 5; path++ {
+		if c.states[path] == nil {
+			t.Fatalf("rook path %d was not allocated", path)
+		}
+	}
+	for path := 5; path < len(c.states); path++ {
+		if c.states[path] != nil {
+			t.Fatalf("rook allocated unused echo path %d", path)
+		}
 	}
 }
 

@@ -119,3 +119,27 @@ func TestJackRoutingDriftSkipsUnreadableControls(t *testing.T) {
 		t.Errorf("want only the readable, drifted control, got %+v", d)
 	}
 }
+
+func TestRookJackRoutingUsesItsSpeakerGainAndDisablesAmpForHeadphones(t *testing.T) {
+	for _, test := range []struct {
+		inserted bool
+		gain     string
+		amp      string
+		right    string
+	}{
+		{false, "9", "On", "On"},
+		{true, "11", "Off", "Off"},
+	} {
+		got := map[string][]string{}
+		for _, write := range jackRoutingForTarget("rook", test.inserted) {
+			got[write.Ctl] = write.Args
+		}
+		if got[ctlHPDriverGain][0] != test.gain || got[ctlHPDriverGain][1] != test.gain ||
+			got[ctlSpeakerAmp][0] != test.amp || got["Right Channel Only"][0] != test.right {
+			t.Fatalf("rook inserted=%v: wrong analog route: %v", test.inserted, got)
+		}
+	}
+	if drift := jackRoutingDriftForTarget("rook", false, map[string]string{ctlHPDriverGain: "0"}); len(drift) != 1 || drift[0].Ctl != ctlHPDriverGain {
+		t.Fatalf("rook gain drift = %v", drift)
+	}
+}

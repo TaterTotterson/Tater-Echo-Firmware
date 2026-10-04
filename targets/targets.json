@@ -25,6 +25,21 @@
       "rootfs_slots": "a-b",
       "ota_slots": "application-a-b-on-data",
       "status": "hardware-tested"
+    },
+    "rook": {
+      "display_name": "Amazon Echo Spot 1st Generation (2017)",
+      "amazon_codename": "rook",
+      "cpu": "armv7a",
+      "unlock": "amonet-rook-v2.0.0",
+      "native_base_os": "tater-linux",
+      "factory_transport": "usb-twrp",
+      "factory_install": true,
+      "ota": true,
+      "factory_installer": "factory/rook-linux/install.py",
+      "native_framebuffer_ui": true,
+      "rootfs_slots": "a-b",
+      "ota_slots": "application-a-b-on-data",
+      "status": "hardware-tested"
     }
   }
 }

@@ -7,13 +7,16 @@
 package checkersalsa
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"strconv"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -120,11 +123,104 @@ func ioctlArgless(fd, request uintptr) error {
 // Playback holds Checkers' pcmC0D23p stream. The caller must already hold
 // pcmC0D1c open so the vendor driver allocates the ring in DRAM.
 type Playback struct {
-	file    *os.File
-	started bool
+	file                 *os.File
+	started              bool
+	xruns                uint64
+	maximumQueuedFrames  int
+	queueReadErrorLogged bool
+	lastDelayFrames      int
+	minimumDelayFrames   int
+	maximumDelayFrames   int
+	observedDelay        bool
+}
+
+// SetMaximumQueuedFrames keeps Rook's vendor ring below its nearly-full edge.
+// The kernel copy callback can silently truncate a write when its private
+// u4DataRemained count disagrees with ALSA's available-frame count. Checkers
+// keeps its established, unthrottled path.
+func (p *Playback) SetMaximumQueuedFrames(frames int) {
+	p.maximumQueuedFrames = frames
+}
+
+func parsePlaybackDelay(status []byte) (int, error) {
+	for _, line := range bytes.Split(status, []byte{'\n'}) {
+		name, value, found := bytes.Cut(line, []byte{':'})
+		if found && string(bytes.TrimSpace(name)) == "delay" {
+			return strconv.Atoi(string(bytes.TrimSpace(value)))
+		}
+	}
+	return 0, errors.New("ALSA playback status has no delay")
+}
+
+func (p *Playback) waitForQueueHeadroom() {
+	if p.maximumQueuedFrames <= 0 {
+		return
+	}
+	const statusPath = "/proc/asound/card0/pcm23p/sub0/status"
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for {
+		status, err := os.ReadFile(statusPath)
+		if err == nil {
+			var delay int
+			delay, err = parsePlaybackDelay(status)
+			if err == nil && delay >= 0 {
+				p.lastDelayFrames = delay
+				if !p.observedDelay || delay < p.minimumDelayFrames {
+					p.minimumDelayFrames = delay
+				}
+				if !p.observedDelay || delay > p.maximumDelayFrames {
+					p.maximumDelayFrames = delay
+				}
+				p.observedDelay = true
+			}
+			if err == nil && delay <= p.maximumQueuedFrames {
+				return
+			}
+			if err == nil && time.Now().Before(deadline) {
+				wait := time.Duration(delay-p.maximumQueuedFrames) * time.Second / rate
+				if wait > 10*time.Millisecond {
+					wait = 10 * time.Millisecond
+				}
+				if wait < time.Millisecond {
+					wait = time.Millisecond
+				}
+				time.Sleep(wait)
+				continue
+			}
+		}
+		if err != nil && !p.queueReadErrorLogged {
+			log.Printf("[speaker] ALSA playback queue telemetry unavailable: %v", err)
+			p.queueReadErrorLogged = true
+		}
+		return // fall back to the normal blocking ALSA write
+	}
 }
 
 func OpenPlayback() (*Playback, error) {
+	return OpenPlaybackWithPeriodFrames(PeriodFrames)
+}
+
+func playbackHwParams(periodFrames int) hwParams {
+	var params hwParams
+	params.init()
+	params.setMask(paramAccess, 3) // RW_INTERLEAVED
+	params.setMask(paramFormat, 2) // S16_LE
+	params.setMask(paramSubformat, 0)
+	params.setInterval(paramSampleBits, bits)
+	params.setInterval(paramFrameBits, bits*channels)
+	params.setInterval(paramChannels, channels)
+	params.setInterval(paramRate, rate)
+	params.setInterval(paramPeriodSize, uint32(periodFrames))
+	params.setInterval(paramPeriods, periods)
+	return params
+}
+
+// OpenPlaybackWithPeriodFrames retains the kernel's four-period maximum while
+// allowing a target to trade playback latency for more scheduling headroom.
+func OpenPlaybackWithPeriodFrames(periodFrames int) (*Playback, error) {
+	if periodFrames < PeriodFrames || periodFrames > 2304 {
+		return nil, fmt.Errorf("Checkers playback period size %d is outside %d..2304", periodFrames, PeriodFrames)
+	}
 	const path = "/dev/snd/pcmC0D23p"
 	file, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
@@ -140,17 +236,7 @@ func OpenPlayback() (*Playback, error) {
 		return nil, fmt.Errorf("clear Checkers playback nonblock: %w", errno)
 	}
 
-	var params hwParams
-	params.init()
-	params.setMask(paramAccess, 3) // RW_INTERLEAVED
-	params.setMask(paramFormat, 2) // S16_LE
-	params.setMask(paramSubformat, 0)
-	params.setInterval(paramSampleBits, bits)
-	params.setInterval(paramFrameBits, bits*channels)
-	params.setInterval(paramChannels, channels)
-	params.setInterval(paramRate, rate)
-	params.setInterval(paramPeriodSize, PeriodFrames)
-	params.setInterval(paramPeriods, periods)
+	params := playbackHwParams(periodFrames)
 	if err := ioctl(file.Fd(), ioctlHwParams, unsafe.Pointer(&params)); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("Checkers playback hw_params: %w", err)
@@ -160,7 +246,7 @@ func OpenPlayback() (*Playback, error) {
 		param int
 		want  uint32
 	}{
-		{"period size", paramPeriodSize, PeriodFrames},
+		{"period size", paramPeriodSize, uint32(periodFrames)},
 		{"period count", paramPeriods, periods},
 		{"rate", paramRate, rate},
 		{"channels", paramChannels, channels},
@@ -174,6 +260,8 @@ func OpenPlayback() (*Playback, error) {
 		file.Close()
 		return nil, fmt.Errorf("Checkers playback prepare: %w", err)
 	}
+	log.Printf("[speaker] ALSA playback configured: %d x %d frames at %d Hz (%dms buffer)",
+		periods, periodFrames, rate, periods*periodFrames*1000/rate)
 	return &Playback{file: file}, nil
 }
 
@@ -186,12 +274,21 @@ func (p *Playback) Pump(data []byte) error {
 	}
 	recoveries := 0
 	for len(data) > 0 {
+		p.waitForQueueHeadroom()
 		var transfer xferi
 		transfer.buf = uintptr(unsafe.Pointer(&data[0]))
 		transfer.frames = uintptr(len(data) / frameBytes)
 		err := ioctl(p.file.Fd(), ioctlWritei, unsafe.Pointer(&transfer))
 		runtime.KeepAlive(data)
 		if errors.Is(err, syscall.EPIPE) {
+			p.xruns++
+			if p.observedDelay {
+				log.Printf("[speaker] ALSA playback xrun: recovering (total=%d, last/min/max queued=%d/%d/%d frames)",
+					p.xruns, p.lastDelayFrames, p.minimumDelayFrames, p.maximumDelayFrames)
+				p.observedDelay = false
+			} else {
+				log.Printf("[speaker] ALSA playback xrun: recovering (total=%d)", p.xruns)
+			}
 			if prepareErr := ioctlArgless(p.file.Fd(), ioctlPrepare); prepareErr != nil {
 				return fmt.Errorf("Checkers playback recover underrun: %w", prepareErr)
 			}

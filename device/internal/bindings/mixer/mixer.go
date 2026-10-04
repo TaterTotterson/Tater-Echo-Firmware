@@ -71,6 +71,18 @@ var checkersProfile = targetProfile{
 	adcMute:    []string{"ADC_A Left Mute", "ADC_A Right Mute"},
 }
 
+var rookProfile = targetProfile{
+	playbackVolume: PlaybackVolume,
+	playbackMax:    127,
+	speakerAmp:     SpeakerAmp,
+	speakerOn:      "On",
+	speakerOff:     "Off",
+	adcMute: []string{
+		"ADC_A Left Mute", "ADC_A Right Mute",
+		"ADC_B Left Mute", "ADC_B Right Mute",
+	},
+}
+
 var (
 	targetMu      sync.RWMutex
 	activeProfile = biscuitProfile
@@ -83,6 +95,10 @@ func ConfigureTarget(target string) {
 	defer targetMu.Unlock()
 	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
 		activeProfile = checkersProfile
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(target), "rook") {
+		activeProfile = rookProfile
 		return
 	}
 	activeProfile = biscuitProfile

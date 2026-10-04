@@ -75,3 +75,28 @@ func TestCheckersRoutesUseItsMeasuredCodecs(t *testing.T) {
 		}
 	}
 }
+
+func TestRookRoutesUseTwoADCsAndDotStyleOutput(t *testing.T) {
+	got := map[string]string{}
+	for _, write := range RookRoutes {
+		if _, duplicate := got[write.Name]; duplicate {
+			t.Fatalf("duplicate Rook route %q", write.Name)
+		}
+		got[write.Name] = write.Value
+	}
+	for _, name := range []string{
+		"ADC_A Left Ip Select ADC_A DIF1_L switch",
+		"ADC_A Right Ip Select ADC_A DIF1_R switch",
+		"ADC_B Left Ip Select ADC_B DIF1_L switch",
+		"ADC_B Right Ip Select ADC_B DIF1_R switch",
+		"HPL Output Mixer L_DAC Switch",
+		"HPR Output Mixer R_DAC Switch",
+	} {
+		if got[name] != "1" {
+			t.Errorf("Rook route %q = %q, want 1", name, got[name])
+		}
+	}
+	if _, exists := got["ADC_C Left Ip Select ADC_C DIF1_L switch"]; exists {
+		t.Fatal("Rook routes inherited nonexistent ADC_C")
+	}
+}

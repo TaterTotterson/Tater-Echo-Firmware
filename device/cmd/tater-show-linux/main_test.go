@@ -19,6 +19,49 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/show"
 )
 
+func TestDisplayThemesKeepTaterDefaultAndUsePrimaryColorForReply(t *testing.T) {
+	wantTater := color.RGBA{255, 132, 48, 255}
+	if got := accentForTheme("idle", ""); got != wantTater {
+		t.Fatalf("empty theme did not preserve the Tater default: got=%v want=%v", got, wantTater)
+	}
+	if got := accentForTheme("speaking", "tater"); got != wantTater {
+		t.Fatalf("Tater reply glow did not use the main orange: got=%v want=%v", got, wantTater)
+	}
+
+	seen := map[color.RGBA]string{}
+	for _, theme := range []string{"tater", "ocean", "violet", "forest", "sunset"} {
+		main := accentForTheme("idle", theme)
+		if previous := seen[main]; previous != "" {
+			t.Fatalf("themes %s and %s share the same primary color %v", previous, theme, main)
+		}
+		seen[main] = theme
+		if reply := accentForTheme("speaking", theme); reply != main {
+			t.Errorf("%s reply glow=%v, want main screen color=%v", theme, reply, main)
+		}
+	}
+	if got := accentForTheme("idle", "not-a-theme"); got != wantTater {
+		t.Fatalf("unknown theme did not safely fall back to Tater: %v", got)
+	}
+}
+
+func TestCheckersThemeChangesRenderedScreen(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	r := &renderer{faces: faces, animationStart: now, state: show.Snapshot{Phase: "idle", Connected: true}}
+	tater := image.NewRGBA(image.Rect(0, 0, 960, 480))
+	r.state.DisplayTheme = "tater"
+	r.render(tater, now)
+	ocean := image.NewRGBA(tater.Rect)
+	r.state.DisplayTheme = "ocean"
+	r.render(ocean, now)
+	if bytes.Equal(tater.Pix, ocean.Pix) {
+		t.Fatal("changing display_theme did not change the Checkers render")
+	}
+}
+
 func TestIntercomIsLowerLeftQuarterCircle(t *testing.T) {
 	if intercomCenterX > -20 || intercomCenterY < 500 || micIconLeft+micIconWidth/2 >= 34 || micIconTop+micIconHeight/2 <= 432 {
 		t.Fatal("intercom control and icon did not move down and left")
@@ -152,14 +195,63 @@ func TestTranslucentRoundedRectKeepsItsColor(t *testing.T) {
 	}
 }
 
-func TestCompactVoiceOrbVisibility(t *testing.T) {
+func TestCheckersVoiceStagesDoNotDrawOrbs(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	r := &renderer{faces: faces, animationStart: now, state: show.Snapshot{Connected: true}}
 	for _, phase := range []string{"listening", "thinking", "tool_call", "speaking", "intercom"} {
-		if !shouldDrawCompactVoiceOrb(phase, true) {
-			t.Errorf("should draw compact orb for %q over primary content", phase)
+		r.state.Phase = phase
+		accent := accentFor(phase)
+		if phase == "speaking" {
+			accent = color.RGBA{255, 132, 48, 255}
+		}
+		background := image.NewRGBA(image.Rect(0, 0, 960, 480))
+		fillGradient(background, color.RGBA{6, 11, 19, 255}, mix(color.RGBA{6, 11, 19, 255}, accent, .13))
+
+		r.state.Weather = &show.Weather{TemperatureText: "72°", Condition: "Sunny", ConditionKind: "sunny"}
+		withWeather := image.NewRGBA(background.Rect)
+		r.render(withWeather, now)
+		if got, want := withWeather.RGBAAt(480, 434), background.RGBAAt(480, 434); got != want {
+			t.Errorf("%s drew a compact voice orb over the weather: got=%v background=%v", phase, got, want)
+		}
+
+		r.state.Weather = nil
+		withoutWeather := image.NewRGBA(background.Rect)
+		r.render(withoutWeather, now)
+		if got, want := withoutWeather.RGBAAt(678, 340), background.RGBAAt(678, 340); got != want {
+			t.Errorf("%s drew the fallback voice orb: got=%v background=%v", phase, got, want)
 		}
 	}
-	if shouldDrawCompactVoiceOrb("idle", true) || shouldDrawCompactVoiceOrb("listening", false) {
-		t.Error("compact orb appeared without both response activity and primary content")
+}
+
+func TestCheckersReplyRimFollowsAudioWithoutCoveringWeather(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	r := &renderer{faces: faces, animationStart: now, state: show.Snapshot{
+		Phase: "speaking", Connected: true,
+		Weather: &show.Weather{TemperatureText: "72°", Condition: "Sunny", ConditionKind: "sunny"},
+	}}
+	quiet := image.NewRGBA(image.Rect(0, 0, 960, 480))
+	r.render(quiet, now)
+	r.state.AudioLevel = .7
+	loud := image.NewRGBA(quiet.Rect)
+	for frame := 1; frame <= 5; frame++ {
+		r.render(loud, now.Add(time.Duration(frame)*33*time.Millisecond))
+	}
+	for _, point := range []image.Point{{X: 480, Y: 3}, {X: 3, Y: 240}} {
+		low, high := quiet.RGBAAt(point.X, point.Y), loud.RGBAAt(point.X, point.Y)
+		if high.R <= low.R+60 || high.G <= low.G+30 {
+			t.Errorf("reply rim did not brighten with audio at %v: quiet=%v loud=%v", point, low, high)
+		}
+	}
+	if quiet.RGBAAt(480, 434) != loud.RGBAAt(480, 434) {
+		t.Fatal("reply audio changed the former compact-orb area")
 	}
 }
 

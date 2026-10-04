@@ -1,12 +1,18 @@
 package beamformer
 
-// Checkers' two-microphone front end follows the shape of the Voice PE XMOS
-// pipeline without pretending the Show has that DSP: calibrate the two ADC
-// paths, coherently combine them, then use the spatial difference signal as a
-// conservative noise estimate.  It intentionally does not publish a screen
-// bearing.  Two microphones can estimate one delay axis, but the physical
-// left/right orientation has not yet been measured well enough to turn that
-// delay into an honest 0-360 degree direction.
+// Checkers' measured capture stream is four-channel S24_3LE at 16 kHz:
+//
+//   ch0  screen-right microphone
+//   ch1  screen-left microphone
+//   ch2  inactive (bit-exact zero)
+//   ch3  inactive (bit-exact zero)
+//
+// Physical captures on 2026-10-04 measured opposing side speech at -0.91 and
+// +0.81 samples, with centred speech at 0.00 samples.  The resulting effective
+// aperture is about 18 mm.  Two microphones still cannot resolve the
+// front/back ambiguity, so this front end deliberately does not publish a
+// 0-360 degree screen bearing.  It can, however, form stable left and right
+// wake beams and carry the winning acoustic path into the voice turn.
 
 import (
 	"encoding/binary"
@@ -15,16 +21,21 @@ import (
 )
 
 const (
-	checkersChannels       = 4
-	checkersFrameSize      = checkersChannels * byteSample
-	checkersMaxLag         = 6 // 0.375 ms / 129 mm acoustic path at 16 kHz
-	checkersHistorySamples = checkersMaxLag + 2
-	checkersMinSignalRMS   = 32.0 // raw S24 units; rejects digital silence
-	checkersMinCorrelation = 0.18
-	checkersMinPeakMargin  = 0.025
-	checkersCalibrationMin = 24 // accepted 32 ms diffuse-noise observations
-	checkersWarmupBlocks   = 12 // suppress only after ~384 ms of observation
-	checkersNoiseMinGain   = 0.68
+	checkersChannels           = 4
+	checkersFrameSize          = checkersChannels * byteSample
+	checkersMaxLag             = 2 // measured aperture is 0.86 samples; retain reflection margin
+	checkersHistorySamples     = checkersMaxLag + 2
+	checkersBeamDelaySamples   = 0.86
+	checkersLeftPath           = 0
+	checkersRightPath          = 1
+	checkersOmniPath           = 2
+	checkersMinSignalRMS       = 32.0 // raw S24 units; rejects digital silence
+	checkersMinCorrelation     = 0.18
+	checkersMinPeakMargin      = 0.025
+	checkersCalibrationMin     = 24 // accepted 32 ms diffuse-noise observations
+	checkersWarmupBlocks       = 12 // suppress only after ~384 ms of observation
+	checkersWakeNoiseMinGain   = 0.68
+	checkersLockedNoiseMinGain = 0.48
 )
 
 // CheckersFrontEnd decodes the measured four-channel S24_3LE/16 kHz stream.
@@ -50,13 +61,25 @@ type CheckersFrontEnd struct {
 
 	delaySamples float64
 	delayValid   bool
-	noiseGain    float64
-	blocksSeen   int
+	// steeringLocked freezes the inter-mic delay chosen from the user's
+	// speech onset. Without it the pair happily re-aims at television dialogue
+	// after the user pauses, undoing the spatial rejection we built the pair
+	// for. Wake listening remains adaptive; only an active voice turn locks.
+	steeringLocked bool
+	lockedPath     int
+	outputPath     int
+	noiseGain      float64
+	blocksSeen     int
 
 	lastCorrelation float64
 	lastPeakMargin  float64
 	lastCoherence   float64
 	healthyChannels int
+	leftHealthy     bool
+	rightHealthy    bool
+	periodDelay     float64
+	periodDelayOK   bool
+	periodActivity  float64
 }
 
 // NewCheckers returns a two-mic front end with unity calibration and no
@@ -65,13 +88,58 @@ func NewCheckers() *CheckersFrontEnd {
 	return &CheckersFrontEnd{
 		noiseGain:       1,
 		healthyChannels: 2,
+		leftHealthy:     true,
+		rightHealthy:    true,
+		lockedPath:      checkersOmniPath,
+		outputPath:      checkersOmniPath,
 	}
 }
 
-func (c *CheckersFrontEnd) Lock(bool)          {}
-func (c *CheckersFrontEnd) PrepareSpeechLock() {}
-func (c *CheckersFrontEnd) LockCurrent(bool)   {}
-func (c *CheckersFrontEnd) Unlock()            {}
+func (c *CheckersFrontEnd) Lock(enabled bool) {
+	if enabled && c.delayValid {
+		c.steeringLocked = true
+		c.lockedPath = checkersPathForDelay(c.delaySamples)
+	}
+}
+
+// LockWakeDirection carries the exact fixed beam that crossed microWakeWord
+// into the bounded voice turn.  The direction values are internal acoustic
+// path identities, not an asserted 360-degree bearing.
+func (c *CheckersFrontEnd) LockWakeDirection(direction int, enabled bool) {
+	if !enabled {
+		return
+	}
+	switch direction {
+	case checkersLeftPath:
+		c.delaySamples = -checkersBeamDelaySamples
+	case checkersRightPath:
+		c.delaySamples = checkersBeamDelaySamples
+	default:
+		return
+	}
+	c.delayValid = true
+	c.steeringLocked = true
+	c.lockedPath = direction
+	log.Printf("[beam] Checkers locked winning %s wake beam (delay=%+.2f samples)", checkersPathName(direction), c.delaySamples)
+}
+
+// PrepareSpeechLock deliberately leaves the pair adaptive while waiting for
+// the first near-end speech. LockCurrent then freezes the delay estimated from
+// that same speech batch, matching Biscuit's continued-chat behavior.
+func (c *CheckersFrontEnd) PrepareSpeechLock() {
+	c.steeringLocked = false
+	c.delayValid = false
+	c.lockedPath = checkersOmniPath
+	c.outputPath = checkersOmniPath
+}
+func (c *CheckersFrontEnd) LockCurrent(enabled bool) {
+	c.Lock(enabled)
+}
+func (c *CheckersFrontEnd) Unlock() {
+	c.steeringLocked = false
+	c.lockedPath = checkersOmniPath
+	c.outputPath = checkersOmniPath
+}
 
 func (c *CheckersFrontEnd) ensure(frames int) {
 	if cap(c.left) < frames {
@@ -93,6 +161,7 @@ func (c *CheckersFrontEnd) Process(raw []byte, _ float64, gain float64) ([]byte,
 	if c.noiseGain == 0 { // keep a useful zero-value for package-local callers
 		c.noiseGain = 1
 	}
+	c.outputPath = checkersOmniPath
 	c.ensure(frames)
 	for i := 0; i < frames; i++ {
 		base := i * checkersFrameSize
@@ -100,12 +169,32 @@ func (c *CheckersFrontEnd) Process(raw []byte, _ float64, gain float64) ([]byte,
 		c.right[i] = float64(decodePackedS24(raw[base+3 : base+6]))
 	}
 
+	var delayWeighted, correlationWeighted, marginWeighted, totalWeight float64
 	for start := 0; start < frames; start += periodFrames {
 		end := start + periodFrames
 		if end > frames {
 			end = frames
 		}
 		c.processBlock(c.left[start:end], c.right[start:end], c.combined[start:end])
+		if c.periodDelayOK {
+			// The ALSA producer delivers five periods at once. Preserve the
+			// speech-bearing estimate across that whole batch instead of letting
+			// a quiet final period overwrite it immediately before LockCurrent.
+			weight := c.periodActivity * (0.10 + c.lastPeakMargin)
+			delayWeighted += c.periodDelay * weight
+			correlationWeighted += c.lastCorrelation * weight
+			marginWeighted += c.lastPeakMargin * weight
+			totalWeight += weight
+		}
+	}
+	if !c.steeringLocked && totalWeight > 0 {
+		c.delaySamples = delayWeighted / totalWeight
+		c.delayValid = true
+		c.lastCorrelation = correlationWeighted / totalWeight
+		c.lastPeakMargin = marginWeighted / totalWeight
+	}
+	if c.steeringLocked && c.healthyChannels == 2 {
+		c.outputPath = c.lockedPath
 	}
 
 	out := make([]byte, frames*2)
@@ -128,6 +217,8 @@ func (c *CheckersFrontEnd) Process(raw []byte, _ float64, gain float64) ([]byte,
 }
 
 func (c *CheckersFrontEnd) processBlock(left, right, out []float64) {
+	c.periodDelayOK = false
+	c.periodActivity = 0
 	if len(left) == 0 {
 		return
 	}
@@ -144,6 +235,7 @@ func (c *CheckersFrontEnd) processBlock(left, right, out []float64) {
 	c.blocksSeen++
 
 	meanL, meanR, rmsL, rmsR, zeroCorrelation := channelStats(left, right)
+	c.periodActivity = math.Max(rmsL, rmsR)
 	// Split the correction symmetrically, so a 2:1 ADC mismatch becomes
 	// sqrt(1/2):sqrt(2) rather than boosting only the quieter/noisier input.
 	leftScale := math.Exp(-0.5 * c.logLevelRatio)
@@ -158,6 +250,7 @@ func (c *CheckersFrontEnd) processBlock(left, right, out []float64) {
 		leftHealthy = ratio > 0.04
 		rightHealthy = ratio < 25
 	}
+	c.leftHealthy, c.rightHealthy = leftHealthy, rightHealthy
 
 	switch {
 	case leftHealthy && !rightHealthy:
@@ -219,7 +312,9 @@ func (c *CheckersFrontEnd) processBlock(left, right, out []float64) {
 			estimatedLag += clamp(0.5*(a-d)/denominator, -0.5, 0.5)
 		}
 	}
-	if best >= checkersMinCorrelation && margin >= checkersMinPeakMargin {
+	if !c.steeringLocked && best >= checkersMinCorrelation && margin >= checkersMinPeakMargin {
+		c.periodDelay = estimatedLag
+		c.periodDelayOK = true
 		if !c.delayValid {
 			c.delaySamples = estimatedLag
 			c.delayValid = true
@@ -281,7 +376,14 @@ func (c *CheckersFrontEnd) processBlock(left, right, out []float64) {
 		// deliberate: average+postfilter improves diffuse noise by roughly
 		// 6 dB while never carving quiet wake-word phonemes into silence.
 		shaped := coherence * coherence * (3 - 2*coherence)
-		targetGain = checkersNoiseMinGain + (1-checkersNoiseMinGain)*shaped
+		floor := checkersWakeNoiseMinGain
+		if c.steeringLocked {
+			// Once the user's bearing is frozen, incoherent energy is explicitly
+			// off-beam. Apply stronger attenuation to the STT-bound turn without
+			// making wake-word audio more fragile before the lock exists.
+			floor = checkersLockedNoiseMinGain
+		}
+		targetGain = floor + (1-floor)*shaped
 	}
 	oldGain := c.noiseGain
 	coefficient := 0.08 // enter suppression slowly
@@ -420,16 +522,135 @@ func absInt(value int) int {
 	return value
 }
 
+func checkersPathForDelay(delay float64) int {
+	if delay < -0.25 {
+		return checkersLeftPath
+	}
+	if delay > 0.25 {
+		return checkersRightPath
+	}
+	return checkersOmniPath
+}
+
+func checkersPathName(path int) string {
+	switch path {
+	case checkersLeftPath:
+		return "left"
+	case checkersRightPath:
+		return "right"
+	default:
+		return "omni"
+	}
+}
+
+// WakeBeamCount uses one persistent neural scorer for each physically measured
+// side of the array.  Centre/front speech remains coherent in both broad beams.
+func (*CheckersFrontEnd) WakeBeamCount() int { return 2 }
+
+func (c *CheckersFrontEnd) WakeBeams(raw []byte, gain float64) []WakeBeam {
+	if c.healthyChannels < 2 {
+		return []WakeBeam{{Direction: checkersOmniPath, Angle: -1, PCM: c.extractLiveRaw(raw, gain)}}
+	}
+	return []WakeBeam{
+		c.WakeBeam(raw, checkersLeftPath, gain),
+		c.WakeBeam(raw, checkersRightPath, gain),
+	}
+}
+
+func (c *CheckersFrontEnd) WakeBeam(raw []byte, direction int, gain float64) WakeBeam {
+	delay := 0.0
+	switch direction {
+	case checkersLeftPath:
+		delay = -checkersBeamDelaySamples
+	case checkersRightPath:
+		delay = checkersBeamDelaySamples
+	default:
+		direction = checkersOmniPath
+	}
+	return WakeBeam{Direction: direction, Angle: -1, PCM: c.extractSteeredRaw(raw, delay, direction, gain)}
+}
+
+func (c *CheckersFrontEnd) extractSteeredRaw(raw []byte, delay float64, path int, gain float64) []byte {
+	frames := len(raw) / checkersFrameSize
+	if frames == 0 {
+		return nil
+	}
+	leftScale := clamp(math.Exp(-0.5*c.logLevelRatio), 0.5, 2)
+	rightScale := clamp(math.Exp(0.5*c.logLevelRatio), 0.5, 2)
+	leftDelay, rightDelay := 0.0, 0.0
+	if delay > 0 {
+		leftDelay = delay
+	} else {
+		rightDelay = -delay
+	}
+	out := make([]byte, frames*2)
+	for frame := 0; frame < frames; frame++ {
+		left := checkersRawDelayed(raw, frames, frame, 0, leftDelay) * leftScale
+		right := checkersRawDelayed(raw, frames, frame, 1, rightDelay) * rightScale
+		c.writeRawSample(out, frame, 0.5*(left+right)*gain/256, path)
+	}
+	return out
+}
+
+func (c *CheckersFrontEnd) extractLiveRaw(raw []byte, gain float64) []byte {
+	frames := len(raw) / checkersFrameSize
+	out := make([]byte, frames*2)
+	if frames == 0 || (!c.leftHealthy && !c.rightHealthy) {
+		return out
+	}
+	channel, scale := 0, clamp(math.Exp(-0.5*c.logLevelRatio), 0.5, 2)
+	if !c.leftHealthy {
+		channel, scale = 1, clamp(math.Exp(0.5*c.logLevelRatio), 0.5, 2)
+	}
+	for frame := 0; frame < frames; frame++ {
+		base := frame*checkersFrameSize + channel*byteSample
+		c.writeRawSample(out, frame, float64(decodePackedS24(raw[base:]))*scale*gain/256, checkersOmniPath)
+	}
+	return out
+}
+
+func checkersRawDelayed(raw []byte, frames, frame, channel int, delay float64) float64 {
+	position := float64(frame) - delay
+	base := int(math.Floor(position))
+	fraction := position - float64(base)
+	if base < 0 {
+		base, fraction = 0, 0
+	}
+	next := base + 1
+	if next >= frames {
+		next = frames - 1
+	}
+	aOffset := base*checkersFrameSize + channel*byteSample
+	bOffset := next*checkersFrameSize + channel*byteSample
+	a := float64(decodePackedS24(raw[aOffset:]))
+	b := float64(decodePackedS24(raw[bOffset:]))
+	return a + fraction*(b-a)
+}
+
+func (c *CheckersFrontEnd) writeRawSample(out []byte, frame int, sample float64, path int) {
+	value := math.Round(sample)
+	if value > 32767 {
+		value = 32767
+		c.clipped++
+		c.clippedByChannel[path]++
+	} else if value < -32768 {
+		value = -32768
+		c.clipped++
+		c.clippedByChannel[path]++
+	}
+	binary.LittleEndian.PutUint16(out[frame*2:], uint16(int16(value)))
+}
+
 // Checkers has no verified in-band playback-reference channel. The shared
 // software speaker tap remains active, so AEC still has a safe far-end source.
 func (*CheckersFrontEnd) EchoRefInto([]byte, []byte) []byte { return nil }
 
 func (c *CheckersFrontEnd) ClippedSamples() uint64      { return c.clipped }
 func (c *CheckersFrontEnd) ClippedByChannel() [7]uint64 { return c.clippedByChannel }
-func (*CheckersFrontEnd) OutputChannel() int            { return 0 }
+func (c *CheckersFrontEnd) OutputChannel() int          { return c.outputPath }
 func (c *CheckersFrontEnd) Diagnostics() Diagnostics {
 	return Diagnostics{
-		OutputChannel:      0,
+		OutputChannel:      c.outputPath,
 		Confidence:         c.lastCorrelation,
 		Spatial:            c.lastPeakMargin,
 		Calibrated:         c.calibrated,

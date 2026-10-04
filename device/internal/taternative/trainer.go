@@ -86,6 +86,10 @@ func (c *Client) flushCloseMiss() {
 }
 
 func (c *Client) queueTrainerCapture(eventType, wakeWord string, score float32) bool {
+	return c.queueTrainerCaptureWithFrames(eventType, wakeWord, score, nil)
+}
+
+func (c *Client) queueTrainerCaptureWithFrames(eventType, wakeWord string, score float32, preferredFrames [][]byte) bool {
 	c.stateMu.RLock()
 	enabled := boolValue(c.settings["capture_wake_audio"])
 	if eventType != "wake_detected" {
@@ -103,9 +107,12 @@ func (c *Client) queueTrainerCapture(eventType, wakeWord string, score float32) 
 		return false
 	}
 
-	c.audioMu.Lock()
-	frames := cloneFrames(c.captureRoll)
-	c.audioMu.Unlock()
+	frames := cloneTailFrames(preferredFrames, trainerCaptureChunks)
+	if len(frames) == 0 {
+		c.audioMu.Lock()
+		frames = cloneFrames(c.captureRoll)
+		c.audioMu.Unlock()
+	}
 	total := 0
 	for _, frame := range frames {
 		total += len(frame)

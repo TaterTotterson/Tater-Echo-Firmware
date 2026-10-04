@@ -1,8 +1,8 @@
 //go:build linux
 
-// Package linuxscreen owns the Checkers framebuffer. The framebuffer and
-// rotation code is derived from TECHO5 (MIT), whose hardware research proved
-// that the LineageOS kernel leaves fbdev available when Android is not started.
+// Package linuxscreen owns the Checkers and Rook framebuffers. The framebuffer
+// code is derived from TECHO5 (MIT); Checkers rotates its portrait panel,
+// while Rook draws directly to its square panel.
 package linuxscreen
 
 import (
@@ -75,6 +75,7 @@ type Device struct {
 	sourceShadow            [][]byte
 	sourceValid             []bool
 	bandRows                [][]byte
+	directRow               []byte
 	lastConvert, lastPan    time.Duration
 }
 
@@ -130,8 +131,12 @@ func Open() (*Device, error) {
 	if d.page >= d.pages {
 		d.page = 0
 	}
-	// Checkers has a 480x960 portrait panel mounted as a 960x480 display.
-	d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelHeight, d.panelWidth))
+	if d.panelWidth == d.panelHeight {
+		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelWidth, d.panelHeight))
+	} else {
+		// Checkers has a 480x960 portrait panel mounted as a 960x480 display.
+		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelHeight, d.panelWidth))
+	}
 	return d, nil
 }
 
@@ -177,58 +182,89 @@ func (d *Device) Present() error {
 		d.sourceShadow[next] = sourceShadow
 	}
 	rowBytes := d.panelWidth * 4
-	if len(d.bandRows) != rotateBand || len(d.bandRows[0]) != rowBytes {
-		d.bandRows = make([][]byte, rotateBand)
-		for index := range d.bandRows {
-			d.bandRows[index] = make([]byte, rowBytes)
+	if d.panelWidth == d.panelHeight {
+		if len(d.directRow) != rowBytes {
+			d.directRow = make([]byte, rowBytes)
 		}
-	}
-	columns := min(width, d.panelHeight)
-	drawHeight := min(height, d.panelWidth)
-	for x0 := 0; x0 < columns; x0 += rotateBand {
-		count := min(rotateBand, columns-x0)
-		// Each framebuffer page can be two frames behind the visible page.
-		// Compare against this page's own last source frame, not the most
-		// recent frame globally, before skipping an unchanged rotated band.
-		if d.sourceValid[next] {
-			unchanged := true
-			for y := 0; y < drawHeight; y++ {
-				start := y*imageData.Stride + x0*4
-				end := start + count*4
-				if !bytes.Equal(imageData.Pix[start:end], sourceShadow[start:end]) {
-					unchanged = false
-					break
-				}
-			}
-			if unchanged {
+		for y := 0; y < d.panelHeight; y++ {
+			from := y * imageData.Stride
+			source := imageData.Pix[from : from+rowBytes]
+			if d.sourceValid[next] && bytes.Equal(source, sourceShadow[from:from+rowBytes]) {
 				continue
 			}
-		}
-		for y := 0; y < drawHeight; y++ {
-			source := imageData.Pix[y*imageData.Stride+x0*4 : y*imageData.Stride+(x0+count)*4]
-			copy(sourceShadow[y*imageData.Stride+x0*4:], source)
-			offset := (d.panelWidth - 1 - y) * 4
-			for index := 0; index < count; index++ {
-				pixel := source[index*4 : index*4+4]
-				row := d.bandRows[index]
+			copy(sourceShadow[from:from+rowBytes], source)
+			row := d.directRow
+			for x := 0; x < rowBytes; x += 4 {
+				pixel := source[x : x+4]
 				switch {
 				case fast && swap:
-					binary.LittleEndian.PutUint32(row[offset:offset+4], uint32(pixel[2])|uint32(pixel[1])<<8|uint32(pixel[0])<<16|uint32(pixel[3])<<24)
+					binary.LittleEndian.PutUint32(row[x:x+4], uint32(pixel[2])|uint32(pixel[1])<<8|uint32(pixel[0])<<16|uint32(pixel[3])<<24)
 				case fast:
-					copy(row[offset:offset+4], pixel)
+					copy(row[x:x+4], pixel)
 				default:
-					binary.LittleEndian.PutUint32(row[offset:offset+4], uint32(pixel[0])<<red|uint32(pixel[1])<<green|uint32(pixel[2])<<blue|uint32(pixel[3])<<alpha)
+					binary.LittleEndian.PutUint32(row[x:x+4], uint32(pixel[0])<<red|uint32(pixel[1])<<green|uint32(pixel[2])<<blue|uint32(pixel[3])<<alpha)
 				}
 			}
-		}
-		for index := 0; index < count; index++ {
-			offset := (x0 + index) * d.lineBytes
-			row := d.bandRows[index][:rowBytes]
-			if bytes.Equal(row, shadow[offset:offset+rowBytes]) {
-				continue
+			offset := y * d.lineBytes
+			if !bytes.Equal(row, shadow[offset:offset+rowBytes]) {
+				copy(shadow[offset:offset+rowBytes], row)
+				copy(destination[offset:offset+rowBytes], row)
 			}
-			copy(shadow[offset:offset+rowBytes], row)
-			copy(destination[offset:offset+rowBytes], row)
+		}
+	} else {
+		if len(d.bandRows) != rotateBand || len(d.bandRows[0]) != rowBytes {
+			d.bandRows = make([][]byte, rotateBand)
+			for index := range d.bandRows {
+				d.bandRows[index] = make([]byte, rowBytes)
+			}
+		}
+		columns := min(width, d.panelHeight)
+		drawHeight := min(height, d.panelWidth)
+		for x0 := 0; x0 < columns; x0 += rotateBand {
+			count := min(rotateBand, columns-x0)
+			// Each framebuffer page can be two frames behind the visible page.
+			// Compare against this page's own last source frame, not the most
+			// recent frame globally, before skipping an unchanged rotated band.
+			if d.sourceValid[next] {
+				unchanged := true
+				for y := 0; y < drawHeight; y++ {
+					start := y*imageData.Stride + x0*4
+					end := start + count*4
+					if !bytes.Equal(imageData.Pix[start:end], sourceShadow[start:end]) {
+						unchanged = false
+						break
+					}
+				}
+				if unchanged {
+					continue
+				}
+			}
+			for y := 0; y < drawHeight; y++ {
+				source := imageData.Pix[y*imageData.Stride+x0*4 : y*imageData.Stride+(x0+count)*4]
+				copy(sourceShadow[y*imageData.Stride+x0*4:], source)
+				offset := (d.panelWidth - 1 - y) * 4
+				for index := 0; index < count; index++ {
+					pixel := source[index*4 : index*4+4]
+					row := d.bandRows[index]
+					switch {
+					case fast && swap:
+						binary.LittleEndian.PutUint32(row[offset:offset+4], uint32(pixel[2])|uint32(pixel[1])<<8|uint32(pixel[0])<<16|uint32(pixel[3])<<24)
+					case fast:
+						copy(row[offset:offset+4], pixel)
+					default:
+						binary.LittleEndian.PutUint32(row[offset:offset+4], uint32(pixel[0])<<red|uint32(pixel[1])<<green|uint32(pixel[2])<<blue|uint32(pixel[3])<<alpha)
+					}
+				}
+			}
+			for index := 0; index < count; index++ {
+				offset := (x0 + index) * d.lineBytes
+				row := d.bandRows[index][:rowBytes]
+				if bytes.Equal(row, shadow[offset:offset+rowBytes]) {
+					continue
+				}
+				copy(shadow[offset:offset+rowBytes], row)
+				copy(destination[offset:offset+rowBytes], row)
+			}
 		}
 	}
 	d.sourceValid[next] = true

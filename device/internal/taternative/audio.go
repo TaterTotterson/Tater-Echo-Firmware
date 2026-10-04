@@ -49,13 +49,21 @@ func appendRollingFrame(frames [][]byte, frame []byte) [][]byte {
 	return append(frames, frame)
 }
 
-// Wake starts a local-wake turn and snapshots the complete pre-roll ring.
-// False means the client was disconnected or another voice turn already owns
-// the pipeline.
+// Wake starts a local-wake turn using the established shared mono pre-roll.
+// Array targets call WakeWithPreRoll with the exact beam that crossed.
 func (c *Client) Wake(wakeWord string, score float32) bool {
+	return c.WakeWithPreRoll(wakeWord, score, nil)
+}
+
+// WakeWithPreRoll carries one acoustic view consistently through wake-word
+// verification, trainer upload, and the beginning of STT. A nil/empty
+// preferredPreRoll preserves the established shared-mono fallback used by
+// non-array targets and degraded arrays.
+func (c *Client) WakeWithPreRoll(wakeWord string, score float32, preferredPreRoll [][]byte) bool {
 	if !c.connected.Load() {
 		return false
 	}
+	preferredPreRoll = cloneFrames(preferredPreRoll)
 	c.stateMu.RLock()
 	bargeIn := boolValue(c.settings["barge_in_enabled"])
 	speaking := c.state == "speaking"
@@ -66,19 +74,23 @@ func (c *Client) Wake(wakeWord string, score float32) bool {
 		return false
 	}
 	c.cancelCloseMiss()
-	c.queueTrainerCapture("wake_detected", wakeWord, score)
+	c.queueTrainerCaptureWithFrames("wake_detected", wakeWord, score, preferredPreRoll)
 	switch {
 	case forceVerifier || verifierMode == "enforce":
-		return c.queueWakeVerification(strings.TrimSpace(wakeWord), score, true)
+		return c.queueWakeVerificationWithFrames(strings.TrimSpace(wakeWord), score, true, preferredPreRoll)
 	case verifierMode == "observe":
-		c.queueWakeVerification(strings.TrimSpace(wakeWord), score, false)
-		return c.startWake(wakeWord, score)
+		c.queueWakeVerificationWithFrames(strings.TrimSpace(wakeWord), score, false, preferredPreRoll)
+		return c.startWakeWithPreRoll(wakeWord, score, preferredPreRoll)
 	default:
-		return c.startWake(wakeWord, score)
+		return c.startWakeWithPreRoll(wakeWord, score, preferredPreRoll)
 	}
 }
 
 func (c *Client) startWake(wakeWord string, score float32) bool {
+	return c.startWakeWithPreRoll(wakeWord, score, nil)
+}
+
+func (c *Client) startWakeWithPreRoll(wakeWord string, score float32, preferredPreRoll [][]byte) bool {
 	// A local wake during TTS is barge-in: cancel buffered voice playback
 	// before opening the microphone turn. Persistent music stays alive and is
 	// ducked by the eventual reply.
@@ -89,7 +101,7 @@ func (c *Client) startWake(wakeWord string, score float32) bool {
 			hook()
 		}
 	}
-	return c.startVoice("local_wake", strings.TrimSpace(wakeWord), "", score, true)
+	return c.startVoiceWithPreRoll("local_wake", strings.TrimSpace(wakeWord), "", score, true, preferredPreRoll)
 }
 
 // StartButton starts a push-to-talk turn without a wake phrase.
@@ -116,6 +128,10 @@ func (c *Client) startContinued(conversationID string) bool {
 }
 
 func (c *Client) startVoice(source, wakeWord, conversationID string, score float32, includePreRoll bool) bool {
+	return c.startVoiceWithPreRoll(source, wakeWord, conversationID, score, includePreRoll, nil)
+}
+
+func (c *Client) startVoiceWithPreRoll(source, wakeWord, conversationID string, score float32, includePreRoll bool, preferredPreRoll [][]byte) bool {
 	if !c.connected.Load() {
 		return false
 	}
@@ -130,7 +146,11 @@ func (c *Client) startVoice(source, wakeWord, conversationID string, score float
 	c.pendingAudio = nil
 	c.wakePreRoll = nil
 	if includePreRoll {
-		c.wakePreRoll = cloneFrames(c.preRoll)
+		if len(preferredPreRoll) > 0 {
+			c.wakePreRoll = cloneTailFrames(preferredPreRoll, preRollChunks)
+		} else {
+			c.wakePreRoll = cloneFrames(c.preRoll)
+		}
 	}
 	c.audioMu.Unlock()
 	payload := map[string]any{
@@ -161,6 +181,13 @@ func cloneFrames(in [][]byte) [][]byte {
 		out[i] = append([]byte(nil), in[i]...)
 	}
 	return out
+}
+
+func cloneTailFrames(in [][]byte, maximum int) [][]byte {
+	if maximum > 0 && len(in) > maximum {
+		in = in[len(in)-maximum:]
+	}
+	return cloneFrames(in)
 }
 
 func (c *Client) handleVoiceStartAck(payload map[string]any) {

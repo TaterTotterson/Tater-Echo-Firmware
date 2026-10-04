@@ -22,9 +22,16 @@ S24_3LE channels at 16 kHz.
 | 8 | Right playback loopback/reference |
 
 The six perimeter microphones are approximately 36 mm from the center. Tater
-uses channel 6 for direction-neutral wake detection, continuously estimates
-direction from channels 0–5, and locks a suitable perimeter microphone for a
-voice turn when confidence is sufficient.
+continuously estimates direction from channels 0–5 and forms the two strongest
+candidate beams from all seven microphones. Each beam has an independent
+microWakeWord state. If a candidate retargets, Tater replays 640 ms of raw
+nine-channel pre-roll so the detector keeps the beginning of the phrase. The
+winning lane's timestamped audio is used for STT wake verification, trainer
+uploads, and the initial STT pre-roll before that same beam is held for the
+voice turn. This gives the complete wake pipeline coherent array gain without
+running six neural models. A dead array channel
+automatically falls back to one healthy capsule, preferring direction-neutral
+channel 6.
 
 Channels 7 and 8 are playback loopbacks, not microphones. Measurements show
 that the internal speaker path emits the right channel, so production echo
@@ -39,10 +46,13 @@ and 6/7. All four share the TDM data bus.
 
 ## Audio path
 
-- Wake detection receives the center microphone without adaptive gain.
-- Direction estimators remain warm while idle, then select a perimeter mic at
-  the start of a turn.
-- SpeexDSP AEC consumes the selected microphone and channel 8 reference.
+- Wake detection scores two independent seven-microphone candidate beams
+  without adaptive gain; a healthy channel 6 is the preferred degraded fallback.
+- Direction estimators remain warm while idle and carry the winning wake
+  bearing and audio directly into verification, training, STT pre-roll, and
+  the seven-microphone voice beam.
+- SpeexDSP AEC consumes the centre fallback or locked steered-array path and
+  channel 8 reference.
 - Playback uses ALSA card 0, device 22 and drives the right channel.
 - Mixer controls are addressed by name because Fire OS builds can renumber
   them.

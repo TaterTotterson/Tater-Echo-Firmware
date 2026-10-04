@@ -269,6 +269,12 @@ func (s *Server) IsMuted() bool {
 	return s.mute.IsMuted()
 }
 
+// EnsureMuteStateFile records the effective state even on an unmuted first
+// boot. Rook's camera helper fails closed until this file exists.
+func (s *Server) EnsureMuteStateFile() {
+	s.mute.persist()
+}
+
 // ReconcileMuteHardware reasserts codec and visual state after a controller
 // reconnect. It is safe to call repeatedly; readback decides success.
 func (s *Server) ReconcileMuteHardware() error {

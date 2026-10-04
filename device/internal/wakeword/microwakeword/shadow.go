@@ -179,12 +179,20 @@ func (s *ShadowScorer) Push(samples []int16) {
 		return
 	}
 	pcm := append([]int16(nil), samples...)
-	s.enqueue(pcm)
+	s.enqueue(pcm, time.Now())
 }
 
 // PushBytes queues little-endian mono S16 PCM. An odd trailing byte is ignored
 // rather than shifting the sample boundary.
 func (s *ShadowScorer) PushBytes(raw []byte) {
+	s.PushBytesAt(raw, time.Now())
+}
+
+// PushBytesAt is PushBytes with the capture timestamp supplied by the shared
+// microphone pipeline. Candidate beams derived from the same raw frames then
+// carry one time identity even though their inference goroutines run
+// independently.
+func (s *ShadowScorer) PushBytesAt(raw []byte, capturedAt time.Time) {
 	if len(raw) < 2 || s.closed.Load() {
 		return
 	}
@@ -192,11 +200,13 @@ func (s *ShadowScorer) PushBytes(raw []byte) {
 	for i := range pcm {
 		pcm[i] = int16(binary.LittleEndian.Uint16(raw[i*2:]))
 	}
-	s.enqueue(pcm)
+	s.enqueue(pcm, capturedAt)
 }
 
-func (s *ShadowScorer) enqueue(pcm []int16) {
-	now := time.Now()
+func (s *ShadowScorer) enqueue(pcm []int16, capturedAt time.Time) {
+	if capturedAt.IsZero() {
+		capturedAt = time.Now()
+	}
 	nowNs := int64(time.Since(shadowClockStart))
 	// Preserve monotonic order if an outgoing and replacement mic goroutine
 	// overlap briefly. The older call must not move lastPush backwards and
@@ -215,7 +225,7 @@ func (s *ShadowScorer) enqueue(pcm []int16) {
 	}
 	chunk := shadowChunk{
 		pcm:        pcm,
-		capturedAt: now,
+		capturedAt: capturedAt,
 		generation: s.generation.Load(),
 		sequence:   s.sequence.Add(1),
 	}

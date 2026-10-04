@@ -297,6 +297,148 @@ func TestSpatialScoresUseAllPerimeterMics(t *testing.T) {
 	}
 }
 
+func planeWaveRaw(direction, frames int, seed uint32, amplitude float64) []byte {
+	raw := make([]byte, frames*frameSize)
+	source := make([]float64, frames+32)
+	for i := range source {
+		seed = seed*1664525 + 1013904223
+		source[i] = float64(int32(seed)) / 2147483648.0
+	}
+	theta := candidateAngles[direction] * math.Pi / 180
+	sx, sy := math.Sin(theta), math.Cos(theta)
+	var arrival [7]float64
+	minimum := math.MaxFloat64
+	for channel := 0; channel < len(arrival); channel++ {
+		a := micAngles[channel] * math.Pi / 180
+		radius := micRadiusMetres
+		if channel == centreCh {
+			radius = 0
+		}
+		x, y := radius*math.Sin(a), radius*math.Cos(a)
+		arrival[channel] = -(x*sx + y*sy) * sampleRate / speedOfSound
+		if arrival[channel] < minimum {
+			minimum = arrival[channel]
+		}
+	}
+	for frame := 0; frame < frames; frame++ {
+		for channel := 0; channel < len(arrival); channel++ {
+			delay := int(math.Round(arrival[channel] - minimum))
+			value := int32(source[frame+16-delay] * amplitude)
+			offset := frame*frameSize + channel*byteSample
+			raw[offset], raw[offset+1], raw[offset+2] = byte(value), byte(value>>8), byte(value>>16)
+		}
+	}
+	return raw
+}
+
+func TestLockedBiscuitUsesSevenMicSteeredBeam(t *testing.T) {
+	const wanted = 2 // 90 degrees
+	desired := planeWaveRaw(wanted, periodFrames*5, 0x12345678, 0x180000)
+	interferer := planeWaveRaw((wanted+3)%nDirections, periodFrames*5, 0x87654321, 0x180000)
+
+	desiredBeam := New()
+	desiredBeam.lockedChannel = directionToChannel[wanted]
+	desiredOut, _ := desiredBeam.Process(desired, -1, 1)
+
+	interferenceBeam := New()
+	interferenceBeam.lockedChannel = directionToChannel[wanted]
+	interferenceOut, _ := interferenceBeam.Process(interferer, -1, 1)
+
+	// Equal-level broadband sources are equal in any one capsule. Steering all
+	// seven capsules toward the user must produce a clear spatial advantage over
+	// the source on the opposite side of the ring.
+	ratio := pcmRMS(desiredOut[32:]) / math.Max(pcmRMS(interferenceOut[32:]), 1)
+	if ratio < 1.45 {
+		t.Fatalf("steered desired/off-axis RMS ratio = %.2f, want >= 1.45", ratio)
+	}
+	if desiredBeam.OutputChannel() != directionToChannel[wanted] {
+		t.Fatalf("AEC path = %d, want bearing path %d", desiredBeam.OutputChannel(), directionToChannel[wanted])
+	}
+}
+
+func TestWakeBeamIncludesCentreMicrophone(t *testing.T) {
+	raw := raw9(periodFrames, func(channel int) int32 {
+		if channel == centreCh {
+			return 0x180000
+		}
+		return 0
+	})
+	beam := New().WakeBeam(raw, 2, 1)
+	if got := pcmRMS(beam.PCM[32:]); got < 800 {
+		t.Fatalf("seven-mic wake beam ignored centre capsule: RMS %.1f", got)
+	}
+}
+
+func TestHealthyWakeArrayProducesTwoDistinctCandidateBeams(t *testing.T) {
+	b := New()
+	raw := planeWaveRaw(3, periodFrames*5, 0x9abcdef0, 0x180000)
+	b.Process(raw, -1, 1)
+	beams := b.WakeBeams(raw, 1)
+	if len(beams) != 2 {
+		t.Fatalf("healthy wake beam count = %d, want 2", len(beams))
+	}
+	if beams[0].Direction == beams[1].Direction {
+		t.Fatalf("wake lanes share direction %d", beams[0].Direction)
+	}
+	for lane, beam := range beams {
+		if len(beam.PCM) != periodFrames*5*2 {
+			t.Fatalf("lane %d PCM bytes = %d, want %d", lane, len(beam.PCM), periodFrames*5*2)
+		}
+	}
+}
+
+func TestWakeArrayFallsBackToCentreWhenAChannelIsDead(t *testing.T) {
+	b := New()
+	raw := raw9(periodFrames, func(channel int) int32 {
+		if channel == 4 {
+			return 0
+		}
+		return int32(channel+1) * 256
+	})
+	b.Process(raw, -1, 1)
+	beams := b.WakeBeams(raw, 1)
+	if len(beams) != 1 || beams[0].Direction != centreCh {
+		t.Fatalf("degraded wake beams = %+v, want one centre fallback", beams)
+	}
+}
+
+func TestWakeArrayDoesNotChooseDeadCentreAsFallback(t *testing.T) {
+	b := New()
+	raw := raw9(periodFrames, func(channel int) int32 {
+		if channel == centreCh {
+			return 0
+		}
+		return int32(channel+1) * 256
+	})
+	b.Process(raw, -1, 1)
+	beams := b.WakeBeams(raw, 1)
+	if len(beams) != 1 || beams[0].Direction == centreCh || pcmRMS(beams[0].PCM) == 0 {
+		t.Fatalf("dead-centre fallback = %+v, want one live perimeter channel", beams)
+	}
+}
+
+func TestWinningWakeBeamLocksExactDirection(t *testing.T) {
+	b := New()
+	b.LockWakeDirection(4, true)
+	if got := b.LockedAngle(); got != candidateAngles[4] {
+		t.Fatalf("winning wake lock angle = %.0f, want %.0f", got, candidateAngles[4])
+	}
+}
+
+func TestUnlockedBiscuitWakePathRemainsCentreMic(t *testing.T) {
+	b := New()
+	raw := raw9(periodFrames, func(channel int) int32 {
+		return int32(channel+1) * 256
+	})
+	mono, angle := b.Process(raw, -1, 1)
+	if angle != -1 {
+		t.Fatalf("idle wake angle = %.0f, want unavailable", angle)
+	}
+	if got := int16(uint16(mono[0]) | uint16(mono[1])<<8); got != centreCh+1 {
+		t.Fatalf("idle wake sample = %d, want centre channel value %d", got, centreCh+1)
+	}
+}
+
 func TestSpatialNoiseCannotBreakEnergyTie(t *testing.T) {
 	b := New()
 	b.trackSpeech = true

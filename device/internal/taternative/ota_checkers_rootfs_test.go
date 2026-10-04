@@ -30,6 +30,16 @@ func TestCheckersOTARejectsPreLinuxBase(t *testing.T) {
 	}
 }
 
+func TestRookOTARejectsPreLinuxBase(t *testing.T) {
+	installer := &OTAInstaller{Target: "rook", BaseOS: func() string { return platform.FireOS }}
+	err := installer.Install(context.Background(), OTARequest{
+		URL: "https://example.invalid/firmware", SHA256: strings.Repeat("0", 64),
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "USB factory installer") {
+		t.Fatalf("pre-Linux Rook OTA error = %v", err)
+	}
+}
+
 func linuxAppBundle(t *testing.T, target, baseOS string, extra map[string]string) []byte {
 	return linuxAppBundleWithExtras(t, target, baseOS, extra, extra)
 }
@@ -105,7 +115,7 @@ func writeLinuxAppBundle(t *testing.T, payload []byte) string {
 
 func TestReadLinuxAppManifest(t *testing.T) {
 	payload := linuxAppBundle(t, "checkers", "tater-linux", nil)
-	manifest, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload))
+	manifest, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,15 +126,26 @@ func TestReadLinuxAppManifest(t *testing.T) {
 
 func TestReadLinuxAppManifestRejectsWrongIdentity(t *testing.T) {
 	payload := linuxAppBundle(t, "biscuit", "tater-linux", nil)
-	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload))
+	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
 	if err == nil || !strings.Contains(err.Error(), "identity is incomplete") {
 		t.Fatalf("wrong identity error = %v", err)
 	}
 }
 
+func TestReadLinuxAppManifestAcceptsRookOnlyForRook(t *testing.T) {
+	payload := linuxAppBundle(t, "rook", "tater-linux", nil)
+	bundle := writeLinuxAppBundle(t, payload)
+	if _, err := readLinuxAppManifest(bundle, "rook"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLinuxAppManifest(bundle, "checkers"); err == nil {
+		t.Fatal("Checkers accepted a Rook application bundle")
+	}
+}
+
 func TestReadLinuxAppManifestRejectsUnsafeVersion(t *testing.T) {
 	payload := linuxAppBundleWithVersionAndExtras(t, "checkers", "tater-linux", "v2.0.0\nprevious=system", nil, nil)
-	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload))
+	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
 	if err == nil || !strings.Contains(err.Error(), "identity is incomplete") {
 		t.Fatalf("unsafe version error = %v", err)
 	}
@@ -132,7 +153,7 @@ func TestReadLinuxAppManifestRejectsUnsafeVersion(t *testing.T) {
 
 func TestReadLinuxAppManifestRejectsUnexpectedPath(t *testing.T) {
 	payload := linuxAppBundle(t, "checkers", "tater-linux", map[string]string{"../escape": "bad"})
-	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload))
+	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
 	if err == nil || !strings.Contains(err.Error(), "unsafe path") {
 		t.Fatalf("unsafe path error = %v", err)
 	}
@@ -140,7 +161,7 @@ func TestReadLinuxAppManifestRejectsUnexpectedPath(t *testing.T) {
 
 func TestReadLinuxAppManifestRejectsExtraManifestFile(t *testing.T) {
 	payload := linuxAppBundleWithExtras(t, "checkers", "tater-linux", map[string]string{"extra": "bad"}, nil)
-	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload))
+	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
 	if err == nil || !strings.Contains(err.Error(), "manifest has unexpected files") {
 		t.Fatalf("unexpected file error = %v", err)
 	}
@@ -150,7 +171,7 @@ func TestInstallLinuxAppBundleSwitchesApplicationSlot(t *testing.T) {
 	stateDir := t.TempDir()
 	payload := linuxAppBundle(t, "checkers", "tater-linux", nil)
 	bundle := writeLinuxAppBundle(t, payload)
-	manifest, err := readLinuxAppManifest(bundle)
+	manifest, err := readLinuxAppManifest(bundle, "checkers")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +197,7 @@ func TestInstallLinuxAppBundleRejectsPendingTrial(t *testing.T) {
 	stateDir := t.TempDir()
 	payload := linuxAppBundle(t, "checkers", "tater-linux", nil)
 	bundle := writeLinuxAppBundle(t, payload)
-	manifest, err := readLinuxAppManifest(bundle)
+	manifest, err := readLinuxAppManifest(bundle, "checkers")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,5 +240,27 @@ func TestInstallDispatchesCheckersLinuxAppBundle(t *testing.T) {
 	case <-restarted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("installer did not request restart")
+	}
+}
+
+func TestInstallDispatchesRookLinuxAppBundle(t *testing.T) {
+	payload := linuxAppBundle(t, "rook", "tater-linux", nil)
+	digest := sha256.Sum256(payload)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write(payload)
+	}))
+	defer server.Close()
+	stateDir := t.TempDir()
+	installer := &OTAInstaller{
+		Target: "rook", HTTP: server.Client(), StateDir: stateDir,
+		BaseOS: func() string { return platform.TaterLinux },
+	}
+	if err := installer.Install(context.Background(), OTARequest{
+		URL: server.URL, SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(len(payload)),
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "app", "slots", "a", "tater-echo")); err != nil {
+		t.Fatal(err)
 	}
 }

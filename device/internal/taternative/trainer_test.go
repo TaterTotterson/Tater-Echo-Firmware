@@ -52,8 +52,12 @@ func TestWakeCaptureUploadsTrainerCompatibleRawAudio(t *testing.T) {
 		pcm[index] = byte(index)
 	}
 	c.PushAudio(pcm)
+	winning := make([]byte, trainerMinimumCaptureBytes)
+	for index := range winning {
+		winning[index] = 0x6b
+	}
 
-	if !c.Wake("custom_tater", 0.96) {
+	if !c.WakeWithPreRoll("custom_tater", 0.96, [][]byte{winning}) {
 		t.Fatal("wake was not accepted")
 	}
 	select {
@@ -63,8 +67,8 @@ func TestWakeCaptureUploadsTrainerCompatibleRawAudio(t *testing.T) {
 			got.format != "pcm_s16le" || got.rate != "16000" {
 			t.Fatalf("unexpected trainer request: %#v", got)
 		}
-		if string(got.body) != string(pcm) {
-			t.Fatalf("trainer body bytes = %d, want %d", len(got.body), len(pcm))
+		if string(got.body) != string(winning) {
+			t.Fatalf("trainer did not receive winning beam: bytes = %d, want %d", len(got.body), len(winning))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("wake capture was not uploaded")

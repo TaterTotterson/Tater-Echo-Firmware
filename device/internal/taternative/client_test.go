@@ -130,6 +130,31 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 	}
 }
 
+func TestWinningWakeBeamIsFlushedAtStartOfSTT(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.PushAudio([]byte{1, 0}) // shared mono must not be selected
+	winning := [][]byte{{7, 0}, {8, 0}}
+	if !c.WakeWithPreRoll("hey_tater", 0.99, winning) {
+		t.Fatal("winning-beam wake was not accepted")
+	}
+	start := <-c.out
+	if start.kind != websocket.TextMessage {
+		t.Fatalf("voice start kind = %d", start.kind)
+	}
+	c.handleVoiceStartAck(map[string]any{"ok": true})
+	for index, want := range []byte{7, 8} {
+		frame := <-c.out
+		if frame.kind != websocket.BinaryMessage || len(frame.data) != 2 || frame.data[0] != want {
+			t.Fatalf("winning STT frame %d = kind %d data %v, want %d", index, frame.kind, frame.data, want)
+		}
+	}
+}
+
 func TestVoiceSegmentsPlayInOrderAndFinishOnce(t *testing.T) {
 	played := make(chan string, 3)
 	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{

@@ -68,7 +68,12 @@ const primePeriods = 24
 var silencePeriod = make([]byte, periodBytes)
 
 type PcmSpeaker struct {
-	session playbackSession
+	session   playbackSession
+	rookDrift rookPlaybackDrift
+	// alsaWriteFrames is the actual MediaTek hardware period selected at open.
+	// The vendor driver accounts playback in first-write-sized blocks, so Rook
+	// writes a whole hardware period rather than splitting a mixed period.
+	alsaWriteFrames int
 	// Checkers' MediaTek DL1 playback ring must live in DRAM. Hold a second
 	// AFE node open before playback, as TECHO5 does, to reserve the SRAM path.
 	dramHold *os.File
@@ -195,7 +200,7 @@ func (p *PcmSpeaker) Init() error {
 	// unmute must come last. The old order (amp on → unmute → open PCM)
 	// unmuted a floating DAC and then hit it with the stream-open
 	// transient — the "click" on every service start.
-	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") && !strings.EqualFold(strings.TrimSpace(p.target), "rook") {
 		exec.Command("stop", "mixer").Run()
 	}
 	// Android's media stack takes the speaker for itself when a headphone
@@ -205,7 +210,7 @@ func (p *PcmSpeaker) Init() error {
 	// takeover as `stop mixer` above and `stop smarthomewifid` in main: on a
 	// device where EchoMuse drives the codec directly, mediaserver has no
 	// work to do and is only ever in the way.
-	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+	if !strings.EqualFold(strings.TrimSpace(p.target), "checkers") && !strings.EqualFold(strings.TrimSpace(p.target), "rook") {
 		exec.Command("stop", "media").Run()
 	}
 	waitForFreePcm(cardNr, deviceNr, pcmFreeTimeout)
@@ -215,7 +220,16 @@ func (p *PcmSpeaker) Init() error {
 	// into silence. See the codec package.
 	codec.EnsureRoutes(p.target)
 	mixer.SetPlaybackLevel(0, 127) // mute before touching amp or stream
-	if strings.EqualFold(strings.TrimSpace(p.target), "checkers") {
+	if strings.EqualFold(strings.TrimSpace(p.target), "rook") {
+		// Rook's mono speaker needs its right-channel driver and gain set before
+		// the DAC begins clocking. Biscuit's current path does not set these.
+		for _, write := range jackRoutingForTarget("rook", false) {
+			if write.Ctl != mixer.SpeakerAmp {
+				mixer.Set(write.Ctl, write.Args...)
+			}
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(p.target), "checkers") || strings.EqualFold(strings.TrimSpace(p.target), "rook") {
 		// The vendor kernel chooses DL1's ring memory at open. With no other
 		// AFE node held, it chooses a broken SRAM path; TECHO5 holds this
 		// unused capture node so playback takes the working DRAM path.
@@ -229,7 +243,30 @@ func (p *PcmSpeaker) Init() error {
 	var session playbackSession
 	var err error
 	if p.dramHold != nil {
-		session, err = checkersalsa.OpenPlayback()
+		// Match Spot's hardware period to this loop's 2048-frame mixed period,
+		// so each ioctl carries one complete period as TECHO5's sender does.
+		// Keep Checkers' established 768 x 4 configuration.
+		p.alsaWriteFrames = checkersalsa.PeriodFrames
+		if strings.EqualFold(strings.TrimSpace(p.target), "rook") {
+			session, err = checkersalsa.OpenPlaybackWithPeriodFrames(periodSize)
+			if err != nil {
+				log.Printf("[speaker] Spot 2048 x 4 playback unavailable (%v); falling back to 1536 x 4", err)
+				session, err = checkersalsa.OpenPlaybackWithPeriodFrames(1536)
+				if err != nil {
+					log.Printf("[speaker] Spot 1536 x 4 playback unavailable (%v); falling back to 768 x 4", err)
+					session, err = checkersalsa.OpenPlayback()
+				}
+			} else {
+				p.alsaWriteFrames = periodSize
+			}
+		} else {
+			session, err = checkersalsa.OpenPlayback()
+		}
+		if strings.EqualFold(strings.TrimSpace(p.target), "rook") && err == nil {
+			if playback, ok := session.(*checkersalsa.Playback); ok {
+				playback.SetMaximumQueuedFrames(2 * periodSize)
+			}
+		}
 	} else {
 		device := tinyalsa.NewDevice(cardNr, deviceNr, pcm.Config{
 			Channels:         2,
@@ -334,7 +371,7 @@ func (p *PcmSpeaker) SetJackRouting(inserted bool) {
 	p.jackKnown = true
 	p.jackMu.Unlock()
 
-	p.applyJackWrites(jackRouting(inserted))
+	p.applyJackWrites(jackRoutingForTarget(p.target, inserted))
 	log.Printf("[speaker] jack routing applied (%s)",
 		map[bool]string{true: "external", false: "internal"}[inserted])
 }
@@ -375,13 +412,14 @@ func (p *PcmSpeaker) ReconcileJackRouting() int {
 	}
 
 	current := map[string]string{}
-	for _, ctl := range []string{ctlSpeakerAmp, ctlHPDriverGain} {
+	for _, write := range jackRoutingForTarget(p.target, inserted) {
+		ctl := write.Ctl
 		if v, err := mixer.Get(ctl); err == nil {
 			current[ctl] = v
 		} // a failed read is not evidence of drift
 	}
 
-	drift := jackRoutingDrift(inserted, current)
+	drift := jackRoutingDriftForTarget(p.target, inserted, current)
 	if len(drift) == 0 {
 		return 0
 	}
@@ -496,6 +534,7 @@ func (p *PcmSpeaker) silenceLoop() {
 		if p.levelTap != nil {
 			p.levelTap(level)
 		}
+		meter.observeAudio(out, len(voice) > 0 || len(music) > 0)
 		meter.beforeWrite()
 		if err := p.pump(out); err != nil {
 			log.Printf("silenceLoop: pump error: %v", err)
@@ -509,9 +548,12 @@ func (p *PcmSpeaker) silenceLoop() {
 // buffer is topped up a hardware period at a time rather than waiting for
 // room for the whole mixed period — which would let it drain to half.
 func (p *PcmSpeaker) pump(out []byte) error {
+	if strings.EqualFold(strings.TrimSpace(p.target), "rook") && p.alsaWriteFrames == periodSize {
+		return p.session.Pump(p.rookDrift.expand(out))
+	}
 	chunk := alsaPeriodSize * 4 // stereo S16
 	if p.dramHold != nil {
-		chunk = checkersalsa.PeriodFrames * 4
+		chunk = p.alsaWriteFrames * 4
 	}
 	for off := 0; off < len(out); off += chunk {
 		end := off + chunk

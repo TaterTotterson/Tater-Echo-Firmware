@@ -43,6 +43,23 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesForTargetDescribesRookScreenAndCamera(t *testing.T) {
+	got := CapabilitiesForTarget("rook")
+	for _, key := range []string{"screen", "touchscreen", "screen_weather", "screen_notifications", "ble_advertisements", "ota"} {
+		if got[key] != true {
+			t.Errorf("rook %s = %#v, want true", key, got[key])
+		}
+	}
+	for _, key := range []string{"led_ring"} {
+		if got[key] != false {
+			t.Errorf("rook %s = %#v, want false", key, got[key])
+		}
+	}
+	if got["camera_snapshot"] != true || got["camera_snapshot_version"] != 1 {
+		t.Fatal("rook did not advertise its on-demand Room Vision camera")
+	}
+}
+
 func TestCapabilitiesForTargetReturnsIndependentMaps(t *testing.T) {
 	checkers := CapabilitiesForTarget("checkers")
 	biscuit := CapabilitiesForTarget("biscuit")
