@@ -31,8 +31,14 @@ Target metadata used by builds and Tater lives in
 
 ## What it supports
 
-- On-device microWakeWord with live wake-word, model, sensitivity, wake-sound,
-  and second-STT verification settings from Tater.
+- Independently selectable microWakeWord and openWakeWord engines: MWW-only,
+  MWW + OWW agreement, or OWW-only before the optional STT wake check. Tater
+  manages built-in/custom model sources, sensitivity, and wake sounds live.
+  The built-in Hey Tater profile includes a matched, jointly packaged MWW and
+  OWW pair so dual mode cannot accidentally combine different phrases.
+  Biscuit, Checkers, and Rook all execute OWW with the optimized ARMv7 ONNX
+  Runtime/XNNPACK path. Android/Bionic and Linux/musl receive separately built,
+  hash-verified runtime libraries for their matching ABI.
 - Wake-audio training uploads, continued conversation, barge-in, intercom,
   timers, announcements, mute, volume, and device controls.
 - Synchronized stereo/group media, TTS overlays, audio scenes, music ducking,
@@ -154,6 +160,7 @@ target plus `firmware-manifest.json` and `SHA256SUMS`.
 | `tater-echo-checkers-vX.Y.Z-ota.tar.gz` | Checkers daemon + native screen A/B application OTA |
 | `tater-echo-rook-vX.Y.Z-factory.tar.gz` | Rook USB-to-Tater Linux factory conversion bundle |
 | `tater-echo-rook-vX.Y.Z-ota.tar.gz` | Rook daemon + native screen A/B application OTA |
+| `tater-echo-<target>-vX.Y.Z-{wake-runtime,onnxruntime}.so` | ABI-matched native wake-runtime sidecars used during OTA bootstrap |
 | `firmware-manifest.json` | Target compatibility, filenames, sizes, and SHA-256 hashes |
 
 Tater reads the manifest, selects the asset matching `firmware_target`, and
@@ -235,8 +242,9 @@ This project builds on three open-source firmware projects:
   Rook release pins and verifies that base and retains its MIT attribution.
 
 Additional credit goes to R0rt1z2 for amonet-biscuit, Binozo for EchoGo and
-GoTinyAlsa, Dragon863 for EchoCLI, microWakeWord, TensorFlow Lite Micro,
-Xiph.Org, and all hardware testers and contributors.
+GoTinyAlsa, Dragon863 for EchoCLI, microWakeWord, openWakeWord, Microsoft ONNX
+Runtime, TensorFlow Lite Micro, Xiph.Org, and all hardware testers and
+contributors.
 
 The repository is [MIT licensed](LICENSE); third-party terms are recorded in
 [`NOTICE.md`](NOTICE.md). Factory releases include the matching BusyBox source,

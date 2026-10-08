@@ -55,6 +55,8 @@ image=${TATER_ALPINE_ARMV7_IMAGE:-alpine:3.22}
 cache_root=${TATER_BUILD_CACHE:-/tmp/tater-rook-build-cache}
 mkdir -p "$cache_root/go-build" "$cache_root/go-mod"
 
+"$device/prepare_onnxruntime_linux_armv7.sh"
+
 docker run --rm --platform linux/arm/v7 \
     -e TATER_VERSION="$version" -e GOTOOLCHAIN=auto \
     -v "$repo:/src" \
@@ -63,14 +65,32 @@ docker run --rm --platform linux/arm/v7 \
     -w /src/device "$image" sh -lc '
 set -eu
 apk add --no-cache build-base ca-certificates cmake go linux-headers ninja tinyalsa-dev >/dev/null
+cmake -S internal/wakeword/microwakeword/native \
+  -B build/rook/microwakeword -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DTATER_MWW_BUILD_SMOKE_TEST=OFF
+cmake --build build/rook/microwakeword --parallel 2
+strip build/rook/microwakeword/libtater_microwakeword.so
+runtime_sha=$(sha256sum build/rook/microwakeword/libtater_microwakeword.so | awk "{print \$1}")
+ort_sha=$(sha256sum build/onnxruntime-linux-armv7/libonnxruntime.so | awk "{print \$1}")
+smoke=build/onnxruntime-linux-armv7/smoke
+mkdir -p "$smoke"
+cp build/onnxruntime-linux-armv7/libonnxruntime.so "$smoke/libonnxruntime.so"
+cp build/microwakeword-testdata/melspectrogram.onnx "$smoke/melspectrogram.onnx"
+cp build/microwakeword-testdata/embedding_model.onnx "$smoke/embedding_model.onnx"
+cp internal/wakeword/microwakeword/models/hey_tater.oww.onnx "$smoke/hey_tater.oww.onnx"
+TATER_ORT_SMOKE_DIR=/src/device/$smoke \
+  go test -count=1 -tags onnxruntime -run "^TestLinuxARMv7ORTModels$" \
+  ./internal/wakeword/microwakeword
 build_unix=$(date +%s)
 ldflags="-s -w \
   -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=$TATER_VERSION \
   -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=rook \
-  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix"
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix \
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseRuntimeSHA256=$runtime_sha \
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseORTRuntimeSHA256=$ort_sha"
 CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 \
   CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
-  go build -trimpath -tags server -ldflags "$ldflags" \
+  go build -trimpath -tags server,onnxruntime -ldflags "$ldflags" \
   -o build/rook/tater-echo ./cmd/
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w -X main.version=$TATER_VERSION" \
@@ -78,11 +98,6 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w" \
   -o build/rook/tater-reboot-now ./cmd/tater-reboot-now
-cmake -S internal/wakeword/microwakeword/native \
-  -B build/rook/microwakeword -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DTATER_MWW_BUILD_SMOKE_TEST=OFF
-cmake --build build/rook/microwakeword --parallel 2
-strip build/rook/microwakeword/libtater_microwakeword.so
 tiny=$(readlink -f /usr/lib/libtinyalsa.so.2)
 cp "$tiny" build/rook/libtinyalsa.so.2.0.0
 '
@@ -90,8 +105,13 @@ cp "$tiny" build/rook/libtinyalsa.so.2.0.0
 sh "$script_dir/build_camera_helper.sh" "$techo5" "$device/build/rook/tater-camera"
 
 for required in \
-    "$device/build/microwakeword-testdata/hey_tater.tflite" \
-    "$device/build/microwakeword-testdata/stop.tflite"; do
+    "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.oww.json" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json" \
+    "$device/build/microwakeword-testdata/stop.tflite" \
+    "$device/build/microwakeword-testdata/melspectrogram.onnx" \
+    "$device/build/microwakeword-testdata/embedding_model.onnx"; do
     [ -f "$required" ] || { echo "required model is missing: $required" >&2; exit 1; }
 done
 
@@ -102,10 +122,16 @@ python3 "$script_dir/build_rootfs.py" \
     --reboot "$device/build/rook/tater-reboot-now" \
     --camera "$device/build/rook/tater-camera" \
     --mww-runtime "$device/build/rook/microwakeword/libtater_microwakeword.so" \
-    --hey-tater-model "$device/build/microwakeword-testdata/hey_tater.tflite" \
+    --onnx-runtime "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" \
+    --hey-tater-model "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
     --hey-tater-manifest "$device/internal/wakeword/microwakeword/models/hey_tater.json" \
+    --hey-tater-oww-onnx "$device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx" \
+    --hey-tater-oww-metadata "$device/internal/wakeword/microwakeword/models/hey_tater.oww.json" \
+    --hey-tater-bundle "$device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json" \
     --stop-model "$device/build/microwakeword-testdata/stop.tflite" \
     --stop-manifest "$device/internal/wakeword/microwakeword/models/stop.json" \
+    --oww-melspectrogram-onnx "$device/build/microwakeword-testdata/melspectrogram.onnx" \
+    --oww-embedding-onnx "$device/build/microwakeword-testdata/embedding_model.onnx" \
     --tinyalsa "$device/build/rook/libtinyalsa.so.2.0.0" \
     --techo5-spot-license "$spot_source/LICENSE" \
     --techo5-license "$techo5/LICENSE" \
@@ -113,10 +139,16 @@ python3 "$script_dir/build_rootfs.py" \
     --version "$version" \
     --output "$output"
 
-file "$device/build/rook/tater-echo" "$device/build/rook/tater-show" "$device/build/rook/tater-reboot-now" "$device/build/rook/tater-camera"
+file "$device/build/rook/tater-echo" "$device/build/rook/tater-show" "$device/build/rook/tater-reboot-now" "$device/build/rook/tater-camera" \
+    "$device/build/onnxruntime-linux-armv7/libonnxruntime.so"
 file "$device/build/rook/tater-echo" | grep -q '32-bit.*ARM'
 file "$device/build/rook/tater-show" | grep -q '32-bit.*ARM'
 file "$device/build/rook/tater-camera" | grep -q '32-bit.*ARM'
+file "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | grep -q '32-bit.*ARM'
 strings "$device/build/rook/tater-echo" | grep -qF "$version"
 strings "$device/build/rook/tater-echo" | grep -qF rook
+runtime_sha=$(sha256sum "$device/build/rook/microwakeword/libtater_microwakeword.so" | awk '{print $1}')
+strings "$device/build/rook/tater-echo" | grep -qF "$runtime_sha"
+ort_sha=$(sha256sum "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | awk '{print $1}')
+strings "$device/build/rook/tater-echo" | grep -qF "$ort_sha"
 echo "Rook Linux rootfs: $output"

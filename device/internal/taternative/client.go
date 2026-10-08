@@ -259,9 +259,11 @@ type Client struct {
 	trainerCloseWord      string
 	trainerLastClose      time.Time
 
+	wakeGateMu           sync.Mutex
 	playMu               sync.Mutex
 	voiceCancel          context.CancelFunc
 	voiceGen             uint64
+	voiceResponseQueued  bool
 	voiceResponsePending bool
 	pendingReopen        bool
 	pendingConversation  string
@@ -355,6 +357,8 @@ func DefaultCapabilities() map[string]any {
 		"audio_scenes": true, "audio_scene_version": 1,
 		"audio_session_version": 4,
 		"settings":              true, "wake_verifier": true,
+		"dual_wake_confirmation": true,
+		"openwakeword":           true, "wake_detector_selection": true,
 		"wake_sound": true, "wake_audio_capture": true,
 		"ble_advertisements": true, "ble_advertisements_version": 1,
 	}

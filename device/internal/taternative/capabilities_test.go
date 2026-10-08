@@ -13,6 +13,9 @@ func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
 		t.Fatalf("biscuit BLE capabilities = %#v", got)
 	}
+	if got["openwakeword"] != true || got["wake_detector_selection"] != true {
+		t.Fatalf("biscuit selectable wake capabilities = %#v", got)
+	}
 }
 
 func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {

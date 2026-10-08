@@ -47,6 +47,8 @@ image=${TATER_ALPINE_ARMV7_IMAGE:-alpine:3.22}
 cache_root=${TATER_BUILD_CACHE:-/tmp/tater-checkers-build-cache}
 mkdir -p "$cache_root/go-build" "$cache_root/go-mod"
 
+"$device/prepare_onnxruntime_linux_armv7.sh"
+
 docker run --rm --platform linux/arm/v7 \
     -e TATER_VERSION="$version" \
     -e GOTOOLCHAIN=auto \
@@ -56,14 +58,32 @@ docker run --rm --platform linux/arm/v7 \
     -w /src/device "$image" sh -lc '
 set -eu
 apk add --no-cache build-base ca-certificates cmake go linux-headers ninja tinyalsa-dev >/dev/null
+cmake -S internal/wakeword/microwakeword/native \
+  -B build/microwakeword-linux -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DTATER_MWW_BUILD_SMOKE_TEST=OFF
+cmake --build build/microwakeword-linux --parallel 2
+strip build/microwakeword-linux/libtater_microwakeword.so
+runtime_sha=$(sha256sum build/microwakeword-linux/libtater_microwakeword.so | awk "{print \$1}")
+ort_sha=$(sha256sum build/onnxruntime-linux-armv7/libonnxruntime.so | awk "{print \$1}")
+smoke=build/onnxruntime-linux-armv7/smoke
+mkdir -p "$smoke"
+cp build/onnxruntime-linux-armv7/libonnxruntime.so "$smoke/libonnxruntime.so"
+cp build/microwakeword-testdata/melspectrogram.onnx "$smoke/melspectrogram.onnx"
+cp build/microwakeword-testdata/embedding_model.onnx "$smoke/embedding_model.onnx"
+cp internal/wakeword/microwakeword/models/hey_tater.oww.onnx "$smoke/hey_tater.oww.onnx"
+TATER_ORT_SMOKE_DIR=/src/device/$smoke \
+  go test -count=1 -tags onnxruntime -run "^TestLinuxARMv7ORTModels$" \
+  ./internal/wakeword/microwakeword
 build_unix=$(date +%s)
 ldflags="-s -w \
   -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=$TATER_VERSION \
   -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=checkers \
-  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix"
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix \
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseRuntimeSHA256=$runtime_sha \
+  -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseORTRuntimeSHA256=$ort_sha"
 CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 \
   CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
-  go build -trimpath -tags server -ldflags "$ldflags" \
+  go build -trimpath -tags server,onnxruntime -ldflags "$ldflags" \
   -o build/tater-echo ./cmd/
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w -X main.version=$TATER_VERSION" \
@@ -71,11 +91,6 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w" \
   -o build/tater-reboot-now ./cmd/tater-reboot-now
-cmake -S internal/wakeword/microwakeword/native \
-  -B build/microwakeword-linux -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DTATER_MWW_BUILD_SMOKE_TEST=OFF
-cmake --build build/microwakeword-linux --parallel 2
-strip build/microwakeword-linux/libtater_microwakeword.so
 tiny=$(readlink -f /usr/lib/libtinyalsa.so.2)
 mkdir -p build/tater-linux-libs
 cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
@@ -85,8 +100,13 @@ cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 python3 "$script_dir/build_rescue_fbprobe.py" "$techo5" "$device/build/tater-rescue-fbprobe"
 
 for required in \
-    "$device/build/microwakeword-testdata/hey_tater.tflite" \
-    "$device/build/microwakeword-testdata/stop.tflite"; do
+    "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.oww.json" \
+    "$device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json" \
+    "$device/build/microwakeword-testdata/stop.tflite" \
+    "$device/build/microwakeword-testdata/melspectrogram.onnx" \
+    "$device/build/microwakeword-testdata/embedding_model.onnx"; do
     [ -f "$required" ] || { echo "required model is missing: $required" >&2; exit 1; }
 done
 
@@ -97,10 +117,16 @@ python3 "$script_dir/build_rootfs.py" \
     --reboot "$device/build/tater-reboot-now" \
     --camera "$device/build/tater-camera" \
     --mww-runtime "$device/build/microwakeword-linux/libtater_microwakeword.so" \
-    --hey-tater-model "$device/build/microwakeword-testdata/hey_tater.tflite" \
+    --onnx-runtime "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" \
+    --hey-tater-model "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
     --hey-tater-manifest "$device/internal/wakeword/microwakeword/models/hey_tater.json" \
+    --hey-tater-oww-onnx "$device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx" \
+    --hey-tater-oww-metadata "$device/internal/wakeword/microwakeword/models/hey_tater.oww.json" \
+    --hey-tater-bundle "$device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json" \
     --stop-model "$device/build/microwakeword-testdata/stop.tflite" \
     --stop-manifest "$device/internal/wakeword/microwakeword/models/stop.json" \
+    --oww-melspectrogram-onnx "$device/build/microwakeword-testdata/melspectrogram.onnx" \
+    --oww-embedding-onnx "$device/build/microwakeword-testdata/embedding_model.onnx" \
     --tinyalsa "$device/build/tater-linux-libs/libtinyalsa.so.2.0.0" \
     --techo5-license "$techo5/LICENSE" \
     --apk-cache "$device/build" \
@@ -109,12 +135,18 @@ python3 "$script_dir/build_rootfs.py" \
 
 file "$device/build/tater-echo" "$device/build/tater-show-linux" "$device/build/tater-reboot-now" \
     "$device/build/tater-camera" "$device/build/tater-rescue-fbprobe" \
-    "$device/build/microwakeword-linux/libtater_microwakeword.so"
+    "$device/build/microwakeword-linux/libtater_microwakeword.so" \
+    "$device/build/onnxruntime-linux-armv7/libonnxruntime.so"
 file "$device/build/tater-echo" | grep -q '32-bit.*ARM'
 file "$device/build/tater-show-linux" | grep -q '32-bit.*ARM'
 file "$device/build/tater-reboot-now" | grep -q '32-bit.*ARM'
 file "$device/build/tater-camera" | grep -q '32-bit.*ARM'
 file "$device/build/tater-rescue-fbprobe" | grep -q '32-bit.*ARM'
+file "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | grep -q '32-bit.*ARM'
 strings "$device/build/tater-echo" | grep -qF "$version"
 strings "$device/build/tater-echo" | grep -qF checkers
+runtime_sha=$(sha256sum "$device/build/microwakeword-linux/libtater_microwakeword.so" | awk '{print $1}')
+strings "$device/build/tater-echo" | grep -qF "$runtime_sha"
+ort_sha=$(sha256sum "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | awk '{print $1}')
+strings "$device/build/tater-echo" | grep -qF "$ort_sha"
 echo "Checkers Linux rootfs: $output"

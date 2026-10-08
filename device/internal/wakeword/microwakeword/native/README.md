@@ -48,7 +48,7 @@ and regeneration instructions.
 
 The repository wrapper uses Android NDK 21.4.7075529 from the same pinned base
 image as the firmware, then verifies ELF32/ARM, the dependency list, and the
-ten-symbol public ABI:
+ten-symbol MWW ABI. openWakeWord runs separately through ONNX Runtime:
 
 ```bash
 cd device

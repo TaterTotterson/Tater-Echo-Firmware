@@ -28,6 +28,29 @@ type NativeRuntime struct {
 	version string
 }
 
+// OWWSettings are the calibrated acceptance values carried by a dual-model
+// wake bundle. Arenas are fixed by firmware after measuring the supported OWW
+// 0.6 models; keeping them out of user settings prevents unbounded allocation.
+type OWWSettings struct {
+	Threshold float32
+	Patience  int
+}
+
+// OWWResult describes the independent second-stage decision.
+type OWWResult struct {
+	Accepted    bool
+	Score       float32
+	Consecutive int
+}
+
+// OWWEngine supports both bounded MWW confirmation and continuous OWW-only
+// detection. It implements Engine so the established asynchronous shadow
+// scorer can supply queueing, discontinuity resets, and wake policy.
+type OWWEngine interface {
+	Engine
+	Confirm([]int16) (OWWResult, error)
+}
+
 var (
 	nativeRuntimeMu sync.Mutex
 	nativeRuntimes  = map[string]*NativeRuntime{}

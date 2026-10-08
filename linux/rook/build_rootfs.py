@@ -46,10 +46,16 @@ def build(args: argparse.Namespace) -> None:
         common.copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
         common.copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
         common.copy(args.mww_runtime, root / "usr/share/tater/microwakeword/libtater_microwakeword.so", 0o755)
+        common.copy(args.onnx_runtime, root / "usr/share/tater/microwakeword/libonnxruntime.so", 0o755)
         common.copy(args.hey_tater_model, root / "usr/share/tater/microwakeword/hey_tater.tflite", 0o644)
         common.copy(args.hey_tater_manifest, root / "usr/share/tater/microwakeword/hey_tater.json", 0o644)
+        common.copy(args.hey_tater_oww_onnx, root / "usr/share/tater/microwakeword/hey_tater.oww.onnx", 0o644)
+        common.copy(args.hey_tater_oww_metadata, root / "usr/share/tater/microwakeword/hey_tater.oww.json", 0o644)
+        common.copy(args.hey_tater_bundle, root / "usr/share/tater/microwakeword/hey_tater.wake-bundle.json", 0o644)
         common.copy(args.stop_model, root / "usr/share/tater/microwakeword/stop.tflite", 0o644)
         common.copy(args.stop_manifest, root / "usr/share/tater/microwakeword/stop.json", 0o644)
+        common.copy(args.oww_melspectrogram_onnx, root / "usr/share/tater/microwakeword/melspectrogram.onnx", 0o644)
+        common.copy(args.oww_embedding_onnx, root / "usr/share/tater/microwakeword/embedding_model.onnx", 0o644)
         common.copy(args.tinyalsa, root / "usr/lib/libtinyalsa.so.2.0.0", 0o755)
         for name, digest, member in common.SETUP_PACKAGES:
             common.setup_binary(args.apk_cache, name, digest, member, root / member)
@@ -103,8 +109,10 @@ def build(args: argparse.Namespace) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("base-rootfs", "server", "show", "reboot", "camera", "mww-runtime", "hey-tater-model",
-                 "hey-tater-manifest", "stop-model", "stop-manifest", "tinyalsa",
+    for name in ("base-rootfs", "server", "show", "reboot", "camera", "mww-runtime", "onnx-runtime", "hey-tater-model",
+                 "hey-tater-manifest", "hey-tater-oww-onnx", "hey-tater-oww-metadata",
+                 "hey-tater-bundle", "stop-model", "stop-manifest", "tinyalsa",
+                 "oww-melspectrogram-onnx", "oww-embedding-onnx",
                  "techo5-spot-license", "techo5-license", "apk-cache", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--version", required=True)

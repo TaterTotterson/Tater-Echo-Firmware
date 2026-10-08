@@ -71,20 +71,6 @@ jobs:
       - name: Build Android compiler image
         run: docker build -t tater-echo-compiler device/compiler/
 
-      - name: Compile Tater Echo userspace
-        run: |
-          mkdir -p device/build
-          build_unix=$(date +%s)
-          docker run --rm --entrypoint bash \
-            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
-            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
-            -v "${{ github.workspace }}/device":/sdk \
-            tater-echo-compiler -c "cd /sdk && go build -tags server \
-              -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
-                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
-                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix' \
-              -o build/server ./cmd/"
-
       - name: Build ARMv7 microWakeWord runtime
         run: device/build_microwakeword_runtime.sh
 
@@ -100,6 +86,25 @@ jobs:
             https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/18f27f6086b4e7c5adfb9f884a80340e2e81970f/microWakeWordsV1/stop.tflite \
             -o device/build/microwakeword-testdata/stop.tflite
           echo '020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea  device/build/microwakeword-testdata/stop.tflite' | sha256sum -c -
+          device/prepare_onnxruntime_android.sh
+
+      - name: Compile Tater Echo userspace
+        run: |
+          mkdir -p device/build
+          build_unix=$(date +%s)
+          runtime_sha=$(sha256sum device/build/microwakeword-android/libtater_microwakeword.so | awk '{print $1}')
+          ort_sha=$(sha256sum device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | awk '{print $1}')
+          docker run --rm --entrypoint bash \
+            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
+            -v "${{ github.workspace }}/device":/sdk \
+            tater-echo-compiler -c "cd /sdk && go build -tags server \
+              -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseRuntimeSHA256=$runtime_sha \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseORTRuntimeSHA256=$ort_sha' \
+              -o build/server ./cmd/"
 
       - name: Compile emOS init32
         run: |
@@ -134,9 +139,11 @@ jobs:
         shell: bash
         run: |
           file device/build/server device/build/microwakeword-android/libtater_microwakeword.so \
+            device/build/onnxruntime/armeabi-v7a/libonnxruntime.so \
             emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
           file device/build/server | grep -q '32-bit.*ARM'
           file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
+          file device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | grep -q '32-bit.*ARM'
           file emos/build/init32 | grep -q '32-bit LSB executable, ARM'
           file emos/build/init32 | grep -q 'statically linked'
           file emos/build/wpa/wpa_supplicant | grep -q '32-bit LSB executable, ARM'
@@ -144,6 +151,12 @@ jobs:
           file emos/build/bb/busybox | grep -q '32-bit LSB executable, ARM'
           file emos/build/bb/busybox | grep -q 'statically linked'
           strings device/build/server | grep -qF '${{ steps.version.outputs.version }}'
+          runtime_sha=$(sha256sum device/build/microwakeword-android/libtater_microwakeword.so | awk '{print $1}')
+          ort_sha=$(sha256sum device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | awk '{print $1}')
+          strings device/build/server | grep -qF "$runtime_sha" || {
+            echo '::error::Biscuit firmware is missing its wake-runtime digest'; exit 1; }
+          strings device/build/server | grep -qF "$ort_sha" || {
+            echo '::error::Biscuit firmware is missing its ONNX Runtime digest'; exit 1; }
           if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
             echo '::error::Biscuit firmware requires unavailable pcm_readi'; exit 1;
           fi

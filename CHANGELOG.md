@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+- Tater can enable microWakeWord and openWakeWord independently. MWW-only
+  preserves the original pipeline, dual mode requires both models to accept
+  the same winning-beam audio, and OWW-only runs openWakeWord continuously
+  before the optional STT wake check.
+- Each engine has its own built-in Hey Tater/custom source selection. Custom
+  openWakeWord models install from the verified `.wake-bundle.json` produced
+  by either Tater trainer. The newly trained Hey Tater MWW and OWW classifiers
+  now ship together as one verified built-in profile.
+- Biscuit, Checkers, and Rook factory images carry the built-in pair and shared
+  OWW feature models. Ordinary daemon OTA installs repair the same signed
+  profile and securely bootstrap the matching native wake runtime. Saved
+  detector choices remain user-controlled, and the timer Stop wake remains
+  immediate.
+- Dual mode keeps MWW and OWW warm in parallel on the same directional beam
+  lanes and opens the microphone only when their timestamped crossings agree.
+  This preserves mandatory two-model agreement without replaying the wake clip
+  after MWW or adding a second-stage delay.
+- Biscuit now runs OWW through the ARMv7 ONNX Runtime/XNNPACK path proven on
+  this hardware by EchoMuse. Live validation measured same-frame MWW/OWW
+  agreement while keeping the daemon near 25% CPU and 39 MB RSS.
+- Checkers and Rook now use that same continuous ONNX/XNNPACK OWW pipeline
+  through a reduced Linux/musl ARMv7 runtime built from pinned source. Their
+  factory images and release sidecars carry the verified native runtime and
+  ONNX feature models, with an emulated inference smoke test before packaging.
+
 ## v2.1.0
 
 ### What's Changed

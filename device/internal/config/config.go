@@ -32,7 +32,8 @@ type Device struct {
 
 	// Wake word
 	// MwwShadowEnabled independently enables the Tater microWakeWord runtime.
-	// It is observational only: crossings are reported but never start a turn.
+	// Crossings are observational in legacy controller mode and start a native
+	// turn when the direct Tater transport supplies a wake callback.
 	// MwwThreshold=0 uses the model manifest's calibrated threshold.
 	MwwShadowEnabled bool
 	MwwThreshold     float64
@@ -41,6 +42,8 @@ type Device struct {
 	MwwModel         string
 	MwwSensitivity   string
 	MwwEnvironment   string
+	OwwEnabled       bool
+	OwwModel         string
 	// BargeInEnabled / BargeInThreshold mirror the controller's barge-in
 	// settings for compatibility with legacy control messages. Tater-native
 	// wake policy is applied by the microWakeWord configuration below.
@@ -160,6 +163,8 @@ func (d *Device) loadDefaults() {
 	d.MwwModel = envStr("MWW_MODEL", "hey_tater")
 	d.MwwSensitivity = envStr("MWW_SENSITIVITY", "normal")
 	d.MwwEnvironment = envStr("MWW_ENVIRONMENT", "balanced")
+	d.OwwEnabled = envBool("OWW_ENABLED", false)
+	d.OwwModel = envStr("OWW_MODEL", "hey_tater")
 	d.BargeInThreshold = envFloat("BARGE_IN_THRESHOLD", 0.05)
 	d.DuckDb = envFloat("DUCK_DB", -18)
 	d.AdcDigitalGain = envInt("ADC_DIGITAL_GAIN", 88)
@@ -225,6 +230,12 @@ func (d *Device) Apply(msg ConfigMessage) {
 	}
 	if msg.MwwEnvironment != "" {
 		d.MwwEnvironment = msg.MwwEnvironment
+	}
+	if msg.OwwEnabled != nil {
+		d.OwwEnabled = *msg.OwwEnabled
+	}
+	if msg.OwwModel != "" {
+		d.OwwModel = msg.OwwModel
 	}
 	if msg.BargeInEnabled != nil {
 		d.BargeInEnabled = *msg.BargeInEnabled
@@ -332,6 +343,7 @@ func (d *Device) Snapshot() ConfigMessage {
 	mwwThreshold := d.MwwThreshold
 	mwwSlidingWindow := d.MwwSlidingWindow
 	mwwCloseMiss := d.MwwCloseMiss
+	owwEnabled := d.OwwEnabled
 	agcEnabled := true
 	if d.AgcEnabled != nil {
 		agcEnabled = *d.AgcEnabled
@@ -359,6 +371,8 @@ func (d *Device) Snapshot() ConfigMessage {
 		MwwModel:           d.MwwModel,
 		MwwSensitivity:     d.MwwSensitivity,
 		MwwEnvironment:     d.MwwEnvironment,
+		OwwEnabled:         &owwEnabled,
+		OwwModel:           d.OwwModel,
 		BargeInEnabled:     &bargeInEnabled,
 		BargeInThreshold:   d.BargeInThreshold,
 		StartupVolume:      d.StartupVolume,
@@ -401,6 +415,8 @@ type ConfigMessage struct {
 	MwwModel         string   `json:"mwwModel,omitempty"`
 	MwwSensitivity   string   `json:"mwwSensitivity,omitempty"`
 	MwwEnvironment   string   `json:"mwwEnvironment,omitempty"`
+	OwwEnabled       *bool    `json:"owwEnabled,omitempty"`
+	OwwModel         string   `json:"owwModel,omitempty"`
 	// ConsolePassword is the hashed record emOS's init checks before handing
 	// over a shell on the USB serial console. A POINTER, and it has to be: an
 	// EMPTY record is the legitimate "no password" setting, so with a plain

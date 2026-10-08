@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	// DefaultPackageDir is populated separately from the A/B firmware binary
-	// because the runtime/model change less often and should not double every
-	// OTA payload.
+	// DefaultPackageDir holds the verified embedded default pair, downloaded
+	// custom packages, and the target runtime outside the A/B executable slots.
 	DefaultPackageDir = "/data/local/share/tater/microwakeword"
 	DefaultPackage    = "hey_tater"
 	RuntimeFilename   = "libtater_microwakeword.so"

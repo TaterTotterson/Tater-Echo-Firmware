@@ -151,6 +151,7 @@ add_library(tater_mww_tflm STATIC
   ${TFL}/kernels/internal/tensor_ctypes.cc
   ${TFL}/kernels/internal/runtime_shape.cc
   ${TFL}/kernels/internal/reference/portable_tensor_utils.cc
+  ${TFL}/kernels/internal/reference/comparisons.cc
 
   ${TFLM}/kernels/conv.cc
   ${TFLM}/kernels/conv_common.cc
@@ -170,12 +171,16 @@ add_library(tater_mww_tflm STATIC
   ${TFLM}/kernels/add_common.cc
   ${TFLM}/kernels/mul.cc
   ${TFLM}/kernels/mul_common.cc
+  ${TFLM}/kernels/sub.cc
+  ${TFLM}/kernels/sub_common.cc
   ${TFLM}/kernels/quantize.cc
   ${TFLM}/kernels/quantize_common.cc
   ${TFLM}/kernels/dequantize.cc
   ${TFLM}/kernels/dequantize_common.cc
   ${TFLM}/kernels/activations.cc
   ${TFLM}/kernels/activations_common.cc
+  ${TFLM}/kernels/leaky_relu.cc
+  ${TFLM}/kernels/leaky_relu_common.cc
   ${TFLM}/kernels/pad.cc
   ${TFLM}/kernels/pad_common.cc
   ${TFLM}/kernels/concatenation.cc
@@ -192,6 +197,10 @@ add_library(tater_mww_tflm STATIC
   ${TFLM}/kernels/split_v.cc
   ${TFLM}/kernels/reduce.cc
   ${TFLM}/kernels/reduce_common.cc
+  ${TFLM}/kernels/maximum_minimum.cc
+  ${TFLM}/kernels/comparisons.cc
+  ${TFLM}/kernels/elementwise.cc
+  ${TFLM}/kernels/if.cc
 )
 target_include_directories(tater_mww_tflm SYSTEM PUBLIC
   ${TFLM_ROOT}
