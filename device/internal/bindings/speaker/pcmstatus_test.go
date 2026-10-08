@@ -76,3 +76,20 @@ func TestStatusPathMatchesTheDeviceWeOpen(t *testing.T) {
 		t.Fatalf("statusPath = %q, want %q", got, want)
 	}
 }
+
+func TestPcmDelayReadsOnlyRunningRendererClock(t *testing.T) {
+	if frames, ok := pcmDelay(runningStatus); !ok || frames != 8064 {
+		t.Fatalf("running delay = %d %v, want 8064 true", frames, ok)
+	}
+	for name, status := range map[string]string{
+		"closed":   "closed\n",
+		"prepared": "state: PREPARED\ndelay: 0\n",
+		"xrun":     "state: XRUN\ndelay: 4096\n",
+		"missing":  "state: RUNNING\navail: 879\n",
+		"garbage":  "state: RUNNING\ndelay: lots\n",
+	} {
+		if _, ok := pcmDelay(status); ok {
+			t.Errorf("%s status supplied a renderer clock", name)
+		}
+	}
+}

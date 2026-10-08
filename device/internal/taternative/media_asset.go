@@ -117,6 +117,15 @@ func (a *mediaAsset) readFrames(
 		return nil, false, false, nil
 	}
 	for {
+		// A completed asset can be replayed entirely from disk, so the loop path
+		// below never waits on a notification. Check cancellation on every pass
+		// to let audio.scene.start stop a looping background when its foreground
+		// TTS and fade-out have finished.
+		select {
+		case <-ctx.Done():
+			return nil, false, waited, ctx.Err()
+		default:
+		}
 		frames, done, decodeErr, notify := a.snapshot()
 		if *cursor >= frames {
 			if done {
@@ -452,10 +461,8 @@ func convertPCMStream(
 	return resampler.finish()
 }
 
-// resampleMediaBlock consumes a very small source-rate difference into one
-// fixed output block. correction > 0 advances the source (catch up), while a
-// negative value consumes fewer source frames (fall back), both without a
-// dropped/repeated discontinuity.
+// resampleMediaBlock converts a decoded local-scene block to an exact output
+// size without a dropped/repeated discontinuity at the boundary.
 func resampleMediaBlock(input []int16, outputFrames int) []byte {
 	if len(input) == 0 || outputFrames <= 0 {
 		return nil
@@ -479,51 +486,4 @@ func resampleMediaBlock(input []int16, outputFrames int) []byte {
 		binary.LittleEndian.PutUint16(out[index*2:], uint16(int16(math.Round(value))))
 	}
 	return out
-}
-
-type mediaSlew struct {
-	pending       int64
-	interval      int64
-	untilNextStep int64
-}
-
-func (s *mediaSlew) replace(correction int64, settleFrames int64) {
-	s.pending = correction
-	if correction == 0 {
-		s.interval = 0
-		s.untilNextStep = 0
-		return
-	}
-	abs := correction
-	if abs < 0 {
-		abs = -abs
-	}
-	if settleFrames <= 0 {
-		settleFrames = playbackRate
-	}
-	s.interval = maxInt64(1, settleFrames/abs)
-	s.untilNextStep = s.interval
-}
-
-func (s *mediaSlew) next(outputFrames int64) int64 {
-	if s.pending == 0 || outputFrames <= 0 {
-		return 0
-	}
-	var result int64
-	remaining := outputFrames
-	for s.pending != 0 && remaining >= s.untilNextStep {
-		remaining -= s.untilNextStep
-		if s.pending > 0 {
-			result++
-			s.pending--
-		} else {
-			result--
-			s.pending++
-		}
-		s.untilNextStep = s.interval
-	}
-	if s.pending != 0 {
-		s.untilNextStep -= remaining
-	}
-	return result
 }

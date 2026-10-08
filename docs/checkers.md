@@ -38,7 +38,7 @@ The Linux generation keeps the existing satellite protocol and feature set:
   independently scored left/right wake beams, winning-beam handoff,
   winning-beam STT verification/trainer/pre-roll, speech-locked steering and
   off-axis attenuation, VAD, per-path AEC, barge-in, and microWakeWord;
-- TTS, media, synchronized group audio, timers, alarms, announcements,
+- TTS, Sendspin media and synchronized group audio, timers, alarms, announcements,
   intercom, mute, and volume;
 - BLE presence advertisement forwarding;
 - weather, room sensors, notifications, Room Vision, tool status, media and

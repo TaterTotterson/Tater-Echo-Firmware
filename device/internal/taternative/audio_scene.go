@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 )
 
 // PlayOverlay prepares a bounded foreground spool, starts it on Tater's
@@ -83,7 +85,7 @@ func (p *LocalPlayer) PlayOverlay(ctx context.Context, req OverlayRequest, start
 	}
 	if req.StopMediaWhenFinished && req.BackgroundFadeOut > 0 {
 		setSpeakerDuck(p.Speaker, -96, req.BackgroundFadeOut)
-		if err := waitPlaybackDuration(ctx, req.BackgroundFadeOut); err != nil {
+		if err := waitSpeakerDuckRamp(ctx, p.Speaker, req.BackgroundFadeOut); err != nil {
 			return err
 		}
 		// Tater stops the background when it receives overlay.finished. Keep
@@ -100,6 +102,20 @@ func (p *LocalPlayer) PlayOverlay(ctx context.Context, req OverlayRequest, start
 	return nil
 }
 
+// duckRampWaiter lets the hardware renderer report the completion of its
+// sample-counted gain envelope. A wall-clock sleep can expire before the ALSA
+// loop observes a new ramp, clipping the last period of a fade.
+type duckRampWaiter interface {
+	WaitDuckRamp(context.Context) error
+}
+
+func waitSpeakerDuckRamp(ctx context.Context, spk speaker.Speaker, duration time.Duration) error {
+	if waiter, ok := spk.(duckRampWaiter); ok {
+		return waiter.WaitDuckRamp(ctx)
+	}
+	return waitPlaybackDuration(ctx, duration)
+}
+
 func waitPlaybackDuration(ctx context.Context, duration time.Duration) error {
 	if duration <= 0 {
 		return nil
@@ -114,9 +130,10 @@ func waitPlaybackDuration(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-// PlayScene provides the direct audio.scene.start compatibility path. The
-// normal Tater path uses a synchronized persistent background session and
-// calls PlayOverlay, which additionally participates in group clock repair.
+// PlayScene provides the direct audio.scene.start compatibility path for a
+// single Echo. Tater sends synchronized multi-satellite playback through
+// Sendspin; the native scene path remains for a local foreground/background
+// composition and uses the same hardware ducking planes.
 func (p *LocalPlayer) PlayScene(ctx context.Context, req SceneRequest) error {
 	if strings.TrimSpace(req.ForegroundURL) == "" {
 		return errors.New("foreground URL is required")
@@ -132,9 +149,8 @@ func (p *LocalPlayer) PlayScene(ctx context.Context, req SceneRequest) error {
 	backgroundDone := make(chan error, 1)
 	go func() {
 		backgroundDone <- p.PlayMedia(sceneCtx, MediaRequest{
-			SessionID: req.SceneID + "-background", URL: req.BackgroundURL,
-			VolumePercent: req.BackgroundVolumePercent, Loop: req.BackgroundLoop,
-			ContentType: "background", Channel: "mono",
+			URL: req.BackgroundURL, VolumePercent: req.BackgroundVolumePercent,
+			Loop: req.BackgroundLoop, Channel: "mono",
 		})
 	}()
 	err := p.PlayOverlay(sceneCtx, OverlayRequest{
@@ -144,14 +160,25 @@ func (p *LocalPlayer) PlayScene(ctx context.Context, req SceneRequest) error {
 		DuckingAttack:        req.DuckingAttack, DuckingRelease: req.DuckingRelease,
 		StopMediaWhenFinished: true, BackgroundFadeOut: req.BackgroundFadeOut,
 	}, nil)
+	return p.finishSceneBackground(cancel, backgroundDone, err)
+}
+
+func (p *LocalPlayer) finishSceneBackground(
+	cancel context.CancelFunc,
+	backgroundDone <-chan error,
+	err error,
+) error {
 	cancel()
-	setSpeakerDuck(p.Speaker, 0, 0)
 	select {
 	case backgroundErr := <-backgroundDone:
 		if err == nil && backgroundErr != nil && !errors.Is(backgroundErr, context.Canceled) {
 			err = backgroundErr
 		}
 	case <-time.After(time.Second):
+		// Keep the gain at silence while stopping a stuck background. Resetting
+		// it first can briefly expose the queued music at full volume.
+		p.Speaker.FlushMusic()
 	}
+	setSpeakerDuck(p.Speaker, 0, 0)
 	return err
 }

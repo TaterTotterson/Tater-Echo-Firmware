@@ -4,6 +4,7 @@ package speaker
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math"
 	"os"
@@ -18,7 +19,6 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/mixer"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/checkersalsa"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
-	pkgspeaker "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 
 	"github.com/Binozo/GoTinyAlsa/pkg/pcm"
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
@@ -114,6 +114,7 @@ type PcmSpeaker struct {
 	duckTarget     atomic.Int32
 	duckRampFrames atomic.Int64
 	duckRevision   atomic.Uint64
+	duckCompleted  atomic.Uint64
 	mixer          Mixer
 
 	// chain is the output chain (EQ, bass guard, limiter), run on the MIX,
@@ -148,6 +149,61 @@ type PcmSpeaker struct {
 	// fine: silenceLoop reads it under statsMu only on that cold path.
 	statsMu sync.Mutex
 	statsCb func(StreamStats)
+
+	// src is Sendspin's pull producer for the music plane. It is consulted
+	// only while the native local-scene music plane is empty. The ALSA writer
+	// owns the DAC timing measurement, so timestamped audio must be pulled
+	// here rather than pushed into the several-seconds-deep music queue.
+	src    atomic.Pointer[sourceBox]
+	srcBuf []byte
+}
+
+// MusicSource fills one stereo S16LE period whose first frame reaches the DAC
+// at playAt. uncertain is half the duration of the ALSA status measurement.
+type MusicSource interface {
+	Active() bool
+	Fill(out []byte, playAt time.Time, uncertain time.Duration) bool
+}
+
+type sourceBox struct{ source MusicSource }
+
+// SetMusicSource installs Sendspin's pull source, or removes it when nil.
+func (p *PcmSpeaker) SetMusicSource(source MusicSource) {
+	if source == nil {
+		p.src.Store(nil)
+		return
+	}
+	p.src.Store(&sourceBox{source: source})
+}
+
+// pullSource measures when the next ALSA period reaches the DAC and asks
+// Sendspin for exactly the audio due at that instant.
+func (p *PcmSpeaker) pullSource() []byte {
+	box := p.src.Load()
+	if box == nil || !box.source.Active() {
+		return nil
+	}
+	before := time.Now()
+	status, err := os.ReadFile(statusPath(cardNr, deviceNr))
+	readDuration := time.Since(before)
+	if err != nil {
+		return nil
+	}
+	queuedFrames, ok := pcmDelay(string(status))
+	if !ok {
+		return nil
+	}
+	measuredAt := before.Add(readDuration / 2)
+	playAt := measuredAt.Add(time.Duration(queuedFrames) * time.Second / 48000)
+	if !box.source.Fill(p.srcBuf, playAt, readDuration/2) {
+		return nil
+	}
+	return p.srcBuf
+}
+
+// MusicPlaneBusy gives direct controller audio priority over Sendspin.
+func (p *PcmSpeaker) MusicPlaneBusy() bool {
+	return p.music.playedWithin(time.Now(), 100*time.Millisecond)
 }
 
 type playbackSession interface {
@@ -181,12 +237,14 @@ func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(r
 		levelTap: levelTap,
 		chain:    outchain.New(48000),
 		chainBuf: make([]byte, periodBytes),
+		srcBuf:   make([]byte, periodBytes),
 	}
 	s.voice = newAudioStream(audioChanDepth, s.deadCh)
 	s.music = newAudioStream(audioChanDepth, s.deadCh)
 	s.duckTarget.Store(unityGain)
 	s.duckRampFrames.Store(periodSize)
 	s.duckRevision.Store(1)
+	s.duckCompleted.Store(1)
 	s.mixer.SetGainImmediate(unityGain)
 	if err := s.Init(); err != nil {
 		return nil, err
@@ -488,6 +546,9 @@ func (p *PcmSpeaker) silenceLoop() {
 		} else if p.music.playing {
 			p.report(p.music.drained(), "music")
 		}
+		if music == nil && !p.music.playing && !p.music.isActive() {
+			music = p.pullSource()
+		}
 
 		// The ring's level must be measured BEFORE mixing: Mix sums into the
 		// voice buffer in place, so afterwards there is no voice-only signal
@@ -505,6 +566,9 @@ func (p *PcmSpeaker) silenceLoop() {
 			duckRevision = revision
 		}
 		out := p.mixer.MixConfigured(voice, music, periodSize)
+		if p.mixer.Gain() == p.duckTarget.Load() {
+			p.duckCompleted.Store(duckRevision)
+		}
 		process := out != nil
 		if out == nil {
 			out = silencePeriod
@@ -652,6 +716,28 @@ func (p *PcmSpeaker) SetDuckRamp(db float64, duration time.Duration) {
 	p.duckRevision.Add(1)
 }
 
+// WaitDuckRamp waits until the ALSA renderer has actually consumed the whole
+// sample-counted gain envelope most recently requested by SetDuckRamp. The
+// control goroutine cannot safely approximate this with a sleep because the
+// render loop may not observe the request until its next period.
+func (p *PcmSpeaker) WaitDuckRamp(ctx context.Context) error {
+	revision := p.duckRevision.Load()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if p.duckCompleted.Load() >= revision {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p.deadCh:
+			return errors.New("speaker playback loop stopped")
+		case <-ticker.C:
+		}
+	}
+}
+
 // SetOutputChain sets the output chain's configuration; it lands on the next
 // period, keeping filter and limiter state, so a change mid-song is heard
 // within ~43ms and does not click.
@@ -713,41 +799,6 @@ func (p *PcmSpeaker) WaitVoiceIdle(ctx context.Context) error {
 	return nil
 }
 
-// WaitMusicIdle is the music-plane equivalent used by synchronized sessions.
-// Completion must describe audible drain, not merely that the decoded file was
-// copied into the Echo's deep queue.
-func (p *PcmSpeaker) WaitMusicIdle(ctx context.Context) error {
-	const hardwareDrainHold = 150 * time.Millisecond
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for p.MusicAudible(hardwareDrainHold) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
-	return nil
-}
-
-// MusicAudible is VoiceAudible for the music plane.
-func (p *PcmSpeaker) MusicAudible(hold time.Duration) bool {
-	return p.music.playedWithin(time.Now(), hold)
-}
-
-// MusicPlaybackStatus exposes the music plane's real consumption clock. The
-// deep queue is intentionally several seconds long, so producer/decoder byte
-// counts are not a usable synchronization clock.
-func (p *PcmSpeaker) MusicPlaybackStatus() pkgspeaker.MusicPlaybackStatus {
-	return pkgspeaker.MusicPlaybackStatus{
-		RenderedFrames:        p.music.renderedFrames.Load(),
-		BufferedFrames:        len(p.music.ch) * periodSize,
-		OutputLatencyFrames:   alsaBufferFrames,
-		FirstRenderedUnixNano: p.music.firstTakeNs.Load(),
-		UnderrunEvents:        p.music.underrunEvents.Load(),
-	}
-}
-
 // EndStream marks the in-flight voice stream complete (0x03). Always arrives
 // after every 0x02 period of that stream has been handed to PumpPeriod —
 // frames are processed sequentially on the read loop — so by the time the
@@ -788,6 +839,7 @@ func (p *PcmSpeaker) FlushMusic() { p.music.flush() }
 // amp-off after every server exit as a belt-and-braces for paths where
 // this never runs (SIGKILL, panic).
 func (p *PcmSpeaker) Close() {
+	p.SetMusicSource(nil)
 	mixer.SetPlaybackLevel(0, 127) // mute
 	mixer.SetSpeakerEnabled(false) // amp off
 	close(p.stopCh)

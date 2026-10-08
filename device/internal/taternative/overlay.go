@@ -46,7 +46,6 @@ func (c *Client) startOverlay(req OverlayRequest) {
 			c.overlayID = ""
 			c.overlayGroup = ""
 		}
-		mediaActive := c.mediaID != ""
 		c.playMu.Unlock()
 		if !current {
 			return
@@ -68,8 +67,6 @@ func (c *Client) startOverlay(req OverlayRequest) {
 			if !c.startContinued(req.ConversationID) {
 				c.setState("idle", map[string]any{"continued_chat": false})
 			}
-		} else if mediaActive {
-			c.setState("playing", payload)
 		} else {
 			c.setState("idle", payload)
 		}
@@ -98,7 +95,6 @@ func (c *Client) stopOverlay(report bool) {
 func (c *Client) startScene(req SceneRequest) {
 	c.stopScene(false)
 	c.stopOverlay(false)
-	c.stopMedia("")
 	c.playMu.Lock()
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.sceneCancel = cancel

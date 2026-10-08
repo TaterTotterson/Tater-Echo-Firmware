@@ -67,3 +67,27 @@ func pcmOwner(status string) int {
 	}
 	return 0
 }
+
+// pcmDelay returns the frames queued ahead of the DAC for a running stream.
+// Reading procfs refreshes ALSA's hardware pointer from DMA, which gives
+// Sendspin the renderer clock needed to place timestamped periods accurately.
+func pcmDelay(status string) (frames int, ok bool) {
+	running := false
+	for _, line := range strings.Split(status, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "state":
+			running = strings.TrimSpace(value) == "RUNNING"
+		case "delay":
+			parsed, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || parsed < 0 {
+				return 0, false
+			}
+			frames, ok = parsed, true
+		}
+	}
+	return frames, ok && running
+}

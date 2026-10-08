@@ -35,8 +35,9 @@ Target metadata used by builds and Tater lives in
   and second-STT verification settings from Tater.
 - Wake-audio training uploads, continued conversation, barge-in, intercom,
   timers, announcements, mute, volume, and device controls.
-- Synchronized stereo/group media, TTS overlays, audio scenes, music ducking,
-  gradual clock correction, and underrun rejoin.
+- Sendspin multi-room and stereo-pair playback, including direct discovery by
+  compatible servers such as Music Assistant, plus native TTS overlays, audio
+  scenes, music ducking, clock correction, and underrun recovery.
 - Tater-selectable LED animations on Biscuit. Biscuit includes seven-mic
   direction of arrival and reply direction; Checkers and Rook have complete
   native Tater display experiences and selectable color themes.
@@ -48,6 +49,22 @@ Target metadata used by builds and Tater lives in
 - Checkers and Rook weather, selected room sensors, notifications, Room Vision,
   timers, live tool status, audio-reactive response visuals, and on-screen
   press-and-hold intercom.
+
+### Sendspin playback
+
+Every supported Echo advertises a Sendspin v1 player over mDNS at
+`_sendspin._tcp` and listens on TCP port `8928` at `/sendspin`. It accepts
+48 kHz/16-bit PCM stereo from Tater's Sendspin source and the encrypted FLAC
+profile used by Music Assistant. The device identity, pairings, volume, delay,
+and Tater stereo-pair channel assignment survive a reboot.
+
+Tater assigns `left`, `right`, `mono`, or `stereo` output when it builds a
+pair or group; all members receive the same synchronized stream and each Echo
+renders its assigned channel through its physical mono speaker. The former
+Tater-specific `audio.clock.sync` and `media.session.*` transport is no longer
+advertised or accepted. Native single-satellite replies, announcements,
+timers, overlays, and foreground/background audio scenes remain available and
+duck the Sendspin music plane in hardware.
 
 ## Install Biscuit (Echo Dot 2)
 
@@ -224,8 +241,9 @@ procedure.
 This project builds on three open-source firmware projects:
 
 - [EchoMuse](https://github.com/wilbowes/EchoMuse) by Wil Bowes supplied the
-  Biscuit hardware work and emOS boot/init foundation used by Tater's Echo Dot
-  firmware. The original copyright and MIT license remain in this repository.
+  Sendspin player, Biscuit hardware work, and emOS boot/init foundation used by
+  Tater's Echo firmware. The original copyright and MIT license remain in this
+  repository.
 - [TECHO5](https://github.com/HuskerMinion/techo5) by HuskerMinion supplied
   the Checkers Linux hardware enablement, boot/rescue and A/B platform work.
   Adapted installer code and its MIT license are included in the factory

@@ -12,6 +12,7 @@ with redistributed binaries and factory bundles.
 | GoTinyAlsa | `device/third_party/GoTinyAlsa/` | BSD-3-Clause |
 | TFLite Micro and microfrontend dependencies | `device/internal/wakeword/microwakeword/native/` build | Apache-2.0 and BSD-3-Clause |
 | EchoMuse emOS and Biscuit hardware work | `emos/`, `factory/biscuit/`, Biscuit firmware | MIT (Wil Bowes) |
+| EchoMuse Sendspin player implementation | `device/internal/sendspin/`, `device/internal/firewall/` | MIT (Wil Bowes) |
 | TECHO5 Checkers Linux tooling, camera driver, and direct ALSA speaker path | `linux/checkers/`, `device/internal/checkersalsa/`, generated rootfs, factory bundle | MIT |
 | TECHO5 Spot Rook Linux hardware enablement and rescue platform | `linux/rook/`, generated rootfs, Rook factory bundle | MIT |
 | Linux kernel in the pinned TECHO5 Checkers boot image | Checkers factory bundle `payload/boot.img` | GPL-2.0 |

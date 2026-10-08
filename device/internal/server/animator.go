@@ -22,7 +22,7 @@ type AnimSpec struct {
 	// RMS), or any native Tater animation:
 	// sparkle, ping_pong, voice_ring, spinner, orbit, pulse, breathe, comet,
 	// dual_comet, scanner, ripple, heartbeat, theater, wave, shimmer,
-	// twinkle, or equalizer.
+	// twinkle, equalizer, music_pulse, music_bars, music_orbit, or music_wave.
 	Pattern string `json:"pattern"`
 	// Colors semantics per pattern:
 	//   solid        — palette painted 1:1 (1 colour = whole ring, else per-LED)
@@ -141,7 +141,8 @@ func (s *Server) StartAnim(spec AnimSpec) {
 		go s.runAnim(gen, spec)
 	case "sparkle", "ping_pong", "voice_ring", "spinner", "orbit", "pulse",
 		"breathe", "comet", "dual_comet", "scanner", "ripple", "heartbeat",
-		"theater", "wave", "shimmer", "twinkle", "equalizer":
+		"theater", "wave", "shimmer", "twinkle", "equalizer", "music_pulse",
+		"music_bars", "music_orbit", "music_wave":
 		go s.runNativeAnim(gen, spec)
 	default:
 		if isAudioMeterPattern(spec.Pattern) {
@@ -224,8 +225,9 @@ func (s *Server) getAudioLevel() float64 {
 }
 
 type nativeAnimState struct {
-	sparkle     [12]float64
-	voiceRadius float64
+	sparkle       [12]float64
+	voiceRadius   float64
+	musicEnvelope float64
 }
 
 // runNativeAnim renders the same named effects exposed for the other Tater
@@ -443,6 +445,34 @@ func nativeAnimationFrame(pattern string, tick int, color [3]uint8, audioLevel f
 				levels[i] = 1
 			}
 		}
+	case "music_pulse":
+		envelope := updateMusicEnvelope(audioLevel, state)
+		fillLevels(levels, 0.015+envelope*0.985)
+	case "music_bars":
+		envelope := updateMusicEnvelope(audioLevel, state)
+		height := envelope * 6
+		for pair := 0; pair < 6; pair++ {
+			level := 0.012 + clampUnit(height-float64(pair))*0.988
+			levels[pair] = level
+			levels[11-pair] = level
+		}
+	case "music_orbit":
+		envelope := updateMusicEnvelope(audioLevel, state)
+		head := (tick / 2) % 12
+		tailLength := 2 + int(math.Round(envelope*3))
+		for _, origin := range []int{head, wrapLED(head + 6)} {
+			for trail := 0; trail < tailLength; trail++ {
+				level := (0.04 + envelope*0.96) * math.Pow(0.58, float64(trail))
+				setMax(levels, wrapLED(origin-trail), level)
+			}
+		}
+	case "music_wave":
+		envelope := updateMusicEnvelope(audioLevel, state)
+		phase := float64(tick) * 0.42
+		for i := range levels {
+			wave := (math.Sin(float64(i)*math.Pi/3-phase) + 1) / 2
+			levels[i] = 0.012 + envelope*(0.12+wave*0.868)
+		}
 	case "voice_ring":
 		center := wrapLED(direction)
 		normalized := clampUnit(audioLevel * 7.5)
@@ -457,6 +487,23 @@ func nativeAnimationFrame(pattern string, tick int, color [3]uint8, audioLevel f
 		fillLevels(levels, 1)
 	}
 	return levelsFrame(color, levels)
+}
+
+// updateMusicEnvelope maps the live speaker RMS onto an LED-friendly envelope.
+// The quick attack catches percussion while the slower release avoids a harsh
+// flicker between samples. It intentionally uses the same reference and input
+// curve as Audio Glow so switching effects does not change sensitivity.
+func updateMusicEnvelope(audioLevel float64, state *nativeAnimState) float64 {
+	target := math.Pow(clampUnit(audioLevel/meterDefaults.ref), meterDefaults.curve)
+	alpha := 0.24
+	if target > state.musicEnvelope {
+		alpha = 0.64
+	}
+	state.musicEnvelope += (target - state.musicEnvelope) * alpha
+	if state.musicEnvelope < 0.001 && target == 0 {
+		state.musicEnvelope = 0
+	}
+	return clampUnit(state.musicEnvelope)
 }
 
 func voiceRingFrame(tick int, color [3]uint8, center int, radius float64) []led.Led {

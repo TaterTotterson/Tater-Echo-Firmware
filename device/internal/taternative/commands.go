@@ -3,7 +3,6 @@ package taternative
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -131,14 +130,6 @@ func (c *Client) handle(message Envelope) {
 		} else {
 			c.sendJSON("playback.finished", message.ID, map[string]any{"ok": true})
 		}
-	case "audio.clock.sync":
-		receivedUS := monotonicMicros()
-		c.sendJSON("audio.clock.sync.result", "", map[string]any{
-			"reply_to": message.ID, "ok": true,
-			"server_send_us":       int64Value(payload["server_send_us"], 0),
-			"satellite_receive_us": receivedUS,
-			"satellite_send_us":    monotonicMicros(),
-		})
 	case "audio.overlay.start":
 		foreground, _ := payload["foreground"].(map[string]any)
 		ducking, _ := payload["ducking"].(map[string]any)
@@ -207,73 +198,6 @@ func (c *Client) handle(message Envelope) {
 		c.startScene(req)
 	case "audio.scene.stop":
 		c.stopScene(true)
-	case "media.session.start", "media.session.prepare":
-		media, _ := payload["media"].(map[string]any)
-		routing, _ := payload["routing"].(map[string]any)
-		req := MediaRequest{
-			SessionID: stringValue(payload["session_id"]), GroupID: stringValue(payload["group_id"]),
-			URL: stringValue(media["url"]), VolumePercent: intValue(media["volume_percent"], 100),
-			StartPositionMS: intValue(media["start_position_ms"], 0), Loop: boolValue(media["loop"]),
-			ContentType: stringValue(media["content_type"]), Title: stringValue(media["title"]),
-			Artist: stringValue(media["artist"]), Album: stringValue(media["album"]),
-			Channel:          normalizedMediaChannel(stringValue(routing["channel"])),
-			DirectionDegrees: optionalDirection(payload["direction_degrees"]),
-		}
-		if req.SessionID == "" || req.URL == "" {
-			c.sendJSON("media.session.finished", message.ID, map[string]any{
-				"session_id": req.SessionID, "group_id": req.GroupID, "ok": false,
-				"reason": "session_id and media.url are required",
-			})
-			return
-		}
-		c.applyReplyDirection(req.DirectionDegrees)
-		if message.Type == "media.session.prepare" {
-			go c.prepareMedia(message.ID, req)
-		} else {
-			go c.startMedia(req)
-		}
-	case "media.session.commit":
-		c.commitMedia(message.ID, stringValue(payload["session_id"]), int64Value(payload["start_at_us"], 0))
-	case "media.session.adjust":
-		err := error(nil)
-		if hook := c.hooks.AdjustMedia; hook != nil {
-			err = hook(
-				stringValue(payload["session_id"]),
-				clamp(intValue(payload["correction_frames"], 0), -480000, 480000),
-				stringValue(payload["mode"]),
-				time.Duration(clamp(intValue(payload["settle_ms"], 0), 0, 10000))*time.Millisecond,
-			)
-		} else {
-			err = fmt.Errorf("synchronized media adjustment unavailable")
-		}
-		result := map[string]any{"reply_to": message.ID, "ok": err == nil}
-		if err != nil {
-			result["error"] = err.Error()
-		}
-		c.sendJSON("media.session.adjust.result", "", result)
-	case "media.session.stop":
-		c.stopMedia(stringValue(payload["session_id"]))
-		c.setState("idle", payload)
-	case "media.session.pause":
-		if hook := c.hooks.PauseMedia; hook != nil {
-			hook(stringValue(payload["session_id"]))
-		}
-	case "media.session.resume":
-		if hook := c.hooks.ResumeMedia; hook != nil {
-			hook(stringValue(payload["session_id"]))
-		}
-	case "media.session.volume":
-		err := error(nil)
-		if hook := c.hooks.VolumeMedia; hook != nil {
-			hook(stringValue(payload["session_id"]), clamp(intValue(payload["volume_percent"], 100), 0, 100))
-		} else {
-			err = fmt.Errorf("media volume unavailable")
-		}
-		result := map[string]any{"reply_to": message.ID, "ok": err == nil}
-		if err != nil {
-			result["error"] = err.Error()
-		}
-		c.sendJSON("media.session.volume.result", "", result)
 	case "setup.reset", "provisioning.reset":
 		hook := c.hooks.SetupReset
 		if hook == nil {
@@ -336,17 +260,6 @@ func toolVisualPayload(payload map[string]any) bool {
 	stateAfter := strings.ToLower(strings.TrimSpace(stringValue(payload["state_after"])))
 	return ttsKind == "tool" || ttsKind == "tool_progress" ||
 		visualMode == "tool_call" || stateAfter == "tool_call"
-}
-
-func normalizedMediaChannel(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "left":
-		return "left"
-	case "right":
-		return "right"
-	default:
-		return "mono"
-	}
 }
 
 func int64Value(value any, fallback int64) int64 {

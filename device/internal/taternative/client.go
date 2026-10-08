@@ -90,55 +90,14 @@ type SceneRequest struct {
 	BackgroundFadeOut       time.Duration
 }
 
-// MediaRequest is a persistent music session.
+// MediaRequest is used only by the local foreground/background scene player.
+// Synchronized music is delivered by Sendspin and never crosses this client.
 type MediaRequest struct {
-	SessionID        string
-	GroupID          string
-	URL              string
-	Channel          string
-	VolumePercent    int
-	StartPositionMS  int
-	Loop             bool
-	ContentType      string
-	Title            string
-	Artist           string
-	Album            string
-	DirectionDegrees *float64
-}
-
-// MediaPreparation describes a locally decoded session that is ready for a
-// synchronized commit. Echo playback is mono at the speaker, but Channel
-// selects which side of a stereo source is rendered by this member.
-type MediaPreparation struct {
-	BufferedFrames      int
-	SampleRateHz        int
-	OutputLatencyFrames int
-}
-
-// MediaPlaybackEvent carries the synchronized session clock and playhead
-// reports emitted by LocalPlayer after a prepared session is committed.
-type MediaPlaybackEvent struct {
-	Kind                     string
-	SessionID                string
-	GroupID                  string
-	Channel                  string
-	SampleRateHz             int
-	ScheduledStartUS         int64
-	ActualStartUS            int64
-	SourceFrames             int64
-	RenderedFrames           int64
-	OutputFrames             int64
-	BufferedFrames           int
-	OutputLatencyFrames      int
-	CorrectionFrames         int
-	UnderrunEvents           int
-	OverlayUnderrunEvents    int
-	BackgroundUnderrunEvents int
-	ForegroundUnderrunEvents int
-	Rebuffering              bool
-	RejoinCount              int
-	RejoinFrames             int64
-	SatelliteTimeUS          int64
+	URL             string
+	Channel         string
+	VolumePercent   int
+	StartPositionMS int
+	Loop            bool
 }
 
 // OTARequest describes one A/B firmware update offered by Tater.
@@ -170,14 +129,6 @@ type Hooks struct {
 	PlayOverlay         func(context.Context, OverlayRequest, func()) error
 	PlayScene           func(context.Context, SceneRequest) error
 	StopVoice           func()
-	StartMedia          func(context.Context, MediaRequest) error
-	PrepareMedia        func(context.Context, MediaRequest) (MediaPreparation, error)
-	CommitMedia         func(context.Context, string, int64, func(MediaPlaybackEvent)) (<-chan error, error)
-	AdjustMedia         func(sessionID string, correctionFrames int, mode string, settle time.Duration) error
-	StopMedia           func(sessionID string)
-	PauseMedia          func(sessionID string)
-	ResumeMedia         func(sessionID string)
-	VolumeMedia         func(sessionID string, percent int)
 	TimerAlarm          func(active bool, timer Timer)
 	TimerUpdate         func(timer TimerDisplay)
 	DisplayWeather      func(payload map[string]any)
@@ -267,12 +218,6 @@ type Client struct {
 	pendingConversation  string
 	voiceQueue           chan queuedVoice
 	voiceStop            chan uint64
-	mediaCancel          context.CancelFunc
-	mediaCtx             context.Context
-	mediaGen             uint64
-	mediaID              string
-	mediaGroup           string
-	mediaChannel         string
 	overlayCancel        context.CancelFunc
 	overlayGen           uint64
 	overlayID            string
@@ -345,18 +290,16 @@ func DefaultCapabilities() map[string]any {
 		"tool_call_mode": true, "timers": true, "ota": true,
 		"intercom": true, "setup_mode": true,
 		"audio_ducking": true, "looping_background_audio": true,
-		"persistent_media_sessions": true, "synchronized_media_sessions": true,
-		"stereo_channel_selection": true, "media_playhead_telemetry": true,
-		"media_render_clock": true, "media_output_latency_frames": echoOutputLatencyFrames,
-		"media_drift_correction": true, "media_rate_slew": true,
-		"media_underrun_recovery": true, "media_session_volume": true,
-		"media_session_start_position": true, "media_sample_rate_hz": playbackRate,
-		"tts_overlays": true, "synchronized_tts_overlays": true,
-		"audio_scenes": true, "audio_scene_version": 1,
-		"audio_session_version": 4,
-		"settings":              true, "wake_verifier": true,
+		"sendspin_player": true, "sendspin_version": 1,
+		"sendspin_output_channel_selection": true,
+		"sendspin_output_channel_modes":     []string{"stereo", "left", "right", "mono"},
+		"tts_overlays":                      true,
+		"audio_scenes":                      true, "audio_scene_version": 1,
+		"settings": true, "wake_verifier": true,
 		"wake_sound": true, "wake_audio_capture": true,
-		"ble_advertisements": true, "ble_advertisements_version": 1,
+		"openwakeword": true, "wake_detector_selection": true,
+		"dual_wake_confirmation": true,
+		"ble_advertisements":     true, "ble_advertisements_version": 1,
 	}
 }
 
@@ -571,7 +514,6 @@ func (c *Client) markDisconnected(error) {
 	c.connected.Store(false)
 	c.stopOverlay(false)
 	c.stopScene(false)
-	c.stopMedia("")
 	c.stopVoice()
 	c.connMu.Lock()
 	c.conn = nil
@@ -699,7 +641,6 @@ func (c *Client) Close() {
 		c.stopOverlay(false)
 		c.stopScene(false)
 		c.stopVoice()
-		c.stopMedia("")
 		c.cancelWakeVerifications()
 		c.cancelCloseMiss()
 		c.timers.Close()

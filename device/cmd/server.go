@@ -197,6 +197,13 @@ func main() {
 		nativeURL = value
 	}
 	nativeMode := nativeURL != ""
+	sendspinName := strings.TrimSpace(bootstrap.DeviceName)
+	if value := strings.TrimSpace(os.Getenv("TATER_DEVICE_NAME")); value != "" {
+		sendspinName = value
+	}
+	if sendspinName == "" {
+		sendspinName = "Tater Echo " + deviceID
+	}
 	var nativeClient *taternative.Client
 	var nativePlayer *taternative.LocalPlayer
 	resetToSetup := func(source string, playSound bool) error {
@@ -629,13 +636,7 @@ func main() {
 		if tokenPath == "" {
 			tokenPath = "/data/local/etc/tater/device_token"
 		}
-		deviceName := bootstrap.DeviceName
-		if value := strings.TrimSpace(os.Getenv("TATER_DEVICE_NAME")); value != "" {
-			deviceName = value
-		}
-		if deviceName == "" {
-			deviceName = "Tater Echo " + deviceID
-		}
+		deviceName := sendspinName
 		room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
 		if isScreenTarget(client.FirmwareTarget) {
 			screen := show.New(show.DefaultAddress, show.Snapshot{
@@ -832,6 +833,18 @@ func main() {
 							snapshot.DisplayTheme = normalizeDisplayTheme(value)
 						})
 					}
+					if _, ok := applied["led_music_animation"]; ok && nativeClient != nil && strings.EqualFold(client.FirmwareTarget, "biscuit") {
+						state := nativeClient.State()
+						if player := sendspinPlayer(); player != nil && shouldShowSendspinMusicVisual(
+							client.FirmwareTarget,
+							player.Active(),
+							s.LinkDown(),
+							nativeClient.TimerRinging(),
+							state,
+						) {
+							s.StartAnim(nativeStateAnimation("playing"))
+						}
+					}
 				}
 				applyCurrentWake()
 				return applied, err
@@ -850,6 +863,7 @@ func main() {
 				status := map[string]any{
 					"volume_percent":             deviceVolumePercent(s.VolumeLevel()),
 					"muted":                      s.IsMuted(),
+					"sendspin":                   sendspinStatus(),
 					"mute_hardware":              s.MuteStatus(),
 					"microphone_pipeline_active": dataClient.MicrophonePipelineActive(),
 					"led_owner":                  s.LEDOwner(),
@@ -873,33 +887,6 @@ func main() {
 			PlayVoice:     nativePlayer.PlayVoice, StopVoice: nativePlayer.StopVoice,
 			PlayOverlay: nativePlayer.PlayOverlay,
 			PlayScene:   nativePlayer.PlayScene,
-			StartMedia: func(playCtx context.Context, request taternative.MediaRequest) error {
-				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
-					snapshot.Media = &show.Media{Title: request.Title, Artist: request.Artist, Album: request.Album}
-					snapshot.Phase = "music"
-				})
-				err := nativePlayer.PlayMedia(playCtx, request)
-				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Media = nil })
-				return err
-			},
-			PrepareMedia: func(playCtx context.Context, request taternative.MediaRequest) (taternative.MediaPreparation, error) {
-				prepared, err := nativePlayer.PrepareMedia(playCtx, request)
-				if err == nil {
-					updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
-						snapshot.Media = &show.Media{Title: request.Title, Artist: request.Artist, Album: request.Album}
-					})
-				}
-				return prepared, err
-			},
-			CommitMedia: nativePlayer.CommitMedia,
-			AdjustMedia: nativePlayer.AdjustMedia,
-			StopMedia: func(string) {
-				nativePlayer.StopMedia()
-				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Media = nil })
-			},
-			PauseMedia:  func(string) { nativePlayer.PauseMedia() },
-			ResumeMedia: func(string) { nativePlayer.ResumeMedia() },
-			VolumeMedia: func(_ string, percent int) { nativePlayer.SetMediaVolume(percent) },
 			TimerAlarm: func(active bool, _ taternative.Timer) {
 				nativePlayer.SetTimerAlarm(active)
 				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.TimerActive = active })
@@ -947,6 +934,30 @@ func main() {
 		pulseCtx, cancel := context.WithCancel(ctx)
 		pulseCancel, pulseKind = cancel, "orange"
 		go pulseOrange(pulseCtx, s)
+	}
+
+	if err := startSendspinPlayer(
+		pcmSpeaker,
+		s,
+		deviceID,
+		sendspinName,
+		client.FirmwareTarget,
+		client.Version,
+	); err != nil {
+		log.Printf("[sendspin] player unavailable: %v", err)
+	} else {
+		go runSendspinPoll(
+			pcmSpeaker,
+			s,
+			client.FirmwareTarget,
+			func() string {
+				if nativeClient != nil {
+					return nativeClient.State()
+				}
+				return "idle"
+			},
+			func() bool { return nativeClient != nil && nativeClient.TimerRinging() },
+		)
 	}
 
 	controlClient.OnDisconnected(func() {
@@ -1210,6 +1221,7 @@ func main() {
 		} else {
 			controlClient.SendVolumeState(level)
 		}
+		sendspinVolumeChanged(level)
 		// The hardware echo reference is tapped upstream of the DAC volume
 		// control, so it holds full scale whatever the user sets. Tell the
 		// canceller the scalar it cannot see, or every volume change is an
@@ -1332,6 +1344,7 @@ func main() {
 	if nativeClient != nil {
 		nativeClient.Close()
 	}
+	stopSendspinPlayer(pcmSpeaker)
 	dataClient.SetMWWShadowScorer(nil)
 	pcmSpeaker.Close()
 	os.Exit(0)
@@ -2092,6 +2105,7 @@ var nativeVisuals = struct {
 	thinking   string
 	tool       string
 	replying   string
+	music      string
 }{
 	brightness: 80,
 	color:      [3]uint8{255, 90, 31},
@@ -2099,6 +2113,7 @@ var nativeVisuals = struct {
 	thinking:   "sparkle",
 	tool:       "ping_pong",
 	replying:   "audio_glow",
+	music:      "audio_glow",
 }
 
 func applyNativeVisualSettings(values, applied map[string]any) {
@@ -2128,6 +2143,7 @@ func applyNativeVisualSettings(values, applied map[string]any) {
 		"led_thinking_animation":  &nativeVisuals.thinking,
 		"led_tool_call_animation": &nativeVisuals.tool,
 		"led_replying_animation":  &nativeVisuals.replying,
+		"led_music_animation":     &nativeVisuals.music,
 	} {
 		if value, ok := values[key]; ok {
 			*target = strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
@@ -2170,6 +2186,13 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		}
 		srv.SetVolume(int(math.Round(float64(percent) * 127 / 100)))
 		applied["volume_percent"] = percent
+	}
+	if value, ok := values["output_channel_mode"]; ok {
+		mode := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		if err := sendspinSetOutputChannel(mode); err != nil {
+			return applied, err
+		}
+		applied["output_channel_mode"] = sendspinOutputChannel()
 	}
 	if value, ok := values["wake_threshold"]; ok {
 		threshold := nativeNumber(value, 0)
@@ -2279,14 +2302,15 @@ func nativeStateAnimation(state string) server.AnimSpec {
 		uint8(math.Round(float64(nativeVisuals.color[2]) * brightness)),
 	}
 	listening, thinking := nativeVisuals.listening, nativeVisuals.thinking
-	tool, replying := nativeVisuals.tool, nativeVisuals.replying
+	tool, replying, music := nativeVisuals.tool, nativeVisuals.replying, nativeVisuals.music
 	nativeVisuals.RUnlock()
 	visual := func(name, fallback string) string {
 		name = strings.ToLower(strings.TrimSpace(name))
 		switch name {
 		case "directional", "sparkle", "ping_pong", "audio_glow", "voice_ring", "spinner", "orbit",
 			"pulse", "breathe", "comet", "dual_comet", "scanner", "ripple",
-			"heartbeat", "theater", "wave", "shimmer", "twinkle", "equalizer", "solid":
+			"heartbeat", "theater", "wave", "shimmer", "twinkle", "equalizer", "solid",
+			"music_pulse", "music_bars", "music_orbit", "music_wave", "off":
 			return name
 		default:
 			return fallback
@@ -2303,8 +2327,10 @@ func nativeStateAnimation(state string) server.AnimSpec {
 		return server.AnimSpec{Pattern: visual(thinking, "sparkle"), Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 135}
 	case "tool_call":
 		return server.AnimSpec{Pattern: visual(tool, "ping_pong"), Colors: [][3]uint8{color}, PeriodMs: 70, TTLSec: 135}
-	case "speaking", "playing":
+	case "speaking":
 		return server.AnimSpec{Pattern: visual(replying, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
+	case "playing":
+		return server.AnimSpec{Pattern: visual(music, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
 	case "error":
 		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 38, TTLSec: 10}
 	default:

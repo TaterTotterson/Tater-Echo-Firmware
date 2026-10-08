@@ -129,9 +129,10 @@ The native protocol supports:
 - local wake, pre-roll, continued conversation, barge-in, intercom, optional
   STT wake verification, and trainer samples;
 - TTS, announcements, timers, volume, mute, and live wake sounds;
-- disk-backed WAV/MP3 media, stereo/group prepare and commit, monotonic
-  playhead reports, gradual rate-slew correction, and underrun rejoin;
-- synchronized TTS overlays, audio scenes, and sample-counted music ducking;
+- a discoverable Sendspin v1 player with PCM/FLAC decoding, encrypted Music
+  Assistant sessions, Tater's plaintext transport profile, persistent
+  left/right stereo-pair routing, clock correction, and underrun recovery;
+- native TTS overlays, local audio scenes, and sample-counted music ducking;
 - Tater-selected LED/display animations and tool progress; and
 - bounded BLE advertisement batches for Tater presence.
 
@@ -161,7 +162,7 @@ screen/input packages, Wi-Fi setup, and BLE HCI behavior. GitHub Actions
 also cross-builds both targets and assembles the complete Checkers Linux rootfs.
 
 Hardware release checks still include wake and first-word retention, barge-in,
-stereo synchronization, BLE presence, physical recovery gestures, clean/cold
+Sendspin group synchronization, BLE presence, physical recovery gestures, clean/cold
 boots, a successful OTA, and one deliberate rollback.
 
 ## Guardrails

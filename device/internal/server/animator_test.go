@@ -159,7 +159,8 @@ func TestNativeAnimationFramesCoverEverySelectableEffect(t *testing.T) {
 	animations := []string{
 		"sparkle", "ping_pong", "voice_ring", "spinner", "orbit", "pulse",
 		"breathe", "comet", "dual_comet", "scanner", "ripple", "heartbeat",
-		"theater", "wave", "shimmer", "twinkle", "equalizer",
+		"theater", "wave", "shimmer", "twinkle", "equalizer", "music_pulse",
+		"music_bars", "music_orbit", "music_wave",
 	}
 	for _, animation := range animations {
 		t.Run(animation, func(t *testing.T) {
@@ -177,6 +178,27 @@ func TestNativeAnimationFramesCoverEverySelectableEffect(t *testing.T) {
 			}
 			if !lit {
 				t.Fatal("effect rendered a completely dark ring")
+			}
+		})
+	}
+}
+
+func TestMusicAnimationsReactToSpeakerLevel(t *testing.T) {
+	brightness := func(frame []led.Led) int {
+		total := 0
+		for _, pixel := range frame {
+			total += int(pixel.R) + int(pixel.G) + int(pixel.B)
+		}
+		return total
+	}
+	for _, animation := range []string{"music_pulse", "music_bars", "music_orbit", "music_wave"} {
+		t.Run(animation, func(t *testing.T) {
+			quietState := nativeAnimState{}
+			loudState := nativeAnimState{}
+			quiet := nativeAnimationFrame(animation, 8, [3]uint8{255, 90, 31}, 0, 0, &quietState)
+			loud := nativeAnimationFrame(animation, 8, [3]uint8{255, 90, 31}, 0.22, 0, &loudState)
+			if brightness(loud) <= brightness(quiet) {
+				t.Fatalf("music animation did not react to audio: quiet=%d loud=%d", brightness(quiet), brightness(loud))
 			}
 		})
 	}

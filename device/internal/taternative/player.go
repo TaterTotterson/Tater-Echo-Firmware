@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
@@ -25,13 +24,12 @@ import (
 )
 
 const (
-	playbackRate            = 48000
-	playbackPeriod          = 4096
-	echoOutputLatencyFrames = 4096
-	maxAudioDownload        = 64 * 1024 * 1024
-	maxWakeSoundRaw         = 2 * 1024 * 1024
-	maxWakeSoundPCM         = 8 * 1024 * 1024
-	defaultWakeCache        = "/data/local/share/tater/wake-sounds"
+	playbackRate     = 48000
+	playbackPeriod   = 4096
+	maxAudioDownload = 64 * 1024 * 1024
+	maxWakeSoundRaw  = 2 * 1024 * 1024
+	maxWakeSoundPCM  = 8 * 1024 * 1024
+	defaultWakeCache = "/data/local/share/tater/wake-sounds"
 )
 
 var builtInWakeSounds = map[string]string{
@@ -54,24 +52,12 @@ var builtInWakeSounds = map[string]string{
 // LocalPlayer downloads WAV/MP3 audio, decodes it to the Echo speaker's
 // 48 kHz mono S16_LE format and feeds the existing voice/music planes.
 type LocalPlayer struct {
-	Speaker             speaker.Speaker
-	HTTP                *http.Client
-	paused              atomic.Bool
-	volume              atomic.Int32
-	voiceMu             sync.Mutex
-	alarmMu             sync.Mutex
-	alarmCancel         context.CancelFunc
-	mediaMu             sync.Mutex
-	prepared            *preparedMedia
-	mediaAdjust         atomic.Int64
-	mediaLastCorrection atomic.Int64
-	mediaCorrections    []mediaCorrection
-	mediaSlew           mediaSlew
-	mediaRebuffering    atomic.Bool
-	mediaRejoinCount    atomic.Uint64
-	mediaRejoinFrames   atomic.Uint64
-	mediaFadeFrames     atomic.Int64
-	mediaCacheDir       string
+	Speaker       speaker.Speaker
+	HTTP          *http.Client
+	voiceMu       sync.Mutex
+	alarmMu       sync.Mutex
+	alarmCancel   context.CancelFunc
+	mediaCacheDir string
 
 	wakeMu               sync.RWMutex
 	wakeCacheDir         string
@@ -88,26 +74,6 @@ type LocalPlayer struct {
 	wakeCacheFailures    uint64
 	wakeDownloadFailures uint64
 	wakeLastError        string
-}
-
-type preparedMedia struct {
-	request    MediaRequest
-	asset      *mediaAsset
-	startFrame int64
-	committed  bool
-}
-
-type mediaCorrection struct {
-	applyAtOutputFrame uint64
-	deltaFrames        int64
-}
-
-type musicIdleWaiter interface {
-	WaitMusicIdle(context.Context) error
-}
-
-type musicPlaybackTelemetry interface {
-	MusicPlaybackStatus() speaker.MusicPlaybackStatus
 }
 
 type timedDucker interface {
@@ -137,7 +103,6 @@ func NewLocalPlayer(spk speaker.Speaker) *LocalPlayer {
 		mediaCacheDir: "/data/local/share/tater/media-cache",
 		wakeID:        "no_sound",
 	}
-	p.volume.Store(100)
 	return p
 }
 
@@ -163,7 +128,7 @@ func (p *LocalPlayer) PlayVoice(ctx context.Context, req PlayRequest) error {
 		setSpeakerDuck(p.Speaker, duckDB, attack)
 		defer setSpeakerDuck(p.Speaker, 0, release)
 	}
-	if err := p.pump(ctx, pcm, false, 100); err != nil {
+	if err := p.pump(ctx, pcm, 100); err != nil {
 		p.Speaker.Flush()
 		p.Speaker.EndStream()
 		return err
@@ -398,7 +363,7 @@ func (p *LocalPlayer) PlayWakeSound() bool {
 		defer p.voiceMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := p.pump(ctx, pcm, false, 100); err != nil {
+		if err := p.pump(ctx, pcm, 100); err != nil {
 			p.Speaker.Flush()
 		}
 		p.Speaker.EndStream()
@@ -420,7 +385,7 @@ func (p *LocalPlayer) PlayEmbeddedSound(ctx context.Context, id string) error {
 	}
 	p.voiceMu.Lock()
 	defer p.voiceMu.Unlock()
-	if err := p.pump(ctx, pcm, false, 100); err != nil {
+	if err := p.pump(ctx, pcm, 100); err != nil {
 		p.Speaker.Flush()
 		p.Speaker.EndStream()
 		return err
@@ -459,8 +424,7 @@ func (p *LocalPlayer) PlayMedia(ctx context.Context, req MediaRequest) error {
 	if p.Speaker == nil {
 		return errors.New("speaker unavailable")
 	}
-	p.volume.Store(int32(clamp(req.VolumePercent, 0, 100)))
-	p.paused.Store(false)
+	volume := clamp(req.VolumePercent, 0, 100)
 	setSpeakerDuck(p.Speaker, 0, 0)
 	asset, err := p.startMediaAsset(ctx, req.URL, req.Channel)
 	if err != nil {
@@ -481,7 +445,7 @@ func (p *LocalPlayer) PlayMedia(ctx context.Context, req MediaRequest) error {
 		}
 		if len(samples) > 0 {
 			chunk := resampleMediaBlock(samples, len(samples))
-			if volume := int(p.volume.Load()); volume != 100 {
+			if volume != 100 {
 				chunk = scalePCM(chunk, volume)
 			}
 			if err := p.Speaker.PumpMusic(chunk); err != nil {
@@ -495,406 +459,9 @@ func (p *LocalPlayer) PlayMedia(ctx context.Context, req MediaRequest) error {
 	}
 }
 
-// PrepareMedia downloads and decodes a synchronized session without feeding
-// the speaker. Tater commits every member only after all of them report ready,
-// so network and decoder timing cannot skew the audible start.
-func (p *LocalPlayer) PrepareMedia(ctx context.Context, req MediaRequest) (MediaPreparation, error) {
-	if p.Speaker == nil {
-		return MediaPreparation{}, errors.New("speaker unavailable")
-	}
-	asset, err := p.startMediaAsset(ctx, req.URL, req.Channel)
-	if err != nil {
-		return MediaPreparation{}, err
-	}
-	startFrame := int64(maxInt(req.StartPositionMS, 0)) * playbackRate / 1000
-	frames, err := asset.waitFrames(ctx, startFrame+mediaPrebufferFrames)
-	if err != nil {
-		asset.Close()
-		return MediaPreparation{}, err
-	}
-	if startFrame > frames {
-		startFrame = frames
-	}
-	p.mediaMu.Lock()
-	old := p.prepared
-	p.prepared = &preparedMedia{request: req, asset: asset, startFrame: startFrame}
-	p.mediaAdjust.Store(0)
-	p.mediaLastCorrection.Store(0)
-	p.mediaCorrections = nil
-	p.mediaSlew.replace(0, 0)
-	p.mediaRebuffering.Store(false)
-	p.mediaRejoinCount.Store(0)
-	p.mediaRejoinFrames.Store(0)
-	p.mediaFadeFrames.Store(0)
-	p.volume.Store(int32(clamp(req.VolumePercent, 0, 100)))
-	p.paused.Store(false)
-	p.mediaMu.Unlock()
-	if old != nil && old.asset != nil {
-		old.asset.Close()
-	}
-	preparation := MediaPreparation{
-		BufferedFrames: maxInt(0, int(frames-startFrame)),
-		SampleRateHz:   playbackRate,
-	}
-	if telemetry, ok := p.Speaker.(musicPlaybackTelemetry); ok {
-		preparation.OutputLatencyFrames = telemetry.MusicPlaybackStatus().OutputLatencyFrames
-	}
-	return preparation, nil
-}
-
-// CommitMedia schedules an already prepared session on the same monotonic
-// clock exposed by audio.clock.sync. The returned channel completes only once
-// the speaker plane has drained or playback has been cancelled.
-func (p *LocalPlayer) CommitMedia(
-	ctx context.Context,
-	sessionID string,
-	startAtUS int64,
-	report func(MediaPlaybackEvent),
-) (<-chan error, error) {
-	p.mediaMu.Lock()
-	prepared := p.prepared
-	if prepared == nil || prepared.request.SessionID != sessionID {
-		p.mediaMu.Unlock()
-		return nil, errors.New("prepared media session not found")
-	}
-	if prepared.committed {
-		p.mediaMu.Unlock()
-		return nil, errors.New("prepared media session was already committed")
-	}
-	prepared.committed = true
-	req := prepared.request
-	asset := prepared.asset
-	startFrame := prepared.startFrame
-	p.mediaMu.Unlock()
-	done := make(chan error, 1)
-	go func() {
-		done <- p.playPreparedMedia(ctx, req, asset, startFrame, startAtUS, report)
-		close(done)
-	}()
-	return done, nil
-}
-
-func (p *LocalPlayer) playPreparedMedia(
-	ctx context.Context,
-	req MediaRequest,
-	asset *mediaAsset,
-	startFrame int64,
-	startAtUS int64,
-	report func(MediaPlaybackEvent),
-) error {
-	defer asset.Close()
-	defer func() {
-		p.mediaMu.Lock()
-		if p.prepared != nil && p.prepared.request.SessionID == req.SessionID {
-			p.prepared = nil
-			p.mediaAdjust.Store(0)
-			p.mediaLastCorrection.Store(0)
-			p.mediaCorrections = nil
-		}
-		p.mediaMu.Unlock()
-	}()
-	if delayUS := startAtUS - monotonicMicros(); delayUS > 0 {
-		timer := time.NewTimer(time.Duration(delayUS) * time.Microsecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	actualStartUS := monotonicMicros()
-	setSpeakerDuck(p.Speaker, 0, 0)
-	channel := normalizedMediaChannel(req.Channel)
-	telemetry, hasRenderClock := p.Speaker.(musicPlaybackTelemetry)
-	if report != nil && !hasRenderClock {
-		report(MediaPlaybackEvent{
-			Kind: "started", SessionID: req.SessionID, GroupID: req.GroupID,
-			Channel: channel, SampleRateHz: playbackRate,
-			ScheduledStartUS: startAtUS, ActualStartUS: actualStartUS,
-		})
-	}
-	streamEnded := false
-	defer func() {
-		if !streamEnded {
-			p.Speaker.EndMusicStream()
-		}
-	}()
-	baseFrames := startFrame
-	if hasRenderClock && report != nil {
-		monitorCtx, cancelMonitor := context.WithCancel(ctx)
-		monitorDone := make(chan struct{})
-		go func() {
-			defer close(monitorDone)
-			p.monitorPreparedMedia(monitorCtx, telemetry, req, startAtUS, baseFrames, report)
-		}()
-		defer func() {
-			cancelMonitor()
-			<-monitorDone
-		}()
-	}
-	sourceFrames := baseFrames
-	outputFrames := int64(0)
-	lastReport := actualStartUS
-	lastCorrection := 0
-	cursor := startFrame
-	fadeFramesRemaining := 0
-	const rejoinFadeFrames = playbackRate / 20
-	for {
-		select {
-		case <-ctx.Done():
-			p.Speaker.FlushMusic()
-			return ctx.Err()
-		default:
-		}
-		if p.paused.Load() {
-			select {
-			case <-ctx.Done():
-				p.Speaker.FlushMusic()
-				return ctx.Err()
-			case <-time.After(20 * time.Millisecond):
-				continue
-			}
-		}
-
-		jump := p.mediaAdjust.Swap(0)
-		if jump > 0 {
-			cursor += jump
-			sourceFrames += jump
-			lastCorrection += int(jump)
-			p.recordMediaCorrection(jump)
-		}
-		p.mediaMu.Lock()
-		slewStep := p.mediaSlew.next(playbackPeriod / 2)
-		p.mediaMu.Unlock()
-		inputFrames := int64(playbackPeriod/2) + slewStep
-		if inputFrames < 1 {
-			inputFrames = 1
-		}
-		samples, ended, waited, err := asset.readFrames(ctx, &cursor, int(inputFrames), req.Loop)
-		if err != nil {
-			return err
-		}
-		if len(samples) == 0 {
-			if ended && !req.Loop {
-				break
-			}
-			continue
-		}
-		if waited {
-			if telemetry, ok := p.Speaker.(musicPlaybackTelemetry); ok {
-				if telemetry.MusicPlaybackStatus().BufferedFrames < 6*(playbackPeriod/2) {
-					p.mediaRebuffering.Store(true)
-				}
-			}
-		}
-		outputCount := playbackPeriod / 2
-		if ended && !req.Loop && len(samples) < int(inputFrames) {
-			outputCount = maxInt(1, int(math.Round(float64(len(samples))*float64(playbackPeriod/2)/float64(inputFrames))))
-		}
-		chunk := resampleMediaBlock(samples, outputCount)
-		appliedCorrection := int64(len(samples) - outputCount)
-		if appliedCorrection != 0 {
-			lastCorrection += int(appliedCorrection)
-			p.recordMediaCorrection(appliedCorrection)
-		}
-		if requested := int(p.mediaFadeFrames.Swap(0)); requested > fadeFramesRemaining {
-			fadeFramesRemaining = requested
-		}
-		if fadeFramesRemaining > 0 {
-			applyMonoFadeIn(chunk, &fadeFramesRemaining, rejoinFadeFrames)
-		}
-		if volume := int(p.volume.Load()); volume != 100 {
-			chunk = scalePCM(chunk, volume)
-		}
-		if err := p.Speaker.PumpMusic(chunk); err != nil {
-			return err
-		}
-		sourceFrames += int64(len(samples))
-		outputFrames += int64(outputCount)
-		nowUS := monotonicMicros()
-		if report != nil && !hasRenderClock && nowUS-lastReport >= int64(time.Second/time.Microsecond) {
-			report(MediaPlaybackEvent{
-				Kind: "playhead", SessionID: req.SessionID, GroupID: req.GroupID,
-				Channel: channel, SampleRateHz: playbackRate,
-				ScheduledStartUS: startAtUS, ActualStartUS: actualStartUS,
-				SourceFrames: sourceFrames, RenderedFrames: sourceFrames,
-				OutputFrames:     outputFrames,
-				BufferedFrames:   assetBufferedFrames(asset, cursor),
-				CorrectionFrames: lastCorrection, SatelliteTimeUS: nowUS,
-			})
-			lastReport = nowUS
-			lastCorrection = 0
-		}
-	}
-	p.Speaker.EndMusicStream()
-	streamEnded = true
-	if waiter, ok := p.Speaker.(musicIdleWaiter); ok {
-		if err := waiter.WaitMusicIdle(ctx); err != nil {
-			p.Speaker.FlushMusic()
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *LocalPlayer) recordMediaCorrection(deltaFrames int64) {
-	if deltaFrames == 0 {
-		return
-	}
-	p.mediaLastCorrection.Store(deltaFrames)
-	telemetry, ok := p.Speaker.(musicPlaybackTelemetry)
-	if !ok {
-		return
-	}
-	status := telemetry.MusicPlaybackStatus()
-	applyAt := status.RenderedFrames + uint64(maxInt(status.BufferedFrames, 0))
-	p.mediaMu.Lock()
-	p.mediaCorrections = append(p.mediaCorrections, mediaCorrection{
-		applyAtOutputFrame: applyAt,
-		deltaFrames:        deltaFrames,
-	})
-	p.mediaMu.Unlock()
-}
-
-func (p *LocalPlayer) renderedTimelineFrames(baseFrames int64, outputFrames uint64) int64 {
-	timeline := baseFrames + int64(outputFrames)
-	p.mediaMu.Lock()
-	for _, correction := range p.mediaCorrections {
-		if correction.applyAtOutputFrame <= outputFrames {
-			timeline += correction.deltaFrames
-		}
-	}
-	p.mediaMu.Unlock()
-	if timeline < 0 {
-		return 0
-	}
-	return timeline
-}
-
-func (p *LocalPlayer) monitorPreparedMedia(
-	ctx context.Context,
-	telemetry musicPlaybackTelemetry,
-	req MediaRequest,
-	startAtUS int64,
-	baseFrames int64,
-	report func(MediaPlaybackEvent),
-) {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	started := false
-	actualStartUS := int64(0)
-	lastReportUS := int64(0)
-	lastUnderruns := uint64(0)
-	lastRendered := uint64(0)
-	channel := normalizedMediaChannel(req.Channel)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		status := telemetry.MusicPlaybackStatus()
-		nowUS := monotonicMicros()
-		if status.UnderrunEvents > lastUnderruns {
-			p.mediaRebuffering.Store(true)
-			lastUnderruns = status.UnderrunEvents
-		}
-		if p.mediaRebuffering.Load() && status.BufferedFrames >= 6*(playbackPeriod/2) && status.RenderedFrames > lastRendered {
-			p.mediaRebuffering.Store(false)
-			p.mediaRejoinCount.Add(1)
-			p.mediaRejoinFrames.Add(uint64(status.BufferedFrames))
-			p.mediaFadeFrames.Store(playbackRate / 20)
-		}
-		lastRendered = status.RenderedFrames
-		if !started {
-			if status.FirstRenderedUnixNano <= 0 {
-				continue
-			}
-			ageUS := (time.Now().UnixNano() - status.FirstRenderedUnixNano) / int64(time.Microsecond)
-			if ageUS < 0 {
-				ageUS = 0
-			}
-			actualStartUS = nowUS - ageUS
-			report(MediaPlaybackEvent{
-				Kind: "started", SessionID: req.SessionID, GroupID: req.GroupID,
-				Channel: channel, SampleRateHz: playbackRate,
-				ScheduledStartUS: startAtUS, ActualStartUS: actualStartUS,
-				OutputLatencyFrames: status.OutputLatencyFrames,
-			})
-			started = true
-			lastReportUS = actualStartUS
-		}
-		if nowUS-lastReportUS < int64(time.Second/time.Microsecond) {
-			continue
-		}
-		timelineFrames := p.renderedTimelineFrames(baseFrames, status.RenderedFrames)
-		report(MediaPlaybackEvent{
-			Kind: "playhead", SessionID: req.SessionID, GroupID: req.GroupID,
-			Channel: channel, SampleRateHz: playbackRate,
-			ScheduledStartUS: startAtUS, ActualStartUS: actualStartUS,
-			SourceFrames: timelineFrames, RenderedFrames: timelineFrames,
-			OutputFrames:             int64(status.RenderedFrames),
-			BufferedFrames:           status.BufferedFrames,
-			OutputLatencyFrames:      status.OutputLatencyFrames,
-			CorrectionFrames:         int(p.mediaLastCorrection.Swap(0)),
-			UnderrunEvents:           int(status.UnderrunEvents),
-			BackgroundUnderrunEvents: int(status.UnderrunEvents),
-			Rebuffering:              p.mediaRebuffering.Load(),
-			RejoinCount:              int(p.mediaRejoinCount.Load()),
-			RejoinFrames:             int64(p.mediaRejoinFrames.Load()),
-			SatelliteTimeUS:          nowUS,
-		})
-		lastReportUS = nowUS
-	}
-}
-
-func (p *LocalPlayer) AdjustMedia(sessionID string, correctionFrames int, mode string, settle time.Duration) error {
-	p.mediaMu.Lock()
-	prepared := p.prepared
-	if prepared == nil || prepared.request.SessionID != sessionID {
-		p.mediaMu.Unlock()
-		return errors.New("media session not found")
-	}
-	correction := int64(clamp(correctionFrames, -480000, 480000))
-	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
-	if normalizedMode == "jump" || normalizedMode == "legacy" {
-		// Rejoin jumps are intentionally forward-only. Rewinding a live or
-		// looping stream could replay speech/music and make group time worse.
-		if correction > 0 {
-			p.mediaAdjust.Add(correction)
-		} else if normalizedMode == "legacy" && correction < 0 {
-			p.mediaSlew.replace(correction, 1)
-		}
-		p.mediaMu.Unlock()
-		return nil
-	}
-	settleFrames := int64(settle) * playbackRate / int64(time.Second)
-	p.mediaSlew.replace(correction, settleFrames)
-	p.mediaMu.Unlock()
-	return nil
-}
-
 func (p *LocalPlayer) StopMedia() {
-	p.mediaMu.Lock()
-	prepared := p.prepared
-	p.prepared = nil
-	p.mediaAdjust.Store(0)
-	p.mediaLastCorrection.Store(0)
-	p.mediaCorrections = nil
-	p.mediaSlew.replace(0, 0)
-	p.mediaRebuffering.Store(false)
-	p.mediaFadeFrames.Store(0)
-	p.mediaMu.Unlock()
 	p.Speaker.FlushMusic()
 	setSpeakerDuck(p.Speaker, 0, 0)
-	if prepared != nil && prepared.asset != nil && !prepared.committed {
-		prepared.asset.Close()
-	}
-}
-func (p *LocalPlayer) PauseMedia()  { p.paused.Store(true) }
-func (p *LocalPlayer) ResumeMedia() { p.paused.Store(false) }
-func (p *LocalPlayer) SetMediaVolume(percent int) {
-	p.volume.Store(int32(clamp(percent, 0, 100)))
 }
 
 // SetTimerAlarm starts or stops a local repeating two-tone alarm. The tone
@@ -920,7 +487,7 @@ func (p *LocalPlayer) SetTimerAlarm(active bool) {
 		defer p.Speaker.EndStream()
 		tone := timerTone()
 		for {
-			if err := p.pump(ctx, tone, false, 80); err != nil {
+			if err := p.pump(ctx, tone, 80); err != nil {
 				return
 			}
 		}
@@ -948,20 +515,12 @@ func timerTone() []byte {
 	return out
 }
 
-func (p *LocalPlayer) pump(ctx context.Context, pcm []byte, music bool, initialVolume int) error {
+func (p *LocalPlayer) pump(ctx context.Context, pcm []byte, volume int) error {
 	for offset := 0; offset < len(pcm); {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-		}
-		if music && p.paused.Load() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(20 * time.Millisecond):
-				continue
-			}
 		}
 		end := offset + playbackPeriod
 		if end > len(pcm) {
@@ -971,21 +530,11 @@ func (p *LocalPlayer) pump(ctx context.Context, pcm []byte, music bool, initialV
 		if len(chunk)%2 != 0 {
 			chunk = chunk[:len(chunk)-1]
 		}
-		if music {
-			volume := int(p.volume.Load())
-			if volume != 100 {
-				chunk = scalePCM(chunk, volume)
-			}
-			if err := p.Speaker.PumpMusic(chunk); err != nil {
-				return err
-			}
-		} else {
-			if initialVolume != 100 {
-				chunk = scalePCM(chunk, initialVolume)
-			}
-			if err := p.Speaker.PumpPeriod(chunk); err != nil {
-				return err
-			}
+		if volume != 100 {
+			chunk = scalePCM(chunk, volume)
+		}
+		if err := p.Speaker.PumpPeriod(chunk); err != nil {
+			return err
 		}
 		offset = end
 	}
@@ -1006,30 +555,6 @@ func scalePCM(raw []byte, percent int) []byte {
 		binary.LittleEndian.PutUint16(out[i:], uint16(int16(value)))
 	}
 	return out
-}
-
-func assetBufferedFrames(asset *mediaAsset, cursor int64) int {
-	if asset == nil {
-		return 0
-	}
-	frames, _, _, _ := asset.snapshot()
-	if frames <= cursor {
-		return 0
-	}
-	return int(frames - cursor)
-}
-
-func applyMonoFadeIn(raw []byte, remaining *int, total int) {
-	if remaining == nil || *remaining <= 0 || total <= 0 {
-		return
-	}
-	for offset := 0; offset+1 < len(raw) && *remaining > 0; offset += 2 {
-		completed := total - *remaining
-		gain := float64(completed) / float64(total)
-		sample := int16(binary.LittleEndian.Uint16(raw[offset:]))
-		binary.LittleEndian.PutUint16(raw[offset:], uint16(int16(math.Round(float64(sample)*gain))))
-		*remaining = *remaining - 1
-	}
 }
 
 func (p *LocalPlayer) fetchAndDecode(ctx context.Context, rawURL string) ([]byte, error) {

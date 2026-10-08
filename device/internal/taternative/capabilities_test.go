@@ -13,6 +13,11 @@ func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
 		t.Fatalf("biscuit BLE capabilities = %#v", got)
 	}
+	for _, key := range []string{"openwakeword", "wake_detector_selection", "dual_wake_confirmation"} {
+		if got[key] != true {
+			t.Errorf("biscuit %s = %#v, want true", key, got[key])
+		}
+	}
 }
 
 func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
