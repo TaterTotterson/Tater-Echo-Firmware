@@ -26,6 +26,7 @@ jobs:
         run: |
           python3 -m unittest \
             factory.biscuit.test_install \
+            tools.test_build_scripts \
             tools.test_merge_release_manifests \
             tools.test_package_echo_release \
             tools.test_release_notes

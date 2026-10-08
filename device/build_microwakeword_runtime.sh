@@ -8,6 +8,10 @@ BUILD_DIR="/sdk/build/microwakeword-android"
 NDK_ROOT="/opt/android/ndk/21.4.7075529"
 READELF="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 NM="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+DOCKER_USER_ARGS=(
+  --user "$(id -u):$(id -g)"
+  --env HOME=/tmp
+)
 
 docker build \
   --platform linux/amd64 \
@@ -16,6 +20,7 @@ docker build \
   "$DEVICE_DIR"
 
 docker run --rm \
+  "${DOCKER_USER_ARGS[@]}" \
   --platform linux/amd64 \
   --entrypoint bash \
   -v "$DEVICE_DIR:/sdk" \
@@ -36,6 +41,7 @@ if [[ ! -f "$LIBRARY" ]]; then
 fi
 
 docker run --rm \
+  "${DOCKER_USER_ARGS[@]}" \
   --platform linux/amd64 \
   --entrypoint bash \
   -v "$DEVICE_DIR:/sdk" \
@@ -51,6 +57,11 @@ docker run --rm \
        count=\$(printf '%s\n' \"\$exports\" | grep -c '^tater_mww_')
        test \"\$count\" -eq 10
        printf '%s\n' \"\$exports\""
+
+if [[ ! -w "$DEVICE_DIR/build" || ! -w "$(dirname "$LIBRARY")" ]]; then
+  echo "native build left device/build inaccessible to the host user" >&2
+  exit 1
+fi
 
 echo
 echo "Built ARMv7/API-22 runtime: $LIBRARY"
