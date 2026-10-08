@@ -210,9 +210,11 @@ type Client struct {
 	trainerCloseWord      string
 	trainerLastClose      time.Time
 
+	wakeGateMu           sync.Mutex
 	playMu               sync.Mutex
 	voiceCancel          context.CancelFunc
 	voiceGen             uint64
+	voiceResponseQueued  bool
 	voiceResponsePending bool
 	pendingReopen        bool
 	pendingConversation  string

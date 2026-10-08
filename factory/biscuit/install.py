@@ -248,10 +248,16 @@ def install_userspace(adb: Adb) -> None:
         "server": "/data/local/bin/server_a",
         "start_server.sh": "/data/local/bin/start_server.sh",
         "libtater_microwakeword.so": "/data/local/share/tater/microwakeword/libtater_microwakeword.so",
+        "libonnxruntime.so": "/data/local/share/tater/microwakeword/libonnxruntime.so",
         "hey_tater.tflite": "/data/local/share/tater/microwakeword/hey_tater.tflite",
         "hey_tater.json": "/data/local/share/tater/microwakeword/hey_tater.json",
+        "hey_tater.oww.onnx": "/data/local/share/tater/microwakeword/hey_tater.oww.onnx",
+        "hey_tater.oww.json": "/data/local/share/tater/microwakeword/hey_tater.oww.json",
+        "hey_tater.wake-bundle.json": "/data/local/share/tater/microwakeword/hey_tater.wake-bundle.json",
         "stop.tflite": "/data/local/share/tater/microwakeword/stop.tflite",
         "stop.json": "/data/local/share/tater/microwakeword/stop.json",
+        "melspectrogram.onnx": "/data/local/share/tater/microwakeword/melspectrogram.onnx",
+        "embedding_model.onnx": "/data/local/share/tater/microwakeword/embedding_model.onnx",
     }
     for name, destination in mapping.items():
         staged = f"{remote_payload}/{name}"
@@ -260,10 +266,16 @@ def install_userspace(adb: Adb) -> None:
     adb.shell(
         "chmod 755 /data/local/bin/server_a /data/local/bin/start_server.sh "
         "/data/local/share/tater/microwakeword/libtater_microwakeword.so; "
+        "chmod 755 /data/local/share/tater/microwakeword/libonnxruntime.so; "
         "chmod 644 /data/local/share/tater/microwakeword/hey_tater.tflite "
         "/data/local/share/tater/microwakeword/hey_tater.json "
+        "/data/local/share/tater/microwakeword/hey_tater.oww.onnx "
+        "/data/local/share/tater/microwakeword/hey_tater.oww.json "
+        "/data/local/share/tater/microwakeword/hey_tater.wake-bundle.json "
         "/data/local/share/tater/microwakeword/stop.tflite "
         "/data/local/share/tater/microwakeword/stop.json; "
+        "chmod 644 /data/local/share/tater/microwakeword/melspectrogram.onnx "
+        "/data/local/share/tater/microwakeword/embedding_model.onnx; "
         "cp /data/local/bin/server_a /data/local/bin/server_b; "
         "chmod 755 /data/local/bin/server_b; "
         "ln -sf server_a /data/local/bin/server; "

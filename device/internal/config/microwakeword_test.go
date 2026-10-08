@@ -10,6 +10,8 @@ func TestMicroWakeWordConfigDefaultsAndSparseUpdates(t *testing.T) {
 	t.Setenv("MWW_CLOSE_MISS_THRESHOLD", "0")
 	t.Setenv("MWW_SENSITIVITY", "normal")
 	t.Setenv("MWW_ENVIRONMENT", "balanced")
+	t.Setenv("OWW_ENABLED", "false")
+	t.Setenv("OWW_MODEL", "hey_tater")
 	d := &Device{}
 	d.Apply(ConfigMessage{})
 	initial := d.Snapshot()
@@ -20,11 +22,15 @@ func TestMicroWakeWordConfigDefaultsAndSparseUpdates(t *testing.T) {
 		initial.MwwSensitivity != "normal" || initial.MwwEnvironment != "balanced" {
 		t.Fatalf("unexpected microWakeWord defaults: %+v", initial)
 	}
+	if initial.OwwEnabled == nil || *initial.OwwEnabled || initial.OwwModel != "hey_tater" {
+		t.Fatalf("unexpected openWakeWord defaults: %+v", initial)
+	}
 
 	enabled := true
 	threshold := 0.83
 	window := 3
 	closeMiss := 0.65
+	owwEnabled := true
 	d.Apply(ConfigMessage{
 		MwwShadowEnabled: &enabled,
 		MwwThreshold:     &threshold,
@@ -33,6 +39,8 @@ func TestMicroWakeWordConfigDefaultsAndSparseUpdates(t *testing.T) {
 		MwwModel:         "kitchen_tater",
 		MwwSensitivity:   "high",
 		MwwEnvironment:   "far_field",
+		OwwEnabled:       &owwEnabled,
+		OwwModel:         "kitchen_oww",
 	})
 	d.Apply(ConfigMessage{VadThreshold: 0.01})
 	got := d.Snapshot()
@@ -41,7 +49,8 @@ func TestMicroWakeWordConfigDefaultsAndSparseUpdates(t *testing.T) {
 		got.MwwSlidingWindow == nil || *got.MwwSlidingWindow != window ||
 		got.MwwCloseMiss == nil || *got.MwwCloseMiss != closeMiss ||
 		got.MwwModel != "kitchen_tater" || got.MwwSensitivity != "high" ||
-		got.MwwEnvironment != "far_field" {
+		got.MwwEnvironment != "far_field" || got.OwwEnabled == nil || !*got.OwwEnabled ||
+		got.OwwModel != "kitchen_oww" {
 		t.Fatalf("sparse update lost microWakeWord config: %+v", got)
 	}
 

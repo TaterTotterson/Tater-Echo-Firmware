@@ -65,12 +65,10 @@ func (c *Client) WakeWithPreRoll(wakeWord string, score float32, preferredPreRol
 	}
 	preferredPreRoll = cloneFrames(preferredPreRoll)
 	c.stateMu.RLock()
-	bargeIn := boolValue(c.settings["barge_in_enabled"])
-	speaking := c.state == "speaking"
 	verifierMode := strings.ToLower(stringValue(c.settings["wake_verifier_mode"]))
 	forceVerifier := strings.EqualFold(stringValue(c.settings["wake_environment"]), "tv_nearby")
 	c.stateMu.RUnlock()
-	if speaking && !bargeIn {
+	if c.handsFreeWakeBlocked() {
 		return false
 	}
 	c.cancelCloseMiss()
@@ -91,12 +89,18 @@ func (c *Client) startWake(wakeWord string, score float32) bool {
 }
 
 func (c *Client) startWakeWithPreRoll(wakeWord string, score float32, preferredPreRoll [][]byte) bool {
+	c.wakeGateMu.Lock()
+	defer c.wakeGateMu.Unlock()
+
+	bargeIn, replyActive := c.handsFreeWakeGateSnapshot()
+	if replyActive && !bargeIn {
+		return false
+	}
 	// A local wake during TTS is barge-in: cancel buffered voice playback
 	// before opening the microphone turn. Persistent music stays alive and is
 	// ducked by the eventual reply.
-	bargeIn := c.State() == "speaking"
 	c.stopVoice()
-	if !bargeIn {
+	if !replyActive {
 		if hook := c.hooks.PlayWakeSound; hook != nil {
 			hook()
 		}
@@ -270,13 +274,19 @@ func (c *Client) StopCapture(abort bool) bool {
 // deliver a response as several adjacent play.url commands, so the worker
 // serializes them and waits briefly before sending one playback.finished.
 func (c *Client) queueVoice(req PlayRequest) bool {
+	c.wakeGateMu.Lock()
+	defer c.wakeGateMu.Unlock()
+
 	c.playMu.Lock()
 	epoch := c.voiceGen
-	c.playMu.Unlock()
 	select {
 	case c.voiceQueue <- queuedVoice{req: req, epoch: epoch}:
+		c.voiceResponseQueued = true
+		c.playMu.Unlock()
+		c.cancelWakeVerificationsForPlayback()
 		return true
 	default:
+		c.playMu.Unlock()
 		log.Printf("[tater-native] voice playback queue full; dropping %q", req.URL)
 		return false
 	}
@@ -302,7 +312,31 @@ func (c *Client) pendingReopenSnapshot() (bool, string) {
 func (c *Client) playbackTurnInProgress() bool {
 	c.playMu.Lock()
 	defer c.playMu.Unlock()
-	return c.voiceResponsePending || len(c.voiceQueue) > 0
+	return c.voiceResponseQueued || c.voiceResponsePending || c.overlayID != "" || c.sceneID != ""
+}
+
+// handsFreeWakeGateSnapshot reports whether hands-free interruption is enabled
+// and whether a protected reply is queued or playing. Persistent media is
+// intentionally excluded: local wake remains available over music, while TTS,
+// tool narration, overlays, and scenes obey the barge-in setting.
+func (c *Client) handsFreeWakeGateSnapshot() (bargeIn, replyActive bool) {
+	c.stateMu.RLock()
+	bargeIn = boolValue(c.settings["barge_in_enabled"])
+	state := strings.ToLower(strings.TrimSpace(c.state))
+	c.stateMu.RUnlock()
+
+	c.playMu.Lock()
+	replyActive = c.voiceResponseQueued || c.voiceResponsePending || c.overlayID != "" || c.sceneID != ""
+	c.playMu.Unlock()
+	if state == "speaking" || state == "tool_call" {
+		replyActive = true
+	}
+	return
+}
+
+func (c *Client) handsFreeWakeBlocked() bool {
+	bargeIn, replyActive := c.handsFreeWakeGateSnapshot()
+	return replyActive && !bargeIn
 }
 
 func (c *Client) voiceWorker() {
@@ -406,6 +440,7 @@ func (c *Client) playVoiceResponse(first queuedVoice) *queuedVoice {
 		c.pendingConversation = ""
 		c.voiceCancel = nil
 		c.voiceResponsePending = false
+		c.voiceResponseQueued = len(c.voiceQueue) > 0
 	}
 	c.playMu.Unlock()
 	if !current {
@@ -489,6 +524,7 @@ func (c *Client) stopVoice() {
 		c.voiceCancel = nil
 	}
 	c.voiceGen++
+	c.voiceResponseQueued = false
 	c.voiceResponsePending = false
 	c.pendingReopen = false
 	c.pendingConversation = ""

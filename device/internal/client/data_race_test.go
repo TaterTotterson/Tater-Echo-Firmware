@@ -117,9 +117,16 @@ func TestWakeLaneClaimSnapshotsWinningBeamThroughCallback(t *testing.T) {
 	if !d.ClaimWakeLane(1, base.Add(80*time.Millisecond)) {
 		t.Fatal("winning wake lane was not accepted")
 	}
+	confirmation := d.CopyWinningWakeAudio()
+	if len(confirmation) != 3 || confirmation[0][0] != 7 {
+		t.Fatalf("confirmation pre-roll = %v, want a copy of lane 1", confirmation)
+	}
+	confirmation[0][0] = 99
+	d.recordWakeLaneAudio(1, base.Add(240*time.Millisecond), []byte{10, 0})
+	d.ExtendWinningWakeAudio(1, base.Add(80*time.Millisecond))
 	frames := d.TakeWinningWakeAudio()
-	if len(frames) != 3 || frames[0][0] != 7 || frames[1][0] != 8 || frames[2][0] != 9 {
-		t.Fatalf("winning pre-roll = %v, want only lane 1 through its callback", frames)
+	if len(frames) != 4 || frames[0][0] != 7 || frames[1][0] != 8 || frames[2][0] != 9 || frames[3][0] != 10 {
+		t.Fatalf("winning pre-roll = %v, want the unmodified lane 1 snapshot plus confirmation-delay audio", frames)
 	}
 	if again := d.TakeWinningWakeAudio(); len(again) != 0 {
 		t.Fatalf("winning pre-roll was not one-shot: %v", again)

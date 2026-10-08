@@ -11,6 +11,9 @@ with redistributed binaries and factory bundles.
 | SpeexDSP acoustic echo canceller | `device/internal/aec/` | BSD-3-Clause |
 | GoTinyAlsa | `device/third_party/GoTinyAlsa/` | BSD-3-Clause |
 | TFLite Micro and microfrontend dependencies | `device/internal/wakeword/microwakeword/native/` build | Apache-2.0 and BSD-3-Clause |
+| Microsoft ONNX Runtime 1.19.2 | Biscuit, Checkers, and Rook openWakeWord runtime | MIT |
+| Eigen e7248b26 | Checkers and Rook ONNX Runtime build dependency | MPL-2.0 |
+| openWakeWord ONNX feature models | Biscuit, Checkers, and Rook openWakeWord runtime | Apache-2.0 |
 | EchoMuse emOS and Biscuit hardware work | `emos/`, `factory/biscuit/`, Biscuit firmware | MIT (Wil Bowes) |
 | EchoMuse Sendspin player implementation | `device/internal/sendspin/`, `device/internal/firewall/` | MIT (Wil Bowes) |
 | TECHO5 Checkers Linux tooling, camera driver, and direct ALSA speaker path | `linux/checkers/`, `device/internal/checkersalsa/`, generated rootfs, factory bundle | MIT |
@@ -51,7 +54,12 @@ build script under `sources/`.
 ## Build dependencies
 
 Native runtime libraries fetched by the pinned build scripts retain their
-upstream terms.
+upstream terms. Microsoft ONNX Runtime is distributed under the MIT license;
+the Biscuit build verifies the exact Android 1.19.2 AAR and ARMv7 runtime by
+SHA-256. Checkers and Rook build a reduced Linux/musl ARMv7 runtime from the
+hash-pinned 1.19.2 source archive and execute all three OWW models under ARMv7
+emulation before packaging it. Their build also verifies ONNX Runtime's exact
+Eigen revision by SHA-256; Eigen is used under its MPL-2.0 terms.
 
 ## Wake-word models
 

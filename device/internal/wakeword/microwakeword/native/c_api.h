@@ -45,6 +45,7 @@ TATER_MWW_EXPORT const char* tater_mww_engine_info(void* engine);
 TATER_MWW_EXPORT size_t tater_mww_engine_arena_used(void* engine);
 TATER_MWW_EXPORT int32_t tater_mww_engine_input_stride(void* engine);
 TATER_MWW_EXPORT void tater_mww_engine_destroy(void* engine);
+
 TATER_MWW_EXPORT void tater_mww_free_error(char* error);
 
 #ifdef __cplusplus

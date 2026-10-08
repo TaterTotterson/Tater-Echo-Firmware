@@ -190,9 +190,41 @@ func (c *Client) completeWakeVerification(requestID uint32, accepted, available 
 
 	log.Printf("[tater-native] wake verification result request=%d accepted=%t available=%t enforced=%t reason=%s", requestID, accepted, available, pending.enforce, reason)
 	if pending.enforce && (accepted || failOpen) {
+		// Playback can begin while the verifier is processing the captured
+		// phrase. Reapply the barge-in gate at the last possible moment so a
+		// stale acceptance cannot cancel the satellite's own reply.
 		return c.startWakeWithPreRoll(pending.wakeWord, pending.score, pending.preRoll)
 	}
 	return false
+}
+
+// cancelWakeVerificationsForPlayback invalidates candidates captured before a
+// protected reply began. With barge-in enabled they remain valid; otherwise a
+// late verifier result must not be able to interrupt that reply.
+func (c *Client) cancelWakeVerificationsForPlayback() {
+	c.stateMu.RLock()
+	bargeIn := boolValue(c.settings["barge_in_enabled"])
+	c.stateMu.RUnlock()
+	if bargeIn {
+		return
+	}
+
+	c.verifyMu.Lock()
+	cancelled := 0
+	for id, pending := range c.verifyRequests {
+		if pending.timer != nil {
+			pending.timer.Stop()
+		}
+		delete(c.verifyRequests, id)
+		cancelled++
+	}
+	if cancelled > 0 {
+		c.verifyLastReason = "reply_playback_suppressed"
+	}
+	c.verifyMu.Unlock()
+	if cancelled > 0 {
+		log.Printf("[tater-native] cancelled %d pending wake verification(s): protected reply playback started", cancelled)
+	}
 }
 
 func (c *Client) cancelWakeVerifications() {

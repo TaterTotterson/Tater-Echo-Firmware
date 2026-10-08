@@ -97,12 +97,16 @@ func TestWatchReportsTheStateItStartsIn(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			got := make(chan bool, 1)
-			go Watch(ctx, func(inserted bool) {
-				select {
-				case got <- inserted:
-				default:
-				}
-			})
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				Watch(ctx, func(inserted bool) {
+					select {
+					case got <- inserted:
+					default:
+					}
+				})
+			}()
 
 			select {
 			case v := <-got:
@@ -113,6 +117,11 @@ func TestWatchReportsTheStateItStartsIn(t *testing.T) {
 				t.Error("Watch never reported its initial state")
 			}
 			cancel()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Watch did not stop after cancellation")
+			}
 		})
 	}
 }
@@ -125,13 +134,22 @@ func TestWatchDispatchesNothingWithoutADetectSwitch(t *testing.T) {
 	statePath = filepath.Join(t.TempDir(), "absent")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	called := make(chan bool, 1)
-	go Watch(ctx, func(inserted bool) { called <- inserted })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Watch(ctx, func(inserted bool) { called <- inserted })
+	}()
 
 	select {
 	case <-called:
 		t.Error("dispatched a jack position on a device with no detect switch")
 	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not stop after cancellation")
 	}
 }

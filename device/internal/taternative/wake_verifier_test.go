@@ -1,6 +1,7 @@
 package taternative
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"testing"
@@ -110,6 +111,167 @@ func TestWakeHonorsBargeInSetting(t *testing.T) {
 	c.stateMu.Unlock()
 	if !c.Wake("hey_tater", 0.99) {
 		t.Fatal("wake did not interrupt speech while barge-in was enabled")
+	}
+}
+
+func TestWakeBlocksEveryProtectedReplyMode(t *testing.T) {
+	tests := map[string]func(*Client){
+		"tool narration state": func(c *Client) {
+			c.stateMu.Lock()
+			c.state = "tool_call"
+			c.stateMu.Unlock()
+		},
+		"queued voice reply": func(c *Client) {
+			c.playMu.Lock()
+			c.voiceResponseQueued = true
+			c.playMu.Unlock()
+		},
+		"active voice reply": func(c *Client) {
+			c.playMu.Lock()
+			c.voiceResponsePending = true
+			c.playMu.Unlock()
+		},
+		"audio overlay": func(c *Client) {
+			c.playMu.Lock()
+			c.overlayID = "overlay-test"
+			c.playMu.Unlock()
+		},
+		"audio scene": func(c *Client) {
+			c.playMu.Lock()
+			c.sceneID = "scene-test"
+			c.playMu.Unlock()
+		},
+	}
+
+	for name, arrange := range tests {
+		t.Run(name, func(t *testing.T) {
+			c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			c.connected.Store(true)
+			c.stateMu.Lock()
+			c.settings["barge_in_enabled"] = false
+			c.stateMu.Unlock()
+			arrange(c)
+
+			if c.Wake("hey_tater", 0.99) {
+				t.Fatalf("wake interrupted %s while barge-in was disabled", name)
+			}
+		})
+	}
+}
+
+func TestReplyPlaybackInvalidatesPendingWakeVerification(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		PlayVoice: func(ctx context.Context, _ PlayRequest) error {
+			close(started)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+				return nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	defer close(release)
+	c.connected.Store(true)
+	c.stateMu.Lock()
+	c.settings["wake_verifier_mode"] = "enforce"
+	c.settings["wake_verifier_window_ms"] = 500
+	c.settings["wake_verifier_timeout_ms"] = 2000
+	c.settings["barge_in_enabled"] = false
+	c.stateMu.Unlock()
+	c.PushAudio(make([]byte, SampleRate))
+
+	if !c.Wake("hey_tater", 0.99) {
+		t.Fatal("wake verification was not queued")
+	}
+	frame := <-c.out
+	requestID := binary.LittleEndian.Uint32(frame.data[8:12])
+	if !c.queueVoice(PlayRequest{URL: "https://audio.test/reply.wav", TTSKind: "tool"}) {
+		t.Fatal("reply was not queued")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("reply did not start")
+	}
+
+	c.handleWakeVerificationResult(map[string]any{
+		"request_id": int(requestID), "accepted": true, "available": true, "reason": "phrase_match",
+	})
+	select {
+	case outgoing := <-c.out:
+		t.Fatalf("stale verification opened a turn during reply playback: kind=%d data=%q", outgoing.kind, outgoing.data)
+	case <-time.After(25 * time.Millisecond):
+	}
+	status := c.wakeVerifierStatus()
+	if status["pending"] != false || status["last_reason"] != "reply_playback_suppressed" {
+		t.Fatalf("verifier status = %#v", status)
+	}
+}
+
+func TestWakeVerificationRechecksBargeInBeforeStartingTurn(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{
+		PlayVoice: func(ctx context.Context, _ PlayRequest) error {
+			close(started)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+				return nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	defer close(release)
+	c.connected.Store(true)
+	c.stateMu.Lock()
+	c.settings["wake_verifier_mode"] = "enforce"
+	c.settings["wake_verifier_window_ms"] = 500
+	c.settings["wake_verifier_timeout_ms"] = 2000
+	c.settings["barge_in_enabled"] = true
+	c.stateMu.Unlock()
+	if !c.queueVoice(PlayRequest{URL: "https://audio.test/reply.wav"}) {
+		t.Fatal("reply was not queued")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("reply did not start")
+	}
+	c.PushAudio(make([]byte, SampleRate))
+	if !c.Wake("hey_tater", 0.99) {
+		t.Fatal("barge-in verification was not queued")
+	}
+	frame := <-c.out
+	requestID := binary.LittleEndian.Uint32(frame.data[8:12])
+
+	// Model a live setting change, or equivalently a candidate that was
+	// already in flight when protected playback began.
+	c.stateMu.Lock()
+	c.settings["barge_in_enabled"] = false
+	c.stateMu.Unlock()
+	c.handleWakeVerificationResult(map[string]any{
+		"request_id": int(requestID), "accepted": true, "available": true, "reason": "phrase_match",
+	})
+	select {
+	case outgoing := <-c.out:
+		t.Fatalf("verification bypassed the final playback gate: kind=%d data=%q", outgoing.kind, outgoing.data)
+	case <-time.After(25 * time.Millisecond):
 	}
 }
 

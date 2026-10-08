@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -93,6 +94,7 @@ func main() {
 			os.Exit(2)
 		}
 	}
+
 	log.SetOutput(os.Stdout)
 	log.Printf("Tater Echo Firmware %s starting", client.Version)
 	mixer.ConfigureTarget(client.FirmwareTarget)
@@ -105,6 +107,17 @@ func main() {
 	// is rolled back before anything tries to use the network — same
 	// self-healing philosophy as the A/B binary slots.
 	wifi.RecoverIfPending()
+	if updated, err := microwakeword.EnsureEmbeddedDefaultPackage(); err != nil {
+		log.Printf("[wake] embedded Hey Tater package could not be installed: %v", err)
+	} else if updated {
+		log.Printf("[wake] installed the verified built-in Hey Tater MWW/OWW package")
+	}
+	if updated, err := microwakeword.EnsureReleaseCompanionRuntime(
+		context.Background(), client.FirmwareTarget, client.Version); err != nil {
+		log.Printf("[oww] release runtime bootstrap deferred: %v", err)
+	} else if updated {
+		log.Printf("[oww] installed the verified %s companion runtime before wake startup", client.FirmwareTarget)
+	}
 
 	// Amazon's WiFi Simple Setup daemon (BLE+WiFi provisioning of
 	// neighbouring Amazon devices) is useless on a repurposed device and
@@ -1824,8 +1837,11 @@ func applyAecConfig(canceller *aec.Canceller, dataClient *client.DataClient) {
 var mwwShadowState struct {
 	sync.RWMutex
 	enabled       bool
+	mwwEnabled    bool
+	owwEnabled    bool
 	ready         bool
 	model         string
+	owwModel      string
 	wakeWord      string
 	label         string
 	source        string
@@ -1835,6 +1851,81 @@ var mwwShadowState struct {
 	slidingWindow int
 	closeMiss     float64
 	lastErr       string
+}
+
+var owwCompanionState struct {
+	sync.RWMutex
+	model     string
+	mode      string
+	ready     bool
+	lastErr   string
+	verifier  *microwakeword.CompanionVerifier
+	agreement *microwakeword.AgreementMatcher
+}
+
+func replaceOWWCompanion(model, mode string, ready bool, verifier *microwakeword.CompanionVerifier,
+	agreement *microwakeword.AgreementMatcher, err error) {
+	lastErr := ""
+	if !ready {
+		// An absent optional companion is intentionally quiet while OWW is
+		// disabled. Once the user explicitly selects dual or OWW-only mode,
+		// however, that same absence is actionable and must be visible in the
+		// satellite status instead of looking like a healthy idle detector.
+		if err != nil && (!errors.Is(err, microwakeword.ErrCompanionUnavailable) || mode != "disabled") {
+			lastErr = err.Error()
+		}
+		if installErr := microwakeword.CompanionInstallError(model); installErr != "" &&
+			installErr != microwakeword.ErrCompanionUnavailable.Error() {
+			lastErr = installErr
+		}
+	}
+	owwCompanionState.Lock()
+	old := owwCompanionState.verifier
+	owwCompanionState.model = model
+	owwCompanionState.mode = mode
+	owwCompanionState.ready = ready
+	owwCompanionState.lastErr = lastErr
+	owwCompanionState.verifier = verifier
+	owwCompanionState.agreement = agreement
+	owwCompanionState.Unlock()
+	if old != nil && old != verifier {
+		old.Close()
+	}
+}
+
+func owwCompanionStatus() map[string]any {
+	owwCompanionState.RLock()
+	model := owwCompanionState.model
+	mode := owwCompanionState.mode
+	ready := owwCompanionState.ready
+	lastErr := owwCompanionState.lastErr
+	verifier := owwCompanionState.verifier
+	agreement := owwCompanionState.agreement
+	owwCompanionState.RUnlock()
+	status := map[string]any{
+		"name": "open_wake_word", "mode": mode, "ready": ready,
+		"model": model, "last_error": lastErr,
+	}
+	if verifier != nil {
+		settings := verifier.Settings()
+		status["threshold"] = settings.Threshold
+		status["patience"] = settings.Patience
+		status["runtime"] = verifier.Info()
+		status["stats"] = verifier.Stats()
+	}
+	if agreement != nil {
+		status["agreement_window_ms"] = microwakeword.DualWakeAgreementWindow.Milliseconds()
+		status["stats"] = agreement.Stats()
+	}
+	return status
+}
+
+func setWakeDetectorSelection(mwwEnabled, owwEnabled bool, owwModel string) {
+	mwwShadowState.Lock()
+	mwwShadowState.mwwEnabled = mwwEnabled
+	mwwShadowState.owwEnabled = owwEnabled
+	mwwShadowState.owwModel = owwModel
+	mwwShadowState.Unlock()
 }
 
 func setMWWState(enabled, ready bool, model, wakeWord, label, source, sensitivity, environment string,
@@ -1860,6 +1951,10 @@ func mwwNativeStatus() map[string]any {
 	defer mwwShadowState.RUnlock()
 	return map[string]any{
 		"name":                 "micro_wake_word",
+		"mode":                 map[bool]string{true: "local", false: "disabled"}[mwwShadowState.enabled],
+		"mww_enabled":          mwwShadowState.mwwEnabled,
+		"oww_enabled":          mwwShadowState.owwEnabled,
+		"oww_model":            mwwShadowState.owwModel,
 		"ready":                mwwShadowState.ready,
 		"model":                mwwShadowState.model,
 		"active_wake_word":     mwwShadowState.wakeWord,
@@ -1871,6 +1966,7 @@ func mwwNativeStatus() map[string]any {
 		"sliding_window":       mwwShadowState.slidingWindow,
 		"close_miss_threshold": mwwShadowState.closeMiss,
 		"last_error":           mwwShadowState.lastErr,
+		"confirmation":         owwCompanionStatus(),
 	}
 }
 
@@ -1881,8 +1977,14 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	onWake func(string, float32, time.Time) bool,
 	onCloseMiss func(string, float32, time.Time)) {
 	snap := config.Get().Snapshot()
-	enabled := snap.MwwShadowEnabled != nil && *snap.MwwShadowEnabled
+	mwwEnabled := snap.MwwShadowEnabled != nil && *snap.MwwShadowEnabled
+	owwEnabled := snap.OwwEnabled != nil && *snap.OwwEnabled
+	enabled := mwwEnabled || owwEnabled
 	model := snap.MwwModel
+	owwModel := strings.TrimSpace(snap.OwwModel)
+	if owwModel == "" {
+		owwModel = microwakeword.DefaultPackage
+	}
 	sensitivity := snap.MwwSensitivity
 	environment := snap.MwwEnvironment
 	threshold := float64(0)
@@ -1897,6 +1999,27 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if snap.MwwCloseMiss != nil {
 		closeMiss = *snap.MwwCloseMiss
 	}
+	var manifest microwakeword.Manifest
+	var manifestErr error
+	if mwwEnabled {
+		manifest, manifestErr = microwakeword.ReadPackageManifest(model)
+		if manifestErr == nil {
+			calibrated := manifest.RuntimeConfig()
+			if threshold <= 0 {
+				threshold = float64(calibrated.Threshold)
+			}
+			if slidingWindow <= 0 {
+				slidingWindow = calibrated.SlidingWindow
+			}
+			if closeMiss <= 0 {
+				closeMiss = float64(calibrated.CloseMissThreshold)
+			}
+		}
+	}
+	configuredThreshold, configuredWindow := threshold, slidingWindow
+	if mwwEnabled && owwEnabled {
+		threshold, slidingWindow, closeMiss = microwakeword.DualStageMWWGate(threshold, slidingWindow, closeMiss)
+	}
 
 	if !enabled {
 		if dc.MWWShadowScorer() != nil {
@@ -1905,23 +2028,30 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		}
 		setMWWState(false, false, model, "", "", "", sensitivity, environment,
 			threshold, slidingWindow, closeMiss, "")
+		setWakeDetectorSelection(false, false, owwModel)
+		replaceOWWCompanion(owwModel, "disabled", false, nil, nil, nil)
 		return
 	}
 
 	mwwShadowState.RLock()
 	same := mwwShadowState.enabled && mwwShadowState.model == model &&
+		mwwShadowState.mwwEnabled == mwwEnabled && mwwShadowState.owwEnabled == owwEnabled &&
+		mwwShadowState.owwModel == owwModel &&
 		mwwShadowState.sensitivity == sensitivity && mwwShadowState.environment == environment &&
 		mwwShadowState.threshold == threshold && mwwShadowState.slidingWindow == slidingWindow &&
 		mwwShadowState.closeMiss == closeMiss
 	previousErr := mwwShadowState.lastErr
 	mwwShadowState.RUnlock()
 	expectedScorers := dc.WakeScorerCount()
-	if len(dc.MWWShadowScorers()) == expectedScorers && same {
+	banksReady := len(dc.MWWShadowScorers()) == expectedScorers
+	if mwwEnabled && owwEnabled {
+		banksReady = banksReady && len(dc.OWWShadowScorers()) == expectedScorers
+	}
+	if banksReady && same {
 		return
 	}
-	manifest, manifestErr := microwakeword.ReadPackageManifest(model)
 	wakeWord, label, source := "hey_tater", "Hey Tater", "embedded"
-	if manifestErr == nil {
+	if mwwEnabled && manifestErr == nil {
 		wakeWord = strings.TrimSpace(manifest.WakeWord)
 		label = strings.TrimSpace(manifest.Label)
 		if label == "" {
@@ -1933,41 +2063,117 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	}
 
 	scorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
-	var openErr error
-	for lane := 0; lane < expectedScorers; lane++ {
-		lane := lane
-		sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
-			Threshold: float32(threshold), SlidingWindow: slidingWindow,
-			CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
-		}, microwakeword.ShadowHooks{
-			Cross: func(score float32, at time.Time) {
-				if !dc.ClaimWakeLane(lane, at) {
-					return
-				}
-				ageMs := time.Since(at).Milliseconds()
-				if onWake != nil && onWake(wakeWord, score, at) {
-					log.Printf("[mww] local wake lane=%d score=%.3f age=%dms — native wake claimed", lane, score, ageMs)
-					return
-				}
-				log.Printf("[mww-shadow] lane=%d crossing score=%.3f age=%dms (report only)", lane, score, ageMs)
-				if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
-					cc.SendMWWShadowCross(score, ageMs)
-				}
-			},
-			CloseMiss: func(score float32, at time.Time) {
-				if lane == 0 && onCloseMiss != nil {
-					onCloseMiss(wakeWord, score, at)
-				}
-			},
-		})
-		if err != nil {
-			openErr = err
-			break
+	owwScorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
+	var agreement *microwakeword.AgreementMatcher
+	if mwwEnabled && owwEnabled {
+		agreement = microwakeword.NewAgreementMatcher(microwakeword.DualWakeAgreementWindow)
+		if configuredThreshold != threshold || configuredWindow != slidingWindow {
+			log.Printf("[wake] dual gate tuned MWW threshold %.3f→%.3f window %d→%d; OWW remains authoritative",
+				configuredThreshold, threshold, configuredWindow, slidingWindow)
 		}
-		scorers = append(scorers, sc)
+	}
+	dispatch := func(lane int, detectedWord string, score float32, at time.Time) {
+		dc.ExtendWinningWakeAudio(lane, at)
+		ageMs := time.Since(at).Milliseconds()
+		if onWake != nil && onWake(detectedWord, score, at) {
+			log.Printf("[wake] local wake lane=%d score=%.3f age=%dms — native wake claimed", lane, score, ageMs)
+			return
+		}
+		log.Printf("[wake-shadow] lane=%d crossing score=%.3f age=%dms (report only)", lane, score, ageMs)
+		if cc != nil && cc.HasFeature(client.FeatureMWWShadow) {
+			cc.SendMWWShadowCross(score, ageMs)
+		}
+	}
+	dispatchAgreement := func(match microwakeword.AgreementMatch) {
+		mwwDirection := dc.WakeLaneDirectionAt(match.Lane, match.MWWAt)
+		owwDirection := dc.WakeLaneDirectionAt(match.Lane, match.OWWAt)
+		if mwwDirection != owwDirection {
+			log.Printf("[oww] rejected cross-direction agreement lane=%d mww_dir=%d oww_dir=%d",
+				match.Lane, mwwDirection, owwDirection)
+			return
+		}
+		if !dc.ClaimWakeLane(match.Lane, match.At) {
+			return
+		}
+		log.Printf("[oww] parallel agreement lane=%d mww=%.3f oww=%.3f delta=%dms",
+			match.Lane, match.MWWScore, match.OWWScore, match.MWWAt.Sub(match.OWWAt).Abs().Milliseconds())
+		dispatch(match.Lane, wakeWord, match.MWWScore, match.At)
+	}
+	var openErr error
+	if mwwEnabled {
+		for lane := 0; lane < expectedScorers; lane++ {
+			lane := lane
+			sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
+				Threshold: float32(threshold), SlidingWindow: slidingWindow,
+				CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
+			}, microwakeword.ShadowHooks{
+				Cross: func(score float32, at time.Time) {
+					if agreement == nil {
+						if dc.ClaimWakeLane(lane, at) {
+							dispatch(lane, wakeWord, score, at)
+						}
+						return
+					}
+					if match, ok := agreement.Observe(microwakeword.AgreementMWW, lane, score, at); ok {
+						dispatchAgreement(match)
+					}
+				},
+				CloseMiss: func(score float32, at time.Time) {
+					if lane == 0 && onCloseMiss != nil {
+						onCloseMiss(wakeWord, score, at)
+					}
+				},
+			})
+			if err != nil {
+				openErr = err
+				break
+			}
+			scorers = append(scorers, sc)
+			if agreement != nil {
+				owwScorer, _, err := microwakeword.OpenCompanionAgreementShadow(owwModel, microwakeword.ShadowHooks{
+					Cross: func(score float32, at time.Time) {
+						if match, ok := agreement.Observe(microwakeword.AgreementOWW, lane, score, at); ok {
+							dispatchAgreement(match)
+						}
+					},
+				})
+				if err != nil {
+					openErr = err
+					break
+				}
+				owwScorers = append(owwScorers, owwScorer)
+			}
+		}
+	} else {
+		for lane := 0; lane < expectedScorers; lane++ {
+			lane := lane
+			sc, bundle, err := microwakeword.OpenCompanionShadow(owwModel, microwakeword.ShadowHooks{
+				Cross: func(score float32, at time.Time) {
+					if dc.ClaimWakeLane(lane, at) {
+						dispatch(lane, wakeWord, score, at)
+					}
+				},
+			})
+			if err != nil {
+				openErr = err
+				break
+			}
+			if lane == 0 {
+				wakeWord = strings.TrimSpace(bundle.Key)
+				if wakeWord == "" {
+					wakeWord = strings.TrimSpace(bundle.WakeWord)
+				}
+				label = strings.TrimSpace(bundle.WakeWord)
+				if label == "" {
+					label = wakeWord
+				}
+				source = "openwakeword"
+			}
+			scorers = append(scorers, sc)
+		}
 	}
 	if openErr != nil {
-		for _, scorer := range scorers {
+		for _, scorer := range append(scorers, owwScorers...) {
 			scorer.Close()
 		}
 		if msg := openErr.Error(); msg != previousErr {
@@ -1976,17 +2182,41 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		dc.SetMWWShadowScorer(nil)
 		setMWWState(true, false, model, wakeWord, label, source, sensitivity, environment,
 			threshold, slidingWindow, closeMiss, openErr.Error())
+		setWakeDetectorSelection(mwwEnabled, owwEnabled, owwModel)
+		mode := "mww_only"
+		if mwwEnabled && owwEnabled {
+			mode = "dual"
+		} else if owwEnabled {
+			mode = "oww_only"
+		}
+		replaceOWWCompanion(owwModel, mode, false, nil, nil, openErr)
 		return
 	}
 
-	dc.SetMWWShadowScorers(scorers)
+	if agreement != nil {
+		dc.SetWakeShadowScorers(scorers, owwScorers)
+	} else {
+		dc.SetMWWShadowScorers(scorers)
+	}
+	detectorMode := "mww_only"
+	if mwwEnabled && owwEnabled {
+		detectorMode = "dual"
+	} else if owwEnabled {
+		detectorMode = "oww_only"
+	}
+	replaceOWWCompanion(owwModel, detectorMode, owwEnabled, nil, agreement, nil)
 	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
-	mode := "shadow/report-only"
+	setWakeDetectorSelection(mwwEnabled, owwEnabled, owwModel)
+	activityMode := "shadow/report-only"
 	if onWake != nil {
-		mode = "active native wake"
+		activityMode = "active native wake"
 	}
-	log.Printf("[mww] scoring %s — %s (%d independent beam lane(s))", scorers[0].Info(), mode, len(scorers))
+	log.Printf("[wake] scoring %s — %s (%d independent beam lane(s), mode=%s)", scorers[0].Info(), activityMode, len(scorers), detectorMode)
+	if agreement != nil {
+		log.Printf("[oww] parallel dual wake ready — %d independently streamed OWW lane(s), agreement window=%dms",
+			len(owwScorers), microwakeword.DualWakeAgreementWindow.Milliseconds())
+	}
 }
 
 // applyMWWTimerStopConfig temporarily replaces the regular wake phrase with a
@@ -2034,6 +2264,8 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 		scorers = append(scorers, scorer)
 	}
 	dc.SetMWWShadowScorers(scorers)
+	replaceOWWCompanion(microwakeword.TimerStopPackage, "timer_stop", false, nil, nil, nil)
+	setWakeDetectorSelection(true, false, "")
 	label := strings.TrimSpace(manifest.Label)
 	if label == "" {
 		label = manifest.WakeWord
@@ -2167,6 +2399,11 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		applied[key] = value
 	}
 	msg := config.ConfigMessage{}
+	localWakeEnabled := strings.EqualFold(strings.TrimSpace(fmt.Sprint(values["wake_engine"])), "micro_wake_word")
+	mwwRequested := localWakeEnabled && nativeBool(values["wake_mww_enabled"], true)
+	owwRequested := localWakeEnabled && nativeBool(values["wake_oww_enabled"], false)
+	dualWakeRequested := mwwRequested && owwRequested
+	selectedMWWPackage := ""
 	applyNativeVisualSettings(values, applied)
 	if value, ok := values["display_theme"]; ok {
 		applied["display_theme"] = normalizeDisplayTheme(value)
@@ -2245,9 +2482,31 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		default:
 			return applied, fmt.Errorf("unsupported wake_engine %q", engine)
 		}
-		enabled := engine == "micro_wake_word"
-		msg.MwwShadowEnabled = &enabled
+		localEnabled := engine == "micro_wake_word"
+		mwwEnabled := localEnabled
+		owwEnabled := false
+		if configured, present := values["wake_mww_enabled"]; present {
+			mwwEnabled = localEnabled && nativeBool(configured, true)
+		}
+		if configured, present := values["wake_oww_enabled"]; present {
+			owwEnabled = localEnabled && nativeBool(configured, false)
+		}
+		msg.MwwShadowEnabled = &mwwEnabled
+		msg.OwwEnabled = &owwEnabled
 		applied["wake_engine"] = engine
+		applied["wake_mww_enabled"] = mwwEnabled
+		applied["wake_oww_enabled"] = owwEnabled
+	} else {
+		if value, ok := values["wake_mww_enabled"]; ok {
+			enabled := nativeBool(value, true)
+			msg.MwwShadowEnabled = &enabled
+			applied["wake_mww_enabled"] = enabled
+		}
+		if value, ok := values["wake_oww_enabled"]; ok {
+			enabled := nativeBool(value, false)
+			msg.OwwEnabled = &enabled
+			applied["wake_oww_enabled"] = enabled
+		}
 	}
 	if value, ok := values["wake_word"]; ok {
 		wakeWord := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
@@ -2264,13 +2523,50 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 				return applied, err
 			}
 			msg.MwwModel = packageName
+			selectedMWWPackage = packageName
 			applied["wake_word"] = "custom_url"
 			applied["wake_word_url"] = strings.TrimSpace(fmt.Sprint(values["wake_word_url"]))
 		} else if wakeWord != "" && wakeWord != "hey_tater" {
 			return applied, fmt.Errorf("wake word %q is not installed on this Echo", wakeWord)
 		} else {
 			msg.MwwModel = "hey_tater"
+			selectedMWWPackage = "hey_tater"
 			applied["wake_word"] = "hey_tater"
+		}
+	}
+	if value, ok := values["oww_wake_word"]; ok {
+		wakeWord := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+		if wakeWord == "hey tater" {
+			wakeWord = "hey_tater"
+		}
+		if wakeWord == "paired_bundle" {
+			if !dualWakeRequested || selectedMWWPackage == "" {
+				return applied, fmt.Errorf("paired OWW bundle requires dual mode and an installed MWW package")
+			}
+			pairedPackage, err := microwakeword.PairedCompanionPackage(selectedMWWPackage)
+			if err != nil {
+				return applied, err
+			}
+			msg.OwwModel = pairedPackage
+			applied["oww_wake_word"] = "paired_bundle"
+			applied["oww_wake_word_url"] = strings.TrimSpace(fmt.Sprint(values["oww_wake_word_url"]))
+		} else if wakeWord == "custom_url" {
+			packageName, err := microwakeword.InstallCompanionURLRevision(
+				context.Background(),
+				strings.TrimSpace(fmt.Sprint(values["oww_wake_word_url"])),
+				strings.TrimSpace(fmt.Sprint(values["oww_model_revision"])),
+			)
+			if err != nil {
+				return applied, err
+			}
+			msg.OwwModel = packageName
+			applied["oww_wake_word"] = "custom_url"
+			applied["oww_wake_word_url"] = strings.TrimSpace(fmt.Sprint(values["oww_wake_word_url"]))
+		} else if wakeWord != "" && wakeWord != "hey_tater" {
+			return applied, fmt.Errorf("openWakeWord %q is not installed on this Echo", wakeWord)
+		} else {
+			msg.OwwModel = "hey_tater"
+			applied["oww_wake_word"] = "hey_tater"
 		}
 	}
 	if value, ok := values["barge_in_enabled"]; ok {

@@ -11,7 +11,9 @@ Echo microphones
   -> target-specific capture and beam selection
   -> echo cancellation and signal conditioning
   -> one or two 16 kHz mono wake beams
-       |-> microWakeWord -> winning beam
+       |-> microWakeWord only
+       |-> parallel microWakeWord + openWakeWord agreement
+       |-> openWakeWord only
        |-> winning-beam verifier and trainer pre-roll
        `-> winning-beam STT pre-roll, then the locked live beam
 
@@ -24,10 +26,9 @@ Microphone capture never waits on inference or networking. Wake inference runs
 on its own bounded queue; a discontinuity resets the streaming frontend before
 scoring continues. Each array lane retains a bounded timestamped audio ring.
 When a lane crosses, its exact post-AEC/high-pass audio is frozen and used by
-the optional STT wake verifier, wake-audio trainer upload, and the first two
-seconds sent to speech recognition. The live microphone then locks to that
-same acoustic path. Degraded and non-array capture safely retains the shared
-mono pre-roll.
+the optional STT wake verifier, wake-audio trainer upload, and the first two seconds sent to speech
+recognition. The live microphone then locks to that same acoustic path.
+Degraded and non-array capture safely retains the shared mono pre-roll.
 
 ## Wake engine
 
@@ -46,20 +47,52 @@ TFLite Micro runtime is an ARM library loaded through a versioned C ABI. A
 missing or incompatible model/runtime disables local wake without preventing
 the rest of the satellite from booting.
 
+New trainer bundles include an independent openWakeWord ONNX classifier.
+Biscuit, Checkers, and Rook use it with the pinned ARMv7 ONNX
+Runtime/XNNPACK path. Biscuit carries the Android/Bionic library; both Linux
+display targets carry the separately built Linux/musl library. OWW TFLite is
+not part of the release contract.
+Tater exposes separate MWW and OWW switches and model sources. With both
+enabled, both engines run continuously on the same wake beams. Their captured
+crossing timestamps must fall inside a bounded window on the same lane and
+physical beam direction before Tater opens the microphone. Either model may
+cross first, so dual agreement adds no replay stage. MWW uses a recall-oriented
+ceiling of 0.95 and three probability frames in this mode; the user's calibrated
+stricter policy remains unchanged whenever MWW runs by itself. OWW uses its
+trainer-calibrated confirmation policy because MWW agreement is still mandatory.
+With only OWW enabled, the same continuously warm OWW lanes feed wake
+arbitration, pre-roll, and the optional STT verifier directly. This never
+requires both physical beams to agree. An explicitly enabled but missing or
+invalid OWW model fails closed and is visible in wake telemetry; disabling OWW
+restores the established MWW-only behavior. The temporary timer `stop` model
+stays MWW-only so dismissing a ringing timer remains immediate.
+
+The built-in Hey Tater choice is a verified matched bundle containing the
+current MWW and OWW classifiers. It is embedded in the daemon for OTA-safe
+installation and also copied directly by every factory installer. Custom wake
+words use the same bundle contract, which prevents dual mode from pairing two
+different phrases.
+
 Each installation carries:
 
 ```text
 /data/local/share/tater/microwakeword/
   libtater_microwakeword.so
+  libonnxruntime.so
+  melspectrogram.onnx
+  embedding_model.onnx
   hey_tater.json
   hey_tater.tflite
+  hey_tater.oww.json
+  hey_tater.oww.onnx
+  hey_tater.wake-bundle.json
 ```
 
-Wake models, sounds, sensitivity, verification policy, and trainer behavior can
-change live from Tater. A little over three seconds of each candidate beam is
-available to the trainer and verifier; the final two seconds protect the first
-command word while the server acknowledges and arbitrates a wake heard by
-multiple rooms.
+Wake engines, models, optional companion classifiers, sounds, sensitivity,
+verification policy, and trainer behavior can change live from Tater. A little
+over three seconds of each candidate beam remains available to the trainer,
+verifier, and STT paths. The final two seconds protect the first command word
+while the server acknowledges and arbitrates a wake heard by multiple rooms.
 
 ## Target integrations
 

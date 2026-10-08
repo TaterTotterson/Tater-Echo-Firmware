@@ -31,6 +31,10 @@ esac
 [ -n "$EM_EXTRA_TAGS" ] && VERSION="${VERSION}-${EM_EXTRA_TAGS// /-}"
 echo "Building Tater Echo Firmware $VERSION for $TARGET..."
 
+# The Android cgo OWW binding compiles against the pinned ORT header and loads
+# the corresponding ARMv7 library only when OWW is selected at runtime.
+"$REPO_ROOT/device/prepare_onnxruntime_android.sh"
+
 # Suppress known harmless warnings from vendored C sources:
 #   -Wno-null-dereference: rnnoise/rnn.c assert-style null checks
 #   -Wno-deprecated-declarations: tinyalsa pcm_read/pcm_write

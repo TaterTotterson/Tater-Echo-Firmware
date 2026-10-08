@@ -15,6 +15,18 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class RookRootfsTests(unittest.TestCase):
+    def test_both_linux_targets_build_and_package_native_onnx_runtime(self):
+        repo = Path(__file__).resolve().parents[2]
+        for target in ("checkers", "rook"):
+            script = (repo / "linux" / target / "build_linux.sh").read_text()
+            with self.subTest(target=target):
+                self.assertIn("prepare_onnxruntime_linux_armv7.sh", script)
+                self.assertIn("-tags server,onnxruntime", script)
+                self.assertIn("ReleaseORTRuntimeSHA256=$ort_sha", script)
+                self.assertIn("--onnx-runtime", script)
+                self.assertIn("--hey-tater-oww-onnx", script)
+                self.assertIn("TestLinuxARMv7ORTModels", script)
+
     def test_release_workflow_fetches_pinned_wake_models_before_build(self):
         workflow = (
             Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
@@ -126,9 +138,11 @@ log "boot script done"
             output = root / "rook.tar.gz"
             args = SimpleNamespace(
                 base_rootfs=base, server=payload, show=payload, reboot=payload,
-                camera=payload, mww_runtime=payload, hey_tater_model=payload,
-                hey_tater_manifest=payload, stop_model=payload,
-                stop_manifest=payload, tinyalsa=payload,
+                camera=payload, mww_runtime=payload, onnx_runtime=payload, hey_tater_model=payload,
+                hey_tater_manifest=payload, hey_tater_oww_onnx=payload,
+                hey_tater_oww_metadata=payload, hey_tater_bundle=payload, stop_model=payload,
+                stop_manifest=payload, oww_melspectrogram_onnx=payload,
+                oww_embedding_onnx=payload, tinyalsa=payload,
                 techo5_spot_license=license_file, techo5_license=license_file,
                 apk_cache=root, version="v0.0.1", output=output,
             )
@@ -144,10 +158,16 @@ log "boot script done"
                 inittab = archive.extractfile("./etc/inittab").read().decode()
                 runner = archive.extractfile("./usr/local/sbin/tater-camera-run").read().decode()
                 license_text = archive.extractfile("./usr/share/licenses/tater-linux/TECHO5-LICENSE").read().decode()
+                wake_bundle = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.wake-bundle.json").read()
+                onnx_runtime = archive.extractfile("./usr/share/tater/microwakeword/libonnxruntime.so").read()
+                onnx_classifier = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.oww.onnx").read()
             self.assertEqual(camera, b"trial-binary")
             self.assertIn("::respawn:/usr/local/sbin/tater-camera-run", inittab)
             self.assertIn("/usr/local/bin/tater-camera", runner)
             self.assertEqual(license_text, "MIT license\n")
+            self.assertEqual(wake_bundle, b"trial-binary")
+            self.assertEqual(onnx_runtime, b"trial-binary")
+            self.assertEqual(onnx_classifier, b"trial-binary")
 
 
 if __name__ == "__main__":

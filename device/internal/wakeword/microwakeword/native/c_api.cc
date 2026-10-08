@@ -44,7 +44,7 @@ extern "C" {
 uint32_t tater_mww_abi_version(void) { return TATER_MWW_ABI_VERSION; }
 
 const char* tater_mww_runtime_version(void) {
-  return "1.0.0+tflm.2747abd";
+  return "1.2.0+tflm.2747abd";
 }
 
 void* tater_mww_engine_create(const uint8_t* model_data, size_t model_size,

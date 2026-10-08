@@ -33,9 +33,21 @@ partition with the A/B store.
 
 Biscuit's OTA asset is the ARM userspace ELF. Checkers' and Rook's routine OTA
 assets are deterministic gzip-compressed application bundles containing the
-native daemon, native screen renderer, and a per-file manifest. Their full
-Linux root filesystems remain in USB factory bundles for recovery and rare
+native daemon, native screen renderer, and a per-file manifest. The daemon
+embeds and verifies the matched built-in Hey Tater MWW/OWW package, so an
+ordinary OTA installs or repairs the current default pair. Their full Linux
+root filesystems remain in USB factory bundles for recovery and rare
 base-system changes.
+
+Each target also publishes target-specific `wake-runtime.so` and
+`onnxruntime.so` sidecars. Biscuit receives the Android/Bionic ARMv7 ONNX
+Runtime; Checkers and Rook receive the reduced Linux/musl ARMv7 build. A
+firmware OTA that first introduces either runtime verifies and installs that
+exact library plus the matching shared feature models before wake startup.
+Factory images already contain them. A failed sidecar bootstrap does not stop
+the daemon: MWW-only remains available, explicitly selected OWW modes fail
+closed, and the verified download is retried on the next boot.
+
 Tater sends the same target-independent command envelope for either format:
 
 ```json

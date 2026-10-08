@@ -48,6 +48,82 @@ class PackageEchoReleaseTests(unittest.TestCase):
             with tarfile.open(path, "w:gz") as archive:
                 archive.add(root / "etc", arcname="etc")
 
+    def test_biscuit_factory_contains_the_verified_default_wake_pair(self) -> None:
+        version = "v9.8.7"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            output = Path(temporary) / "release"
+            targets = root / "targets/targets.json"
+            targets.parent.mkdir(parents=True)
+            targets.write_text(json.dumps({"targets": {"biscuit": {
+                "display_name": "Echo Dot",
+                "factory_install": True,
+                "ota": True,
+                "status": "hardware-tested",
+            }}}))
+            inputs = (
+                "device/build/server",
+                "device/build/microwakeword-android/libtater_microwakeword.so",
+                "device/build/onnxruntime/armeabi-v7a/libonnxruntime.so",
+                "device/build/microwakeword-testdata/stop.tflite",
+                "device/build/microwakeword-testdata/melspectrogram.onnx",
+                "device/build/microwakeword-testdata/embedding_model.onnx",
+                "device/internal/wakeword/microwakeword/models/hey_tater.tflite",
+                "device/internal/wakeword/microwakeword/models/hey_tater.json",
+                "device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx",
+                "device/internal/wakeword/microwakeword/models/hey_tater.oww.json",
+                "device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json",
+                "device/internal/wakeword/microwakeword/models/stop.json",
+                "factory/biscuit/install.sh",
+                "factory/biscuit/install.py",
+                "factory/biscuit/README.md",
+                "factory/biscuit/tools/tater_emos_build.py",
+                "factory/biscuit/payload/start_server.sh",
+                "emos/build/init32",
+                "emos/build/wpa/wpa_supplicant",
+                "emos/build/wpa/wpa_cli",
+                "emos/build/wpa/em-wifi",
+                "emos/build/bb/busybox",
+                "emos/build/bb/busybox-1.0.tar.bz2",
+                "emos/build/bb/busybox-LICENSE",
+                "emos/tools/build-busybox.sh",
+                "LICENSE",
+                "NOTICE.md",
+            )
+            for relative in inputs:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((relative + "\n").encode())
+
+            with (
+                mock.patch.object(package_echo_release, "REPO", root),
+                mock.patch.object(package_echo_release, "TARGETS", targets),
+            ):
+                package_echo_release.build(version, "biscuit", output)
+
+            archive_path = output / f"tater-echo-biscuit-{version}-factory.tar.gz"
+            prefix = f"tater-echo-biscuit-{version}-factory"
+            with tarfile.open(archive_path, "r:gz") as archive:
+                names = set(archive.getnames())
+                for name in (
+                    "hey_tater.tflite",
+                    "hey_tater.json",
+                    "hey_tater.oww.onnx",
+                    "hey_tater.oww.json",
+                    "hey_tater.wake-bundle.json",
+                    "libonnxruntime.so",
+                    "melspectrogram.onnx",
+                    "embedding_model.onnx",
+                ):
+                    self.assertIn(f"{prefix}/payload/{name}", names)
+                manifest = json.load(archive.extractfile(f"{prefix}/bundle-manifest.json"))
+            for name in (
+                "hey_tater.tflite",
+                "hey_tater.oww.onnx",
+                "hey_tater.wake-bundle.json",
+            ):
+                self.assertIn(f"payload/{name}", manifest["files"])
+
     def test_rook_factory_and_ota_bundle_verify_end_to_end(self) -> None:
         version = "v2.1.0"
         with tempfile.TemporaryDirectory() as temporary:
@@ -77,6 +153,12 @@ class PackageEchoReleaseTests(unittest.TestCase):
             build.mkdir(parents=True)
             (build / "tater-echo").write_bytes(b"rook-daemon-v2.1.0")
             (build / "tater-show").write_bytes(b"rook-screen-v2.1.0")
+            runtime = build / "microwakeword/libtater_microwakeword.so"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"rook-wake-runtime-v2.1.0")
+            ort = root / "device/build/onnxruntime-linux-armv7/libonnxruntime.so"
+            ort.parent.mkdir(parents=True)
+            ort.write_bytes(b"rook-onnx-runtime-v2.1.0")
             self._rook_boot(build / "tater-rook-boot.img")
             rootfs = build / f"tater-rook-rootfs-{version}.tar.gz"
             self._rook_rootfs(rootfs, version)
@@ -94,6 +176,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             names = {path.name for path in artifacts}
             self.assertIn(f"tater-echo-rook-{version}-factory.tar.gz", names)
             self.assertIn(f"tater-echo-rook-{version}-ota.tar.gz", names)
+            self.assertIn(f"tater-echo-rook-{version}-wake-runtime.so", names)
+            self.assertIn(f"tater-echo-rook-{version}-onnxruntime.so", names)
 
             manifest = json.loads((output / "firmware-manifest.json").read_text())
             self.assertEqual(manifest["version"], version)

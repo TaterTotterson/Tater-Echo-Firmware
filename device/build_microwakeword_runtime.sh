@@ -50,7 +50,7 @@ docker run --rm \
        exports=\$($NM -D --defined-only \"\$library\" | awk '{print \$3}' | grep '^tater_mww_' | sort)
        count=\$(printf '%s\n' \"\$exports\" | grep -c '^tater_mww_')
        test \"\$count\" -eq 10
-       echo \"\$exports\""
+       printf '%s\n' \"\$exports\""
 
 echo
 echo "Built ARMv7/API-22 runtime: $LIBRARY"

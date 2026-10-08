@@ -14,12 +14,12 @@ silently updated during normal firmware builds.
   — Apache License 2.0.
 - kissfft, commit `7bce4153c6bc8aba2db0e889e576f9d00505cbe1`
   — BSD-3-Clause.
-
 The dependency selection and Android build structure were informed by Home
 Assistant Android's Apache-2.0 `microwakeword` module. The runtime API and
 engine in this directory are Tater-specific implementations: they return raw
 scores to Go, reset TFLM resource variables, validate the Tater model contract,
-and do not contain its JNI layer.
+and do not contain its JNI layer. openWakeWord and its ONNX feature models run
+through the separately packaged ONNX Runtime.
 
 Golden-vector generation additionally uses `pymicro-features` 2.0.2 and
 `ai-edge-litert` 2.2.0, both under Apache License 2.0. They are development-only

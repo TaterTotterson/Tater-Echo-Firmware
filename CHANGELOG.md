@@ -4,6 +4,30 @@
 
 ### What's Changed
 
+- Tater can enable microWakeWord and openWakeWord independently. MWW-only
+  preserves the original pipeline, Dual Wake Word requires both models to
+  accept the same winning-beam audio, and OWW-only runs openWakeWord
+  continuously before the optional STT wake check.
+- Dual Wake Word keeps MWW and OWW warm in parallel on the same directional
+  beam lanes and opens the microphone only when their timestamped crossings
+  agree within 1.2 seconds. This preserves mandatory two-model agreement
+  without replaying the wake clip after MWW or adding a second-stage delay.
+- Each engine has its own built-in Hey Tater/custom source selection. Custom
+  openWakeWord models install from the verified `.wake-bundle.json` produced
+  by either Tater trainer. The newly trained Hey Tater MWW and OWW classifiers
+  now ship together as one verified built-in profile.
+- Biscuit, Checkers, and Rook factory images carry the built-in pair and shared
+  OWW feature models. Ordinary daemon OTA installs repair the same signed
+  profile and securely bootstrap the matching native wake runtime. Saved
+  detector choices remain user-controlled, and the timer Stop wake remains
+  immediate.
+- Biscuit runs OWW through the ARMv7 ONNX Runtime/XNNPACK path proven on this
+  hardware by EchoMuse. Live validation measured same-frame MWW/OWW agreement
+  while keeping the daemon near 25% CPU and 39 MB RSS.
+- Checkers and Rook use that same continuous ONNX/XNNPACK OWW pipeline through
+  a reduced Linux/musl ARMv7 runtime built from pinned source. Their factory
+  images and release sidecars carry the verified native runtime and ONNX
+  feature models, with an emulated inference smoke test before packaging.
 - Replaced the firmware-specific Tater media clock/session transport with a
   Sendspin v1 player on Biscuit, Checkers, and Rook. Every Echo now advertises
   itself to Tater, Music Assistant, and other compatible Sendspin controllers,
@@ -13,14 +37,13 @@
   Native replies, interactive TTS, announcements, wake cues, timers, overlays,
   audio scenes, ducking, and barge-in still take priority locally and return the
   speaker cleanly to Sendspin afterward.
-- Added the Echo capability contract for Tater's new OpenWakeWord path,
-  including wake-detector selection and dual-wake confirmation. The permanent
-  Echo wake stream and independent beamformed wake lanes remain available so
-  on-device microWakeWord and Tater's OWW detector can participate in the same
-  wake decision instead of competing as separate turns.
-- Keeps the winning wake lane's pre-roll available to the second detector,
-  wake verifier, trainer, and STT handoff, with fail-open behavior when the
-  remote confirmation path is unavailable.
+- Added the Echo capability contract that lets Tater and the Home Assistant
+  bridge select on-device microWakeWord, openWakeWord, or Dual Wake Word without
+  relying on firmware-version checks.
+- Both detectors receive the same timestamped 80 ms beamformed audio chunks and
+  maintain continuous inference state. Agreement is restricted to the same
+  directional lane, while the winning lane's pre-roll remains available to the
+  wake verifier, trainer, and STT handoff.
 - Fixed looping background audio continuing after a local TTS announcement
   finishes on Biscuit, Checkers, and Rook, and made the configured background
   fade-out complete in the hardware renderer before its queued music is

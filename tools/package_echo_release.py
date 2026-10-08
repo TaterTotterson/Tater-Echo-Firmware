@@ -162,6 +162,23 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     else:
         raise SystemExit(f"factory packaging is not implemented for {target!r}")
 
+    runtime_source = REPO / "device/build" / (
+        "microwakeword-android/libtater_microwakeword.so" if target == "biscuit"
+        else ("rook/microwakeword/libtater_microwakeword.so" if target == "rook"
+              else "microwakeword-linux/libtater_microwakeword.so")
+    )
+    runtime_asset = output / f"{stem}-wake-runtime.so"
+    copy(runtime_source, runtime_asset, 0o755)
+    artifacts["wake_runtime"] = runtime_asset
+
+    ort_source = REPO / "device/build" / (
+        "onnxruntime/armeabi-v7a/libonnxruntime.so" if target == "biscuit"
+        else "onnxruntime-linux-armv7/libonnxruntime.so"
+    )
+    ort_asset = output / f"{stem}-onnxruntime.so"
+    copy(ort_source, ort_asset, 0o755)
+    artifacts["onnx_runtime"] = ort_asset
+
     with tempfile.TemporaryDirectory(prefix="tater-echo-package-") as temporary:
         factory = Path(temporary) / f"{stem}-factory"
         factory.mkdir()
@@ -179,14 +196,26 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "factory/biscuit/payload/start_server.sh", 0o755),
                 "payload/libtater_microwakeword.so": (
                     REPO / "device/build/microwakeword-android/libtater_microwakeword.so", 0o755),
+                "payload/libonnxruntime.so": (
+                    REPO / "device/build/onnxruntime/armeabi-v7a/libonnxruntime.so", 0o755),
                 "payload/hey_tater.tflite": (
-                    REPO / "device/build/microwakeword-testdata/hey_tater.tflite", 0o644),
+                    REPO / "device/internal/wakeword/microwakeword/models/hey_tater.tflite", 0o644),
                 "payload/hey_tater.json": (
                     REPO / "device/internal/wakeword/microwakeword/models/hey_tater.json", 0o644),
+                "payload/hey_tater.oww.onnx": (
+                    REPO / "device/internal/wakeword/microwakeword/models/hey_tater.oww.onnx", 0o644),
+                "payload/hey_tater.oww.json": (
+                    REPO / "device/internal/wakeword/microwakeword/models/hey_tater.oww.json", 0o644),
+                "payload/hey_tater.wake-bundle.json": (
+                    REPO / "device/internal/wakeword/microwakeword/models/hey_tater.wake-bundle.json", 0o644),
                 "payload/stop.tflite": (
                     REPO / "device/build/microwakeword-testdata/stop.tflite", 0o644),
                 "payload/stop.json": (
                     REPO / "device/internal/wakeword/microwakeword/models/stop.json", 0o644),
+                "payload/melspectrogram.onnx": (
+                    REPO / "device/build/microwakeword-testdata/melspectrogram.onnx", 0o644),
+                "payload/embedding_model.onnx": (
+                    REPO / "device/build/microwakeword-testdata/embedding_model.onnx", 0o644),
                 "payload/init32": (REPO / "emos/build/init32", 0o755),
                 "payload/wpa_supplicant": (REPO / "emos/build/wpa/wpa_supplicant", 0o755),
                 "payload/wpa_cli": (REPO / "emos/build/wpa/wpa_cli", 0o755),

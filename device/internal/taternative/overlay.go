@@ -6,6 +6,9 @@ import (
 )
 
 func (c *Client) startOverlay(req OverlayRequest) {
+	c.wakeGateMu.Lock()
+	defer c.wakeGateMu.Unlock()
+
 	c.stopOverlay(false)
 	c.playMu.Lock()
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -15,6 +18,7 @@ func (c *Client) startOverlay(req OverlayRequest) {
 	c.overlayID = req.OverlayID
 	c.overlayGroup = req.GroupID
 	c.playMu.Unlock()
+	c.cancelWakeVerificationsForPlayback()
 
 	go func() {
 		startedSent := false
@@ -93,6 +97,9 @@ func (c *Client) stopOverlay(report bool) {
 }
 
 func (c *Client) startScene(req SceneRequest) {
+	c.wakeGateMu.Lock()
+	defer c.wakeGateMu.Unlock()
+
 	c.stopScene(false)
 	c.stopOverlay(false)
 	c.playMu.Lock()
@@ -102,6 +109,7 @@ func (c *Client) startScene(req SceneRequest) {
 	generation := c.sceneGen
 	c.sceneID = req.SceneID
 	c.playMu.Unlock()
+	c.cancelWakeVerificationsForPlayback()
 	c.setState("speaking", map[string]any{"audio_scene": true, "scene_id": req.SceneID})
 	go func() {
 		var err error
