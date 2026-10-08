@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.3.1
+
+### What's Changed
+
+- Fixed slow or unreliable Dual Wake Word detection by giving microWakeWord
+  and openWakeWord the same uninterrupted primary beam. Each Echo now runs one
+  MWW and one OWW detector instead of two directional copies of each, without
+  resetting model state or replaying audio when the estimated direction moves.
+- Wake beamforming remains active on every Echo target: Biscuit uses its
+  seven-microphone array, Checkers its two-microphone pair, and Rook its
+  four-microphone array. The accepted direction continues into the voice and
+  STT turn, including the existing calibrated echo-cancellation path.
+- Detector calibration now comes from the selected model files in every mode.
+  MWW uses its manifest threshold, window, and close-miss values; OWW uses the
+  standalone or confirmation threshold and patience from its wake bundle.
+  Firmware no longer substitutes hard-coded Dual-mode sensitivity values.
+- All v2.3.0 Sendspin playback, Checkers/Rook album artwork, now-playing
+  presentation, track colors, and Biscuit reactive music LED behavior remain
+  included.
+
 ## v2.3.0
 
 ### What's Changed
