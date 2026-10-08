@@ -1986,40 +1986,24 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if owwModel == "" {
 		owwModel = microwakeword.DefaultPackage
 	}
-	sensitivity := snap.MwwSensitivity
-	environment := snap.MwwEnvironment
+	// The selected model package is authoritative for detector calibration.
+	// Controller settings choose the package and engine mode; they must not
+	// silently replace thresholds or patience from the model JSON files.
+	sensitivity := "normal"
+	environment := "balanced"
 	threshold := float64(0)
-	if snap.MwwThreshold != nil {
-		threshold = *snap.MwwThreshold
-	}
 	slidingWindow := 0
-	if snap.MwwSlidingWindow != nil {
-		slidingWindow = *snap.MwwSlidingWindow
-	}
 	closeMiss := float64(0)
-	if snap.MwwCloseMiss != nil {
-		closeMiss = *snap.MwwCloseMiss
-	}
 	var manifest microwakeword.Manifest
 	var manifestErr error
 	if mwwEnabled {
 		manifest, manifestErr = microwakeword.ReadPackageManifest(model)
 		if manifestErr == nil {
 			calibrated := manifest.RuntimeConfig()
-			if threshold <= 0 {
-				threshold = float64(calibrated.Threshold)
-			}
-			if slidingWindow <= 0 {
-				slidingWindow = calibrated.SlidingWindow
-			}
-			if closeMiss <= 0 {
-				closeMiss = float64(calibrated.CloseMissThreshold)
-			}
+			threshold = float64(calibrated.Threshold)
+			slidingWindow = calibrated.SlidingWindow
+			closeMiss = float64(calibrated.CloseMissThreshold)
 		}
-	}
-	configuredThreshold, configuredWindow := threshold, slidingWindow
-	if mwwEnabled && owwEnabled {
-		threshold, slidingWindow, closeMiss = microwakeword.DualStageMWWGate(threshold, slidingWindow, closeMiss)
 	}
 
 	if !enabled {
@@ -2068,10 +2052,6 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	var agreement *microwakeword.AgreementMatcher
 	if mwwEnabled && owwEnabled {
 		agreement = microwakeword.NewAgreementMatcher(microwakeword.DualWakeAgreementWindow)
-		if configuredThreshold != threshold || configuredWindow != slidingWindow {
-			log.Printf("[wake] dual gate tuned MWW threshold %.3f→%.3f window %d→%d; OWW remains authoritative",
-				configuredThreshold, threshold, configuredWindow, slidingWindow)
-		}
 	}
 	dispatch := func(lane int, detectedWord string, score float32, at time.Time) {
 		dc.ExtendWinningWakeAudio(lane, at)
@@ -2086,13 +2066,6 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		}
 	}
 	dispatchAgreement := func(match microwakeword.AgreementMatch) {
-		mwwDirection := dc.WakeLaneDirectionAt(match.Lane, match.MWWAt)
-		owwDirection := dc.WakeLaneDirectionAt(match.Lane, match.OWWAt)
-		if mwwDirection != owwDirection {
-			log.Printf("[oww] rejected cross-direction agreement lane=%d mww_dir=%d oww_dir=%d",
-				match.Lane, mwwDirection, owwDirection)
-			return
-		}
 		if !dc.ClaimWakeLane(match.Lane, match.At) {
 			return
 		}
@@ -2104,10 +2077,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if mwwEnabled {
 		for lane := 0; lane < expectedScorers; lane++ {
 			lane := lane
-			sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{
-				Threshold: float32(threshold), SlidingWindow: slidingWindow,
-				CloseMissThreshold: float32(closeMiss), Sensitivity: sensitivity, Environment: environment,
-			}, microwakeword.ShadowHooks{
+			sc, err := microwakeword.OpenShadowTunedWithHooks(model, microwakeword.ScorerOverrides{}, microwakeword.ShadowHooks{
 				Cross: func(score float32, at time.Time) {
 					if agreement == nil {
 						if dc.ClaimWakeLane(lane, at) {
@@ -2213,9 +2183,9 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if onWake != nil {
 		activityMode = "active native wake"
 	}
-	log.Printf("[wake] scoring %s — %s (%d independent beam lane(s), mode=%s)", scorers[0].Info(), activityMode, len(scorers), detectorMode)
+	log.Printf("[wake] scoring %s — %s (%d continuous wake stream(s), mode=%s)", scorers[0].Info(), activityMode, len(scorers), detectorMode)
 	if agreement != nil {
-		log.Printf("[oww] parallel dual wake ready — %d independently streamed OWW lane(s), agreement window=%dms",
+		log.Printf("[oww] parallel dual wake ready — %d continuous primary-beam OWW stream(s), agreement window=%dms",
 			len(owwScorers), microwakeword.DualWakeAgreementWindow.Milliseconds())
 	}
 }
@@ -2273,7 +2243,7 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 	}
 	setMWWState(true, true, microwakeword.TimerStopPackage, manifest.WakeWord, label,
 		"timer", "", "", float64(settings.Threshold), settings.SlidingWindow, 0, "")
-	log.Printf("[mww] scoring %s — timer stop mode (%d independent beam lane(s))", scorers[0].Info(), len(scorers))
+	log.Printf("[mww] scoring %s — timer stop mode (%d continuous wake stream(s))", scorers[0].Info(), len(scorers))
 	return nil
 }
 

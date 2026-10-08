@@ -547,6 +547,15 @@ func checkersPathName(path int) string {
 // side of the array.  Centre/front speech remains coherent in both broad beams.
 func (*CheckersFrontEnd) WakeBeamCount() int { return 2 }
 
+// WakeDirection reports the current measured side of arrival without forming
+// the two legacy wake-audio beams.
+func (c *CheckersFrontEnd) WakeDirection() (int, bool) {
+	if c.healthyChannels < 2 || !c.delayValid {
+		return checkersOmniPath, false
+	}
+	return checkersPathForDelay(c.delaySamples), true
+}
+
 func (c *CheckersFrontEnd) WakeBeams(raw []byte, gain float64) []WakeBeam {
 	if c.healthyChannels < 2 {
 		return []WakeBeam{{Direction: checkersOmniPath, Angle: -1, PCM: c.extractLiveRaw(raw, gain)}}

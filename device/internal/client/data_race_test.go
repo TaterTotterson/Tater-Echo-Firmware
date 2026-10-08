@@ -60,13 +60,13 @@ func TestNativeWakeCarriesWinningBeamIntoListening(t *testing.T) {
 	}
 }
 
-func TestWakeScorerCountIsTargetSpecific(t *testing.T) {
-	if got := NewDataClientForTarget("biscuit", nil, nil, aec.New(), "biscuit").WakeScorerCount(); got != 2 {
-		t.Fatalf("Biscuit wake scorer count = %d, want 2", got)
+func TestEveryTargetUsesOneContinuousWakeStream(t *testing.T) {
+	if got := NewDataClientForTarget("biscuit", nil, nil, aec.New(), "biscuit").WakeScorerCount(); got != 1 {
+		t.Fatalf("Biscuit wake scorer count = %d, want 1 stable stream", got)
 	}
 	checkers := NewDataClientForTarget("checkers", nil, nil, aec.New(), "checkers")
-	if got := checkers.WakeScorerCount(); got != 2 {
-		t.Fatalf("Checkers wake scorer count = %d, want 2", got)
+	if got := checkers.WakeScorerCount(); got != 1 {
+		t.Fatalf("Checkers wake scorer count = %d, want 1 stable stream", got)
 	}
 	if !checkers.ClaimWakeLane(0, time.Now()) {
 		t.Fatal("Checkers first beam crossing was not accepted")
@@ -130,6 +130,22 @@ func TestWakeLaneClaimSnapshotsWinningBeamThroughCallback(t *testing.T) {
 	}
 	if again := d.TakeWinningWakeAudio(); len(again) != 0 {
 		t.Fatalf("winning pre-roll was not one-shot: %v", again)
+	}
+}
+
+func TestContinuousWakeAudioSurvivesDirectionChange(t *testing.T) {
+	d := NewDataClient("continuous-wake-test", nil, nil, aec.New())
+	base := time.Now()
+	d.assignWakeLane(0, 1, base)
+	d.recordWakeLaneAudio(0, base, []byte{1, 0})
+	d.assignWakeLane(0, 4, base.Add(80*time.Millisecond))
+	d.recordWakeLaneAudio(0, base.Add(80*time.Millisecond), []byte{2, 0})
+	if !d.ClaimWakeLane(0, base.Add(40*time.Millisecond)) {
+		t.Fatal("continuous wake stream was not accepted")
+	}
+	frames := d.TakeWinningWakeAudio()
+	if len(frames) != 2 || frames[0][0] != 1 || frames[1][0] != 2 {
+		t.Fatalf("wake pre-roll was split by a direction update: %v", frames)
 	}
 }
 

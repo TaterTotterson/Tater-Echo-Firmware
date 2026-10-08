@@ -26,8 +26,8 @@
 // every time constant five times slower than its name and comment.
 //
 // Output is determined by lock state, not by the config flag:
-//   - Unlocked: ch6 remains the transport/pre-roll signal, while two stable
-//     seven-mic candidate beams are scored independently for local wake.
+//   - Unlocked: ch6 remains the continuous transport/pre-roll and local wake
+//     signal while the array estimator tracks direction as metadata.
 //   - Locked: a fractional-delay sum of all seven microphones aimed
 //     at the direction selected at Lock() time, or at BeamAngle when fixed.
 //
@@ -525,8 +525,8 @@ func (b *Beamformer) LockedAngle() float64 {
 // config state. The flag only affects Lock() behaviour (see Lock() docs).
 //
 // Output is determined by lock state alone:
-//   - Unlocked (lockedChannel == -1): transport audio stays on ch6 while the
-//     optional WakeArray interface supplies two seven-mic scorer lanes.
+//   - Unlocked (lockedChannel == -1): transport and wake audio stay on ch6
+//     while the array estimator tracks the likely speaker direction.
 //   - Locked, steerAngle >= 0 (fixed-beam): seven-mic delay-and-sum steered at
 //     that direction, ignoring the energy-based lock channel.
 //   - Locked, steerAngle < 0 (auto): seven-mic delay-and-sum steered at the
@@ -989,6 +989,15 @@ func (b *Beamformer) extractSteered(direction int, gain float64) []byte {
 // Biscuit. Six simultaneous models cost materially more CPU and memory while
 // the strongest and runner-up beams retain the useful array gain.
 func (b *Beamformer) WakeBeamCount() int { return 2 }
+
+// WakeDirection reports the primary direction maintained by the continuous
+// array estimator without constructing either legacy candidate audio beam.
+func (b *Beamformer) WakeDirection() (int, bool) {
+	if b.healthyCount < len(b.healthyMics) {
+		return centreCh, false
+	}
+	return b.wakeDirections[0], b.wakeReady
+}
 
 // WakeBeams forms the two currently selected wake views. A raw batch in which
 // any array channel is bit-exact dead falls back to the centre microphone;

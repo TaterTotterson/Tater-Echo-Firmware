@@ -43,8 +43,8 @@ type agreementEvent struct {
 }
 
 // AgreementMatcher correlates independently streaming MWW and OWW crossings.
-// Each wake lane is matched only with itself, preserving the exact directional
-// audio path instead of allowing two different speakers to satisfy the pair.
+// Tater's Echo wake path uses lane zero for the one continuous primary beam
+// shared by both engines; the lane key remains for compatibility and tests.
 type AgreementMatcher struct {
 	mu     sync.Mutex
 	window time.Duration

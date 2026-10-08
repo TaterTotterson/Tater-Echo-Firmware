@@ -25,18 +25,12 @@ const (
 	maxCompanionBundleBytes       = 128 * 1024
 	maxCompanionMetadataBytes     = 256 * 1024
 	maxCompanionModelBytes        = 16 * 1024 * 1024
-	// MWW has already located the phrase near the end of its winning-beam
+	// MWW has already located the phrase near the end of its continuous wake
 	// history. Replaying the full three-second trainer buffer makes bounded
 	// OWW confirmation needlessly expensive on the Echo CPUs. Twenty-four
 	// 80 ms frames retain 1.92 seconds around the crossing, including the
 	// scorer's bounded inference lag, while discarding unrelated room audio.
 	maxConfirmationFrames = 24
-
-	// In dual mode MWW is a recall-oriented gate, not the final authority.
-	// OWW still has to agree on the exact winning-beam audio, so retaining the
-	// single-model 0.98/5 policy only hides valid phrases from the second stage.
-	DualStageMWWMaxThreshold = 0.95
-	DualStageMWWMaxWindow    = 3
 
 	// A local wake arriving later than this is worse than a miss: it can open
 	// the microphone after the user has already moved on.
@@ -44,19 +38,6 @@ const (
 )
 
 var ErrCompanionBusy = errors.New("microwakeword: openWakeWord confirmation already in progress")
-
-func DualStageMWWGate(threshold float64, slidingWindow int, closeMiss float64) (float64, int, float64) {
-	if threshold <= 0 || threshold > DualStageMWWMaxThreshold {
-		threshold = DualStageMWWMaxThreshold
-	}
-	if slidingWindow <= 0 || slidingWindow > DualStageMWWMaxWindow {
-		slidingWindow = DualStageMWWMaxWindow
-	}
-	if closeMiss > threshold {
-		closeMiss = threshold
-	}
-	return threshold, slidingWindow, closeMiss
-}
 
 func ConfirmationIsStale(capturedAt, now time.Time) bool {
 	return capturedAt.IsZero() || now.Sub(capturedAt) > MaximumConfirmationAge
@@ -249,8 +230,8 @@ func OpenCompanionVerifier(packageName string) (*CompanionVerifier, error) {
 	return &CompanionVerifier{engine: engine, settings: settings}, nil
 }
 
-// OpenCompanionShadow opens one continuous openWakeWord detector. Each beam
-// requires its own model state, just like MWW, so callers create one per lane.
+// OpenCompanionShadow opens one continuous openWakeWord detector. Tater runs
+// one detector state against the same uninterrupted audio stream as MWW.
 func OpenCompanionShadow(packageName string, hooks ShadowHooks) (*ShadowScorer, WakeBundle, error) {
 	return openCompanionShadow(packageName, false, hooks)
 }
@@ -415,7 +396,7 @@ func (v *CompanionVerifier) ConfirmReservedFrames(frames [][]byte) (OWWResult, e
 		sampleCount += len(frame) / 2
 	}
 	if sampleCount == 0 {
-		return OWWResult{}, fmt.Errorf("microwakeword: no winning-beam audio for OWW confirmation")
+		return OWWResult{}, fmt.Errorf("microwakeword: no wake-stream audio for OWW confirmation")
 	}
 	samples := make([]int16, 0, sampleCount)
 	for _, frame := range frames {

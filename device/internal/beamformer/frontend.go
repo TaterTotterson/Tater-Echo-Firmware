@@ -44,6 +44,13 @@ type WakeArray interface {
 	LockWakeDirection(direction int, enabled bool)
 }
 
+// WakeDirectionProvider exposes the best current array bearing. The wake
+// engines share one continuous primary beam at this bearing; the same value
+// also steers the subsequent voice turn.
+type WakeDirectionProvider interface {
+	WakeDirection() (direction int, ok bool)
+}
+
 // NewForTarget returns the capture front end for a release target.
 func NewForTarget(target string) FrontEnd {
 	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
@@ -65,7 +72,10 @@ func decodePackedS24(sample []byte) int32 {
 
 var _ FrontEnd = (*Beamformer)(nil)
 var _ WakeArray = (*Beamformer)(nil)
+var _ WakeDirectionProvider = (*Beamformer)(nil)
 var _ FrontEnd = (*CheckersFrontEnd)(nil)
 var _ WakeArray = (*CheckersFrontEnd)(nil)
+var _ WakeDirectionProvider = (*CheckersFrontEnd)(nil)
 var _ FrontEnd = (*RookFrontEnd)(nil)
 var _ WakeArray = (*RookFrontEnd)(nil)
+var _ WakeDirectionProvider = (*RookFrontEnd)(nil)

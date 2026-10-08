@@ -753,6 +753,15 @@ func (r *RookFrontEnd) writeSample(out []byte, frame int, sample float64, path i
 // pickup that an in-between source is present in both views.
 func (*RookFrontEnd) WakeBeamCount() int { return 2 }
 
+// WakeDirection reports the primary direction maintained by the array
+// estimator without constructing the legacy candidate audio beams.
+func (r *RookFrontEnd) WakeDirection() (int, bool) {
+	if r.healthyN < 2 {
+		return rookOmniPath, false
+	}
+	return r.wakeDirections[0], r.wakeReady
+}
+
 func (r *RookFrontEnd) WakeBeams(raw []byte, gain float64) []WakeBeam {
 	if r.healthyN < 2 {
 		return []WakeBeam{{Direction: rookOmniPath, Angle: -1, PCM: r.extractOmniRaw(raw, gain)}}

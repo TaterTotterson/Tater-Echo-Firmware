@@ -241,26 +241,23 @@ type DataClient struct {
 
 	beam              beamformer.FrontEnd
 	proc              *processor.Processor
+	wakeProc          *processor.Processor
 	aec               *aec.Canceller
 	onDirectionChange func(angle float64, activity bool, speech bool)
 	directionMu       sync.Mutex
 
-	// pcmObserver receives the 80 ms transport/pre-roll stream sent to the
-	// legacy controller. Non-array targets score these exact chunks; array
-	// targets instead score two candidate beams derived from the same capture
-	// boundaries. It remains the transport-neutral seam used by the Tater
-	// native client.
+	// pcmObserver receives the 80 ms transport stream sent to the legacy
+	// controller. Local MWW and OWW instead share one continuous primary
+	// beamformed stream; there is never a second detector lane or model reset.
 	pcmObserverMu sync.RWMutex
 	pcmObserver   func([]byte)
 
-	// The MWW and OWW scorer banks observe the same independent wake beams.
-	// Dual mode keeps both banks warm in parallel so agreement adds no replay
-	// delay. Non-array targets keep one lane; array targets keep two model
-	// states per bank so one beam cannot overwrite another's temporal context.
+	// MWW and OWW observe the same continuous primary wake beam. Dual mode keeps
+	// one instance of each model warm in parallel so agreement adds no replay
+	// delay. Direction changes never reset either model or splice pre-roll.
 	mwwShadowMu      sync.Mutex
 	mwwShadowScorers []*microwakeword.ShadowScorer
 	owwShadowScorers []*microwakeword.ShadowScorer
-	wakeProc         [2]*processor.Processor
 	wakeLaneDir      [2]atomic.Int32
 	wakeWinnerDir    atomic.Int32
 	wakeWinnerValid  atomic.Bool
@@ -316,7 +313,6 @@ type DataClient struct {
 }
 
 type wakeAudioFrame struct {
-	at  time.Time
 	pcm []byte
 }
 
@@ -344,11 +340,11 @@ func NewDataClientForTarget(deviceID string, microphone mic.Subscribable, spk sp
 		readyCh:    make(chan string, 1),
 		beam:       beamformer.NewForTarget(target),
 		proc:       processor.New(),
+		wakeProc:   processor.New(),
 		aec:        canceller,
 		listenGate: listen.New(0, 0, 0),
 	}
-	for lane := range d.wakeProc {
-		d.wakeProc[lane] = processor.New()
+	for lane := range d.wakeLaneDir {
 		d.wakeLaneDir[lane].Store(-1)
 	}
 	d.wakeWinnerDir.Store(-1)
@@ -515,19 +511,15 @@ func (d *DataClient) WakeShadowScorers() (mww, oww []*microwakeword.ShadowScorer
 		append([]*microwakeword.ShadowScorer(nil), d.owwShadowScorers...)
 }
 
-// WakeScorerCount is two only for a front end that supplies independent wake
-// beams. Other Echo targets retain the established one-engine path.
+// WakeScorerCount is one on every target. Wake models need a stable continuous
+// signal; a primary beam may follow the array estimator, but direction changes
+// never create a second scorer or reset either neural detector.
 func (d *DataClient) WakeScorerCount() int {
-	if array, ok := d.beam.(beamformer.WakeArray); ok {
-		return array.WakeBeamCount()
-	}
 	return 1
 }
 
-// ClaimWakeLane records which physical beam produced the accepted model
-// crossing. Adjacent beams often recognize the same phrase; a shared
-// refractory admits only the first so legacy mode cannot emit duplicate wake
-// events and native mode cannot replace the winner before the turn locks it.
+// ClaimWakeLane accepts a crossing from the single continuous wake stream and
+// snapshots the current array bearing for the subsequent voice-turn lock.
 func (d *DataClient) ClaimWakeLane(lane int, capturedAt time.Time) bool {
 	if lane < 0 || lane >= len(d.wakeLaneDir) {
 		lane = 0
@@ -548,7 +540,7 @@ func (d *DataClient) ClaimWakeLane(lane int, capturedAt time.Time) bool {
 		d.wakeWinnerDir.Store(int32(direction))
 		d.wakeWinnerValid.Store(true)
 	}
-	d.snapshotWinningWakeAudio(lane, capturedAt, direction)
+	d.snapshotWinningWakeAudio(lane)
 	return true
 }
 
@@ -566,11 +558,11 @@ func (d *DataClient) WakeLaneDirectionAt(lane int, capturedAt time.Time) int {
 	return direction
 }
 
-func (d *DataClient) recordWakeLaneAudio(lane int, capturedAt time.Time, pcm []byte) {
+func (d *DataClient) recordWakeLaneAudio(lane int, _ time.Time, pcm []byte) {
 	if lane < 0 || lane >= len(d.wakeLaneAudio) || len(pcm) == 0 {
 		return
 	}
-	frame := wakeAudioFrame{at: capturedAt, pcm: append([]byte(nil), pcm...)}
+	frame := wakeAudioFrame{pcm: append([]byte(nil), pcm...)}
 	d.wakeAudioMu.Lock()
 	roll := d.wakeLaneAudio[lane]
 	if len(roll) >= wakeLaneCaptureFrames {
@@ -581,30 +573,20 @@ func (d *DataClient) recordWakeLaneAudio(lane int, capturedAt time.Time, pcm []b
 	d.wakeAudioMu.Unlock()
 }
 
-func (d *DataClient) snapshotWinningWakeAudio(lane int, capturedAt time.Time, winningDirection int) {
+func (d *DataClient) snapshotWinningWakeAudio(lane int) {
 	d.wakeAudioMu.Lock()
 	d.wakeWinnerAudio = d.wakeWinnerAudio[:0]
 	if lane >= 0 && lane < len(d.wakeLaneAudio) {
-		// Inference is asynchronous. If the lane still represents the same
-		// direction, include the few exact-beam frames captured between the
-		// crossing and its callback so STT has no gap. If it retargeted, never
-		// mix the new direction into the older winner.
-		includeAfterCrossing := int(d.wakeLaneDir[lane].Load()) == winningDirection
 		for _, frame := range d.wakeLaneAudio[lane] {
-			if !includeAfterCrossing && !capturedAt.IsZero() && frame.at.After(capturedAt) {
-				continue
-			}
 			d.wakeWinnerAudio = append(d.wakeWinnerAudio, append([]byte(nil), frame.pcm...))
 		}
 	}
 	d.wakeAudioMu.Unlock()
 }
 
-// TakeWinningWakeAudio returns the exact directional pre-roll that produced
-// the accepted microWakeWord crossing. It is one-shot: the caller hands it to
-// Tater's verifier/trainer/STT path, and a later wake must claim a fresh lane.
-// Array devices return the winning beam; other targets return the same mono
-// stream that their local wake model scored.
+// TakeWinningWakeAudio returns the exact continuous pre-roll that produced the
+// accepted wake crossing. It is one-shot: the caller hands it to Tater's
+// verifier/trainer/STT path, and a later wake must claim a fresh stream.
 func (d *DataClient) TakeWinningWakeAudio() [][]byte {
 	d.wakeAudioMu.Lock()
 	defer d.wakeAudioMu.Unlock()
@@ -616,9 +598,9 @@ func (d *DataClient) TakeWinningWakeAudio() [][]byte {
 	return frames
 }
 
-// CopyWinningWakeAudio returns the same immutable winning-beam snapshot
-// without consuming it. The optional OWW second stage evaluates this copy;
-// the accepted wake then still hands the original to verifier/trainer/STT.
+// CopyWinningWakeAudio returns the same immutable wake-stream snapshot without
+// consuming it. The accepted wake then still hands the original to
+// verifier/trainer/STT.
 func (d *DataClient) CopyWinningWakeAudio() [][]byte {
 	d.wakeAudioMu.Lock()
 	defer d.wakeAudioMu.Unlock()
@@ -629,25 +611,15 @@ func (d *DataClient) CopyWinningWakeAudio() [][]byte {
 	return frames
 }
 
-// ExtendWinningWakeAudio adds audio captured while an on-demand confirmation
-// stage was running. Array targets extend only if the lane still represents
-// the original winning direction, so a retarget can never splice a different
-// talker into the command pre-roll. The confirmation itself continues using
-// the immutable copy taken at the crossing.
-func (d *DataClient) ExtendWinningWakeAudio(lane int, capturedAt time.Time) {
+// ExtendWinningWakeAudio adds audio captured while wake agreement was being
+// completed. Direction updates cannot invalidate it because the detector and
+// pre-roll share the same uninterrupted single-beam stream.
+func (d *DataClient) ExtendWinningWakeAudio(lane int, _ time.Time) {
 	if lane < 0 || lane >= len(d.wakeLaneAudio) {
 		return
 	}
-	direction := -1
-	_, array := d.beam.(beamformer.WakeArray)
-	if array {
-		direction = d.WakeLaneDirectionAt(lane, capturedAt)
-	}
 	d.wakeAudioMu.Lock()
 	defer d.wakeAudioMu.Unlock()
-	if array && int(d.wakeLaneDir[lane].Load()) != direction {
-		return
-	}
 	d.wakeWinnerAudio = d.wakeWinnerAudio[:0]
 	for _, frame := range d.wakeLaneAudio[lane] {
 		d.wakeWinnerAudio = append(d.wakeWinnerAudio, append([]byte(nil), frame.pcm...))
@@ -660,15 +632,6 @@ func (d *DataClient) resetWakeLaneAudio() {
 		d.wakeLaneAudio[lane] = nil
 	}
 	d.wakeWinnerAudio = nil
-	d.wakeAudioMu.Unlock()
-}
-
-func (d *DataClient) resetWakeLaneAudioFor(lane int) {
-	if lane < 0 || lane >= len(d.wakeLaneAudio) {
-		return
-	}
-	d.wakeAudioMu.Lock()
-	d.wakeLaneAudio[lane] = nil
 	d.wakeAudioMu.Unlock()
 }
 
@@ -1295,9 +1258,7 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 		d.lockWakeOrBest(turnBeamEnabled)
 	}
 	d.proc.ResetAGC()
-	for _, proc := range d.wakeProc {
-		proc.ResetAGC()
-	}
+	d.wakeProc.ResetAGC()
 	d.pipeMu.Unlock()
 
 	ch := d.mic.Subscribe()
@@ -1310,13 +1271,9 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 	active := false
 	everActive := false // true once active has been true at least once this turn
 	buf := make([]byte, 0, wakeChunkBytes*4)
-	var wakeBuf [2][]byte
+	wakeBuf := make([]byte, 0, wakeChunkBytes*4)
 	wakeLaneDirection := [2]int{-2, -2}
-	// Four 160ms hardware batches retain 640ms of untouched multichannel
-	// capture. A retargeted candidate can replay the onset that caused the
-	// direction change instead of beginning halfway through the wake phrase,
-	// while still satisfying the verifier's 500ms minimum with one direction.
-	wakeRawPreroll := make([][]byte, 0, 4)
+	wakeDirection, hasWakeDirection := d.beam.(beamformer.WakeDirectionProvider)
 	wakeArray, hasWakeArray := d.beam.(beamformer.WakeArray)
 	d.resetWakeLaneAudio()
 	// preroll ring — processed mono periods captured while the gate is
@@ -1480,20 +1437,6 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 				gainLin = math.Pow(10, float64(gainDb)/20.0)
 				log.Printf("[data] mic gain: %ddB (linear %.2f)", gainDb, gainLin)
 			}
-			if !lockMic && hasWakeArray {
-				copyRaw := append([]byte(nil), raw...)
-				if len(wakeRawPreroll) == cap(wakeRawPreroll) {
-					copy(wakeRawPreroll, wakeRawPreroll[1:])
-					wakeRawPreroll[len(wakeRawPreroll)-1] = copyRaw
-				} else {
-					wakeRawPreroll = append(wakeRawPreroll, copyRaw)
-				}
-			}
-			var wakePCM [2][]byte
-			var wakeRetarget [2]bool
-			var wakeRetargetAt [2]time.Time
-			wakeCount := 0
-
 			d.pipeMu.Lock()
 			// Consume any pending beam lock/unlock request from the control
 			// plane (wake detection → lock, turn end → unlock). Handled on
@@ -1514,17 +1457,28 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			}
 
 			mono, angle := d.beam.Process(raw, beamAngle, gainLin)
-			var wakeBeams []beamformer.WakeBeam
-			if !lockMic && hasWakeArray {
-				wakeBeams = wakeArray.WakeBeams(raw, gainLin)
-				if len(wakeBeams) > len(wakePCM) {
-					wakeBeams = wakeBeams[:len(wakePCM)]
-				}
-				wakeCount = len(wakeBeams)
-			}
 			clipped := d.beam.ClippedSamples()
 			beamDiag := d.beam.Diagnostics()
-			d.aec.SelectPath(d.beam.OutputChannel())
+			mainPath := d.beam.OutputChannel()
+			d.aec.SelectPath(mainPath)
+
+			// Local wake detection uses exactly one primary array beam. MWW and
+			// OWW receive this same signal continuously; a direction update changes
+			// the acoustic view but never creates a second lane, resets a model, or
+			// replays old audio into a new model state.
+			var wakePCM []byte
+			wakePath := -1
+			if !lockMic && hasWakeDirection && hasWakeArray {
+				if direction, ok := wakeDirection.WakeDirection(); ok {
+					candidate := wakeArray.WakeBeam(raw, direction, gainLin)
+					wakePCM = candidate.PCM
+					wakePath = candidate.Direction
+					if wakeLaneDirection[0] != wakePath {
+						wakeLaneDirection[0] = wakePath
+						d.assignWakeLane(0, wakePath, time.Now())
+					}
+				}
+			}
 
 			// AEC — subtract the speaker's own output before anything
 			// measures or gates the signal. No-op while aecEnabled=false.
@@ -1555,55 +1509,26 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 				mono = d.aec.ProcessInPlace(mono)
 			}
 
-			// Prepare the independent wake lanes. A lane direction is sticky;
-			// when strong evidence retargets it, reset that lane's filter/model
-			// and replay up to 480ms of untouched array capture. Replay is
-			// suppressed during local playback because historical AEC cannot be
-			// advanced twice without corrupting its adaptive state.
-			for lane := 0; lane < wakeCount; lane++ {
-				candidate := wakeBeams[lane]
-				if wakeLaneDirection[lane] != candidate.Direction {
-					wakeRetargetAt[lane] = time.Now()
-					wakeLaneDirection[lane] = candidate.Direction
-					d.assignWakeLane(lane, candidate.Direction, wakeRetargetAt[lane])
-					d.wakeProc[lane].ResetAGC()
-					wakeBuf[lane] = wakeBuf[lane][:0]
-					d.resetWakeLaneAudioFor(lane)
-					wakeRetarget[lane] = true
-					if !beamDiag.PlaybackActive && len(wakeRawPreroll) > 1 {
-						total := 0
-						for _, batch := range wakeRawPreroll {
-							total += len(batch)
-						}
-						history := make([]byte, 0, total)
-						for _, batch := range wakeRawPreroll {
-							history = append(history, batch...)
-						}
-						candidate = wakeArray.WakeBeam(history, candidate.Direction, gainLin)
-					}
+			if !lockMic {
+				switch {
+				case len(wakePCM) == 0:
+					// Array evidence is not ready or a mic is degraded. The normal
+					// target-specific omni path remains a safe single-stream fallback.
+					wakePCM = append([]byte(nil), mono...)
+				case hardwareRef:
+					// Hardware reference samples may be consumed by each retained AEC
+					// path independently. Restore the main path afterward for telemetry
+					// and the bounded turn stream.
+					d.aec.SelectPath(wakePath)
+					wakePCM = d.aec.ProcessWithRefInPlace(wakePCM, echoRef)
+					d.aec.SelectPath(mainPath)
+				case d.aec.Enabled() && beamDiag.PlaybackActive:
+					// The software far-end ring can only advance once. Reuse the
+					// already-cancelled mono stream during playback instead of consuming
+					// it twice and desynchronising AEC.
+					wakePCM = append(wakePCM[:0], mono...)
 				}
-				if candidate.Direction == 6 && d.aec.Enabled() && beamDiag.PlaybackActive {
-					candidate.PCM = append(candidate.PCM[:0], mono...)
-				} else if hardwareRef && !wakeRetarget[lane] && candidate.Direction >= 0 && candidate.Direction < 6 {
-					d.aec.SelectPath(candidate.Direction)
-					candidate.PCM = d.aec.ProcessWithRefInPlace(candidate.PCM, echoRef)
-				} else if d.aec.Enabled() && beamDiag.PlaybackActive && !hardwareRef {
-					// Software reference consumption is singular. Until ch8 proves
-					// itself, score the already-cancelled centre stream instead of
-					// feeding an uncancelled playback echo to both wake engines.
-					candidate.PCM = append(candidate.PCM[:0], mono...)
-				}
-				wakePCM[lane] = d.wakeProc[lane].HighPass(candidate.PCM)
-			}
-			for lane := wakeCount; lane < len(wakePCM); lane++ {
-				if wakeLaneDirection[lane] != -2 {
-					wakeRetargetAt[lane] = time.Now()
-					wakeLaneDirection[lane] = -2
-					d.assignWakeLane(lane, -1, wakeRetargetAt[lane])
-					wakeBuf[lane] = wakeBuf[lane][:0]
-					d.resetWakeLaneAudioFor(lane)
-					wakeRetarget[lane] = true
-				}
+				wakePCM = d.wakeProc.HighPass(wakePCM)
 			}
 
 			// Remove DC and sub-speech rumble before either VAD or AGC sees it.
@@ -1711,45 +1636,10 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 			// gate below now serves only bounded lockMic turns.
 			if !lockMic {
 				mwwScorers, owwScorers := d.WakeShadowScorers()
-				scorers := mwwScorers
-				if len(scorers) == 0 {
-					scorers = owwScorers
-				}
-				if hasWakeArray {
-					for lane := 0; lane < len(wakePCM) && lane < len(scorers); lane++ {
-						if wakeRetarget[lane] {
-							if lane < len(mwwScorers) {
-								mwwScorers[lane].Reset()
-							}
-							if lane < len(owwScorers) {
-								owwScorers[lane].Reset()
-							}
-						}
-						if len(wakePCM[lane]) == 0 {
-							continue
-						}
-						wakeBuf[lane] = append(wakeBuf[lane], wakePCM[lane]...)
-						for len(wakeBuf[lane]) >= wakeChunkBytes {
-							chunk := make([]byte, wakeChunkBytes)
-							copy(chunk, wakeBuf[lane][:wakeChunkBytes])
-							wakeBuf[lane] = wakeBuf[lane][wakeChunkBytes:]
-							capturedAt := time.Now()
-							if !wakeRetargetAt[lane].IsZero() {
-								capturedAt = wakeRetargetAt[lane]
-							}
-							d.recordWakeLaneAudio(lane, capturedAt, chunk)
-							if lane < len(mwwScorers) {
-								mwwScorers[lane].PushBytesAt(chunk, capturedAt)
-							}
-							if lane < len(owwScorers) {
-								owwScorers[lane].PushBytesAt(chunk, capturedAt)
-							}
-						}
-					}
-				}
 				buf = append(buf, mono...)
+				wakeBuf = append(wakeBuf, wakePCM...)
 				state := d.ListenState()
-				for len(buf) >= wakeChunkBytes {
+				for len(buf) >= wakeChunkBytes && len(wakeBuf) >= wakeChunkBytes {
 					// One copy per frame, stamped once, shared by the scorer
 					// and the listen gate: the gate keeps frames in its ring,
 					// and a wake's session starts after the frame the scorer
@@ -1757,17 +1647,19 @@ func (d *DataClient) streamMic(conn *websocket.Conn, stopCh <-chan struct{}, loc
 					chunk := make([]byte, wakeChunkBytes)
 					copy(chunk, buf[:wakeChunkBytes])
 					buf = buf[wakeChunkBytes:]
+					wakeChunk := make([]byte, wakeChunkBytes)
+					copy(wakeChunk, wakeBuf[:wakeChunkBytes])
+					wakeBuf = wakeBuf[wakeChunkBytes:]
 					at := time.Now()
-					// Non-array targets score the transport stream. Biscuit's
-					// scorer bank was fed above from its independently filtered
-					// seven-mic beams on these same 80ms boundaries.
-					if !hasWakeArray && len(scorers) > 0 {
-						d.recordWakeLaneAudio(0, at, chunk)
+					// Every target scores one continuous primary beam. MWW and OWW
+					// receive the exact same bytes and timestamp.
+					if len(mwwScorers) > 0 || len(owwScorers) > 0 {
+						d.recordWakeLaneAudio(0, at, wakeChunk)
 						if len(mwwScorers) > 0 {
-							mwwScorers[0].PushBytesAt(chunk, at)
+							mwwScorers[0].PushBytesAt(wakeChunk, at)
 						}
 						if len(owwScorers) > 0 {
-							owwScorers[0].PushBytesAt(chunk, at)
+							owwScorers[0].PushBytesAt(wakeChunk, at)
 						}
 					}
 					d.observePCM(chunk)
