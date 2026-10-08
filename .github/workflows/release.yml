@@ -1,7 +1,8 @@
 name: Tater Echo Firmware Release
 
-# One annotated vX.Y.Z tag builds every target independently, then publishes a
-# single compatibility manifest. Biscuit produces factory + OTA firmware;
+# One annotated vX.Y.Z tag builds every target, sharing one pinned/cached Linux
+# ARMv7 ONNX Runtime, then publishes a single compatibility manifest. Biscuit
+# produces factory + OTA firmware;
 # Checkers and Rook produce A/B application OTAs and USB Linux factory bundles
 # around pinned, hash-verified TECHO5 hardware enablement.
 # Biscuit remains on its existing emOS path.
@@ -22,6 +23,48 @@ env:
     sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 jobs:
+  onnxruntime-armv7:
+    name: Shared Linux ARMv7 ONNX Runtime
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore pinned ONNX Runtime
+        id: onnxruntime-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            device/build/onnxruntime-linux-armv7/libonnxruntime.so
+            device/build/onnxruntime/include/onnxruntime_c_api.h
+          key: tater-onnxruntime-linux-armv7-v1-${{ hashFiles('device/prepare_onnxruntime_linux_armv7.sh', 'device/onnxruntime/**') }}
+
+      - name: Set up ARMv7 emulation
+        if: steps.onnxruntime-cache.outputs.cache-hit != 'true'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Build pinned Linux ARMv7 ONNX Runtime
+        if: steps.onnxruntime-cache.outputs.cache-hit != 'true'
+        run: device/prepare_onnxruntime_linux_armv7.sh
+
+      - name: Verify shared ONNX Runtime
+        run: |
+          file device/build/onnxruntime-linux-armv7/libonnxruntime.so \
+            | grep -q '32-bit.*ARM'
+          test -s device/build/onnxruntime/include/onnxruntime_c_api.h
+
+      - name: Upload shared ONNX Runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: tater-onnxruntime-linux-armv7
+          path: |
+            device/build/onnxruntime-linux-armv7/libonnxruntime.so
+            device/build/onnxruntime/include/onnxruntime_c_api.h
+          if-no-files-found: error
+
   biscuit:
     name: Echo Dot 2 (biscuit)
     runs-on: ubuntu-latest
@@ -193,6 +236,7 @@ jobs:
 
   checkers:
     name: Echo Show 5 (checkers) Tater Linux
+    needs: onnxruntime-armv7
     runs-on: ubuntu-latest
 
     steps:
@@ -211,6 +255,12 @@ jobs:
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
             echo "::error::version must look like v0.1.0"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download shared ONNX Runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-onnxruntime-linux-armv7
+          path: device/build
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -320,6 +370,7 @@ jobs:
 
   rook:
     name: Echo Spot 2017 (rook) Tater Linux
+    needs: onnxruntime-armv7
     runs-on: ubuntu-latest
 
     steps:
@@ -338,6 +389,12 @@ jobs:
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || {
             echo "::error::version must look like v0.1.0"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download shared ONNX Runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-onnxruntime-linux-armv7
+          path: device/build
 
       - name: Set up Go
         uses: actions/setup-go@v6

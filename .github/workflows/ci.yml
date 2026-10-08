@@ -7,6 +7,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  onnxruntime-armv7-cache:
+    name: Warm Linux ARMv7 ONNX Runtime cache
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore pinned ONNX Runtime
+        id: onnxruntime-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            device/build/onnxruntime-linux-armv7/libonnxruntime.so
+            device/build/onnxruntime/include/onnxruntime_c_api.h
+          key: tater-onnxruntime-linux-armv7-v1-${{ hashFiles('device/prepare_onnxruntime_linux_armv7.sh', 'device/onnxruntime/**') }}
+      - name: Set up ARMv7 emulation
+        if: steps.onnxruntime-cache.outputs.cache-hit != 'true'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+      - name: Build pinned Linux ARMv7 ONNX Runtime
+        if: steps.onnxruntime-cache.outputs.cache-hit != 'true'
+        run: device/prepare_onnxruntime_linux_armv7.sh
+      - name: Verify cached ONNX Runtime
+        run: |
+          file device/build/onnxruntime-linux-armv7/libonnxruntime.so \
+            | grep -q '32-bit.*ARM'
+          test -s device/build/onnxruntime/include/onnxruntime_c_api.h
+
   device-tests:
     name: Firmware and installer tests
     runs-on: ubuntu-latest

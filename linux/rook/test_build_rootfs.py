@@ -53,6 +53,44 @@ class RookRootfsTests(unittest.TestCase):
             rook_job,
         )
 
+    def test_workflows_build_and_cache_onnx_runtime_once(self):
+        repo = Path(__file__).resolve().parents[2]
+        release = (repo / ".github/workflows/release.yml").read_text()
+        ci = (repo / ".github/workflows/ci.yml").read_text()
+        cache_key = (
+            "tater-onnxruntime-linux-armv7-v1-${{ hashFiles("
+            "'device/prepare_onnxruntime_linux_armv7.sh', "
+            "'device/onnxruntime/**') }}"
+        )
+
+        shared_job = release.split("\n  onnxruntime-armv7:\n", 1)[1].split(
+            "\n  biscuit:\n", 1
+        )[0]
+        self.assertIn("actions/cache@v6", shared_job)
+        self.assertIn(cache_key, shared_job)
+        self.assertEqual(
+            shared_job.count("device/prepare_onnxruntime_linux_armv7.sh"),
+            2,
+        )
+        self.assertIn("name: tater-onnxruntime-linux-armv7", shared_job)
+
+        for target, following in (("checkers", "rook"), ("rook", "publish")):
+            job = release.split(f"\n  {target}:\n", 1)[1].split(
+                f"\n  {following}:\n", 1
+            )[0]
+            with self.subTest(target=target):
+                self.assertIn("needs: onnxruntime-armv7", job)
+                self.assertIn("actions/download-artifact@v8", job)
+                self.assertIn("name: tater-onnxruntime-linux-armv7", job)
+
+        warm_job = ci.split("\n  onnxruntime-armv7-cache:\n", 1)[1].split(
+            "\n  device-tests:\n", 1
+        )[0]
+        self.assertIn("github.event_name != 'pull_request'", warm_job)
+        self.assertIn("actions/cache@v6", warm_job)
+        self.assertIn(cache_key, warm_job)
+        self.assertIn("device/prepare_onnxruntime_linux_armv7.sh", warm_job)
+
     def test_setup_ap_uses_primary_interface_without_changing_checkers_default(self):
         rook_script = Path(__file__).with_name("setup-ap.sh")
         shared_script = Path(__file__).resolve().parents[1] / "checkers/setup-ap.sh"

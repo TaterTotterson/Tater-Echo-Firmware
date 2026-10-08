@@ -22,7 +22,10 @@ output=$work/libonnxruntime.so
 header_dir=$script_dir/build/onnxruntime/include
 asset_dir=$script_dir/build/microwakeword-testdata
 operators=$script_dir/onnxruntime/required_operators.config
-image=${TATER_ALPINE_ARMV7_IMAGE:-alpine:3.22}
+# Keep the default build environment immutable so the final runtime can be
+# safely shared through GitHub's cache. Release jobs may still override this,
+# but the cache-warming job intentionally uses this pinned default.
+image=${TATER_ALPINE_ARMV7_IMAGE:-alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}
 build_jobs=${TATER_ORT_BUILD_JOBS:-2}
 
 sha256_file() {
