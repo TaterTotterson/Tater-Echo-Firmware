@@ -32,6 +32,11 @@ type Config struct {
 	Port      int
 	Product   string
 	Version   string
+	// Screen enables metadata and album artwork for Checkers/Rook. Visuals
+	// enables the lightweight color and synchronized visualizer roles used by
+	// screen animations and Biscuit's music ring.
+	Screen  bool
+	Visuals bool
 	// Unpaired lets a server play without pairing, once its operator has
 	// approved the device. Off by default: anyone on the LAN can claim to
 	// be a server, and pairing is one paste of the device's token.
@@ -61,6 +66,7 @@ type Client struct {
 	// moves it (Wil, 2026-09-30).
 	onVolume      func(v int)
 	outputChannel atomic.Int32
+	presentation  presentationState
 
 	srv  *http.Server
 	mdns *zeroconf.Server
@@ -363,10 +369,30 @@ func (c *Client) SyncDiag() (SyncDiag, bool) {
 }
 
 func (c *Client) hello() clientHello {
+	roles := []string{rolePlayer}
+	var artwork *artworkSupport
+	var visualizer *visualizerSupport
+	if c.cfg.Screen {
+		roles = append(roles, roleMetadata, roleArtwork)
+		artwork = &artworkSupport{Channels: []artworkChannel{{
+			Source: "album", Format: "jpeg", MediaWidth: 512, MediaHeight: 512,
+		}}}
+	}
+	if c.cfg.Visuals || c.cfg.Screen {
+		roles = append(roles, roleColor, roleVisualizer)
+		visualizer = &visualizerSupport{
+			BufferCapacity: 64 * 1024,
+			RateMax:        20,
+			Types:          []string{"loudness", "beat", "spectrum", "peak"},
+			Spectrum: &visualizerSpectrumSupport{
+				DisplayBins: 12, Scale: "mel", MinHz: 60, MaxHz: 16000,
+			},
+		}
+	}
 	return clientHello{
 		Version:        1,
 		Name:           c.cfg.Name,
-		SupportedRoles: []string{rolePlayer},
+		SupportedRoles: roles,
 		DeviceInfo: &deviceInfo{
 			ProductName:     c.cfg.Product,
 			Manufacturer:    "Tater",
@@ -380,6 +406,8 @@ func (c *Client) hello() clientHello {
 			BufferCapacity:    bufferCapacity,
 			SupportedCommands: []string{"volume", "mute"},
 		},
+		ArtworkSupport:       artwork,
+		VisualizerSupport:    visualizer,
 		SupportedPairMethods: []pairMethod{{Method: methodPSK}},
 		UnpairedAccess:       unpairedAccess{Enabled: c.unpairedAccess()},
 	}
@@ -464,6 +492,7 @@ func (c *Client) release(s *session) {
 	c.mu.Unlock()
 	if was {
 		c.player.clear()
+		c.clearPresentation()
 		log.Printf("[sendspin] %q disconnected", s.name())
 		c.changed()
 	}

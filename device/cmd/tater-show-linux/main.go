@@ -142,6 +142,8 @@ type renderer struct {
 	animationStart    time.Time
 	notificationID    string
 	notificationImage image.Image
+	mediaID           string
+	mediaImage        image.Image
 	intercomPressed   bool
 	timerPressed      bool
 	intercomIcon      *image.RGBA
@@ -292,9 +294,6 @@ func (r *renderer) status(local time.Time) (string, string) {
 		}
 		return "Using " + tool, firstNonEmpty(r.state.ToolMessage, r.state.Message, "Working on it")
 	}
-	if r.state.Media != nil && strings.TrimSpace(r.state.Media.Title) != "" {
-		return r.state.Media.Title, firstNonEmpty(r.state.Media.Artist, r.state.DeviceName)
-	}
 	message := firstNonEmpty(r.state.Message, "Ready when you are")
 	if r.state.Connected && r.state.Phase == "idle" && message == "Ready when you are" {
 		hour := local.Hour()
@@ -321,6 +320,10 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		r.drawTimer(canvas, now, width, seconds, accent)
 		return
 	}
+	if r.state.Media != nil && r.state.Media.Active {
+		r.drawNowPlaying(canvas, now, width, seconds, accent)
+		return
+	}
 	if r.state.Weather != nil {
 		r.drawWeather(canvas, width, seconds, accent)
 		return
@@ -338,6 +341,164 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		return
 	}
 	r.drawOrb(canvas, (pane.Min.X+pane.Max.X)/2, 220, 120, seconds, accent)
+}
+
+func (r *renderer) drawNowPlaying(canvas *image.RGBA, now time.Time, width int, seconds float64, accent color.RGBA) {
+	media := r.state.Media
+	pane := rightPane(width, canvas.Rect.Dy())
+	left, right := pane.Min.X, pane.Max.X
+	musicColor := mediaDisplayColor(media, accent)
+	heading := nowPlayingHeading(r.state, media)
+	r.text(canvas, left, 52, fitTextToWidth(heading, r.faces.bold[16], pane.Dx()), 16, true, musicColor)
+
+	art := image.Rect(left, 75, left+202, 277)
+	roundedRect(canvas, art, 20, mix(color.RGBA{16, 23, 35, 255}, musicColor, .13))
+	if r.mediaImage != nil {
+		drawCover(canvas, art, r.mediaImage)
+	} else {
+		r.drawMusicVisualizer(canvas, art, seconds, musicColor)
+	}
+
+	textLeft := art.Max.X + 26
+	textWidth := max(1, right-textLeft)
+	titleLines := wrapTextToWidth(firstNonEmpty(media.Title, "Music"), r.faces.bold[30], textWidth)
+	for index, value := range titleLines {
+		if index >= 3 {
+			break
+		}
+		r.text(canvas, textLeft, 116+index*35, fitTextToWidth(value, r.faces.bold[30], textWidth), 30, true, color.White)
+	}
+	artistBaseline := 229
+	if len(titleLines) < 3 {
+		artistBaseline = 123 + len(titleLines)*35
+	}
+	r.text(canvas, textLeft, artistBaseline, fitTextToWidth(firstNonEmpty(media.Artist, media.AlbumArtist, "Tater Music"), r.faces.bold[18], textWidth), 18, true, color.RGBA{216, 225, 238, 255})
+	if album := strings.TrimSpace(media.Album); album != "" {
+		r.text(canvas, textLeft, artistBaseline+27, fitTextToWidth(album, r.faces.regular[16], textWidth), 16, false, color.RGBA{146, 162, 185, 255})
+	}
+
+	progress, duration := mediaProgress(media, now)
+	if duration > 0 {
+		barY := 316
+		line(canvas, left, barY, right, barY, 4, color.RGBA{91, 103, 122, 95})
+		filled := int(float64(pane.Dx()) * math.Min(1, float64(progress)/float64(duration)))
+		line(canvas, left, barY, left+filled, barY, 4, musicColor)
+		r.text(canvas, left, barY+28, formatMediaTime(progress), 14, true, color.RGBA{192, 205, 222, 255})
+		end := formatMediaTime(duration)
+		endWidth := font.MeasureString(r.faces.bold[14], end).Round()
+		r.text(canvas, right-endWidth, barY+28, end, 14, true, color.RGBA{141, 156, 178, 255})
+	}
+	r.drawMusicBars(canvas, image.Rect(left, 362, right, 430), seconds, musicColor)
+}
+
+func nowPlayingHeading(state show.Snapshot, media *show.Media) string {
+	switch state.Phase {
+	case "listening":
+		return "LISTENING"
+	case "thinking":
+		return "THINKING"
+	case "speaking":
+		return "SPEAKING"
+	case "intercom":
+		return "INTERCOM"
+	case "tool_call":
+		if tool := titleWords(state.ToolName); tool != "" {
+			return "USING " + strings.ToUpper(tool)
+		}
+		return "WORKING"
+	}
+	heading := "NOW PLAYING"
+	if media != nil && strings.EqualFold(media.PlaybackState, "paused") {
+		heading = "PAUSED"
+	}
+	if media != nil {
+		if group := strings.TrimSpace(media.GroupName); group != "" {
+			heading += "  ·  " + strings.ToUpper(group)
+		}
+	}
+	return heading
+}
+
+func (r *renderer) drawMusicVisualizer(canvas *image.RGBA, bounds image.Rectangle, seconds float64, ink color.RGBA) {
+	cx, cy := (bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2
+	circle(canvas, cx, cy, min(bounds.Dx(), bounds.Dy())/3, color.RGBA{ink.R, ink.G, ink.B, 30})
+	for index := 0; index < 5; index++ {
+		height := int((.18 + .52*musicBinLevel(r.state.Media, index, seconds, r.state.AudioLevel)) * float64(bounds.Dy()))
+		x := cx - 42 + index*21
+		roundedRect(canvas, image.Rect(x-5, cy-height/2, x+6, cy+height/2), 5, color.RGBA{ink.R, ink.G, ink.B, 210})
+	}
+}
+
+func (r *renderer) drawMusicBars(canvas *image.RGBA, bounds image.Rectangle, seconds float64, ink color.RGBA) {
+	const count = 12
+	gap := 7
+	barWidth := max(3, (bounds.Dx()-gap*(count-1))/count)
+	for index := 0; index < count; index++ {
+		level := musicBinLevel(r.state.Media, index, seconds, r.state.AudioLevel)
+		height := max(3, int(level*float64(bounds.Dy())))
+		x := bounds.Min.X + index*(barWidth+gap)
+		roundedRect(canvas, image.Rect(x, bounds.Max.Y-height, x+barWidth, bounds.Max.Y), barWidth/2,
+			color.RGBA{ink.R, ink.G, ink.B, uint8(85 + 170*level)})
+	}
+}
+
+func musicBinLevel(media *show.Media, index int, seconds, fallback float64) float64 {
+	if media != nil && len(media.Spectrum) > 0 {
+		value := media.Spectrum[index%len(media.Spectrum)]
+		return math.Max(.04, math.Min(1, value))
+	}
+	level := math.Min(1, math.Max(.03, fallback*5))
+	wave := .48 + .52*math.Sin(seconds*3.4+float64(index)*.82)
+	return math.Max(.04, level*(.32+.68*wave))
+}
+
+func mediaDisplayColor(media *show.Media, fallback color.RGBA) color.RGBA {
+	if media == nil {
+		return fallback
+	}
+	selected := media.PrimaryColor
+	if brighterRGB(media.AccentColor, selected) {
+		selected = media.AccentColor
+	}
+	if selected == ([3]uint8{}) {
+		return fallback
+	}
+	peak := max(selected[0], max(selected[1], selected[2]))
+	if peak < 150 {
+		scale := 150 / float64(max(peak, 1))
+		for index := range selected {
+			selected[index] = uint8(math.Min(255, math.Round(float64(selected[index])*scale)))
+		}
+	}
+	return color.RGBA{selected[0], selected[1], selected[2], 255}
+}
+
+func brighterRGB(a, b [3]uint8) bool {
+	brightness := func(value [3]uint8) int { return int(value[0])*299 + int(value[1])*587 + int(value[2])*114 }
+	return brightness(a) > brightness(b)
+}
+
+func mediaProgress(media *show.Media, now time.Time) (int64, int64) {
+	if media == nil {
+		return 0, 0
+	}
+	progress := media.ProgressMS
+	if media.PlaybackSpeed > 0 && media.ProgressUpdatedAtUnixMS > 0 {
+		elapsed := max(int64(0), now.UnixMilli()-media.ProgressUpdatedAtUnixMS)
+		progress += elapsed * int64(media.PlaybackSpeed) / 1000
+	}
+	if media.DurationMS > 0 {
+		progress = min(progress, media.DurationMS)
+	}
+	return max(int64(0), progress), max(int64(0), media.DurationMS)
+}
+
+func formatMediaTime(milliseconds int64) string {
+	seconds := max(int64(0), milliseconds/1000)
+	if seconds >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+	}
+	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
 }
 
 func checkersVoiceStageLabel(phase string) string {
@@ -895,12 +1056,13 @@ func main() {
 		case <-ctx.Done():
 			return
 		case state := <-client.states:
-			if state.Phase != renderer.state.Phase || notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) || timerIdentity(state.Timer) != timerIdentity(renderer.state.Timer) {
+			if state.Phase != renderer.state.Phase || notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) || timerIdentity(state.Timer) != timerIdentity(renderer.state.Timer) || mediaIdentity(state.Media) != mediaIdentity(renderer.state.Media) {
 				renderer.animationStart = time.Now()
 			}
 			renderer.state = state
 			renderer.received = time.Now()
 			renderer.loadNotificationImage(ctx)
+			renderer.loadMediaImage(ctx)
 		case event := <-touchEvents:
 			handleTouch(renderer, client, event)
 		case <-ticker.C:
@@ -1003,6 +1165,47 @@ func (r *renderer) loadNotificationImage(ctx context.Context) {
 	if err == nil {
 		r.notificationImage = decoded
 	}
+}
+
+func (r *renderer) loadMediaImage(ctx context.Context) {
+	if r.state.Media == nil || r.state.Media.ArtworkURL == "" {
+		r.mediaID, r.mediaImage = "", nil
+		return
+	}
+	identity := mediaIdentity(r.state.Media)
+	if r.mediaID == identity {
+		return
+	}
+	r.mediaID, r.mediaImage = identity, nil
+	r.mediaImage = loadLoopbackImage(ctx, r.state.Media.ArtworkURL)
+}
+
+func loadLoopbackImage(ctx context.Context, rawURL string) image.Image {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "http" || (parsed.Hostname() != "127.0.0.1" && parsed.Hostname() != "localhost") {
+		return nil
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil
+	}
+	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+	if err != nil {
+		return nil
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil
+	}
+	contents, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024+1))
+	if err != nil || len(contents) > 4*1024*1024 {
+		return nil
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(contents))
+	if err != nil {
+		return nil
+	}
+	return decoded
 }
 
 func fillGradient(destination *image.RGBA, top, bottom color.RGBA) {
@@ -1360,6 +1563,13 @@ func timerIdentity(timer *show.Timer) string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%t", timer.ID, timer.Ringing)
+}
+
+func mediaIdentity(media *show.Media) string {
+	if media == nil || !media.Active {
+		return ""
+	}
+	return strings.Join([]string{media.ArtworkURL, media.Title, media.Artist, media.Album}, "\x00")
 }
 
 func inCircle(x, y, centerX, centerY, radius int) bool {

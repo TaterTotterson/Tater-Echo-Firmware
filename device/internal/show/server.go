@@ -27,9 +27,25 @@ const (
 // Media is the currently visible media item. Empty fields are omitted so the
 // renderer can distinguish no media from a title that happens to be blank.
 type Media struct {
-	Title  string `json:"title,omitempty"`
-	Artist string `json:"artist,omitempty"`
-	Album  string `json:"album,omitempty"`
+	Active                  bool      `json:"active"`
+	PlaybackState           string    `json:"playback_state,omitempty"`
+	GroupName               string    `json:"group_name,omitempty"`
+	Title                   string    `json:"title,omitempty"`
+	Artist                  string    `json:"artist,omitempty"`
+	AlbumArtist             string    `json:"album_artist,omitempty"`
+	Album                   string    `json:"album,omitempty"`
+	ArtworkURL              string    `json:"artwork_url,omitempty"`
+	PrimaryColor            [3]uint8  `json:"primary_color,omitempty"`
+	AccentColor             [3]uint8  `json:"accent_color,omitempty"`
+	ProgressMS              int64     `json:"progress_ms,omitempty"`
+	DurationMS              int64     `json:"duration_ms,omitempty"`
+	PlaybackSpeed           int       `json:"playback_speed,omitempty"`
+	ProgressUpdatedAtUnixMS int64     `json:"progress_updated_at_unix_ms,omitempty"`
+	Loudness                float64   `json:"loudness,omitempty"`
+	Peak                    float64   `json:"peak,omitempty"`
+	PeakSequence            uint64    `json:"peak_sequence,omitempty"`
+	Spectrum                []float64 `json:"spectrum,omitempty"`
+	BeatSequence            uint64    `json:"beat_sequence,omitempty"`
 }
 
 // Weather is the compact Environment Core summary rendered by screen targets.
@@ -140,6 +156,9 @@ type Server struct {
 	notificationImage        []byte
 	notificationImageType    string
 	notificationImageVersion uint64
+	mediaImage               []byte
+	mediaImageType           string
+	mediaImageVersion        uint64
 	closed                   bool
 	notify                   chan struct{}
 }
@@ -178,11 +197,24 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notification-image", s.serveNotificationImage)
+	mux.HandleFunc("/media-image", s.serveMediaImage)
 	imageServer := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second}
 	s.mu.Lock()
 	s.listener = listener
 	s.imageListener = imageListener
 	s.imageServer = imageServer
+	if s.state.Notification != nil && len(s.notificationImage) > 0 && s.state.Notification.ImageURL == "" {
+		next := *s.state.Notification
+		s.notificationImageVersion++
+		next.ImageURL = fmt.Sprintf("http://%s/notification-image?v=%d", imageListener.Addr().String(), s.notificationImageVersion)
+		s.state.Notification = &next
+	}
+	if s.state.Media != nil && len(s.mediaImage) > 0 && s.state.Media.ArtworkURL == "" {
+		next := *s.state.Media
+		s.mediaImageVersion++
+		next.ArtworkURL = fmt.Sprintf("http://%s/media-image?v=%d", imageListener.Addr().String(), s.mediaImageVersion)
+		s.state.Media = &next
+	}
 	s.mu.Unlock()
 	go func() {
 		if err := imageServer.Serve(imageListener); err != nil && !errors.Is(err, http.ErrServerClosed) && ctx.Err() == nil {
@@ -218,6 +250,49 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 		go s.readCommands(c)
+	}
+}
+
+// SetMedia updates Sendspin's compact now-playing state. Artwork is served on
+// loopback instead of being embedded in every snapshot, just like awareness
+// images, so the visualizer may update without copying a cover image at 20 Hz.
+func (s *Server) SetMedia(media *Media, image []byte, contentType string) {
+	s.mu.Lock()
+	if media == nil {
+		s.state.Media = nil
+		s.mediaImage = nil
+		s.mediaImageType = ""
+	} else {
+		next := *media
+		next.Spectrum = append([]float64(nil), media.Spectrum...)
+		if len(image) > 0 {
+			s.mediaImage = append(s.mediaImage[:0], image...)
+			s.mediaImageType = strings.TrimSpace(contentType)
+			if !strings.HasPrefix(s.mediaImageType, "image/") {
+				s.mediaImageType = "image/jpeg"
+			}
+			s.mediaImageVersion++
+			if s.imageListener != nil {
+				next.ArtworkURL = fmt.Sprintf(
+					"http://%s/media-image?v=%d",
+					s.imageListener.Addr().String(),
+					s.mediaImageVersion,
+				)
+			}
+		} else {
+			s.mediaImage = nil
+			s.mediaImageType = ""
+			next.ArtworkURL = ""
+		}
+		s.state.Media = &next
+	}
+	s.state.Protocol = ProtocolVersion
+	s.state.Type = "snapshot"
+	s.state.UpdatedAtUnixMS = time.Now().UnixMilli()
+	s.mu.Unlock()
+	select {
+	case s.notify <- struct{}{}:
+	default:
 	}
 }
 
@@ -303,6 +378,21 @@ func (s *Server) serveNotificationImage(w http.ResponseWriter, r *http.Request) 
 	s.mu.RLock()
 	image := append([]byte(nil), s.notificationImage...)
 	contentType := s.notificationImageType
+	s.mu.RUnlock()
+	if len(image) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(image)
+}
+
+func (s *Server) serveMediaImage(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	image := append([]byte(nil), s.mediaImage...)
+	contentType := s.mediaImageType
 	s.mu.RUnlock()
 	if len(image) == 0 {
 		http.NotFound(w, r)

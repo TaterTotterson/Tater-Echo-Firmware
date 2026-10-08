@@ -63,6 +63,12 @@ type Server struct {
 	// audioLevel holds the live speaker RMS as float64 bits — written by
 	// the speaker's ALSA pump via SetAudioLevel, read by the meter anim.
 	audioLevel atomic.Uint64
+	// musicLevel is Sendspin's playback-clock visualizer loudness converted
+	// back from its dB-normalized wire value. The local speaker RMS remains a
+	// fallback for servers that do not offer the visualizer role.
+	musicLevel    atomic.Uint64
+	musicVisualAt atomic.Int64
+	musicPulseAt  atomic.Int64
 
 	// directionAngle is the most recent beamformer bearing. Listening uses
 	// it for the directional marker; voice_ring reuses it so a response can

@@ -1,6 +1,7 @@
 package sendspin
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,11 +22,23 @@ const (
 	// silent link for this long is a dead one.
 	idleTimeout = 30 * time.Second
 
-	rolePlayer   = "player@v1"
-	actPlayback  = "playback"
-	actPairing   = "pairing"
-	methodPSK    = "pairing_psk"
-	maxReadBytes = 4 << 20
+	rolePlayer      = "player@v1"
+	roleMetadata    = "metadata@v1"
+	roleArtwork     = "artwork@v1"
+	roleVisualizer  = "visualizer@v1"
+	roleColor       = "color@v1"
+	actPlayback     = "playback"
+	actPairing      = "pairing"
+	methodPSK       = "pairing_psk"
+	maxReadBytes    = 4 << 20
+	maxArtworkBytes = 4 << 20
+
+	msgArtwork0           = 8
+	msgArtwork3           = 11
+	msgVisualizerLoudness = 16
+	msgVisualizerBeat     = 17
+	msgVisualizerSpectrum = 19
+	msgVisualizerPeak     = 20
 )
 
 // session is one server's WebSocket. The read loop owns almost everything;
@@ -64,6 +77,8 @@ type session struct {
 	awaitHello   bool // re-keyed; 9.1.1 re-sends server/hello next
 	dec          *decoder
 	streaming    bool
+	artworkTypes [4]string
+	visualBins   int
 
 	// Written by the read loop, read from other goroutines too.
 	mu         sync.Mutex
@@ -149,6 +164,14 @@ func (s *session) run() {
 			s.onAudio(msg)
 			continue
 		}
+		if msg[0] >= msgArtwork0 && msg[0] <= msgArtwork3 {
+			s.onArtwork(msg)
+			continue
+		}
+		if msg[0] >= msgVisualizerLoudness && msg[0] <= msgVisualizerPeak {
+			s.onVisualizer(msg)
+			continue
+		}
 		if msg[0] != msgJSON {
 			continue // a role we do not implement
 		}
@@ -194,8 +217,16 @@ func (s *session) dispatch(env envelope) error {
 		}
 	case "stream/start":
 		var st streamStart
-		if json.Unmarshal(env.Payload, &st) == nil && st.Player != nil {
-			s.onStreamStart(*st.Player)
+		if json.Unmarshal(env.Payload, &st) == nil {
+			if st.Player != nil {
+				s.onStreamStart(*st.Player)
+			}
+			if st.Artwork != nil {
+				s.onArtworkStart(*st.Artwork)
+			}
+			if st.Visualizer != nil {
+				s.onVisualizerStart(*st.Visualizer)
+			}
 		}
 	case "stream/clear":
 		var r streamRoles
@@ -203,11 +234,20 @@ func (s *session) dispatch(env envelope) error {
 		if r.covers("player") && s.isAdmitted() {
 			s.c.player.clear()
 		}
+		if r.covers("visualizer") && s.isAdmitted() {
+			s.clearVisualizer()
+		}
 	case "stream/end":
 		var r streamRoles
 		json.Unmarshal(env.Payload, &r)
 		if r.covers("player") {
 			s.endStream()
+		}
+		if r.covers("visualizer") {
+			s.clearVisualizer()
+		}
+		if r.covers("artwork") {
+			s.clearArtwork()
 		}
 	case "group/update":
 		var g groupUpdate
@@ -215,7 +255,28 @@ func (s *session) dispatch(env envelope) error {
 			s.mu.Lock()
 			s.group = g
 			s.mu.Unlock()
+			if s.isAdmitted() {
+				s.c.updateGroupPresentation(g)
+			}
 			s.c.changed()
+		}
+	case "server/state":
+		var state serverState
+		if json.Unmarshal(env.Payload, &state) == nil && s.isAdmitted() {
+			if len(state.Metadata) > 0 && s.hasRole(roleMetadata) {
+				s.runAtStateTimestamp(state.Metadata, func() {
+					if s.hasRole(roleMetadata) {
+						s.c.applyMetadata(state.Metadata)
+					}
+				})
+			}
+			if len(state.Color) > 0 && s.hasRole(roleColor) {
+				s.runAtStateTimestamp(state.Color, func() {
+					if s.hasRole(roleColor) {
+						s.c.applyColor(state.Color)
+					}
+				})
+			}
 		}
 	case "server/command":
 		var cmd serverCommand
@@ -349,12 +410,28 @@ func (s *session) onActivate(a serverActivate) error {
 	}
 
 	wasPlayer := s.playerRole()
+	wasMetadata := s.hasRole(roleMetadata)
+	wasArtwork := s.hasRole(roleArtwork)
+	wasVisualizer := s.hasRole(roleVisualizer)
+	wasColor := s.hasRole(roleColor)
 	s.mu.Lock()
 	s.roles = roles
 	reported := s.stateSent
 	s.mu.Unlock()
 	if wasPlayer && !s.playerRole() {
 		s.endStream()
+	}
+	if wasMetadata && !s.hasRole(roleMetadata) && s.isAdmitted() {
+		s.c.applyMetadata(json.RawMessage("null"))
+	}
+	if wasArtwork && !s.hasRole(roleArtwork) {
+		s.clearArtwork()
+	}
+	if wasVisualizer && !s.hasRole(roleVisualizer) {
+		s.clearVisualizer()
+	}
+	if wasColor && !s.hasRole(roleColor) && s.isAdmitted() {
+		s.c.applyColor(json.RawMessage("null"))
 	}
 	if s.playerRole() && (!wasPlayer || !reported) {
 		s.sendState()
@@ -400,14 +477,151 @@ func (s *session) onPairing(p *activatePairing) error {
 }
 
 func (s *session) playerRole() bool {
+	return s.hasRole(rolePlayer)
+}
+
+func (s *session) hasRole(role string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, r := range s.roles {
-		if r == rolePlayer {
+		if r == role {
 			return true
 		}
 	}
 	return false
+}
+
+func (s *session) onArtworkStart(config streamArtwork) {
+	if !s.hasRole(roleArtwork) {
+		return
+	}
+	s.mu.Lock()
+	s.artworkTypes = [4]string{}
+	for index, channel := range config.Channels {
+		if index >= len(s.artworkTypes) {
+			break
+		}
+		s.artworkTypes[index] = artworkContentType(channel.Format)
+	}
+	s.mu.Unlock()
+}
+
+func (s *session) onVisualizerStart(config streamVisualizer) {
+	if !s.hasRole(roleVisualizer) {
+		return
+	}
+	bins := 0
+	if config.Spectrum != nil {
+		bins = config.Spectrum.DisplayBins
+	}
+	s.mu.Lock()
+	s.visualBins = bins
+	s.mu.Unlock()
+}
+
+func (s *session) onArtwork(msg []byte) {
+	if len(msg) < 9 || !s.isAdmitted() || !s.hasRole(roleArtwork) {
+		return
+	}
+	channel := int(msg[0] - msgArtwork0)
+	s.mu.Lock()
+	contentType := s.artworkTypes[channel]
+	s.mu.Unlock()
+	if contentType == "" {
+		return
+	}
+	timestamp := int64(binary.BigEndian.Uint64(msg[1:9]))
+	contents := append([]byte(nil), msg[9:]...)
+	s.runAt(timestamp, func() {
+		if s.hasRole(roleArtwork) {
+			s.c.applyArtwork(contents, contentType)
+		}
+	})
+}
+
+func (s *session) clearArtwork() {
+	s.mu.Lock()
+	s.artworkTypes = [4]string{}
+	s.mu.Unlock()
+	if s.isAdmitted() {
+		s.c.clearArtwork()
+	}
+}
+
+func (s *session) onVisualizer(msg []byte) {
+	if len(msg) < 9 || !s.isAdmitted() || !s.hasRole(roleVisualizer) {
+		return
+	}
+	timestamp := int64(binary.BigEndian.Uint64(msg[1:9]))
+	playAt := nowUs()
+	if s.filter.synchronized() {
+		playAt = s.filter.clientTime(timestamp)
+	}
+	s.mu.Lock()
+	bins := s.visualBins
+	s.mu.Unlock()
+	s.c.queueVisualizer(msg[0], msg[1:], bins, playAt)
+}
+
+func (s *session) runAtStateTimestamp(raw json.RawMessage, apply func()) {
+	var value struct {
+		Timestamp int64 `json:"timestamp"`
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		apply()
+		return
+	}
+	s.runAt(value.Timestamp, apply)
+}
+
+func (s *session) runAt(serverTimestamp int64, apply func()) {
+	if serverTimestamp <= 0 || !s.filter.synchronized() {
+		apply()
+		return
+	}
+	delay := time.Duration(s.filter.clientTime(serverTimestamp)-nowUs()) * time.Microsecond
+	if delay <= 0 {
+		apply()
+		return
+	}
+	if delay > 30*time.Second {
+		return
+	}
+	time.AfterFunc(delay, func() {
+		if s.isAdmitted() {
+			apply()
+		}
+	})
+}
+
+func (s *session) clearVisualizer() {
+	s.mu.Lock()
+	s.visualBins = 0
+	s.mu.Unlock()
+	if !s.isAdmitted() {
+		return
+	}
+	s.c.mu.Lock()
+	s.c.presentation.HasLoudness = false
+	s.c.presentation.Loudness = 0
+	s.c.presentation.Peak = 0
+	s.c.presentation.Spectrum = nil
+	s.c.presentation.visualQueue = nil
+	s.c.presentation.VisualizerRevision++
+	s.c.mu.Unlock()
+}
+
+func artworkContentType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "jpeg", "jpg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "bmp":
+		return "image/bmp"
+	default:
+		return ""
+	}
 }
 
 func (s *session) name() string {

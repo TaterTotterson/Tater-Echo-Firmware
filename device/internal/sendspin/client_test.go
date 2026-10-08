@@ -1,9 +1,93 @@
 package sendspin
 
 import (
+	"encoding/binary"
+	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestPresentationRolesAreScopedToEchoHardware(t *testing.T) {
+	screen, err := New(Config{StorePath: filepath.Join(t.TempDir(), "screen.json"), Screen: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hello := screen.hello()
+	for _, role := range []string{rolePlayer, roleMetadata, roleArtwork, roleColor, roleVisualizer} {
+		if !containsString(hello.SupportedRoles, role) {
+			t.Fatalf("screen hello lacks %s: %v", role, hello.SupportedRoles)
+		}
+	}
+	if hello.ArtworkSupport == nil || len(hello.ArtworkSupport.Channels) != 1 ||
+		hello.ArtworkSupport.Channels[0].Format != "jpeg" {
+		t.Fatalf("screen artwork support = %#v", hello.ArtworkSupport)
+	}
+	if hello.VisualizerSupport == nil || hello.VisualizerSupport.Spectrum == nil ||
+		hello.VisualizerSupport.Spectrum.DisplayBins != 12 {
+		t.Fatalf("screen visualizer support = %#v", hello.VisualizerSupport)
+	}
+
+	biscuit, err := New(Config{StorePath: filepath.Join(t.TempDir(), "biscuit.json"), Visuals: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hello = biscuit.hello()
+	if containsString(hello.SupportedRoles, roleMetadata) || containsString(hello.SupportedRoles, roleArtwork) {
+		t.Fatalf("Biscuit requested screen-only roles: %v", hello.SupportedRoles)
+	}
+	if !containsString(hello.SupportedRoles, roleColor) || !containsString(hello.SupportedRoles, roleVisualizer) {
+		t.Fatalf("Biscuit lacks music visual roles: %v", hello.SupportedRoles)
+	}
+}
+
+func TestNowPlayingMergesStateAndAppliesDueVisualizerFrames(t *testing.T) {
+	c, err := New(Config{StorePath: filepath.Join(t.TempDir(), "state.json"), Screen: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.updateGroupPresentation(groupUpdate{PlaybackState: "playing", GroupName: "Everywhere"})
+	c.applyMetadata(json.RawMessage(`{
+		"timestamp":10,"title":"All Together Now","artist":"The Taters","album":"Garden Songs",
+		"progress":{"track_progress":12000,"track_duration":180000,"playback_speed":1000}
+	}`))
+	c.applyColor(json.RawMessage(`{"timestamp":10,"primary":[12,34,56],"accent":[210,90,30]}`))
+	c.applyArtwork([]byte{1, 2, 3}, "image/jpeg")
+
+	frame := make([]byte, 10)
+	binary.BigEndian.PutUint64(frame[:8], uint64(nowUs()))
+	binary.BigEndian.PutUint16(frame[8:], 32768)
+	c.queueVisualizer(msgVisualizerLoudness, frame, 0, nowUs()-1)
+	got := c.NowPlaying()
+	if !got.Active || got.GroupName != "Everywhere" || got.Title != "All Together Now" ||
+		got.ProgressMS != 12000 || got.DurationMS != 180000 || got.PrimaryColor != ([3]uint8{12, 34, 56}) {
+		t.Fatalf("now playing = %#v", got)
+	}
+	artwork, contentType := c.NowPlayingArtwork()
+	if got.Loudness < .49 || got.Loudness > .51 || string(artwork) != string([]byte{1, 2, 3}) || contentType != "image/jpeg" {
+		t.Fatalf("presentation media/visualizer = %#v", got)
+	}
+	c.mu.Lock()
+	c.presentation.progressUpdatedAt = time.Now().Add(-2 * time.Second)
+	c.mu.Unlock()
+	advanced := c.NowPlaying().ProgressMS
+	if advanced < 13_999 || advanced > 14_010 {
+		t.Fatalf("playing progress did not advance from its metadata timestamp: %d", advanced)
+	}
+	artwork[0] = 9
+	if stored, _ := c.NowPlayingArtwork(); stored[0] != 1 {
+		t.Fatal("NowPlaying exposed mutable artwork storage")
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
 
 // One volume (Wil, 2026-09-30): with the device owning it, a server's volume
 // command moves the DEVICE's volume and the synced music itself plays at

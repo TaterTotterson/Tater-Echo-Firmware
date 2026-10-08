@@ -97,6 +97,60 @@ func TestNotificationImageUsesLoopbackSideChannel(t *testing.T) {
 	}
 }
 
+func TestMediaArtworkUsesLoopbackSideChannelAndClears(t *testing.T) {
+	s := New("127.0.0.1:0", Snapshot{Phase: "idle"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for s.Address() == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.Address() == "" {
+		t.Fatal("server did not bind")
+	}
+
+	art := []byte{0xff, 0xd8, 0xff, 0xd9}
+	s.SetMedia(&Media{Active: true, Title: "Garden Song", Spectrum: []float64{.1, .7}}, art, "image/jpeg")
+	media := s.Snapshot().Media
+	if media == nil || media.ArtworkURL == "" || media.Title != "Garden Song" {
+		t.Fatalf("media snapshot = %#v", media)
+	}
+	response, err := http.Get(media.ArtworkURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(got) != string(art) {
+		t.Fatalf("media image status=%d body=%x err=%v", response.StatusCode, got, err)
+	}
+
+	s.SetMedia(nil, nil, "")
+	if s.Snapshot().Media != nil {
+		t.Fatal("media state did not clear")
+	}
+	response, err = http.Get(media.ArtworkURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("cleared artwork status = %d, want 404", response.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
 func TestServerSendsCompleteUpdatesAndReceivesCommands(t *testing.T) {
 	commands := make(chan Command, 1)
 	s := New("127.0.0.1:0", Snapshot{Phase: "offline", DeviceName: "Test Show"}, func(c Command) {

@@ -834,7 +834,6 @@ func main() {
 					if state == "idle" || state == "error" {
 						snapshot.DirectionDegrees = nil
 						snapshot.AudioLevel = 0
-						snapshot.Media = nil
 					}
 				})
 			},
@@ -855,7 +854,8 @@ func main() {
 							nativeClient.TimerRinging(),
 							state,
 						) {
-							s.StartAnim(nativeStateAnimation("playing"))
+							nowPlaying := player.NowPlaying()
+							s.StartAnim(nativeMusicAnimation(nowPlaying.PrimaryColor, nowPlaying.AccentColor))
 						}
 					}
 				}
@@ -962,6 +962,7 @@ func main() {
 		go runSendspinPoll(
 			pcmSpeaker,
 			s,
+			showServerPtr.Load(),
 			client.FirmwareTarget,
 			func() string {
 				if nativeClient != nil {
@@ -2626,12 +2627,46 @@ func nativeStateAnimation(state string) server.AnimSpec {
 	case "speaking":
 		return server.AnimSpec{Pattern: visual(replying, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
 	case "playing":
-		return server.AnimSpec{Pattern: visual(music, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180}
+		return server.AnimSpec{Pattern: visual(music, "audio_glow"), Colors: [][3]uint8{color}, PeriodMs: 50, TTLSec: 180, Music: true}
 	case "error":
 		return server.AnimSpec{Pattern: "pulse", Colors: [][3]uint8{{200, 0, 0}}, PeriodMs: 38, TTLSec: 10}
 	default:
 		return server.AnimSpec{Pattern: "off"}
 	}
+}
+
+func nativeMusicAnimation(primary, accent [3]uint8) server.AnimSpec {
+	spec := nativeStateAnimation("playing")
+	selected := brighterColor(primary, accent)
+	if selected == ([3]uint8{}) {
+		return spec
+	}
+	nativeVisuals.RLock()
+	brightness := float64(nativeVisuals.brightness) / 100
+	nativeVisuals.RUnlock()
+	peak := max(selected[0], max(selected[1], selected[2]))
+	if peak == 0 {
+		return spec
+	}
+	// Album palettes are commonly intentionally dark. Normalize hue to the
+	// user's LED brightness so the ring remains readable without replacing
+	// the selected music animation.
+	scale := 255 * brightness / float64(peak)
+	for index := range selected {
+		selected[index] = uint8(math.Min(255, math.Round(float64(selected[index])*scale)))
+	}
+	spec.Colors = [][3]uint8{selected}
+	return spec
+}
+
+func brighterColor(a, b [3]uint8) [3]uint8 {
+	brightness := func(value [3]uint8) int {
+		return int(value[0])*299 + int(value[1])*587 + int(value[2])*114
+	}
+	if brightness(b) > brightness(a) {
+		return b
+	}
+	return a
 }
 
 func updateShow(screen *show.Server, change func(*show.Snapshot)) {

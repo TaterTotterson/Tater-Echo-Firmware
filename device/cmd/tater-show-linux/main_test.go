@@ -286,6 +286,57 @@ func TestToolCallKeepsWeatherCardAndHasNoSpinningFallback(t *testing.T) {
 	}
 }
 
+func TestCheckersNowPlayingReplacesWeatherButNotAwareness(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	media := &show.Media{
+		Active: true, PlaybackState: "playing", GroupName: "Downstairs",
+		Title: "Garden Song", Artist: "The Taters", Album: "Freshly Planted",
+		PrimaryColor: [3]uint8{26, 112, 170}, AccentColor: [3]uint8{255, 124, 44},
+		ProgressMS: 75_000, DurationMS: 240_000, PlaybackSpeed: 1000,
+		ProgressUpdatedAtUnixMS: now.UnixMilli(), Spectrum: []float64{.1, .3, .8, .4, .6, .2},
+	}
+	r := &renderer{faces: faces, state: show.Snapshot{
+		Phase: "idle", Media: media,
+		Weather: &show.Weather{TemperatureText: "72°", Condition: "Sunny", ConditionKind: "sun"},
+	}}
+	nowPlaying := image.NewRGBA(image.Rect(0, 0, 960, 480))
+	r.drawRight(nowPlaying, now, 960, 480, 2, color.RGBA{255, 132, 48, 255})
+	r.state.Media = nil
+	weather := image.NewRGBA(nowPlaying.Rect)
+	r.drawRight(weather, now, 960, 480, 2, color.RGBA{255, 132, 48, 255})
+	if bytes.Equal(nowPlaying.Pix, weather.Pix) {
+		t.Fatal("active Sendspin media did not replace the weather pane")
+	}
+
+	r.state.Media = media
+	r.state.Notification = &show.Notification{ID: "door", CameraName: "Front Door", Description: "A person is at the door", ExpiresAtUnixMS: now.Add(time.Minute).UnixMilli()}
+	withMedia := image.NewRGBA(nowPlaying.Rect)
+	r.drawRight(withMedia, now, 960, 480, 2, color.RGBA{255, 132, 48, 255})
+	r.state.Media = nil
+	withoutMedia := image.NewRGBA(nowPlaying.Rect)
+	r.drawRight(withoutMedia, now, 960, 480, 2, color.RGBA{255, 132, 48, 255})
+	if !bytes.Equal(withMedia.Pix, withoutMedia.Pix) {
+		t.Fatal("now playing overrode an awareness notification")
+	}
+}
+
+func TestNowPlayingHeadingPreservesVoiceAndToolFeedback(t *testing.T) {
+	media := &show.Media{Active: true, GroupName: "Downstairs"}
+	if got := nowPlayingHeading(show.Snapshot{Phase: "idle"}, media); got != "NOW PLAYING  ·  DOWNSTAIRS" {
+		t.Fatalf("idle now-playing heading = %q", got)
+	}
+	if got := nowPlayingHeading(show.Snapshot{Phase: "listening"}, media); got != "LISTENING" {
+		t.Fatalf("listening heading = %q", got)
+	}
+	if got := nowPlayingHeading(show.Snapshot{Phase: "tool_call", ToolName: "room_vision"}, media); got != "USING ROOM VISION" {
+		t.Fatalf("tool heading = %q", got)
+	}
+}
+
 func TestConnectedStatusUsesAssistantFirstName(t *testing.T) {
 	if got := connectedStatus("Jarvis"); got != "Jarvis Connected" {
 		t.Fatalf("connected status = %q", got)
@@ -467,6 +518,16 @@ func TestRenderPreview(t *testing.T) {
 		state.Weather = nil
 		state.Notification = &show.Notification{ID: "door", CameraName: "Front Door", Description: "A person was detected at the front door. Check the camera or ask Tater what happened.", Priority: "critical", ExpiresAtUnixMS: now.Add(time.Minute).UnixMilli()}
 		state.Message = "Someone is at the door"
+	case "media":
+		state.Phase = "idle"
+		state.Media = &show.Media{
+			Active: true, PlaybackState: "playing", GroupName: "Downstairs",
+			Title: "Garden Song", Artist: "The Taters", Album: "Freshly Planted",
+			PrimaryColor: [3]uint8{30, 108, 165}, AccentColor: [3]uint8{255, 124, 44},
+			ProgressMS: 75_000, DurationMS: 240_000, PlaybackSpeed: 1000,
+			ProgressUpdatedAtUnixMS: now.UnixMilli(),
+			Spectrum:                []float64{.12, .28, .72, .55, .9, .38, .61, .22, .48, .77, .34, .18},
+		}
 	case "setup-hotspot":
 		state = show.Snapshot{Phase: "setup", Connected: false, DeviceName: "Tater Checkers", Room: "Tater-Setup-D4B7", Message: "192.168.4.1"}
 	case "connecting":

@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.3.0
+
+### What's Changed
+
+- Checkers now presents Sendspin music on its right-side canvas with album
+  artwork, track and artist details, playback progress, and a live spectrum in
+  the existing Tater visual style. Awareness notifications and timers retain
+  priority, and the screen returns to now playing or weather afterward.
+- Rook gains a round-screen now-playing view designed for its available center
+  space, including artwork, track information, progress, and live audio motion
+  without crowding the voice and tool-call states.
+- Biscuit uses Sendspin's synchronized loudness, beat, peak, spectrum, and
+  track colors to drive the music LED animation the user already selected.
+  The speaker's local audio level remains an automatic fallback when a
+  controller does not publish visualizer data.
+- Presentation changes follow Sendspin's playback clock, keeping artwork,
+  metadata, progress, and reactive visuals aligned with the audio. Artwork is
+  requested only by display devices, so Biscuit avoids unnecessary image
+  traffic and memory use.
+
 ## v2.2.0
 
 ### What's Changed

@@ -55,3 +55,26 @@ func TestVoiceStatesAcceptNoAnimation(t *testing.T) {
 		})
 	}
 }
+
+func TestSendspinMusicKeepsSelectedEffectAndUsesTrackPalette(t *testing.T) {
+	nativeVisuals.Lock()
+	previousMusic := nativeVisuals.music
+	previousBrightness := nativeVisuals.brightness
+	nativeVisuals.music = "music_wave"
+	nativeVisuals.brightness = 80
+	nativeVisuals.Unlock()
+	t.Cleanup(func() {
+		nativeVisuals.Lock()
+		nativeVisuals.music = previousMusic
+		nativeVisuals.brightness = previousBrightness
+		nativeVisuals.Unlock()
+	})
+
+	spec := nativeMusicAnimation([3]uint8{12, 18, 24}, [3]uint8{30, 210, 72})
+	if spec.Pattern != "music_wave" || !spec.Music {
+		t.Fatalf("music spec = %#v, want selected effect with Sendspin visualizer input", spec)
+	}
+	if len(spec.Colors) != 1 || spec.Colors[0][1] <= spec.Colors[0][0] || spec.Colors[0][1] <= spec.Colors[0][2] {
+		t.Fatalf("music spec did not use track palette: %#v", spec.Colors)
+	}
+}

@@ -49,6 +49,8 @@ func (r *renderer) renderSpot(canvas *image.RGBA, now time.Time, seconds float64
 		r.drawSpotNotification(canvas, now, seconds, accent)
 	case r.state.Timer != nil && r.state.Timer.Active:
 		r.drawSpotTimer(canvas, now, seconds, accent)
+	case r.state.Media != nil && r.state.Media.Active:
+		r.drawSpotNowPlaying(canvas, now, seconds, accent)
 	case r.state.Weather != nil:
 		r.drawSpotWeather(canvas, seconds, accent)
 	default:
@@ -58,7 +60,7 @@ func (r *renderer) renderSpot(canvas *image.RGBA, now time.Time, seconds float64
 	}
 	// The round Spot no longer uses either the center or corner voice orb.
 	// Keep a small stage label where it does not compete with the weather art.
-	if (r.state.Timer == nil || !r.state.Timer.Active) && !r.notificationActive(now) {
+	if (r.state.Timer == nil || !r.state.Timer.Active) && !r.notificationActive(now) && (r.state.Media == nil || !r.state.Media.Active) {
 		stage, stageColor := "", accent
 		switch {
 		case r.intercomPressed || r.state.Phase == "intercom":
@@ -82,6 +84,37 @@ func (r *renderer) renderSpot(canvas *image.RGBA, now time.Time, seconds float64
 		status, statusColor = "MIC MUTED", color.RGBA{255, 152, 155, 255}
 	}
 	r.centeredText(canvas, 240, 449, fitTextToWidth(status, r.faces.bold[14], 214), 14, true, statusColor)
+}
+
+func (r *renderer) drawSpotNowPlaying(canvas *image.RGBA, now time.Time, seconds float64, accent color.RGBA) {
+	media := r.state.Media
+	ink := mediaDisplayColor(media, accent)
+	heading := nowPlayingHeading(r.state, media)
+	r.centeredText(canvas, 240, 181, fitTextToWidth(heading, r.faces.bold[14], 270), 14, true, ink)
+
+	art := image.Rect(170, 190, 310, 330)
+	roundedRect(canvas, art, 18, mix(color.RGBA{15, 22, 34, 255}, ink, .14))
+	if r.mediaImage != nil {
+		drawCover(canvas, art, r.mediaImage)
+	} else {
+		r.drawMusicVisualizer(canvas, art, seconds, ink)
+	}
+
+	r.centeredText(canvas, 240, 360, fitTextToWidth(firstNonEmpty(media.Title, "Music"), r.faces.bold[22], 300), 22, true, color.White)
+	r.centeredText(canvas, 240, 383, fitTextToWidth(firstNonEmpty(media.Artist, media.AlbumArtist, media.GroupName, "Tater Music"), r.faces.regular[15], 270), 15, false, color.RGBA{174, 190, 211, 255})
+	progress, duration := mediaProgress(media, now)
+	if duration > 0 {
+		left, right, barY := 122, 358, 402
+		line(canvas, left, barY, right, barY, 3, color.RGBA{95, 108, 128, 85})
+		filled := int(float64(right-left) * math.Min(1, float64(progress)/float64(duration)))
+		line(canvas, left, barY, left+filled, barY, 3, ink)
+		r.text(canvas, left, 424, formatMediaTime(progress), 14, true, color.RGBA{190, 203, 220, 255})
+		end := formatMediaTime(duration)
+		endWidth := font.MeasureString(r.faces.bold[14], end).Round()
+		r.text(canvas, right-endWidth, 424, end, 14, true, color.RGBA{139, 155, 177, 255})
+	} else if strings.TrimSpace(media.GroupName) != "" {
+		r.centeredText(canvas, 240, 416, fitTextToWidth(strings.ToUpper(media.GroupName), r.faces.bold[14], 230), 14, true, ink)
+	}
 }
 
 func (r *renderer) spotBackground(canvas *image.RGBA, accent color.RGBA) {

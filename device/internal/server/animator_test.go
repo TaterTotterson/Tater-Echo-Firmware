@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
@@ -201,6 +202,27 @@ func TestMusicAnimationsReactToSpeakerLevel(t *testing.T) {
 				t.Fatalf("music animation did not react to audio: quiet=%d loud=%d", brightness(quiet), brightness(loud))
 			}
 		})
+	}
+}
+
+func TestMusicVisualizerUsesSynchronizedLevelWithLocalFallback(t *testing.T) {
+	s := &Server{}
+	s.SetAudioLevel(.08)
+	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
+		t.Fatalf("music level without Sendspin visualizer = %.4f, want local .08", got)
+	}
+	s.SetMusicVisualizer(1, false)
+	if got := s.musicAnimationLevel(); got < .99 {
+		t.Fatalf("full-scale Sendspin visualizer = %.4f, want near 1", got)
+	}
+	s.ClearMusicVisualizer()
+	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
+		t.Fatalf("cleared Sendspin visualizer = %.4f, want local fallback .08", got)
+	}
+	s.SetMusicVisualizer(1, false)
+	s.musicVisualAt.Store(time.Now().Add(-time.Second).UnixNano())
+	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
+		t.Fatalf("stale Sendspin visualizer = %.4f, want local fallback .08", got)
 	}
 }
 

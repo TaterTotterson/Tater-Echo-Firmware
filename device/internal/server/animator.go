@@ -40,6 +40,10 @@ type AnimSpec struct {
 	// TTLSec auto-clears the ring if no newer spec arrives — protects
 	// against a controller that died mid-turn. 0 → no TTL.
 	TTLSec int `json:"ttlSec"`
+	// Music selects Sendspin's playback-clock visualizer input when it is
+	// available. It is deliberately separate from Pattern because audio_glow
+	// is also used for TTS replies, which must keep following local RMS.
+	Music bool `json:"music,omitempty"`
 
 	// ── meter-only response curve ────────────────────────────────────────
 	// Pointer-typed so 0 is expressible and "absent" is distinguishable
@@ -224,6 +228,41 @@ func (s *Server) getAudioLevel() float64 {
 	return math.Float64frombits(s.audioLevel.Load())
 }
 
+// SetMusicVisualizer supplies Sendspin's synchronized loudness and transient
+// markers. loudness is the protocol's 0..1 encoding of -60..0 dBFS.
+func (s *Server) SetMusicVisualizer(loudness float64, transient bool) {
+	loudness = math.Max(0, math.Min(1, loudness))
+	db := loudness*60 - 60
+	linear := math.Pow(10, db/20)
+	s.musicLevel.Store(math.Float64bits(linear))
+	now := time.Now().UnixNano()
+	s.musicVisualAt.Store(now)
+	if transient {
+		s.musicPulseAt.Store(now)
+	}
+}
+
+// ClearMusicVisualizer immediately hands music effects back to the local
+// speaker RMS. It is used at stream boundaries so one track cannot lend its
+// last visualizer frame to the next one.
+func (s *Server) ClearMusicVisualizer() {
+	s.musicVisualAt.Store(0)
+	s.musicPulseAt.Store(0)
+}
+
+func (s *Server) musicAnimationLevel() float64 {
+	now := time.Now()
+	updated := s.musicVisualAt.Load()
+	if updated == 0 || now.Sub(time.Unix(0, updated)) > 350*time.Millisecond {
+		return s.getAudioLevel()
+	}
+	level := math.Float64frombits(s.musicLevel.Load())
+	if pulse := s.musicPulseAt.Load(); pulse > 0 && now.Sub(time.Unix(0, pulse)) < 140*time.Millisecond {
+		level = math.Max(level, 0.24)
+	}
+	return level
+}
+
 type nativeAnimState struct {
 	sparkle       [12]float64
 	voiceRadius   float64
@@ -260,7 +299,11 @@ func (s *Server) runNativeAnim(gen int, spec AnimSpec) {
 			}
 			return
 		}
-		frame := nativeAnimationFrame(spec.Pattern, tick, color, s.getAudioLevel(), s.directionLEDIndex(), &state)
+		level := s.getAudioLevel()
+		if spec.Music {
+			level = s.musicAnimationLevel()
+		}
+		frame := nativeAnimationFrame(spec.Pattern, tick, color, level, s.directionLEDIndex(), &state)
 		s.SetLEDs(frame, boolPtr(false))
 		<-ticker.C
 	}
@@ -625,7 +668,11 @@ func (s *Server) runMeter(gen int, spec AnimSpec) {
 		}
 		// Input curve: normalise the speaker RMS against ref, then apply
 		// curve (<1 lifts quiet detail so consonants register).
-		level := math.Pow(math.Min(1, s.getAudioLevel()/ref), curve)
+		input := s.getAudioLevel()
+		if spec.Music {
+			input = s.musicAnimationLevel()
+		}
+		level := math.Pow(math.Min(1, input/ref), curve)
 		if level > env {
 			env += attack * (level - env) // fast attack
 		} else {

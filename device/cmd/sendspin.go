@@ -11,6 +11,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/firewall"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/sendspin"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/server"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/show"
 )
 
 const sendspinStore = "/data/local/etc/tater/sendspin.json"
@@ -31,6 +32,8 @@ func startSendspinPlayer(spk *speaker.PcmSpeaker, volume *server.Server, deviceI
 		Instance:  "tater-echo-" + deviceID,
 		Product:   "Tater Echo " + strings.TrimSpace(target),
 		Version:   version,
+		Screen:    isScreenTarget(target),
+		Visuals:   strings.EqualFold(strings.TrimSpace(target), "biscuit") || isScreenTarget(target),
 		// Tater's ESP satellites are immediately usable by Tater and Music
 		// Assistant. Echoes follow the same no-extra-pairing behavior.
 		Unpaired: true,
@@ -106,27 +109,78 @@ func sendspinStatus() any {
 	return nil
 }
 
-func runSendspinPoll(spk *speaker.PcmSpeaker, ring *server.Server, target string, state func() string, timerRinging func() bool) {
+func runSendspinPoll(spk *speaker.PcmSpeaker, ring *server.Server, screen *show.Server, target string, state func() string, timerRinging func() bool) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	var logged time.Time
 	showingMusic := false
+	var infoRevision, visualizerRevision, beatSequence, peakSequence uint64
+	var screenActive bool
+	var musicPrimary, musicAccent [3]uint8
 	for range ticker.C {
 		player := sendspinPlayer()
 		if player == nil {
 			return
 		}
-		player.SetExternal(spk.MusicPlaneBusy())
+		external := spk.MusicPlaneBusy()
+		player.SetExternal(external)
 		currentState := "idle"
 		if state != nil {
 			currentState = strings.ToLower(strings.TrimSpace(state()))
 		}
 		ringing := timerRinging != nil && timerRinging()
+		presentation := player.NowPlaying()
+		presentationActive := !external && (player.Active() || (presentation.Active && strings.TrimSpace(presentation.Title) != ""))
+		if screen != nil && (presentation.InfoRevision != infoRevision || presentationActive != screenActive) {
+			infoRevision = presentation.InfoRevision
+			screenActive = presentationActive
+			if presentationActive {
+				artwork, artworkContentType := player.NowPlayingArtwork()
+				screen.SetMedia(&show.Media{
+					Active: true, PlaybackState: presentation.PlaybackState, GroupName: presentation.GroupName,
+					Title: firstNonEmpty(presentation.Title, "Music"), Artist: presentation.Artist,
+					AlbumArtist: presentation.AlbumArtist, Album: presentation.Album,
+					PrimaryColor: presentation.PrimaryColor, AccentColor: presentation.AccentColor,
+					ProgressMS: presentation.ProgressMS, DurationMS: presentation.DurationMS,
+					PlaybackSpeed: presentation.PlaybackSpeed, ProgressUpdatedAtUnixMS: time.Now().UnixMilli(),
+					Loudness: presentation.Loudness, Peak: presentation.Peak, PeakSequence: presentation.PeakSequence,
+					Spectrum: presentation.Spectrum, BeatSequence: presentation.BeatSequence,
+				}, artwork, artworkContentType)
+			} else {
+				screen.SetMedia(nil, nil, "")
+			}
+		}
+		if screen != nil && presentationActive && presentation.VisualizerRevision != visualizerRevision {
+			visualizerRevision = presentation.VisualizerRevision
+			screen.Update(func(snapshot *show.Snapshot) {
+				if snapshot.Media == nil {
+					return
+				}
+				next := *snapshot.Media
+				next.Loudness = presentation.Loudness
+				next.Peak = presentation.Peak
+				next.PeakSequence = presentation.PeakSequence
+				next.Spectrum = append([]float64(nil), presentation.Spectrum...)
+				next.BeatSequence = presentation.BeatSequence
+				snapshot.Media = &next
+			})
+		}
+		transient := presentation.BeatSequence != beatSequence || presentation.PeakSequence != peakSequence
+		if presentationActive && presentation.HasLoudness {
+			ring.SetMusicVisualizer(presentation.Loudness, transient)
+		}
+		beatSequence, peakSequence = presentation.BeatSequence, presentation.PeakSequence
 		showMusic := shouldShowSendspinMusicVisual(target, player.Active(), ring.LinkDown(), ringing, currentState)
-		if showMusic && !showingMusic {
-			ring.StartAnim(nativeStateAnimation("playing"))
+		paletteChanged := presentation.PrimaryColor != musicPrimary || presentation.AccentColor != musicAccent
+		if showMusic && (!showingMusic || paletteChanged) {
+			if !presentation.HasLoudness {
+				ring.ClearMusicVisualizer()
+			}
+			ring.StartAnim(nativeMusicAnimation(presentation.PrimaryColor, presentation.AccentColor))
 			showingMusic = true
+			musicPrimary, musicAccent = presentation.PrimaryColor, presentation.AccentColor
 		} else if !showMusic && showingMusic {
+			ring.ClearMusicVisualizer()
 			// "playing" describes the stream that just ended; it is not a
 			// useful animation to restore after Sendspin becomes inactive.
 			if currentState == "playing" {

@@ -60,6 +60,31 @@ type playerSupport struct {
 	SupportedCommands []string `json:"supported_commands"`
 }
 
+type artworkChannel struct {
+	Source      string `json:"source"`
+	Format      string `json:"format"`
+	MediaWidth  int    `json:"media_width"`
+	MediaHeight int    `json:"media_height"`
+}
+
+type artworkSupport struct {
+	Channels []artworkChannel `json:"channels"`
+}
+
+type visualizerSpectrumSupport struct {
+	DisplayBins int    `json:"n_disp_bins"`
+	Scale       string `json:"scale"`
+	MinHz       int    `json:"f_min"`
+	MaxHz       int    `json:"f_max"`
+}
+
+type visualizerSupport struct {
+	BufferCapacity int                        `json:"buffer_capacity"`
+	RateMax        int                        `json:"rate_max"`
+	Types          []string                   `json:"types"`
+	Spectrum       *visualizerSpectrumSupport `json:"spectrum,omitempty"`
+}
+
 // pairMethod is one entry of supported_pair_methods. 9.1.1: a LIST of
 // {method, ...}; the current spec has an object keyed by method. 9.1.1
 // rejects the object form, so the list is what gets sent.
@@ -72,13 +97,15 @@ type unpairedAccess struct {
 }
 
 type clientHello struct {
-	Version              int            `json:"version"`
-	Name                 string         `json:"name"`
-	SupportedRoles       []string       `json:"supported_roles"`
-	DeviceInfo           *deviceInfo    `json:"device_info,omitempty"`
-	PlayerSupport        *playerSupport `json:"player@v1_support,omitempty"`
-	SupportedPairMethods []pairMethod   `json:"supported_pair_methods"`
-	UnpairedAccess       unpairedAccess `json:"unpaired_access"`
+	Version              int                `json:"version"`
+	Name                 string             `json:"name"`
+	SupportedRoles       []string           `json:"supported_roles"`
+	DeviceInfo           *deviceInfo        `json:"device_info,omitempty"`
+	PlayerSupport        *playerSupport     `json:"player@v1_support,omitempty"`
+	ArtworkSupport       *artworkSupport    `json:"artwork@v1_support,omitempty"`
+	VisualizerSupport    *visualizerSupport `json:"visualizer@v1_support,omitempty"`
+	SupportedPairMethods []pairMethod       `json:"supported_pair_methods"`
+	UnpairedAccess       unpairedAccess     `json:"unpaired_access"`
 }
 
 type playerState struct {
@@ -138,14 +165,39 @@ type serverTime struct {
 }
 
 type streamStart struct {
-	Player *streamFormat `json:"player"`
+	Player     *streamFormat     `json:"player"`
+	Artwork    *streamArtwork    `json:"artwork"`
+	Visualizer *streamVisualizer `json:"visualizer"`
+}
+
+type streamArtwork struct {
+	Channels []streamArtworkChannel `json:"channels"`
+}
+
+type streamArtworkChannel struct {
+	Source string `json:"source"`
+	Format string `json:"format"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type streamVisualizer struct {
+	Types           []string                   `json:"types"`
+	RateMax         int                        `json:"rate_max"`
+	TracksDownbeats *bool                      `json:"tracks_downbeats,omitempty"`
+	Spectrum        *visualizerSpectrumSupport `json:"spectrum,omitempty"`
+}
+
+type serverState struct {
+	Metadata json.RawMessage `json:"metadata"`
+	Color    json.RawMessage `json:"color"`
 }
 
 type streamRoles struct {
 	Roles []string `json:"roles"`
 }
 
-// covers reports whether a stream/clear or stream/end applies to the player.
+// covers reports whether stream/clear or stream/end applies to a role family.
 // Omitted roles means every stream.
 func (r streamRoles) covers(role string) bool {
 	if len(r.Roles) == 0 {

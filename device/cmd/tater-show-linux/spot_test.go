@@ -102,6 +102,55 @@ func TestSpotWeatherAnimationAndRoundLayout(t *testing.T) {
 		r.state.Timer = &show.Timer{Active: true, Label: "Pasta", OriginalDurationMS: 300_000, RemainingMS: 165_000}
 		r.render(second, now)
 		writeSpotPreview(t, filepath.Join(previewDir, "spot-timer.png"), second)
+		r.state.Timer = nil
+		r.state.Media = &show.Media{
+			Active: true, PlaybackState: "playing", GroupName: "Downstairs",
+			Title: "Garden Song", Artist: "The Taters", AccentColor: [3]uint8{255, 124, 44},
+			ProgressMS: 75_000, DurationMS: 240_000, PlaybackSpeed: 1000,
+			ProgressUpdatedAtUnixMS: now.UnixMilli(), Spectrum: []float64{.12, .28, .72, .55, .9, .38},
+		}
+		r.render(second, now)
+		writeSpotPreview(t, filepath.Join(previewDir, "spot-now-playing.png"), second)
+	}
+}
+
+func TestSpotNowPlayingUsesRoundSafeLayoutAndTimerPriority(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.October, 3, 10, 20, 0, 0, time.UTC)
+	r := &renderer{faces: faces, spotScreen: true, animationStart: now, state: show.Snapshot{
+		Phase: "idle", Connected: true,
+		Media: &show.Media{
+			Active: true, PlaybackState: "playing", Title: "Garden Song", Artist: "The Taters",
+			DurationMS: 180_000, ProgressMS: 60_000, PlaybackSpeed: 1000,
+			ProgressUpdatedAtUnixMS: now.UnixMilli(), AccentColor: [3]uint8{255, 124, 44},
+			Spectrum: []float64{.1, .4, .9, .5},
+		},
+		Weather: &show.Weather{TemperatureText: "72°", Condition: "Sunny", ConditionKind: "sun"},
+	}}
+	mediaFrame := image.NewRGBA(image.Rect(0, 0, 480, 480))
+	r.render(mediaFrame, now)
+	r.state.Media = nil
+	weatherFrame := image.NewRGBA(mediaFrame.Rect)
+	r.render(weatherFrame, now)
+	if bytes.Equal(mediaFrame.Pix, weatherFrame.Pix) {
+		t.Fatal("Rook now playing did not replace weather")
+	}
+	if corner := mediaFrame.RGBAAt(0, 0); corner.A != 255 {
+		t.Fatalf("Rook now playing did not paint an opaque round-screen background: %v", corner)
+	}
+
+	r.state.Media = &show.Media{Active: true, Title: "Garden Song"}
+	r.state.Timer = &show.Timer{Active: true, ID: "tea", RemainingMS: 30_000, OriginalDurationMS: 60_000}
+	withMedia := image.NewRGBA(mediaFrame.Rect)
+	r.render(withMedia, now)
+	r.state.Media = nil
+	withoutMedia := image.NewRGBA(mediaFrame.Rect)
+	r.render(withoutMedia, now)
+	if !bytes.Equal(withMedia.Pix, withoutMedia.Pix) {
+		t.Fatal("Rook now playing overrode its timer")
 	}
 }
 
