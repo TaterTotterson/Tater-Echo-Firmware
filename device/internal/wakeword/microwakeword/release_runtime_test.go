@@ -40,6 +40,10 @@ func TestEnsureReleaseCompanionRuntimeInstallsAndCachesVerifiedAssets(t *testing
 	previousORTURL := releaseORTRuntimeURL
 	previousMelONNXURL, previousMelONNXSHA := openWakeWordMelspecONNXURL, openWakeWordMelspecONNXSHA
 	previousEmbedONNXURL, previousEmbedONNXSHA := openWakeWordEmbedONNXURL, openWakeWordEmbedONNXSHA
+	previousEmbeddedRuntime := embeddedReleaseRuntime
+	previousEmbeddedORT := embeddedReleaseORTRuntime
+	previousEmbeddedMelspec := embeddedReleaseMelspectrogram
+	previousEmbeddedEmbedding := embeddedReleaseEmbedding
 	t.Cleanup(func() {
 		ReleaseRuntimeSHA256 = previousRuntimeSHA
 		ReleaseORTRuntimeSHA256 = previousORTSHA
@@ -47,7 +51,15 @@ func TestEnsureReleaseCompanionRuntimeInstallsAndCachesVerifiedAssets(t *testing
 		releaseORTRuntimeURL = previousORTURL
 		openWakeWordMelspecONNXURL, openWakeWordMelspecONNXSHA = previousMelONNXURL, previousMelONNXSHA
 		openWakeWordEmbedONNXURL, openWakeWordEmbedONNXSHA = previousEmbedONNXURL, previousEmbedONNXSHA
+		embeddedReleaseRuntime = previousEmbeddedRuntime
+		embeddedReleaseORTRuntime = previousEmbeddedORT
+		embeddedReleaseMelspectrogram = previousEmbeddedMelspec
+		embeddedReleaseEmbedding = previousEmbeddedEmbedding
 	})
+	embeddedReleaseRuntime = nil
+	embeddedReleaseORTRuntime = nil
+	embeddedReleaseMelspectrogram = nil
+	embeddedReleaseEmbedding = nil
 	ReleaseRuntimeSHA256 = companionDigest(runtimeBody)
 	ReleaseORTRuntimeSHA256 = companionDigest(ortBody)
 	releaseRuntimeURL = func(_, _ string) string { return server.URL + "/runtime" }
@@ -73,6 +85,58 @@ func TestEnsureReleaseCompanionRuntimeInstallsAndCachesVerifiedAssets(t *testing
 	updated, err = EnsureReleaseCompanionRuntime(context.Background(), "checkers", "v2.2.0")
 	if err != nil || updated || requests != 4 {
 		t.Fatalf("cached updated=%v requests=%d err=%v", updated, requests, err)
+	}
+}
+
+func TestEnsureReleaseCompanionRuntimePrefersEmbeddedAssets(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TATER_MWW_DIR", dir)
+	runtimeBody := []byte("\x7fELFembedded-target-runtime")
+	ortBody := []byte("\x7fELFembedded-onnx-runtime")
+	melONNXBody := []byte("embedded-onnx-melspectrogram")
+	embedONNXBody := []byte("embedded-onnx-embedding")
+
+	previousRuntimeSHA := ReleaseRuntimeSHA256
+	previousORTSHA := ReleaseORTRuntimeSHA256
+	previousMelONNXSHA := openWakeWordMelspecONNXSHA
+	previousEmbedONNXSHA := openWakeWordEmbedONNXSHA
+	previousRuntime := embeddedReleaseRuntime
+	previousORT := embeddedReleaseORTRuntime
+	previousMelspec := embeddedReleaseMelspectrogram
+	previousEmbedding := embeddedReleaseEmbedding
+	t.Cleanup(func() {
+		ReleaseRuntimeSHA256 = previousRuntimeSHA
+		ReleaseORTRuntimeSHA256 = previousORTSHA
+		openWakeWordMelspecONNXSHA = previousMelONNXSHA
+		openWakeWordEmbedONNXSHA = previousEmbedONNXSHA
+		embeddedReleaseRuntime = previousRuntime
+		embeddedReleaseORTRuntime = previousORT
+		embeddedReleaseMelspectrogram = previousMelspec
+		embeddedReleaseEmbedding = previousEmbedding
+	})
+	ReleaseRuntimeSHA256 = companionDigest(runtimeBody)
+	ReleaseORTRuntimeSHA256 = companionDigest(ortBody)
+	openWakeWordMelspecONNXSHA = companionDigest(melONNXBody)
+	openWakeWordEmbedONNXSHA = companionDigest(embedONNXBody)
+	embeddedReleaseRuntime = runtimeBody
+	embeddedReleaseORTRuntime = ortBody
+	embeddedReleaseMelspectrogram = melONNXBody
+	embeddedReleaseEmbedding = embedONNXBody
+
+	updated, err := EnsureReleaseCompanionRuntime(context.Background(), "biscuit", "v2.3.0")
+	if err != nil || !updated {
+		t.Fatalf("embedded updated=%v err=%v", updated, err)
+	}
+	for name, expected := range map[string][]byte{
+		RuntimeFilename:               runtimeBody,
+		OWWORTRuntimeFilename:         ortBody,
+		OWWMelspectrogramONNXFilename: melONNXBody,
+		OWWEmbeddingONNXFilename:      embedONNXBody,
+	} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(body) != string(expected) {
+			t.Fatalf("installed embedded %s = %q, err=%v", name, body, err)
+		}
 	}
 }
 

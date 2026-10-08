@@ -56,11 +56,11 @@ func expectedORTRuntimeSHA256() string {
 }
 
 // EnsureReleaseCompanionRuntime lets an ordinary executable-only OTA cross the
-// one-time native ABI boundary safely. Factory images already contain these
-// files; an older installation downloads the exact target runtime from the
-// matching GitHub release before anything dlopen's it. Failure does not stop
-// the daemon: MWW-only remains available, explicitly selected OWW modes fail
-// closed, and the next boot retries the verified download.
+// one-time native ABI boundary safely. Biscuit release executables carry these
+// files inside the OTA itself and install them before anything dlopen's them.
+// Older or developer builds retain the verified download path as a fallback.
+// Failure does not stop the daemon: MWW-only remains available, explicitly
+// selected OWW modes fail closed, and the next boot retries installation.
 func EnsureReleaseCompanionRuntime(parent context.Context, target, version string) (bool, error) {
 	expectedRuntime := strings.ToLower(strings.TrimSpace(ReleaseRuntimeSHA256))
 	target = strings.ToLower(strings.TrimSpace(target))
@@ -87,6 +87,11 @@ func EnsureReleaseCompanionRuntime(parent context.Context, target, version strin
 		fileDigestMatches(melONNXPath, openWakeWordMelspecONNXSHA) &&
 		fileDigestMatches(embedONNXPath, openWakeWordEmbedONNXSHA) {
 		return false, nil
+	}
+	if available, updated, err := installEmbeddedReleaseCompanion(
+		dir, expectedRuntime, expectedORT,
+	); available {
+		return updated, err
 	}
 
 	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
@@ -142,6 +147,54 @@ func EnsureReleaseCompanionRuntime(parent context.Context, target, version strin
 		}
 	}
 	return true, nil
+}
+
+func installEmbeddedReleaseCompanion(dir, expectedRuntime, expectedORT string) (bool, bool, error) {
+	assets := []struct {
+		name       string
+		body       []byte
+		digest     string
+		mode       os.FileMode
+		requireELF bool
+	}{
+		{RuntimeFilename, embeddedReleaseRuntime, expectedRuntime, 0o755, true},
+		{OWWORTRuntimeFilename, embeddedReleaseORTRuntime, expectedORT, 0o755, true},
+		{OWWMelspectrogramONNXFilename, embeddedReleaseMelspectrogram, openWakeWordMelspecONNXSHA, 0o644, false},
+		{OWWEmbeddingONNXFilename, embeddedReleaseEmbedding, openWakeWordEmbedONNXSHA, 0o644, false},
+	}
+	available := false
+	for _, asset := range assets {
+		available = available || len(asset.body) > 0
+	}
+	if !available {
+		return false, false, nil
+	}
+	for _, asset := range assets {
+		if len(asset.body) == 0 {
+			return true, false, fmt.Errorf("microwakeword: embedded release asset %s is missing", asset.name)
+		}
+		if asset.requireELF && (len(asset.body) < 4 || string(asset.body[:4]) != "\x7fELF") {
+			return true, false, fmt.Errorf("microwakeword: embedded release asset %s is not ELF", asset.name)
+		}
+		if !digestMatches(asset.body, asset.digest) {
+			return true, false, fmt.Errorf("microwakeword: embedded release asset %s failed SHA-256 verification", asset.name)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return true, false, fmt.Errorf("microwakeword: create runtime directory: %w", err)
+	}
+	updated := false
+	for _, asset := range assets {
+		path := filepath.Join(dir, asset.name)
+		if fileDigestMatches(path, asset.digest) {
+			continue
+		}
+		if err := atomicPackageWrite(path, asset.body, asset.mode); err != nil {
+			return true, updated, err
+		}
+		updated = true
+	}
+	return true, updated, nil
 }
 
 func fileDigestMatches(path, expected string) bool {

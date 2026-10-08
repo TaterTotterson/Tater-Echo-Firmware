@@ -134,6 +134,7 @@ jobs:
       - name: Compile Tater Echo userspace
         run: |
           mkdir -p device/build
+          device/prepare_biscuit_release_wake_assets.sh
           build_unix=$(date +%s)
           runtime_sha=$(sha256sum device/build/microwakeword-android/libtater_microwakeword.so | awk '{print $1}')
           ort_sha=$(sha256sum device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | awk '{print $1}')
@@ -141,7 +142,7 @@ jobs:
             -e CGO_LDFLAGS="-Wl,--hash-style=both" \
             -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
             -v "${{ github.workspace }}/device":/sdk \
-            tater-echo-compiler -c "cd /sdk && go build -tags server \
+            tater-echo-compiler -c "cd /sdk && go build -tags server,releaseassets \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix \
@@ -200,6 +201,8 @@ jobs:
             echo '::error::Biscuit firmware is missing its wake-runtime digest'; exit 1; }
           strings device/build/server | grep -qF "$ort_sha" || {
             echo '::error::Biscuit firmware is missing its ONNX Runtime digest'; exit 1; }
+          test "$(stat -c %s device/build/server)" -gt 30000000 || {
+            echo '::error::Biscuit OTA does not contain its self-contained wake assets'; exit 1; }
           if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
             echo '::error::Biscuit firmware requires unavailable pcm_readi'; exit 1;
           fi

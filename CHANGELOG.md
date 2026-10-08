@@ -4,6 +4,11 @@
 
 ### What's Changed
 
+- Biscuit OTA updates now carry the verified wake runtime, ONNX Runtime, and
+  shared openWakeWord feature models inside the A/B firmware executable. Tater
+  therefore repairs older installations without requiring the Echo to reach
+  GitHub directly, preventing Dual and OWW modes from remaining unavailable
+  after an otherwise successful update.
 - Checkers now presents Sendspin music on its right-side canvas with album
   artwork, track and artist details, playback progress, and a live spectrum in
   the existing Tater visual style. Awareness notifications and timers retain
