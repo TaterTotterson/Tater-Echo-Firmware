@@ -1,9 +1,11 @@
 #!/bin/sh
 set -eu
 
-# Build the Linux/musl ARMv7 ONNX Runtime used by both Checkers and Rook.
-# Microsoft does not publish a Linux ARM32 binary, so the release workflow
-# builds a reduced, XNNPACK-enabled runtime from a hash-pinned source archive.
+# Prepare the Linux/musl ARMv7 ONNX Runtime used by both Checkers and Rook.
+# Microsoft does not publish a Linux ARM32 binary. Tater's first verified build
+# is published as an immutable, hash-pinned release seed so routine workflows
+# can restore it in seconds; the reproducible source build remains below as an
+# explicit fallback.
 
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/.." && pwd)
@@ -27,6 +29,10 @@ operators=$script_dir/onnxruntime/required_operators.config
 # but the cache-warming job intentionally uses this pinned default.
 image=${TATER_ALPINE_ARMV7_IMAGE:-alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}
 build_jobs=${TATER_ORT_BUILD_JOBS:-2}
+seed_runtime_url=https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/download/v2.2.0/tater-echo-checkers-v2.2.0-onnxruntime.so
+seed_runtime_sha=a0954d59f1f99ae7d3d8823dadf8acf63f2044d8b7bca838edf2e454f9325941
+seed_header_url=https://raw.githubusercontent.com/microsoft/onnxruntime/v1.19.2/include/onnxruntime/core/session/onnxruntime_c_api.h
+seed_header_sha=f4047359e0dbf2078fff0e88bfb806de3c2b8891a895ac0dffdc3dfcb8bb489b
 
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -53,6 +59,29 @@ download_model() {
     mv "$partial" "$path"
 }
 
+download_verified() {
+    url=$1
+    path=$2
+    digest=$3
+    label=$4
+    if [ -s "$path" ] && [ "$(sha256_file "$path")" = "$digest" ]; then
+        return 0
+    fi
+    partial=$path.partial
+    rm -f "$partial"
+    if ! curl -fL "$url" -o "$partial"; then
+        echo "could not download $label release seed" >&2
+        rm -f "$partial"
+        return 1
+    fi
+    if [ "$(sha256_file "$partial")" != "$digest" ]; then
+        echo "$label release seed failed SHA-256 verification" >&2
+        rm -f "$partial"
+        return 1
+    fi
+    mv "$partial" "$path"
+}
+
 mkdir -p "$work" "$header_dir" "$asset_dir"
 download_model melspectrogram.onnx ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f
 download_model embedding_model.onnx 70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f
@@ -64,6 +93,24 @@ if [ -s "$output" ] && [ -s "$header_dir/onnxruntime_c_api.h" ]; then
     }
     echo "Linux ARMv7 ONNX Runtime already prepared: $output"
     exit 0
+fi
+
+if [ "${TATER_ORT_FORCE_SOURCE_BUILD:-0}" != 1 ]; then
+    echo "Restoring Tater's verified Linux ARMv7 ONNX Runtime release seed..."
+    if download_verified "$seed_runtime_url" "$output" "$seed_runtime_sha" "ONNX Runtime" && \
+            download_verified "$seed_header_url" "$header_dir/onnxruntime_c_api.h" \
+                "$seed_header_sha" "ONNX Runtime header"; then
+        chmod 0755 "$output"
+        chmod 0644 "$header_dir/onnxruntime_c_api.h"
+        file "$output" | grep -q '32-bit.*ARM' || {
+            echo "seeded ONNX Runtime is not Linux ARMv7: $output" >&2
+            exit 1
+        }
+        echo "Prepared Linux ARMv7 ONNX Runtime $version from verified release seed: $output"
+        exit 0
+    fi
+    rm -f "$output" "$header_dir/onnxruntime_c_api.h"
+    echo "Verified release seed was unavailable; falling back to the pinned source build." >&2
 fi
 
 if [ ! -s "$archive" ] || [ "$(sha256_file "$archive")" != "$source_sha" ]; then
