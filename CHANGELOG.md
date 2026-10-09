@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.2
+
+### What's Changed
+
+- Made the Echo Show 5 Sendspin audio visualizer substantially smoother by
+  keeping the static now-playing artwork and details cached while redrawing
+  only the live audio motion.
+- Increased the visualizer's frame rate, movement range, and response speed so
+  its taller spectrum bars follow music cleanly without the previous lag.
+
 ## v2.3.1
 
 ### What's Changed
