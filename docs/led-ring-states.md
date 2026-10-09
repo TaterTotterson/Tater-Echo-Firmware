@@ -1,9 +1,9 @@
 # LED ring behavior
 
-Biscuit renders animations locally so motion stays smooth when Wi-Fi latency or
-Tater event-loop timing varies. Tater chooses the semantic state and animation;
-the firmware owns frame timing, brightness limits, direction overlays, and the
-disconnect timeout.
+Biscuit and Radar render animations locally so motion stays smooth when Wi-Fi
+latency or Tater event-loop timing varies. Tater chooses the semantic state and
+animation; the firmware owns frame timing, brightness limits, direction
+overlays, and the disconnect timeout.
 
 ## Priority
 
@@ -65,6 +65,13 @@ syllable movement without flicker:
 Firmware clamps all received values to safe ranges. Audio is measured from the
 actual local playback path, including stereo/group replies; the animation is
 not a synthetic timer.
+
+During Sendspin playback, Biscuit and Radar use the track's brighter primary
+or accent color and synchronized visualizer data at a ring-sized 10 Hz rate.
+The default `music_bars` effect maps the twelve received spectrum bins directly
+onto the twelve LEDs; the other music effects use synchronized loudness plus
+beat/peak events. If a controller omits those roles, the effects fall back to
+local speaker RMS and the LED color selected in Tater.
 
 ## Setup recovery
 

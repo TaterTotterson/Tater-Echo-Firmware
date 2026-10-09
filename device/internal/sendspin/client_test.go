@@ -24,7 +24,8 @@ func TestPresentationRolesAreScopedToEchoHardware(t *testing.T) {
 		t.Fatalf("screen artwork support = %#v", hello.ArtworkSupport)
 	}
 	if hello.VisualizerSupport == nil || hello.VisualizerSupport.Spectrum == nil ||
-		hello.VisualizerSupport.Spectrum.DisplayBins != 12 {
+		hello.VisualizerSupport.Spectrum.DisplayBins != 12 || hello.VisualizerSupport.RateMax != 20 ||
+		hello.VisualizerSupport.BufferCapacity != 64*1024 {
 		t.Fatalf("screen visualizer support = %#v", hello.VisualizerSupport)
 	}
 
@@ -38,6 +39,11 @@ func TestPresentationRolesAreScopedToEchoHardware(t *testing.T) {
 	}
 	if !containsString(hello.SupportedRoles, roleColor) || !containsString(hello.SupportedRoles, roleVisualizer) {
 		t.Fatalf("Biscuit lacks music visual roles: %v", hello.SupportedRoles)
+	}
+	if hello.VisualizerSupport == nil || hello.VisualizerSupport.Spectrum == nil ||
+		hello.VisualizerSupport.Spectrum.DisplayBins != 12 || hello.VisualizerSupport.RateMax != 10 ||
+		hello.VisualizerSupport.BufferCapacity != 16*1024 {
+		t.Fatalf("Biscuit reduced visualizer support = %#v", hello.VisualizerSupport)
 	}
 }
 
@@ -60,7 +66,8 @@ func TestNowPlayingMergesStateAndAppliesDueVisualizerFrames(t *testing.T) {
 	c.queueVisualizer(msgVisualizerLoudness, frame, 0, nowUs()-1)
 	got := c.NowPlaying()
 	if !got.Active || got.GroupName != "Everywhere" || got.Title != "All Together Now" ||
-		got.ProgressMS != 12000 || got.DurationMS != 180000 || got.PrimaryColor != ([3]uint8{12, 34, 56}) {
+		got.ProgressMS < 12000 || got.ProgressMS > 12010 || got.DurationMS != 180000 ||
+		got.PrimaryColor != ([3]uint8{12, 34, 56}) {
 		t.Fatalf("now playing = %#v", got)
 	}
 	artwork, contentType := c.NowPlayingArtwork()

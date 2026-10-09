@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.5.1
+
+### What's Changed
+
+- Biscuit and Radar now request Sendspin track colors and a reduced 10 Hz
+  visualizer whenever they act as music players. A selected music animation
+  uses the brighter track palette, synchronized loudness and beat/peak events,
+  while the new default, Level Bars, maps Sendspin's twelve spectrum bins
+  directly to the twelve ring LEDs. No Animation still keeps the ring dark,
+  and local speaker levels remain the fallback when a controller does not
+  publish visualizer data.
+
 ## v2.5.0
 
 ### What's Changed

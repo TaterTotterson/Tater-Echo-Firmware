@@ -228,9 +228,10 @@ func (s *Server) getAudioLevel() float64 {
 	return math.Float64frombits(s.audioLevel.Load())
 }
 
-// SetMusicVisualizer supplies Sendspin's synchronized loudness and transient
-// markers. loudness is the protocol's 0..1 encoding of -60..0 dBFS.
-func (s *Server) SetMusicVisualizer(loudness float64, transient bool) {
+// SetMusicVisualizer supplies Sendspin's synchronized loudness, transient
+// markers, and optional twelve-bin spectrum. loudness is the protocol's 0..1
+// encoding of -60..0 dBFS.
+func (s *Server) SetMusicVisualizer(loudness float64, transient bool, spectrum []float64) {
 	loudness = math.Max(0, math.Min(1, loudness))
 	db := loudness*60 - 60
 	linear := math.Pow(10, db/20)
@@ -240,6 +241,18 @@ func (s *Server) SetMusicVisualizer(loudness float64, transient bool) {
 	if transient {
 		s.musicPulseAt.Store(now)
 	}
+	if len(spectrum) > 0 {
+		s.musicSpectrumMu.Lock()
+		for index := range s.musicSpectrum {
+			value := 0.0
+			if index < len(spectrum) {
+				value = clampUnit(spectrum[index])
+			}
+			s.musicSpectrum[index] = value
+		}
+		s.musicSpectrumMu.Unlock()
+		s.musicSpectrumAt.Store(now)
+	}
 }
 
 // ClearMusicVisualizer immediately hands music effects back to the local
@@ -248,6 +261,7 @@ func (s *Server) SetMusicVisualizer(loudness float64, transient bool) {
 func (s *Server) ClearMusicVisualizer() {
 	s.musicVisualAt.Store(0)
 	s.musicPulseAt.Store(0)
+	s.musicSpectrumAt.Store(0)
 }
 
 func (s *Server) musicAnimationLevel() float64 {
@@ -263,10 +277,24 @@ func (s *Server) musicAnimationLevel() float64 {
 	return level
 }
 
+func (s *Server) musicAnimationSpectrum() ([12]float64, bool) {
+	updated := s.musicSpectrumAt.Load()
+	if updated == 0 || time.Since(time.Unix(0, updated)) > 350*time.Millisecond {
+		return [12]float64{}, false
+	}
+	s.musicSpectrumMu.RLock()
+	values := s.musicSpectrum
+	s.musicSpectrumMu.RUnlock()
+	return values, true
+}
+
 type nativeAnimState struct {
 	sparkle       [12]float64
 	voiceRadius   float64
 	musicEnvelope float64
+	musicSpectrum [12]float64
+	musicBars     [12]float64
+	hasSpectrum   bool
 }
 
 // runNativeAnim renders the same named effects exposed for the other Tater
@@ -302,6 +330,7 @@ func (s *Server) runNativeAnim(gen int, spec AnimSpec) {
 		level := s.getAudioLevel()
 		if spec.Music {
 			level = s.musicAnimationLevel()
+			state.musicSpectrum, state.hasSpectrum = s.musicAnimationSpectrum()
 		}
 		frame := nativeAnimationFrame(spec.Pattern, tick, color, level, s.directionLEDIndex(), &state)
 		s.SetLEDs(frame, boolPtr(false))
@@ -492,6 +521,18 @@ func nativeAnimationFrame(pattern string, tick int, color [3]uint8, audioLevel f
 		envelope := updateMusicEnvelope(audioLevel, state)
 		fillLevels(levels, 0.015+envelope*0.985)
 	case "music_bars":
+		if state.hasSpectrum {
+			for index, target := range state.musicSpectrum {
+				target = 0.012 + clampUnit(target)*0.988
+				alpha := 0.28
+				if target > state.musicBars[index] {
+					alpha = 0.64
+				}
+				state.musicBars[index] += (target - state.musicBars[index]) * alpha
+				levels[index] = state.musicBars[index]
+			}
+			break
+		}
 		envelope := updateMusicEnvelope(audioLevel, state)
 		height := envelope * 6
 		for pair := 0; pair < 6; pair++ {

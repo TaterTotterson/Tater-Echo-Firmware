@@ -38,11 +38,12 @@ func startSendspinPlayer(spk *speaker.PcmSpeaker, volume *server.Server, deviceI
 		Product:   "Tater Echo " + strings.TrimSpace(target),
 		Version:   version,
 		Screen:    isScreenTarget(target),
-		// Do not request Sendspin's high-rate remote visualizer stream on Echo
-		// hardware. It competes with the always-on OWW feature pipeline even
-		// while the player is idle. Screens still receive metadata/artwork, and
-		// every target keeps locally derived playback-reactive animation.
-		Visuals: false,
+		// Ring targets request track color plus a reduced 10 Hz visualizer. That
+		// is enough for twelve LEDs while avoiding the 20 Hz screen workload that
+		// previously competed with their always-on OWW feature pipeline. The
+		// player still negotiates these roles once; selecting No Animation keeps
+		// the ring dark without requiring a Sendspin reconnect.
+		Visuals: isRingTarget(target),
 		// Tater's ESP satellites are immediately usable by Tater and Music
 		// Assistant. Echoes follow the same no-extra-pairing behavior.
 		Unpaired: true,
@@ -183,7 +184,7 @@ func runSendspinPoll(spk *speaker.PcmSpeaker, ring *server.Server, screen *show.
 		}
 		transient := presentation.BeatSequence != beatSequence || presentation.PeakSequence != peakSequence
 		if presentationActive && presentation.HasLoudness {
-			ring.SetMusicVisualizer(presentation.Loudness, transient)
+			ring.SetMusicVisualizer(presentation.Loudness, transient, presentation.Spectrum)
 		}
 		beatSequence, peakSequence = presentation.BeatSequence, presentation.PeakSequence
 		showMusic := shouldShowSendspinMusicVisual(target, player.Active(), ring.LinkDown(), ringing, currentState)

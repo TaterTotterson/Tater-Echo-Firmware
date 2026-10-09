@@ -32,9 +32,10 @@ type Config struct {
 	Port      int
 	Product   string
 	Version   string
-	// Screen enables metadata and album artwork for Checkers/Rook. Visuals
-	// enables the lightweight color and synchronized visualizer roles used by
-	// screen animations and Biscuit's music ring.
+	// Screen enables metadata and album artwork plus the full 20 Hz visualizer
+	// for Checkers/Rook. Visuals enables color and a reduced 10 Hz visualizer
+	// for Biscuit/Radar rings; it keeps the synchronized music response without
+	// asking those wake-word devices to process the screen-rate stream.
 	Screen  bool
 	Visuals bool
 	// Unpaired lets a server play without pairing, once its operator has
@@ -380,9 +381,15 @@ func (c *Client) hello() clientHello {
 	}
 	if c.cfg.Visuals || c.cfg.Screen {
 		roles = append(roles, roleColor, roleVisualizer)
+		bufferCapacity := 64 * 1024
+		rateMax := 20
+		if c.cfg.Visuals && !c.cfg.Screen {
+			bufferCapacity = 16 * 1024
+			rateMax = 10
+		}
 		visualizer = &visualizerSupport{
-			BufferCapacity: 64 * 1024,
-			RateMax:        20,
+			BufferCapacity: bufferCapacity,
+			RateMax:        rateMax,
 			Types:          []string{"loudness", "beat", "spectrum", "peak"},
 			Spectrum: &visualizerSpectrumSupport{
 				DisplayBins: 12, Scale: "mel", MinHz: 60, MaxHz: 16000,

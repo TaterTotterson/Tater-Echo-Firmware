@@ -2452,7 +2452,7 @@ var nativeVisuals = struct {
 	thinking:   "sparkle",
 	tool:       "ping_pong",
 	replying:   "audio_glow",
-	music:      "audio_glow",
+	music:      "music_bars",
 }
 
 func applyNativeVisualSettings(values, applied map[string]any) {

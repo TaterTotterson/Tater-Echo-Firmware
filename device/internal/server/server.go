@@ -69,6 +69,12 @@ type Server struct {
 	musicLevel    atomic.Uint64
 	musicVisualAt atomic.Int64
 	musicPulseAt  atomic.Int64
+	// musicSpectrum is Sendspin's twelve-bin mel spectrum for the twelve ring
+	// LEDs. The timestamp is separate from loudness so a server that only
+	// publishes scalar levels retains the existing local-level animations.
+	musicSpectrumMu sync.RWMutex
+	musicSpectrum   [12]float64
+	musicSpectrumAt atomic.Int64
 
 	// directionAngle is the most recent beamformer bearing. Listening uses
 	// it for the directional marker; voice_ring reuses it so a response can

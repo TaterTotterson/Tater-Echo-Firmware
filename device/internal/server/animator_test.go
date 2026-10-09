@@ -211,7 +211,7 @@ func TestMusicVisualizerUsesSynchronizedLevelWithLocalFallback(t *testing.T) {
 	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
 		t.Fatalf("music level without Sendspin visualizer = %.4f, want local .08", got)
 	}
-	s.SetMusicVisualizer(1, false)
+	s.SetMusicVisualizer(1, false, nil)
 	if got := s.musicAnimationLevel(); got < .99 {
 		t.Fatalf("full-scale Sendspin visualizer = %.4f, want near 1", got)
 	}
@@ -219,10 +219,37 @@ func TestMusicVisualizerUsesSynchronizedLevelWithLocalFallback(t *testing.T) {
 	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
 		t.Fatalf("cleared Sendspin visualizer = %.4f, want local fallback .08", got)
 	}
-	s.SetMusicVisualizer(1, false)
+	s.SetMusicVisualizer(1, false, nil)
 	s.musicVisualAt.Store(time.Now().Add(-time.Second).UnixNano())
 	if got := s.musicAnimationLevel(); math.Abs(got-.08) > .001 {
 		t.Fatalf("stale Sendspin visualizer = %.4f, want local fallback .08", got)
+	}
+}
+
+func TestMusicVisualizerCarriesTwelveBandSpectrum(t *testing.T) {
+	s := &Server{}
+	s.SetMusicVisualizer(.5, true, []float64{0, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1, 2})
+	got, ok := s.musicAnimationSpectrum()
+	if !ok {
+		t.Fatal("fresh Sendspin spectrum was unavailable")
+	}
+	if got[0] != 0 || math.Abs(got[5]-.5) > .001 || got[10] != 1 || got[11] != 1 {
+		t.Fatalf("stored spectrum = %#v", got)
+	}
+
+	state := nativeAnimState{musicSpectrum: got, hasSpectrum: true}
+	frame := nativeAnimationFrame("music_bars", 0, [3]uint8{255, 90, 31}, 0, 0, &state)
+	pixelLevel := func(index int) int {
+		return int(frame[index].R) + int(frame[index].G) + int(frame[index].B)
+	}
+	if pixelLevel(10) <= pixelLevel(5) || pixelLevel(5) <= pixelLevel(0) {
+		t.Fatalf("music bars do not follow spectrum bins: low=%d mid=%d high=%d",
+			pixelLevel(0), pixelLevel(5), pixelLevel(10))
+	}
+
+	s.ClearMusicVisualizer()
+	if _, ok := s.musicAnimationSpectrum(); ok {
+		t.Fatal("cleared Sendspin spectrum remained available")
 	}
 }
 
