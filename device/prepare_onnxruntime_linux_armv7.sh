@@ -27,7 +27,7 @@ operators=$script_dir/onnxruntime/required_operators.config
 # Keep the default build environment immutable so the final runtime can be
 # safely shared through GitHub's cache. Release jobs may still override this,
 # but the cache-warming job intentionally uses this pinned default.
-image=${TATER_ALPINE_ARMV7_IMAGE:-alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}
+image=${TATER_ALPINE_ARMV7_IMAGE:-public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}
 build_jobs=${TATER_ORT_BUILD_JOBS:-2}
 seed_runtime_url=https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/download/v2.2.0/tater-echo-checkers-v2.2.0-onnxruntime.so
 seed_runtime_sha=a0954d59f1f99ae7d3d8823dadf8acf63f2044d8b7bca838edf2e454f9325941

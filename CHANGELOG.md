@@ -11,6 +11,9 @@
   directly to the twelve ring LEDs. No Animation still keeps the ring dark,
   and local speaker levels remain the fallback when a controller does not
   publish visualizer data.
+- Release builders now fetch the pinned Alpine ARMv7 image through Amazon's
+  public container mirror, avoiding Docker Hub's anonymous pull limit across
+  the Biscuit, Radar, Checkers, and Rook jobs.
 
 ## v2.5.0
 

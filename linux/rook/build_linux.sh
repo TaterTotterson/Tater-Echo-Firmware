@@ -51,7 +51,7 @@ output_dir=$(dirname "$output")
 mkdir -p "$device/build/rook" "$output_dir"
 output=$(CDPATH= cd -- "$output_dir" && pwd)/$(basename "$output")
 
-image=${TATER_ALPINE_ARMV7_IMAGE:-alpine:3.22}
+image=${TATER_ALPINE_ARMV7_IMAGE:-public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}
 cache_root=${TATER_BUILD_CACHE:-/tmp/tater-rook-build-cache}
 mkdir -p "$cache_root/go-build" "$cache_root/go-mod"
 

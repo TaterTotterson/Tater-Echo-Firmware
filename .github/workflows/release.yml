@@ -19,8 +19,8 @@ on:
         default: 'v0.0.0-dev'
 
 env:
-  ALPINE_ARMV7_DIGEST: >-
-    sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+  ALPINE_ARMV7_IMAGE: >-
+    public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 jobs:
   onnxruntime-armv7:
@@ -77,7 +77,7 @@ jobs:
           - target: biscuit
             name: Echo Dot 2 (biscuit)
           - target: radar
-            name: Echo 2 (radar, experimental)
+            name: Echo 2 (radar)
 
     steps:
       - name: Checkout
@@ -185,7 +185,7 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v "${{ github.workspace }}/emos":/emos \
             -v "${{ github.workspace }}/emos/build/bb":/out -w /tmp \
-            alpine@${{ env.ALPINE_ARMV7_DIGEST }} \
+            ${{ env.ALPINE_ARMV7_IMAGE }} \
             sh /emos/tools/build-busybox.sh /out
 
       - name: Verify release inputs
@@ -351,7 +351,7 @@ jobs:
 
       - name: Build Checkers Tater Linux image
         env:
-          TATER_ALPINE_ARMV7_IMAGE: alpine@${{ env.ALPINE_ARMV7_DIGEST }}
+          TATER_ALPINE_ARMV7_IMAGE: ${{ env.ALPINE_ARMV7_IMAGE }}
         run: |
           linux/checkers/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
@@ -494,7 +494,7 @@ jobs:
 
       - name: Build Rook boot and root filesystem
         env:
-          TATER_ALPINE_ARMV7_IMAGE: alpine@${{ env.ALPINE_ARMV7_DIGEST }}
+          TATER_ALPINE_ARMV7_IMAGE: ${{ env.ALPINE_ARMV7_IMAGE }}
         run: |
           python3 linux/rook/build_boot.py \
             --lineage-zip linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip \
