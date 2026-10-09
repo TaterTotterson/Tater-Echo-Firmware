@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/Binozo/GoTinyAlsa v1.0.3
 	github.com/flynn/noise v1.1.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/gvalkov/golang-evdev v0.0.0-20220815104727-7e27d6ce89b6

@@ -32,31 +32,12 @@ const (
 	// scorer's bounded inference lag, while discarding unrelated room audio.
 	maxConfirmationFrames = 24
 
-	// In dual mode MWW is a recall-oriented gate, not the final authority.
-	// OWW still has to agree on the exact winning-beam audio, so retaining the
-	// single-model 0.98/5 policy only hides valid phrases from the second stage.
-	DualStageMWWMaxThreshold = 0.95
-	DualStageMWWMaxWindow    = 3
-
 	// A local wake arriving later than this is worse than a miss: it can open
 	// the microphone after the user has already moved on.
 	MaximumConfirmationAge = 3 * time.Second
 )
 
 var ErrCompanionBusy = errors.New("microwakeword: openWakeWord confirmation already in progress")
-
-func DualStageMWWGate(threshold float64, slidingWindow int, closeMiss float64) (float64, int, float64) {
-	if threshold <= 0 || threshold > DualStageMWWMaxThreshold {
-		threshold = DualStageMWWMaxThreshold
-	}
-	if slidingWindow <= 0 || slidingWindow > DualStageMWWMaxWindow {
-		slidingWindow = DualStageMWWMaxWindow
-	}
-	if closeMiss > threshold {
-		closeMiss = threshold
-	}
-	return threshold, slidingWindow, closeMiss
-}
 
 func ConfirmationIsStale(capturedAt, now time.Time) bool {
 	return capturedAt.IsZero() || now.Sub(capturedAt) > MaximumConfirmationAge

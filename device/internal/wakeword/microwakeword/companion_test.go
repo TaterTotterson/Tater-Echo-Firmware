@@ -214,18 +214,6 @@ func TestCompanionVerifierRequiresOWWAgreement(t *testing.T) {
 	}
 }
 
-func TestDualStageMWWGateMakesOnlyFirstStageRecallFriendly(t *testing.T) {
-	threshold, window, closeMiss := DualStageMWWGate(0.98, 5, 0.81)
-	if threshold != 0.95 || window != 3 || closeMiss != 0.81 {
-		t.Fatalf("dual gate = %.2f/%d/%.2f, want 0.95/3/0.81", threshold, window, closeMiss)
-	}
-
-	threshold, window, closeMiss = DualStageMWWGate(0.90, 2, 0.88)
-	if threshold != 0.90 || window != 2 || closeMiss != 0.88 {
-		t.Fatalf("already-sensitive gate changed = %.2f/%d/%.2f", threshold, window, closeMiss)
-	}
-}
-
 func TestConfirmationFreshnessRejectsOnlyStaleResults(t *testing.T) {
 	now := time.Now()
 	if ConfirmationIsStale(now.Add(-MaximumConfirmationAge+time.Millisecond), now) {

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,7 +12,10 @@ import (
 
 // ShadowQueueChunks bounds work waiting behind the inference goroutine. The
 // microphone supplies 80 ms chunks, so eight entries permit a short scheduler
-// stall without allowing old audio to build up indefinitely.
+// stall without allowing old audio to build up indefinitely. When the queue is
+// full, enqueue replaces its oldest pending chunk with the newest microphone
+// audio. Wake detection is latency-sensitive; scoring stale audio after the
+// phrase has ended is worse than skipping one internal frame.
 const ShadowQueueChunks = 8
 
 // DefaultShadowRefractory collapses the adjacent above-threshold windows from
@@ -72,6 +76,7 @@ type ShadowScorer struct {
 	onCross          func(score float32, at time.Time)
 	onCloseMiss      func(score float32, at time.Time)
 	info             string
+	affinityCPU      int
 
 	ch   chan shadowChunk
 	quit chan struct{}
@@ -106,8 +111,9 @@ func NewShadowScorer(engine Engine, threshold float32, windowSize int,
 // transport. CloseMiss may be called for several adjacent probability windows;
 // consumers are responsible for collapsing one utterance into one report.
 type ShadowHooks struct {
-	Cross     func(score float32, at time.Time)
-	CloseMiss func(score float32, at time.Time)
+	Cross       func(score float32, at time.Time)
+	CloseMiss   func(score float32, at time.Time)
+	AffinityCPU *int
 }
 
 // NewShadowScorerWithHooks is NewShadowScorer with close-miss observations.
@@ -164,9 +170,13 @@ func newShadowScorer(engine Engine, windowSize int, closeMiss float32,
 		onCross:          hooks.Cross,
 		onCloseMiss:      hooks.CloseMiss,
 		info:             engine.Info(),
+		affinityCPU:      -1,
 		ch:               make(chan shadowChunk, ShadowQueueChunks),
 		quit:             make(chan struct{}),
 		done:             make(chan struct{}),
+	}
+	if hooks.AffinityCPU != nil {
+		s.affinityCPU = *hooks.AffinityCPU
 	}
 	s.generation.Store(1)
 	go s.run()
@@ -232,6 +242,18 @@ func (s *ShadowScorer) enqueue(pcm []int16, capturedAt time.Time) {
 	select {
 	case s.ch <- chunk:
 	default:
+		// Latest audio wins. Discard one pending chunk before retrying rather
+		// than discarding the newly captured audio and letting inference work
+		// farther behind real time. A concurrent consumer may free the queue
+		// between these selects; either outcome remains non-blocking.
+		select {
+		case <-s.ch:
+		default:
+		}
+		select {
+		case s.ch <- chunk:
+		default:
+		}
 		s.mu.Lock()
 		s.stats.Drops++
 		s.mu.Unlock()
@@ -291,9 +313,16 @@ func (s *ShadowScorer) Close() {
 
 func (s *ShadowScorer) run() {
 	defer close(s.done)
+	if s.affinityCPU >= 0 {
+		// This goroutine owns the pinned OS thread until it exits. Returning a
+		// pinned thread to the Go scheduler could constrain unrelated work.
+		runtime.LockOSThread()
+		if err := pinCurrentThread(s.affinityCPU); err != nil {
+			s.recordErr(fmt.Errorf("microwakeword: pin scorer to CPU %d: %w", s.affinityCPU, err))
+		}
+	}
 	var (
 		generation uint64
-		lastSeq    uint64
 		scores     = make([]float32, 0, s.window)
 	)
 	reset := func(nextGeneration uint64) bool {
@@ -302,7 +331,6 @@ func (s *ShadowScorer) run() {
 			return false
 		}
 		generation = nextGeneration
-		lastSeq = 0
 		scores = scores[:0]
 		s.mu.Lock()
 		s.ready = false
@@ -336,15 +364,18 @@ func (s *ShadowScorer) run() {
 		// reset that did not recover a discontinuity.
 		if generation == 0 {
 			generation = chunk.generation
-			lastSeq = chunk.sequence - 1
 		}
-		if chunk.generation != generation || (lastSeq != 0 && chunk.sequence != lastSeq+1) {
+		if chunk.generation != generation {
 			if !reset(chunk.generation) {
 				continue
 			}
 		}
-		lastSeq = chunk.sequence
-
+		// A sequence gap here is an internal inference-queue overflow, not a
+		// microphone stream replacement. Resetting OWW for one missed 80 ms
+		// frame erases its accumulated feature history and makes short wake
+		// phrases practically impossible under momentary scheduler pressure.
+		// Keep the streaming state; an actual capture restart changes the
+		// generation above and still performs a hard reset.
 		updateMax(&s.maxQueueMs, time.Since(chunk.capturedAt).Milliseconds())
 		s.mu.Lock()
 		s.stats.Chunks++

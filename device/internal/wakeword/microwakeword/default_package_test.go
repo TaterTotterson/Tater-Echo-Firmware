@@ -28,6 +28,20 @@ func TestEnsureEmbeddedDefaultPackageInstallsPairedModelsAndRepairsDamage(t *tes
 	if paired, err := PairedCompanionPackage(DefaultPackage); err != nil || paired != DefaultPackage {
 		t.Fatalf("paired=%q err=%v", paired, err)
 	}
+	bundleBody, err := os.ReadFile(filepath.Join(dir, defaultBundleFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := ParseWakeBundle(bundleBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.OpenWakeWord.RecommendedPatience != 2 ||
+		bundle.OpenWakeWord.RecommendedConfirmationPatience != 2 {
+		t.Fatalf("embedded OWW patience = %d/%d, want 2/2",
+			bundle.OpenWakeWord.RecommendedPatience,
+			bundle.OpenWakeWord.RecommendedConfirmationPatience)
+	}
 	updated, err = EnsureEmbeddedDefaultPackage()
 	if err != nil || updated {
 		t.Fatalf("cached install updated=%v err=%v", updated, err)

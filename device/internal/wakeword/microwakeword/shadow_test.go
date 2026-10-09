@@ -192,6 +192,39 @@ func TestShadowPushNeverBlocksAndCountsDrops(t *testing.T) {
 	}
 }
 
+func TestShadowQueueOverflowKeepsNewestAudioWithoutResettingStream(t *testing.T) {
+	engine := &fakeShadowEngine{delay: 10 * time.Millisecond}
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	for value := 0; value < ShadowQueueChunks*10; value++ {
+		s.Push([]int16{int16(value)})
+	}
+	newest := int16(ShadowQueueChunks*10 - 1)
+	waitShadow(t, "newest queued audio", func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		for _, input := range engine.inputs {
+			if len(input) == 1 && input[0] == newest {
+				return true
+			}
+		}
+		return false
+	})
+	engine.mu.Lock()
+	resets := engine.resetCount
+	engine.mu.Unlock()
+	if resets != 0 {
+		t.Fatalf("queue overflow reset streaming model %d time(s)", resets)
+	}
+	if st := s.Drain(); st.Drops == 0 || st.Resets != 0 {
+		t.Fatalf("unexpected overflow stats: %+v", st)
+	}
+}
+
 func TestShadowResetDoesNotSpliceStreams(t *testing.T) {
 	engine := &fakeShadowEngine{batches: [][]float32{{0.9}, {0.9}, {0.9}}}
 	s, err := NewShadowScorer(engine, 0.5, 2, 0, nil)

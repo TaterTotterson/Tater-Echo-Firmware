@@ -28,6 +28,7 @@ const (
 	SpeakerAmp     = "Ext_Speaker_Amp_Switch"
 	PlaybackVolume = "PCM Playback Volume" // DAC digital volume, 0.5dB steps, 127 = 0dB
 	HPDriverGain   = "HP Driver Gain Volume"
+	DacMux         = "Audio_DacMux_Setting" // jack line level (#566); measured on FireOS 5 only
 )
 
 // targetProfile contains only controls whose meaning differs between boards.

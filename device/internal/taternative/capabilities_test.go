@@ -13,6 +13,9 @@ func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
 		t.Fatalf("biscuit BLE capabilities = %#v", got)
 	}
+	if got["ble_gatt"] != true || got["ble_gatt_pairing"] != true {
+		t.Fatalf("biscuit active GATT capabilities = %#v", got)
+	}
 	for _, key := range []string{"openwakeword", "wake_detector_selection", "dual_wake_confirmation"} {
 		if got[key] != true {
 			t.Errorf("biscuit %s = %#v, want true", key, got[key])
@@ -43,6 +46,9 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
 		t.Fatal("checkers did not advertise BLE presence scanning")
 	}
+	if got["ble_gatt"] != true || got["ble_gatt_pairing"] != true {
+		t.Fatal("checkers did not advertise its exclusive raw-controller GATT backend")
+	}
 	if got["microphone"] != true || got["speaker"] != true {
 		t.Fatal("checkers lost shared satellite capabilities")
 	}
@@ -59,6 +65,9 @@ func TestCapabilitiesForTargetDescribesRookScreenAndCamera(t *testing.T) {
 		if got[key] != false {
 			t.Errorf("rook %s = %#v, want false", key, got[key])
 		}
+	}
+	if got["ble_gatt"] != true || got["ble_gatt_pairing"] != true {
+		t.Fatal("rook did not advertise its BlueZ active-GATT backend")
 	}
 	if got["camera_snapshot"] != true || got["camera_snapshot_version"] != 1 {
 		t.Fatal("rook did not advertise its on-demand Room Vision camera")

@@ -2,7 +2,27 @@ package tinyapi
 
 // #include <stdio.h>
 // #include <stdlib.h>
+// #include <signal.h>
+// #include <pthread.h>
 // #include <tinyalsa/asoundlib.h>
+//
+// // pcm_write with every signal blocked on the calling thread.
+// //
+// // A blocking WRITEI ioctl interrupted by a signal returns the frames it had
+// // written so far, and pcm_write ignores that count and reports success: the
+// // rest of the buffer is silently dropped. Measured on two Echo Dots,
+// // 2026-10-01: ~15 writes an hour cut short by 16-864 frames, each an audible
+// // click (EchoMuse #707). Go's runtime and exiting child processes both send
+// // signals to arbitrary threads. Blocked signals do not interrupt the wait
+// // and are delivered when the mask is restored, a few ms later.
+// static int em_pcm_write_whole(struct pcm *pcm, const void *data, unsigned int count) {
+//     sigset_t all, old;
+//     sigfillset(&all);
+//     pthread_sigmask(SIG_BLOCK, &all, &old);
+//     int r = pcm_write(pcm, data, count);
+//     pthread_sigmask(SIG_SETMASK, &old, NULL);
+//     return r;
+// }
 import "C"
 import (
 	"errors"
@@ -92,7 +112,7 @@ func (d *PcmDevice) ReadFrames(buffer []byte, size int) error {
 }
 
 func (d *PcmDevice) WriteFrames(buffer []byte, size int) error {
-	framesWritten := C.uint(C.pcm_write(d.pcmDevice, unsafe.Pointer(&buffer[0]), C.uint(size)))
+	framesWritten := C.uint(C.em_pcm_write_whole(d.pcmDevice, unsafe.Pointer(&buffer[0]), C.uint(size)))
 	if framesWritten != 0 {
 		// Error occurred
 		return errors.New(fmt.Sprintf("couldn't write frames: %s", d.GetError()))

@@ -8,11 +8,39 @@ import "testing"
 
 func TestJackRoutingMutesInternalDriverWhenSomethingIsPluggedIn(t *testing.T) {
 	got := jackRouting(true)
-	if len(got) != 2 {
-		t.Fatalf("want 2 writes, got %d: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("want 3 writes, got %d: %+v", len(got), got)
 	}
 	if got[0].Ctl != ctlSpeakerAmp || got[0].Args[0] != "Off" {
 		t.Errorf("internal amp must be Off with a plug in, got ctl %s = %v", got[0].Ctl, got[0].Args)
+	}
+}
+
+func TestJackRoutingSetsTheDacMuxForEachPosition(t *testing.T) {
+	for _, tc := range []struct {
+		inserted bool
+		want     string
+	}{
+		{inserted: true, want: dacMuxJack},
+		{inserted: false, want: dacMuxInternal},
+	} {
+		var got *mixerWrite
+		writes := jackRouting(tc.inserted)
+		for i := range writes {
+			if writes[i].Ctl == ctlDacMux {
+				got = &writes[i]
+				break
+			}
+		}
+		if got == nil {
+			t.Fatalf("inserted=%v: DAC mux was not written", tc.inserted)
+		}
+		if len(got.Args) != 1 || got.Args[0] != tc.want {
+			t.Errorf("inserted=%v: want DAC mux %s, got %v", tc.inserted, tc.want, got.Args)
+		}
+	}
+	if ctlDacMux != "Audio_DacMux_Setting" {
+		t.Errorf("wrong DAC mux control name %q", ctlDacMux)
 	}
 }
 
@@ -91,6 +119,7 @@ func TestJackRoutingDriftRewritesOnlyWhatMoved(t *testing.T) {
 	drift := jackRoutingDrift(true, map[string]string{
 		ctlSpeakerAmp:   "Off",
 		ctlHPDriverGain: "0",
+		ctlDacMux:       dacMuxJack,
 	})
 	if len(drift) != 1 || drift[0].Ctl != ctlHPDriverGain {
 		t.Fatalf("want only the gain rewritten, got %+v", drift)
@@ -101,8 +130,20 @@ func TestJackRoutingDriftIsSilentWhenNothingMoved(t *testing.T) {
 	if d := jackRoutingDrift(true, map[string]string{
 		ctlSpeakerAmp:   "Off",
 		ctlHPDriverGain: hpGainJack,
+		ctlDacMux:       dacMuxJack,
 	}); len(d) != 0 {
 		t.Errorf("want no writes on a correct codec, got %+v", d)
+	}
+}
+
+func TestJackRoutingDriftRestoresTheDacMux(t *testing.T) {
+	drift := jackRoutingDrift(true, map[string]string{
+		ctlSpeakerAmp:   "Off",
+		ctlHPDriverGain: hpGainJack,
+		ctlDacMux:       dacMuxInternal,
+	})
+	if len(drift) != 1 || drift[0].Ctl != ctlDacMux || drift[0].Args[0] != dacMuxJack {
+		t.Fatalf("want only the DAC mux restored to %s, got %+v", dacMuxJack, drift)
 	}
 }
 
@@ -132,6 +173,9 @@ func TestRookJackRoutingUsesItsSpeakerGainAndDisablesAmpForHeadphones(t *testing
 	} {
 		got := map[string][]string{}
 		for _, write := range jackRoutingForTarget("rook", test.inserted) {
+			if write.Ctl == ctlDacMux {
+				t.Fatalf("rook inserted=%v: Biscuit DAC mux leaked into Rook route", test.inserted)
+			}
 			got[write.Ctl] = write.Args
 		}
 		if got[ctlHPDriverGain][0] != test.gain || got[ctlHPDriverGain][1] != test.gain ||
