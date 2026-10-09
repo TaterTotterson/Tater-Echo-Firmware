@@ -52,37 +52,6 @@ Target metadata used by Tater and the release builds lives in
 - Captive-portal Wi-Fi and Tater pairing, followed by verified A/B OTA updates
   with automatic rollback.
 
-## Meshtastic through an Echo satellite
-
-Tater v1.4.0 and Echo firmware v2.4.0 add active Bluetooth GATT on Biscuit,
-Checkers, and Rook. The Meshtastic Core from the Tater Shop can therefore use a
-nearby Echo's Bluetooth radio instead of a separate external bridge.
-
-### Requirements
-
-- Tater v1.4.0 or newer.
-- Tater Echo Firmware v2.4.0 or newer on at least one supported Echo.
-- The current Meshtastic Core from the Tater Shop.
-- Bluetooth enabled on the Meshtastic radio and its six-digit Bluetooth PIN.
-
-### Pair a radio
-
-1. In Tater, install or update **Meshtastic Core** from the Tater Shop.
-2. Open the Core and select **Bluetooth Pairing**.
-3. Scan for radios. The results intentionally show compatible Meshtastic
-   devices rather than every unrelated BLE advertisement in the room.
-4. Select the radio and enter its six-digit Bluetooth PIN. This is the radio's
-   PIN, not the Echo setup code or Wi-Fi password.
-5. Confirm the radio and satellite in the **Current Connection** card. Use
-   **Unpair** there when the bond should be removed.
-
-The PIN is used only during pairing and is not stored. The resulting bond keys
-are stored on the satellite and restore the encrypted Bluetooth connection
-after a reboot. GATT commands travel over the existing authenticated Tater
-satellite link; the firmware does not expose a separate Bluetooth-control
-network listener. Passive BLE presence forwarding remains available alongside
-active connections.
-
 ## Install Biscuit — Echo Dot 2
 
 Start with an Echo Dot 2nd Generation (`biscuit`) that has completed the
