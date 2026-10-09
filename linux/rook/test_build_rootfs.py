@@ -1,4 +1,6 @@
 import importlib.util
+import hashlib
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -15,6 +17,99 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class RookRootfsTests(unittest.TestCase):
+    def test_factory_wifi_mac_is_set_before_link_up(self):
+        source = """#!/bin/sh
+t5_ipv6_private() { :; }
+# t5_wifi_up <module.ko> <wpa.conf>: test fixture
+t5_wifi_up() {
+\tt5_ipv6_private wlan0
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do
+\t\tsleep 1
+\tdone
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "lib/techo5-lib.sh"
+            library.parent.mkdir(parents=True)
+            library.write_text(source)
+            build_rootfs.common.patch_rook_wifi_mac(root)
+            patched = library.read_text()
+            subprocess.run(["sh", "-n", str(library)], check=True)
+
+        self.assertIn('case "$(cat "/sys/class/net/$iface/address"', patched)
+        self.assertIn("00:90:4c:*", patched)
+        self.assertIn("/proc/idme/mac_addr", patched)
+        self.assertIn("/proc/idme/serial", patched)
+        self.assertIn("mac=02$digest", patched)
+        self.assertIn("?[13579bdf]*", patched)
+        self.assertLess(
+            patched.index("until tater_rook_wifi_mac wlan0"),
+            patched.index("until ip link set wlan0 up"),
+        )
+
+    def test_wifi_mac_guard_uses_factory_then_serial_fallback(self):
+        source = """#!/bin/sh
+# t5_wifi_up <module.ko> <wpa.conf>: test fixture
+t5_wifi_up() {
+\tt5_ipv6_private wlan0
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do :; done
+}
+"""
+        cases = (
+            ("00:90:4c:1a:09:00", "50DCE7EE6568", "G070RQ07747500K5", "50:dc:e7:ee:65:68"),
+            ("00:90:4c:1a:09:00", "00904C1A0900", "G070RQ07747500K5", None),
+            ("40:a9:cf:18:d4:b7", "50DCE7EE6568", "G070RQ07747500K5", "unchanged"),
+        )
+        for current, factory, serial, expected in cases:
+            with self.subTest(current=current, factory=factory):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    library = root / "lib/techo5-lib.sh"
+                    library.parent.mkdir(parents=True)
+                    library.write_text(source)
+                    build_rootfs.common.patch_rook_wifi_mac(root)
+
+                    sys_net = root / "sys/class/net"
+                    (sys_net / "wlan0").mkdir(parents=True)
+                    (sys_net / "wlan0/address").write_text(current + "\n")
+                    idme = root / "proc/idme"
+                    idme.mkdir(parents=True)
+                    (idme / "mac_addr").write_text(factory + "\n")
+                    (idme / "serial").write_text(serial + "\n")
+                    library.write_text(
+                        library.read_text()
+                        .replace("/sys/class/net", str(sys_net))
+                        .replace("/proc/idme", str(idme))
+                    )
+                    ip_log = root / "ip.log"
+                    harness = root / "run.sh"
+                    harness.write_text("""#!/bin/sh
+log() { :; }
+pidof() { return 1; }
+ip() { printf '%s\\n' "$*" >> "$TATER_TEST_IP_LOG"; }
+. "$TATER_TEST_LIBRARY"
+tater_rook_wifi_mac wlan0
+""")
+                    environment = os.environ.copy()
+                    environment.update({
+                        "TATER_TEST_IP_LOG": str(ip_log),
+                        "TATER_TEST_LIBRARY": str(library),
+                    })
+                    result = subprocess.run(
+                        ["sh", str(harness)], capture_output=True, text=True, env=environment,
+                    )
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    commands = ip_log.read_text() if ip_log.exists() else ""
+                    if expected == "unchanged":
+                        self.assertEqual("", commands)
+                    else:
+                        if expected is None:
+                            digest = hashlib.sha256(serial.encode()).hexdigest()[:10]
+                            raw = "02" + digest
+                            expected = ":".join(raw[i:i + 2] for i in range(0, 12, 2))
+                        self.assertIn(f"link set wlan0 address {expected}", commands)
+
     def test_both_linux_targets_build_and_package_native_onnx_runtime(self):
         repo = Path(__file__).resolve().parents[2]
         for target in ("checkers", "rook"):
@@ -187,10 +282,12 @@ log "boot script done"
             with (
                 patch.object(build_rootfs.common, "sha256", return_value=build_rootfs.BASE_SHA256),
                 patch.object(build_rootfs.common, "SETUP_PACKAGES", []),
+                patch.object(build_rootfs.common, "patch_rook_wifi_mac") as wifi_patch,
                 patch.object(build_rootfs.common, "patch_boot"),
                 patch.object(build_rootfs.common, "patch_slotctl"),
             ):
                 build_rootfs.build(args)
+            wifi_patch.assert_called_once()
             with tarfile.open(output, "r:gz") as archive:
                 camera = archive.extractfile("./usr/local/bin/tater-camera").read()
                 inittab = archive.extractfile("./etc/inittab").read().decode()

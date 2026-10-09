@@ -37,6 +37,11 @@ Implemented:
   files are included in the distributable image. Routine Tater OTA updates
   the daemon and renderer in application A/B slots on `/data`; a platform
   rootfs update still requires USB/rescue.
+- Rook's Broadcom driver exposes the same `00:90:4c:1a:09:00` placeholder on
+  every unit. The rootfs now replaces only that placeholder with the factory
+  address from `/proc/idme/mac_addr` after firmware load but before association
+  and DHCP. A stable serial-derived local address is used only if IDME is
+  missing or invalid, allowing multiple Spots to remain online together.
 - A read-only TWRP preflight that verifies the device codename, the Rook
   boot/recovery/system partition numbers, and complete local backups before
   the installer is permitted to write anything.

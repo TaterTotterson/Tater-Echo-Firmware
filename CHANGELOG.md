@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.5.2
+
+### What's Changed
+
+- Fixed multi-Spot installations by replacing Rook's shared Broadcom
+  `00:90:4c:1a:09:00` placeholder with each unit's factory Wi-Fi address before
+  association and DHCP. Invalid or missing IDME MAC data receives a stable,
+  locally administered address derived from the unit serial instead.
+- Kept the correction Rook-specific and guarded: Checkers, Radar, Biscuit, and
+  any interface that already has a device-specific address are unchanged.
+  Existing Rook installations can receive the corrected root filesystem by
+  reinstalling the factory bundle from TWRP with
+  `--reinstall-existing-tater`; this resets pairing and local settings.
+
 ## v2.5.1
 
 ### What's Changed

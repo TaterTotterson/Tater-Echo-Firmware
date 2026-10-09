@@ -43,6 +43,11 @@ factory backups. Reinstallation erases the existing Tater setup, settings,
 and A/B slots; pair the Spot again afterward. Do not use this option on a
 newly unlocked device.
 
+Rook factory bundles beginning with v2.5.2 also correct the Broadcom driver's
+shared `00:90:4c:1a:09:00` Wi-Fi placeholder before association and DHCP. An
+already-installed Spot needs this `--reinstall-existing-tater` path because
+routine application OTA does not replace the Linux root filesystem.
+
 During factory installation, the rescue stage shows an upright, round-safe
 `INSTALLING TATER` screen. This screen is part of the boot image, so an
 application OTA cannot change it on an already-installed Spot. The first boot

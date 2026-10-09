@@ -28,6 +28,50 @@ SETUP_PACKAGES = (
 )
 
 
+ROOK_WIFI_MAC_FUNCTION = r'''# tater_rook_wifi_mac <interface>: Rook's Broadcom driver initially exposes the
+# same placeholder address on every Spot. Replace only that known placeholder
+# with the unit's factory IDME address before association and DHCP. A serial-
+# derived locally administered address is a stable last resort for damaged or
+# incomplete IDME data. Other targets and already-correct addresses are no-ops.
+tater_rook_wifi_mac() {
+	iface=$1
+	case "$(cat "/sys/class/net/$iface/address" 2>/dev/null)" in
+	00:90:4c:*) ;;
+	*) return 0 ;;
+	esac
+
+	mac=$(tr -dc '0-9A-Fa-f' 2>/dev/null < /proc/idme/mac_addr | tr 'A-F' 'a-f')
+	kind=factory
+	# Twelve hex digits, unicast, non-zero, and not the driver's placeholder.
+	case "$mac" in
+	000000000000|00904c1a0900|?[13579bdf]*) mac= ;;
+	esac
+	if [ ${#mac} -ne 12 ]; then
+		serial=$(tr -dc '0-9A-Za-z' 2>/dev/null < /proc/idme/serial)
+		digest=$(printf %s "$serial" | sha256sum 2>/dev/null | cut -c1-10 | tr -dc '0-9a-f')
+		if [ -n "$serial" ] && [ ${#digest} -eq 10 ]; then
+			mac=02$digest
+			kind="serial-derived fallback"
+		else
+			log "wifi: no valid factory identity; keeping the Broadcom placeholder"
+			return 0
+		fi
+	fi
+
+	# The firmware must be loaded but the link and supplicant must still be down.
+	pidof wpa_supplicant >/dev/null && return 0
+	ip link set "$iface" down 2>/dev/null
+	formatted=$(echo "$mac" | sed 's/../&:/g; s/:$//')
+	if ! ip link set "$iface" address "$formatted" 2>/tmp/ifmac.err; then
+		grep -qi busy /tmp/ifmac.err && return 1
+		log "wifi: $kind address refused: $(cat /tmp/ifmac.err)"
+		return 0
+	fi
+	log "wifi: $kind address set to $formatted"
+}
+'''
+
+
 def sha256(path: Path) -> str:
     value = hashlib.sha256()
     with path.open("rb") as source:
@@ -73,6 +117,36 @@ def setup_binary(cache: Path, name: str, digest: str, member: str, destination: 
         with source, destination.open("wb") as output:
             shutil.copyfileobj(source, output)
         destination.chmod(0o755)
+
+
+def patch_rook_wifi_mac(root: Path) -> None:
+    """Set Rook's per-unit Wi-Fi address after firmware load, before link-up."""
+    path = root / "lib/techo5-lib.sh"
+    contents = path.read_text()
+    function_marker = "\n# t5_wifi_up <module.ko> <wpa.conf>:"
+    if contents.count(function_marker) != 1 or "\ntater_rook_wifi_mac() {\n" in contents:
+        raise SystemExit("pinned Rook Wi-Fi library no longer has the expected setup function")
+    contents = contents.replace(
+        function_marker,
+        "\n" + ROOK_WIFI_MAC_FUNCTION + function_marker,
+        1,
+    )
+    link_up = "\tt5_ipv6_private wlan0\n\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
+    mac_before_link = (
+        "\tt5_ipv6_private wlan0\n"
+        "\t# bcmdhd needs its firmware loaded before accepting a MAC change,\n"
+        "\t# but the address must be unique before association and DHCP.\n"
+        "\tn=0; until tater_rook_wifi_mac wlan0; do\n"
+        "\t\tn=$((n+1)); [ $n -ge 15 ] && { "
+        "log \"wifi: factory address not set: $(cat /tmp/ifmac.err)\"; break; }\n"
+        "\t\tsleep 1\n"
+        "\tdone\n"
+        "\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
+    )
+    if contents.count(link_up) != 1:
+        raise SystemExit("pinned Rook Wi-Fi library no longer has the expected link-up sequence")
+    contents = contents.replace(link_up, mac_before_link, 1)
+    path.write_text(contents)
 
 
 def patch_boot(root: Path, *, target: str = "checkers") -> None:
