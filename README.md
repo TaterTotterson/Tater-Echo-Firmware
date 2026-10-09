@@ -26,7 +26,7 @@ installer on a similar-looking Echo from another generation.
 | Device | Target | Required unlock | Installed system | Factory | OTA |
 |---|---|---|---|---:|---:|
 | Echo Dot 2nd Generation (2016) | `biscuit` | amonet-biscuit v2.0.0 | Tater emOS | Yes | Yes |
-| Echo 2nd Generation (2017) | `radar` | amonet-radar v1.0.0 | Tater emOS | Experimental | Experimental |
+| Echo 2nd Generation (2017) | `radar` | amonet-radar v1.0.0 | Tater emOS | Yes | Yes |
 | Echo Show 5 1st Generation (2019) | `checkers` | amonet-checkers v2.0.1+ | Tater Linux | Yes | Yes |
 | Echo Spot 1st Generation (2017) | `rook` | amonet-rook v2.0.0 | Tater Linux | Yes | Yes |
 
@@ -79,8 +79,7 @@ stock in `boot_b`, verifies every write, and saves a private recovery image in
 
 ## Install Radar — Echo 2
 
-Radar support is experimental. Start with the 2017 full-size Echo 2
-(`radar`, model XC56PY) after completing the
+Start with the 2017 full-size Echo 2 (`radar`, model XC56PY) after completing the
 [amonet-radar v1.0.0 unlock, Fire OS 6 dual-slot flash, and root procedure](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-2nd-gen-2017-radar.4801290/).
 The device has no external USB socket; keep normal power connected and use the
 D+, D-, and GND pads documented in that guide.
@@ -100,8 +99,8 @@ D+, D-, and GND pads documented in that guide.
 The installer uses Radar's own Fire OS 6 kernel and device trees, preserves
 stock in `boot_b`, and resolves the canonical `boot_a`/`boot_b` slots after
 amonet restores the GPT rather than selecting stale `_x` aliases. Keep the
-private recovery backup and USB connection available while this target remains
-experimental.
+private recovery backup and USB connection available for its hardware-specific
+recovery path.
 
 From a normal emOS boot, the USB-console command `/init recovery` is the
 dependable route back to TWRP.
@@ -172,8 +171,8 @@ check rolls back to the preceding working slot.
 |---|---|
 | `tater-echo-biscuit-vX.Y.Z-factory.tar.gz` | Complete Biscuit installation or recovery |
 | `tater-echo-biscuit-vX.Y.Z-ota.bin` | Biscuit OTA update |
-| `tater-echo-radar-vX.Y.Z-factory.tar.gz` | Experimental Radar installation or recovery |
-| `tater-echo-radar-vX.Y.Z-ota.bin` | Experimental Radar OTA update |
+| `tater-echo-radar-vX.Y.Z-factory.tar.gz` | Complete Radar installation or recovery |
+| `tater-echo-radar-vX.Y.Z-ota.bin` | Radar OTA update |
 | `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Complete Checkers USB conversion |
 | `tater-echo-checkers-vX.Y.Z-ota.tar.gz` | Checkers application OTA |
 | `tater-echo-rook-vX.Y.Z-factory.tar.gz` | Complete Rook USB conversion |
@@ -209,7 +208,7 @@ Technical references:
   audio hardware
 - [`docs/radar-hardware.md`](docs/radar-hardware.md) — live Radar partition,
   audio, privacy, and factory-build measurements
-- [`factory/radar/README.md`](factory/radar/README.md) — experimental Radar
+- [`factory/radar/README.md`](factory/radar/README.md) — Radar
   install and recovery contract
 - [`docs/checkers.md`](docs/checkers.md) — Checkers hardware and native Linux
   integration
