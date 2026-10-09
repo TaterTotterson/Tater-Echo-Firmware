@@ -129,9 +129,24 @@ type Snapshot struct {
 // Command is a bounded request from the local screen. Only actions explicitly
 // handled by cmd/server.go have an effect.
 type Command struct {
-	Protocol int    `json:"protocol"`
-	Type     string `json:"type"`
-	Action   string `json:"action"`
+	Protocol    int                `json:"protocol"`
+	Type        string             `json:"type"`
+	Action      string             `json:"action"`
+	Diagnostics *ScreenDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// ScreenDiagnostics is a low-rate performance sample from the native display
+// process. It is sent over the existing loopback socket and exposed in the
+// satellite status so display performance can be diagnosed without SSH.
+type ScreenDiagnostics struct {
+	FPS          float64 `json:"fps"`
+	RenderAvgMS  float64 `json:"render_avg_ms"`
+	RenderMaxMS  float64 `json:"render_max_ms"`
+	PresentAvgMS float64 `json:"present_avg_ms"`
+	PresentMaxMS float64 `json:"present_max_ms"`
+	RotateAvgMS  float64 `json:"rotate_avg_ms"`
+	PanAvgMS     float64 `json:"pan_avg_ms"`
+	UpdatedAtMS  int64   `json:"updated_at_ms"`
 }
 
 type client struct {

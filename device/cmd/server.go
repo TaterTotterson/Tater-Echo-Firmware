@@ -651,6 +651,7 @@ func main() {
 		}
 		deviceName := sendspinName
 		room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
+		var screenDiagnostics atomic.Pointer[show.ScreenDiagnostics]
 		if isScreenTarget(client.FirmwareTarget) {
 			screen := show.New(show.DefaultAddress, show.Snapshot{
 				Phase: "offline", DeviceName: deviceName, Room: room,
@@ -660,6 +661,11 @@ func main() {
 				switch command.Action {
 				case "screen.ready":
 					// The complete current snapshot was already sent on accept.
+				case "screen.diagnostics":
+					if command.Diagnostics != nil {
+						next := *command.Diagnostics
+						screenDiagnostics.Store(&next)
+					}
 				case "intercom.start":
 					if nativeClient != nil && !s.IsMuted() && !s.LinkDown() {
 						nativeClient.StartIntercom()
@@ -893,6 +899,9 @@ func main() {
 				}
 				if angle, ok := s.Direction(); ok {
 					status["doa_deg"] = math.Round(angle*10) / 10
+				}
+				if diagnostics := screenDiagnostics.Load(); diagnostics != nil {
+					status["display"] = *diagnostics
 				}
 				return status
 			},

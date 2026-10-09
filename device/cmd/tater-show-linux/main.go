@@ -88,7 +88,17 @@ func (client *socketClient) run(ctx context.Context) {
 }
 
 func (client *socketClient) send(action string) {
-	command := show.Command{Protocol: show.ProtocolVersion, Type: "command", Action: action}
+	client.sendCommand(show.Command{Protocol: show.ProtocolVersion, Type: "command", Action: action})
+}
+
+func (client *socketClient) sendDiagnostics(diagnostics show.ScreenDiagnostics) {
+	client.sendCommand(show.Command{
+		Protocol: show.ProtocolVersion, Type: "command", Action: "screen.diagnostics",
+		Diagnostics: &diagnostics,
+	})
+}
+
+func (client *socketClient) sendCommand(command show.Command) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.writer == nil {
@@ -159,6 +169,8 @@ type renderer struct {
 	musicLevelsAt     time.Time
 	musicLevelsMedia  string
 	musicLevelsReady  bool
+	checkersMusicBase *image.RGBA
+	checkersMusicKey  string
 }
 
 const (
@@ -184,6 +196,11 @@ func timerStopBounds(width, height int) image.Rectangle {
 	return image.Rect(cx-145, pane.Max.Y-64, cx+145, pane.Max.Y)
 }
 
+func checkersMusicBarsBounds(width, height int) image.Rectangle {
+	pane := rightPane(width, height)
+	return image.Rect(pane.Min.X, 348, pane.Max.X, 430)
+}
+
 func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
 	accent := accentForTheme(r.state.Phase, r.state.DisplayTheme)
@@ -196,6 +213,22 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 		r.renderSpot(canvas, now, seconds, accent)
 		return
 	}
+	if r.canCacheCheckersMusic(now) {
+		key := r.checkersMusicCacheKey(now, accent)
+		if r.checkersMusicBase == nil || r.checkersMusicBase.Rect != canvas.Rect || key != r.checkersMusicKey {
+			r.checkersMusicBase = image.NewRGBA(canvas.Rect)
+			r.renderCheckers(r.checkersMusicBase, now, width, height, seconds, accent, false)
+			r.checkersMusicKey = key
+		}
+		draw.Draw(canvas, canvas.Rect, r.checkersMusicBase, canvas.Rect.Min, draw.Src)
+		r.drawCheckersMusicMotion(canvas, width, seconds, accent)
+		return
+	}
+	r.checkersMusicKey = ""
+	r.renderCheckers(canvas, now, width, height, seconds, accent, true)
+}
+
+func (r *renderer) renderCheckers(canvas *image.RGBA, now time.Time, width, height int, seconds float64, accent color.RGBA, musicMotion bool) {
 	if r.state.Phase != "speaking" {
 		r.checkersReplyGlow = 0
 	}
@@ -234,12 +267,44 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 	circle(canvas, 49, 352, 6, statusColor)
 	r.text(canvas, 64, 359, fitTextToWidth(status, r.faces.regular[16], leftWidth-22), 16, false, color.RGBA{150, 163, 181, 255})
 
-	r.drawRight(canvas, now, width, height, seconds, accent)
+	r.drawRightWithMusicMotion(canvas, now, width, height, seconds, accent, musicMotion)
 	r.drawIntercom(canvas, accent)
 	if r.state.Muted {
 		roundedRect(canvas, image.Rect(width-174, 22, width-26, 58), 18, color.RGBA{101, 27, 38, 225})
 		r.text(canvas, width-153, 48, "MIC MUTED", 16, true, color.RGBA{255, 191, 197, 255})
 	}
+}
+
+func (r *renderer) canCacheCheckersMusic(now time.Time) bool {
+	phase := strings.ToLower(strings.TrimSpace(r.state.Phase))
+	return r.state.Connected && (phase == "" || phase == "idle" || phase == "playing") &&
+		r.state.Media != nil && r.state.Media.Active &&
+		(r.state.Timer == nil || !r.state.Timer.Active) && !r.notificationActive(now) &&
+		!r.intercomPressed && !r.timerPressed
+}
+
+func (r *renderer) checkersMusicCacheKey(now time.Time, accent color.RGBA) string {
+	media := r.state.Media
+	progress, duration := mediaProgress(media, now)
+	local := r.localTime(now)
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%t|%t|%v|%v|%d|%d|%s|%s",
+		mediaIdentity(media), media.PlaybackState, media.GroupName, r.state.Room,
+		r.state.Message, r.state.DeviceName, r.state.Connected, r.state.Muted,
+		accent, mediaDisplayColor(media, accent), progress/1000, duration/1000,
+		local.Format("200601021504"), r.state.AssistantName)
+}
+
+func (r *renderer) drawCheckersMusicMotion(canvas *image.RGBA, width int, seconds float64, accent color.RGBA) {
+	media := r.state.Media
+	if media == nil {
+		return
+	}
+	pane := rightPane(width, canvas.Rect.Dy())
+	musicColor := mediaDisplayColor(media, accent)
+	if r.mediaImage == nil {
+		r.drawMusicVisualizer(canvas, image.Rect(pane.Min.X, 75, pane.Min.X+202, 277), seconds, musicColor)
+	}
+	r.drawMusicBars(canvas, checkersMusicBarsBounds(width, canvas.Rect.Dy()), seconds, musicColor)
 }
 
 func (r *renderer) drawSetup(canvas *image.RGBA, seconds float64, accent color.RGBA) {
@@ -317,6 +382,10 @@ func (r *renderer) status(local time.Time) (string, string) {
 }
 
 func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height int, seconds float64, accent color.RGBA) {
+	r.drawRightWithMusicMotion(canvas, now, width, height, seconds, accent, true)
+}
+
+func (r *renderer) drawRightWithMusicMotion(canvas *image.RGBA, now time.Time, width, height int, seconds float64, accent color.RGBA, musicMotion bool) {
 	if r.notificationActive(now) {
 		r.drawNotification(canvas, now, width, seconds, accent)
 		return
@@ -326,7 +395,7 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 		return
 	}
 	if r.state.Media != nil && r.state.Media.Active {
-		r.drawNowPlaying(canvas, now, width, seconds, accent)
+		r.drawNowPlaying(canvas, now, width, seconds, accent, musicMotion)
 		return
 	}
 	if r.state.Weather != nil {
@@ -348,7 +417,7 @@ func (r *renderer) drawRight(canvas *image.RGBA, now time.Time, width, height in
 	r.drawOrb(canvas, (pane.Min.X+pane.Max.X)/2, 220, 120, seconds, accent)
 }
 
-func (r *renderer) drawNowPlaying(canvas *image.RGBA, now time.Time, width int, seconds float64, accent color.RGBA) {
+func (r *renderer) drawNowPlaying(canvas *image.RGBA, now time.Time, width int, seconds float64, accent color.RGBA, musicMotion bool) {
 	media := r.state.Media
 	pane := rightPane(width, canvas.Rect.Dy())
 	left, right := pane.Min.X, pane.Max.X
@@ -360,7 +429,7 @@ func (r *renderer) drawNowPlaying(canvas *image.RGBA, now time.Time, width int, 
 	roundedRect(canvas, art, 20, mix(color.RGBA{16, 23, 35, 255}, musicColor, .13))
 	if r.mediaImage != nil {
 		drawCover(canvas, art, r.mediaImage)
-	} else {
+	} else if musicMotion {
 		r.drawMusicVisualizer(canvas, art, seconds, musicColor)
 	}
 
@@ -393,7 +462,9 @@ func (r *renderer) drawNowPlaying(canvas *image.RGBA, now time.Time, width int, 
 		endWidth := font.MeasureString(r.faces.bold[14], end).Round()
 		r.text(canvas, right-endWidth, barY+28, end, 14, true, color.RGBA{141, 156, 178, 255})
 	}
-	r.drawMusicBars(canvas, image.Rect(left, 362, right, 430), seconds, musicColor)
+	if musicMotion {
+		r.drawMusicBars(canvas, checkersMusicBarsBounds(width, canvas.Rect.Dy()), seconds, musicColor)
+	}
 }
 
 func nowPlayingHeading(state show.Snapshot, media *show.Media) string {
@@ -440,6 +511,10 @@ func (r *renderer) drawMusicBars(canvas *image.RGBA, bounds image.Rectangle, sec
 	barWidth := max(3, (bounds.Dx()-gap*(count-1))/count)
 	for index := 0; index < count; index++ {
 		level := r.musicBinLevel(index, seconds)
+		// Sendspin spectrum bins intentionally retain headroom. Expand that
+		// useful range for the display so normal music travels farther without
+		// clipping quiet passages into a permanently tall baseline.
+		level = math.Min(1, .04+(level-.04)*1.30)
 		height := max(3, int(level*float64(bounds.Dy())))
 		x := bounds.Min.X + index*(barWidth+gap)
 		roundedRect(canvas, image.Rect(x, bounds.Max.Y-height, x+barWidth, bounds.Max.Y), barWidth/2,
@@ -475,9 +550,9 @@ func (r *renderer) updateMusicLevels(now time.Time, seconds float64) {
 	// the jagged stepping between incoming Sendspin spectrum frames.
 	for index := range r.musicLevels {
 		target := musicBinLevel(media, index, seconds, r.state.AudioLevel)
-		tau := 85 * time.Millisecond
+		tau := 70 * time.Millisecond
 		if target > r.musicLevels[index] {
-			tau = 28 * time.Millisecond
+			tau = 22 * time.Millisecond
 		}
 		alpha := 1 - math.Exp(-float64(delta)/float64(tau))
 		r.musicLevels[index] += (target - r.musicLevels[index]) * alpha
@@ -1140,11 +1215,22 @@ func main() {
 				presentMax = presented
 			}
 			if elapsed := time.Since(frameWindow); elapsed >= 15*time.Second {
+				diagnostics := show.ScreenDiagnostics{
+					FPS:          float64(frames) / elapsed.Seconds(),
+					RenderAvgMS:  float64(renderTotal/time.Duration(frames)) / float64(time.Millisecond),
+					RenderMaxMS:  float64(renderMax) / float64(time.Millisecond),
+					PresentAvgMS: float64(presentTotal/time.Duration(frames)) / float64(time.Millisecond),
+					PresentMaxMS: float64(presentMax) / float64(time.Millisecond),
+					RotateAvgMS:  float64(convertTotal/time.Duration(frames)) / float64(time.Millisecond),
+					PanAvgMS:     float64(panTotal/time.Duration(frames)) / float64(time.Millisecond),
+					UpdatedAtMS:  time.Now().UnixMilli(),
+				}
 				log.Printf("[display] %.1f fps, render avg/max %s/%s, present avg/max %s/%s (rotate %s, pan %s)",
-					float64(frames)/elapsed.Seconds(), (renderTotal / time.Duration(frames)).Round(time.Millisecond),
+					diagnostics.FPS, (renderTotal / time.Duration(frames)).Round(time.Millisecond),
 					renderMax.Round(time.Millisecond), (presentTotal / time.Duration(frames)).Round(time.Millisecond),
 					presentMax.Round(time.Millisecond), (convertTotal / time.Duration(frames)).Round(time.Millisecond),
 					(panTotal / time.Duration(frames)).Round(time.Millisecond))
+				client.sendDiagnostics(diagnostics)
 				frameWindow, frames, renderTotal, presentTotal, convertTotal, panTotal, renderMax, presentMax = time.Now(), 0, 0, 0, 0, 0, 0, 0
 			}
 		}

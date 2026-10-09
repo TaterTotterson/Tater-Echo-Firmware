@@ -11,6 +11,24 @@ import (
 	"time"
 )
 
+func TestScreenDiagnosticsCommandRoundTrips(t *testing.T) {
+	want := Command{
+		Protocol: ProtocolVersion, Type: "command", Action: "screen.diagnostics",
+		Diagnostics: &ScreenDiagnostics{FPS: 29.8, RenderAvgMS: 4.2, PresentAvgMS: 18.1, UpdatedAtMS: 1234},
+	}
+	body, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Command
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Diagnostics == nil || got.Diagnostics.FPS != want.Diagnostics.FPS || got.Diagnostics.PresentAvgMS != want.Diagnostics.PresentAvgMS {
+		t.Fatalf("screen diagnostics command = %#v, want %#v", got, want)
+	}
+}
+
 func TestSnapshotIsBoundedAndNormalized(t *testing.T) {
 	s := New("127.0.0.1:0", Snapshot{
 		Phase: "mystery", VolumePercent: 150, AudioLevel: -2,

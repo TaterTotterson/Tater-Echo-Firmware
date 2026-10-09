@@ -280,6 +280,46 @@ func TestMusicSpectrumUsesFastAttackAndSmoothRelease(t *testing.T) {
 	}
 }
 
+func TestCheckersMusicCachesStaticFrameButKeepsSpectrumLive(t *testing.T) {
+	faces, err := newFaceSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	media := &show.Media{
+		Active: true, PlaybackState: "playing", Title: "Garden Song", Artist: "The Taters",
+		ProgressMS: 10_000, DurationMS: 180_000, ProgressUpdatedAtUnixMS: now.UnixMilli(),
+		PlaybackSpeed: 1000, Spectrum: []float64{.1, .2, .3, .4},
+	}
+	r := &renderer{faces: faces, state: show.Snapshot{Phase: "idle", Connected: true, Media: media}}
+	first := image.NewRGBA(image.Rect(0, 0, 960, 480))
+	r.render(first, now)
+	base := r.checkersMusicBase
+	if base == nil {
+		t.Fatal("Checkers music did not cache its static frame")
+	}
+
+	media.Spectrum = []float64{.9, .8, .7, .6}
+	second := image.NewRGBA(first.Rect)
+	r.render(second, now.Add(33*time.Millisecond))
+	if r.checkersMusicBase != base {
+		t.Fatal("spectrum-only frame rebuilt the static Checkers music UI")
+	}
+	if bytes.Equal(first.Pix, second.Pix) {
+		t.Fatal("cached Checkers music frame stopped updating the live spectrum")
+	}
+
+	r.render(image.NewRGBA(first.Rect), now.Add(time.Second))
+	if r.checkersMusicBase == base {
+		t.Fatal("progress tick did not refresh the cached static music UI")
+	}
+	r.state.Phase = "listening"
+	r.render(image.NewRGBA(first.Rect), now.Add(1100*time.Millisecond))
+	if r.checkersMusicKey != "" {
+		t.Fatal("voice state incorrectly retained the music fast path")
+	}
+}
+
 func TestToolCallKeepsWeatherCardAndHasNoSpinningFallback(t *testing.T) {
 	faces, err := newFaceSet()
 	if err != nil {

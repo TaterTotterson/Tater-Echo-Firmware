@@ -502,21 +502,33 @@ func (c *Client) release(s *session) {
 
 // Status is what the controller shows. No secrets.
 type Status struct {
-	ClientID   string      `json:"clientId"`
-	State      string      `json:"state"` // listening | connected | playing | busy
-	Server     string      `json:"server,omitempty"`
-	Paired     bool        `json:"paired"`
-	PairedWith int         `json:"pairedWith"`
-	Group      string      `json:"group,omitempty"`
-	Synced     bool        `json:"synced"`
-	SyncErrUs  int64       `json:"syncErrUs,omitempty"`
-	BufferedMs int64       `json:"bufferedMs"`
-	Volume     int         `json:"volume"`
-	Muted      bool        `json:"muted"`
-	DelayMs    int         `json:"delayMs"`
-	Channel    string      `json:"channel"`
-	Unpaired   bool        `json:"unpairedAccess"`
-	Player     playerStats `json:"player"`
+	ClientID   string           `json:"clientId"`
+	State      string           `json:"state"` // listening | connected | playing | busy
+	Server     string           `json:"server,omitempty"`
+	Paired     bool             `json:"paired"`
+	PairedWith int              `json:"pairedWith"`
+	Group      string           `json:"group,omitempty"`
+	Synced     bool             `json:"synced"`
+	SyncErrUs  int64            `json:"syncErrUs,omitempty"`
+	BufferedMs int64            `json:"bufferedMs"`
+	Volume     int              `json:"volume"`
+	Muted      bool             `json:"muted"`
+	DelayMs    int              `json:"delayMs"`
+	Channel    string           `json:"channel"`
+	Unpaired   bool             `json:"unpairedAccess"`
+	Player     playerStats      `json:"player"`
+	Visualizer VisualizerStatus `json:"visualizer"`
+}
+
+type VisualizerStatus struct {
+	QueueDepth       int    `json:"queueDepth"`
+	Received         uint64 `json:"received"`
+	Applied          uint64 `json:"applied"`
+	SpectrumReceived uint64 `json:"spectrumReceived"`
+	SpectrumApplied  uint64 `json:"spectrumApplied"`
+	Revision         uint64 `json:"revision"`
+	LastReceiveAgeMS int64  `json:"lastReceiveAgeMs,omitempty"`
+	LastApplyAgeMS   int64  `json:"lastApplyAgeMs,omitempty"`
 }
 
 func (c *Client) Status() Status {
@@ -535,6 +547,21 @@ func (c *Client) Status() Status {
 	}
 	c.mu.Lock()
 	s, busy := c.admitted, c.extBusy
+	visualNow := time.Now()
+	st.Visualizer = VisualizerStatus{
+		QueueDepth:       len(c.presentation.visualQueue),
+		Received:         c.presentation.visualReceived,
+		Applied:          c.presentation.visualApplied,
+		SpectrumReceived: c.presentation.spectrumReceived,
+		SpectrumApplied:  c.presentation.spectrumApplied,
+		Revision:         c.presentation.VisualizerRevision,
+	}
+	if !c.presentation.lastVisualReceived.IsZero() {
+		st.Visualizer.LastReceiveAgeMS = max(int64(0), visualNow.Sub(c.presentation.lastVisualReceived).Milliseconds())
+	}
+	if !c.presentation.lastVisualApplied.IsZero() {
+		st.Visualizer.LastApplyAgeMS = max(int64(0), visualNow.Sub(c.presentation.lastVisualApplied).Milliseconds())
+	}
 	c.mu.Unlock()
 	if s != nil {
 		st.State = "connected"

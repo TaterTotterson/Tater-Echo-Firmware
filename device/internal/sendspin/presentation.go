@@ -42,6 +42,12 @@ type presentationState struct {
 	artworkContentType string
 	visualQueue        []queuedVisualizer
 	progressUpdatedAt  time.Time
+	visualReceived     uint64
+	visualApplied      uint64
+	spectrumReceived   uint64
+	spectrumApplied    uint64
+	lastVisualReceived time.Time
+	lastVisualApplied  time.Time
 }
 
 type queuedVisualizer struct {
@@ -88,6 +94,11 @@ func (c *Client) queueVisualizer(messageType byte, payload []byte, bins int, at 
 	c.presentation.visualQueue = append(c.presentation.visualQueue, queuedVisualizer{
 		at: at, messageType: messageType, payload: append([]byte(nil), payload...), bins: bins,
 	})
+	c.presentation.visualReceived++
+	if messageType == msgVisualizerSpectrum {
+		c.presentation.spectrumReceived++
+	}
+	c.presentation.lastVisualReceived = time.Now()
 	c.mu.Unlock()
 }
 
@@ -95,7 +106,13 @@ func (c *Client) advanceVisualizerLocked(now int64) {
 	count := 0
 	for count < len(c.presentation.visualQueue) && c.presentation.visualQueue[count].at <= now {
 		frame := c.presentation.visualQueue[count]
-		c.applyVisualizerLocked(frame.messageType, frame.payload, frame.bins)
+		if c.applyVisualizerLocked(frame.messageType, frame.payload, frame.bins) {
+			c.presentation.visualApplied++
+			if frame.messageType == msgVisualizerSpectrum {
+				c.presentation.spectrumApplied++
+			}
+			c.presentation.lastVisualApplied = time.Now()
+		}
 		count++
 	}
 	if count > 0 {
@@ -246,26 +263,26 @@ func (c *Client) clearArtwork() {
 	c.mu.Unlock()
 }
 
-func (c *Client) applyVisualizerLocked(messageType byte, payload []byte, bins int) {
+func (c *Client) applyVisualizerLocked(messageType byte, payload []byte, bins int) bool {
 	if len(payload) < 8 {
-		return
+		return false
 	}
 	data := payload[8:]
 	switch messageType {
 	case msgVisualizerLoudness:
 		if len(data) != 2 {
-			return
+			return false
 		}
 		c.presentation.Loudness = float64(binary.BigEndian.Uint16(data)) / math.MaxUint16
 		c.presentation.HasLoudness = true
 	case msgVisualizerBeat:
 		if len(data) != 1 {
-			return
+			return false
 		}
 		c.presentation.BeatSequence++
 	case msgVisualizerSpectrum:
 		if bins <= 0 || len(data) != bins*2 {
-			return
+			return false
 		}
 		c.presentation.Spectrum = make([]float64, bins)
 		for index := range bins {
@@ -273,14 +290,15 @@ func (c *Client) applyVisualizerLocked(messageType byte, payload []byte, bins in
 		}
 	case msgVisualizerPeak:
 		if len(data) != 1 {
-			return
+			return false
 		}
 		c.presentation.Peak = float64(data[0]) / math.MaxUint8
 		c.presentation.PeakSequence++
 	default:
-		return
+		return false
 	}
 	c.presentation.VisualizerRevision++
+	return true
 }
 
 func isJSONNull(raw json.RawMessage) bool {

@@ -67,6 +67,10 @@ func TestNowPlayingMergesStateAndAppliesDueVisualizerFrames(t *testing.T) {
 	if got.Loudness < .49 || got.Loudness > .51 || string(artwork) != string([]byte{1, 2, 3}) || contentType != "image/jpeg" {
 		t.Fatalf("presentation media/visualizer = %#v", got)
 	}
+	visualizer := c.Status().Visualizer
+	if visualizer.Received != 1 || visualizer.Applied != 1 || visualizer.QueueDepth != 0 || visualizer.Revision != 1 {
+		t.Fatalf("visualizer diagnostics = %#v, want one received and applied frame", visualizer)
+	}
 	c.mu.Lock()
 	c.presentation.progressUpdatedAt = time.Now().Add(-2 * time.Second)
 	c.mu.Unlock()
