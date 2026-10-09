@@ -25,10 +25,11 @@ import (
 // Control names on biscuit. Measured present, and unique, on the FireOS 5 and
 // FireOS 6 kernels (2026-09-17).
 const (
-	SpeakerAmp     = "Ext_Speaker_Amp_Switch"
-	PlaybackVolume = "PCM Playback Volume" // DAC digital volume, 0.5dB steps, 127 = 0dB
-	HPDriverGain   = "HP Driver Gain Volume"
-	DacMux         = "Audio_DacMux_Setting" // jack line level (#566); measured on FireOS 5 only
+	SpeakerAmp         = "Ext_Speaker_Amp_Switch"
+	InternalSpeakerAmp = "Speaker_Amp_Switch"
+	PlaybackVolume     = "PCM Playback Volume" // DAC digital volume, 0.5dB steps, 127 = 0dB
+	HPDriverGain       = "HP Driver Gain Volume"
+	DacMux             = "Audio_DacMux_Setting" // jack line level (#566); measured on FireOS 5 only
 )
 
 // targetProfile contains only controls whose meaning differs between boards.
@@ -38,18 +39,37 @@ const (
 type targetProfile struct {
 	playbackVolume string
 	playbackMax    int
-	speakerAmp     string
-	speakerOn      string
-	speakerOff     string
+	speakerAmps    []ampControl
 	adcMute        []string
+}
+
+type ampControl struct {
+	name string
+	on   string
+	off  string
 }
 
 var biscuitProfile = targetProfile{
 	playbackVolume: PlaybackVolume,
 	playbackMax:    127,
-	speakerAmp:     SpeakerAmp,
-	speakerOn:      "On",
-	speakerOff:     "Off",
+	speakerAmps:    []ampControl{{name: SpeakerAmp, on: "On", off: "Off"}},
+	adcMute: []string{
+		"ADC_A Left Mute", "ADC_A Right Mute",
+		"ADC_B Left Mute", "ADC_B Right Mute",
+		"ADC_C Left Mute", "ADC_C Right Mute",
+		"ADC_D Left Mute", "ADC_D Right Mute",
+	},
+}
+
+var radarProfile = targetProfile{
+	playbackVolume: PlaybackVolume,
+	playbackMax:    127,
+	// Radar has separate codec and external-amplifier gates. Both must be
+	// enabled after the DAC is clocking; either one left off produces silence.
+	speakerAmps: []ampControl{
+		{name: InternalSpeakerAmp, on: "On", off: "Off"},
+		{name: SpeakerAmp, on: "On", off: "Off"},
+	},
 	adcMute: []string{
 		"ADC_A Left Mute", "ADC_A Right Mute",
 		"ADC_B Left Mute", "ADC_B Right Mute",
@@ -64,20 +84,16 @@ var checkersProfile = targetProfile{
 	// its DAC at unity rather than at the control's numeric maximum.
 	playbackVolume: "DAC1 Playback Volume",
 	playbackMax:    173,
-	speakerAmp:     SpeakerAmp,
 	// Checkers' external speaker GPIO is active-low. This was observed both
 	// in the stock ext_speaker_output path and in the live route trace.
-	speakerOn:  "Off",
-	speakerOff: "On",
-	adcMute:    []string{"ADC_A Left Mute", "ADC_A Right Mute"},
+	speakerAmps: []ampControl{{name: SpeakerAmp, on: "Off", off: "On"}},
+	adcMute:     []string{"ADC_A Left Mute", "ADC_A Right Mute"},
 }
 
 var rookProfile = targetProfile{
 	playbackVolume: PlaybackVolume,
 	playbackMax:    127,
-	speakerAmp:     SpeakerAmp,
-	speakerOn:      "On",
-	speakerOff:     "Off",
+	speakerAmps:    []ampControl{{name: SpeakerAmp, on: "On", off: "Off"}},
 	adcMute: []string{
 		"ADC_A Left Mute", "ADC_A Right Mute",
 		"ADC_B Left Mute", "ADC_B Right Mute",
@@ -98,6 +114,10 @@ func ConfigureTarget(target string) {
 		activeProfile = checkersProfile
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(target), "radar") {
+		activeProfile = radarProfile
+		return
+	}
 	if strings.EqualFold(strings.TrimSpace(target), "rook") {
 		activeProfile = rookProfile
 		return
@@ -109,6 +129,7 @@ func profile() targetProfile {
 	targetMu.RLock()
 	p := activeProfile
 	p.adcMute = append([]string(nil), activeProfile.adcMute...)
+	p.speakerAmps = append([]ampControl(nil), activeProfile.speakerAmps...)
 	targetMu.RUnlock()
 	return p
 }
@@ -154,14 +175,24 @@ func GetPlaybackLevel(logicalMax int) (int, error) {
 	return (raw*logicalMax + p.playbackMax/2) / p.playbackMax, nil
 }
 
-// SetSpeakerEnabled accounts for Checkers' active-low external amplifier.
+// SetSpeakerEnabled applies every gate and polarity in the selected board's
+// speaker path.
 func SetSpeakerEnabled(enabled bool) error {
 	p := profile()
-	value := p.speakerOff
-	if enabled {
-		value = p.speakerOn
+	var failed []string
+	for _, amp := range p.speakerAmps {
+		value := amp.off
+		if enabled {
+			value = amp.on
+		}
+		if err := Set(amp.name, value); err != nil {
+			failed = append(failed, err.Error())
+		}
 	}
-	return Set(p.speakerAmp, value)
+	if len(failed) > 0 {
+		return fmt.Errorf("%s", strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 // SetADCMute applies every physical microphone mute on the selected board and
@@ -229,6 +260,13 @@ type Backend interface {
 	Get(name string) (string, error)
 }
 
+// byteBackend is optional because only Radar's speaker tuning uses an ALSA
+// byte control. Keeping it separate avoids pretending ordinary fake and host
+// backends can safely encode a coefficient blob as decimal mixer values.
+type byteBackend interface {
+	SetBytes(name string, values []byte) error
+}
+
 var (
 	mu      sync.Mutex
 	backend Backend = unavailable{}
@@ -256,6 +294,27 @@ func Set(name string, values ...string) error {
 	if err != nil && !warned[name] {
 		// Once per control: a missing control stays missing, and these are
 		// called on paths that repeat.
+		warned[name] = true
+		log.Printf("[mixer] %v", err)
+	}
+	return err
+}
+
+// SetBytes writes a complete byte-typed control in one atomic ALSA ioctl.
+// Writing its elements one at a time would zero every element except the last
+// on tinyalsa versions shipped by these devices.
+func SetBytes(name string, values []byte) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if len(values) == 0 {
+		return fmt.Errorf("mixer: %q: no byte values", name)
+	}
+	b, ok := backend.(byteBackend)
+	if !ok {
+		return fmt.Errorf("mixer: %q: backend does not support byte controls", name)
+	}
+	err := b.SetBytes(name, values)
+	if err != nil && !warned[name] {
 		warned[name] = true
 		log.Printf("[mixer] %v", err)
 	}

@@ -81,6 +81,10 @@ func (t *tinyalsa) Set(name string, values []string) error {
 	return nil
 }
 
+func (t *tinyalsa) SetBytes(name string, values []byte) error {
+	return setByteControl(t.card, name, values)
+}
+
 func (t *tinyalsa) Get(name string) (string, error) {
 	c, err := t.ctl(name)
 	if err != nil {

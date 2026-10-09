@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.5.0
+
+### What's Changed
+
+- Added the experimental 2017 Echo 2 (`radar`) satellite target on the shared
+  MT8163/Puffin emOS path. Radar receives its own hardware identity, dual-gate
+  TLV320AIC3204 speaker route, ring/BLE capabilities, factory bundle, binary
+  OTA, and guarded Fire OS 6 A/B installer while retaining Biscuit's proven
+  seven-microphone and on-device wake pipeline.
+- Radar factory installation builds from the attached unit's own boot image,
+  preserves stock in `boot_b`, and resolves `boot_a`/`boot_b` by name so the
+  stale `boot_a_x`/`boot_b_x` aliases from an interrupted older unlock cannot
+  be selected by the installer. The target remains marked experimental pending
+  full Tater hardware validation.
+- Factory packaging now validates the ELF class and machine of every emOS
+  executable before producing an archive. This prevents stale host binaries,
+  such as a macOS BusyBox in a local build directory, from passing checksum
+  verification and reaching a Biscuit or Radar image.
+- Added a capability-gated eight-band speaker equalizer, presence boost, bass
+  protection, and peak limiter on Biscuit, Radar, Checkers, and Rook. The Echo
+  owns this final output stage in native mode so settings are applied exactly
+  once and persist without rebuilding firmware.
+- Replaced the generated two-tone timer alert with the same embedded Zen
+  timer-finished chime used by Tater's ESP32 satellites, including the quiet
+  listening gap between repeats and an offline-safe fallback.
+- Hardened Radar's codec, amplifier, headphone, mute-button, LED-ring, and
+  Sendspin paths using the hardware-tested route and vendor speaker filter.
+  The emOS boot path now selects the init architecture from the attached
+  device's stock kernel and supports `/init recovery` from the USB console.
+
 ## v2.4.0
 
 ### What's Changed

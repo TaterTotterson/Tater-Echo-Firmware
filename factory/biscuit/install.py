@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Safe post-amonet factory installer for the Echo Dot 2 (biscuit).
+"""Safe post-amonet factory installer for Puffin-platform Echo speakers.
 
-The release does not contain Amazon's kernel or device trees.  While the Dot
-is in TWRP this installer reads the device's own stock boot partition, keeps a
-recovery copy, builds emOS around that kernel, verifies every write, and then
-installs Tater's A/B userspace firmware under /data.
+The release does not contain Amazon's kernel or device trees. While a supported
+Echo is in TWRP this installer reads the device's own stock boot partition,
+keeps a recovery copy, builds emOS around that kernel, verifies every write,
+and then installs Tater's A/B userspace firmware under /data.
 """
 
 from __future__ import annotations
@@ -28,6 +28,18 @@ PAYLOAD = ROOT / "payload"
 REMOTE_STAGE = "/tmp/tater-echo-factory"
 ANDROID_MAGIC = b"ANDROID!"
 RELEASES_URL = "https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest"
+TARGETS = {
+    "biscuit": {
+        "products": ("biscuit", "biscuit_puffin", "omni_biscuit"),
+        "device_type_id": "A3S5BH2HU6VAYF",
+        "name": "Echo Dot 2",
+    },
+    "radar": {
+        "products": ("radar", "radar_puffin", "omni_radar"),
+        "device_type_id": "A7WXQPH584YP",
+        "name": "Echo 2",
+    },
+}
 
 
 class InstallError(RuntimeError):
@@ -46,16 +58,16 @@ def load_manifest() -> dict:
     if not MANIFEST.is_file():
         raise InstallError(
             "this installer is being run outside a published factory bundle. "
-            "Do not run factory/biscuit/install.sh from a source checkout; "
-            f"download and extract tater-echo-biscuit-*-factory.tar.gz from {RELEASES_URL}, "
+            "Do not run a factory install.sh from a source checkout; "
+            f"download and extract the target's tater-echo-*-factory.tar.gz from {RELEASES_URL}, "
             "then run ./install.sh from that extracted directory"
         )
     try:
         manifest = json.loads(MANIFEST.read_text())
     except (OSError, ValueError) as exc:
         raise InstallError(f"cannot read {MANIFEST.name}: {exc}") from exc
-    if manifest.get("target") != "biscuit":
-        raise InstallError("this is not a biscuit factory bundle")
+    if manifest.get("target") not in TARGETS:
+        raise InstallError("this is not a supported emOS factory bundle")
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         raise InstallError("bundle manifest has no files")
@@ -147,15 +159,29 @@ def connected_adb_devices(output: str) -> list[str]:
     return devices
 
 
-def require_twrp(adb: Adb) -> None:
+def device_matches(target: str, product: str, device_type_id: str) -> bool:
+    profile = TARGETS[target]
+    product = product.lower().strip()
+    device_type_id = device_type_id.strip("\0\r\n ")
+    if not product and not device_type_id:
+        return False
+    product_ok = not product or product in profile["products"]
+    id_ok = not device_type_id or device_type_id == profile["device_type_id"]
+    return product_ok and id_ok
+
+
+def require_twrp(adb: Adb, target: str) -> None:
     twrp = adb.shell("getprop ro.twrp.version 2>/dev/null || true")
     marker = adb.shell("test -x /sbin/twrp && echo yes || true")
     if not twrp and marker != "yes":
         raise InstallError(
             "the Echo is not in TWRP; boot it with Volume Up before running this installer")
     product = adb.shell("getprop ro.product.device 2>/dev/null || true").lower()
-    if product and "biscuit" not in product:
-        raise InstallError(f"connected device reports {product!r}, not biscuit")
+    device_type_id = adb.shell("cat /proc/idme/device_type_id 2>/dev/null || true")
+    if not device_matches(target, product, device_type_id):
+        raise InstallError(
+            f"connected device reports product {product!r}, idme {device_type_id!r}; "
+            f"this bundle is only for {TARGETS[target]['name']} ({target})")
 
 
 def resolve_partition(adb: Adb, name: str) -> str:
@@ -163,7 +189,7 @@ def resolve_partition(adb: Adb, name: str) -> str:
         f"for p in /dev/block/by-name/{name} /dev/block/platform/*/by-name/{name}; "
         "do [ -e \"$p\" ] && readlink -f \"$p\" && break; done")
     value = value.splitlines()[0] if value else ""
-    if not re.fullmatch(r"/dev/block/mmcblk[0-9]+p[0-9]+", value):
+    if not re.fullmatch(r"/dev/block/mmcblk0p[0-9]+", value):
         raise InstallError(f"could not resolve the {name} partition in TWRP")
     return value
 
@@ -220,20 +246,59 @@ def load_packer():
     return module
 
 
-def build_emos(reference: Path, system_part: int, version: str, destination: Path) -> None:
+def init_name_for_arch(arch: str) -> str:
+    if arch == "arm":
+        return "init32"
+    if arch == "arm64":
+        return "init"
+    raise InstallError(
+        "could not identify the stock boot image's kernel architecture; nothing was written")
+
+
+def select_donor_slot(target: str, kind_a: str, arch_a: str,
+                      kind_b: str, arch_b: str) -> str:
+    candidates = [
+        ("b", kind_b, arch_b),
+        ("a", kind_a, arch_a),
+    ]
+    if target == "radar":
+        # The hardware route is verified against Radar's Fire OS 6 ARM kernel.
+        # A unit can legitimately retain Fire OS 5/AArch64 in the other slot;
+        # keep it as stock recovery, but do not silently build the experimental
+        # Radar port around a kernel whose userspace path has not been tested.
+        candidates = [candidate for candidate in candidates if candidate[2] == "arm"]
+    for slot, kind, _arch in candidates:
+        if kind == "stock":
+            return slot
+    if target == "radar":
+        raise InstallError(
+            "neither boot slot contains a Fire OS 6 ARM stock image for Radar; "
+            "follow the amonet-radar Fire OS 6 procedure before installing Tater")
+    raise InstallError(
+        "neither boot slot contains a usable stock image; restore FireOS in TWRP first")
+
+
+def build_emos(reference: Path, system_part: int, data_part: int,
+               boot_part: int, cache_part: int, version: str,
+    destination: Path) -> None:
     packer = load_packer()
+    reference_bytes = reference.read_bytes()
+    arch = packer.reference_kernel_arch(reference_bytes)
+    init_name = init_name_for_arch(arch)
     sbin = {
         name: (PAYLOAD / name).read_bytes()
         for name in ("wpa_supplicant", "wpa_cli", "em-wifi", "busybox")
     }
     try:
         built = packer.build_emos_image(
-            reference.read_bytes(), (PAYLOAD / "init32").read_bytes(),
-            version, sbin=sbin, system_part=system_part)
+            reference_bytes, (PAYLOAD / init_name).read_bytes(),
+            version, sbin=sbin, system_part=system_part, data_part=data_part,
+            boot_part=boot_part, cache_part=cache_part)
     except Exception as exc:
         raise InstallError(f"could not build emOS from this Echo's stock boot image: {exc}") from exc
     destination.write_bytes(built["image"])
-    print(f"Built device-specific emOS image ({built['size']:,} bytes, sha256 {built['sha256'][:16]}…)")
+    print(f"Built device-specific {arch} emOS image "
+          f"({built['size']:,} bytes, sha256 {built['sha256'][:16]}…)")
 
 
 def install_userspace(adb: Adb) -> None:
@@ -297,10 +362,13 @@ def restore(adb: Adb, image: Path) -> None:
 
 
 def install(adb: Adb, manifest: dict, assume_yes: bool, no_reboot: bool) -> None:
+    target = manifest["target"]
     boot_a = resolve_partition(adb, "boot_a")
     boot_b = resolve_partition(adb, "boot_b")
     system_a = resolve_partition(adb, "system_a")
     system_b = resolve_partition(adb, "system_b")
+    userdata = resolve_partition(adb, "userdata")
+    cache = resolve_partition(adb, "cache")
 
     with tempfile.TemporaryDirectory(prefix="tater-echo-") as temporary:
         temp = Path(temporary)
@@ -309,28 +377,37 @@ def install(adb: Adb, manifest: dict, assume_yes: bool, no_reboot: bool) -> None
         pull_partition(adb, boot_a, image_a, "read-a")
         pull_partition(adb, boot_b, image_b, "read-b")
         kind_a, kind_b = boot_kind(image_a), boot_kind(image_b)
-        print(f"boot_a: {kind_a}; boot_b: {kind_b}")
-        if kind_b == "stock":
+        packer = load_packer()
+        arch_a = packer.reference_kernel_arch(image_a.read_bytes()) if kind_a == "stock" else ""
+        arch_b = packer.reference_kernel_arch(image_b.read_bytes()) if kind_b == "stock" else ""
+        print(f"boot_a: {kind_a} {arch_a or 'unknown'}; "
+              f"boot_b: {kind_b} {arch_b or 'unknown'}")
+        donor_slot = select_donor_slot(target, kind_a, arch_a, kind_b, arch_b)
+        if donor_slot == "b":
             donor, donor_slot, system = image_b, "b", system_b
-        elif kind_a == "stock":
-            donor, donor_slot, system = image_a, "a", system_a
         else:
-            raise InstallError(
-                "neither boot slot contains a usable stock image; restore FireOS in TWRP first")
+            donor, donor_slot, system = image_a, "a", system_a
 
         backup_dir = ROOT / "factory-backups"
         backup_dir.mkdir(mode=0o700, exist_ok=True)
-        recovery = backup_dir / f"biscuit-stock-boot-{sha256(donor)[:12]}.img"
+        recovery = backup_dir / f"{target}-stock-boot-{sha256(donor)[:12]}.img"
         if not recovery.exists():
             shutil.copy2(donor, recovery)
             os.chmod(recovery, 0o600)
         print(f"Recovery boot saved to {recovery}")
 
         built = temp / "tater-emos-boot.img"
-        build_emos(donor, partition_number(system), manifest["version"], built)
+        build_emos(donor, partition_number(system), partition_number(userdata),
+                   partition_number(boot_a), partition_number(cache),
+                   manifest["version"], built)
+        if built.stat().st_size > min(image_a.stat().st_size, image_b.stat().st_size):
+            raise InstallError(
+                "the generated emOS image does not fit both resolved boot_a/boot_b partitions; "
+                "nothing was written")
 
         if not assume_yes:
-            print("\nThis will preserve stock in boot_b, write Tater emOS to boot_a, and reset Wi-Fi/Tater pairing.")
+            print(f"\nThis will preserve {TARGETS[target]['name']} stock in boot_b, "
+                  "write Tater emOS to boot_a, and reset Wi-Fi/Tater pairing.")
             if input("Type INSTALL to continue: ").strip() != "INSTALL":
                 raise InstallError("installation cancelled")
 
@@ -356,7 +433,7 @@ def install(adb: Adb, manifest: dict, assume_yes: bool, no_reboot: bool) -> None
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Install Tater firmware after amonet-biscuit v2.0.0")
+    parser = argparse.ArgumentParser(description="Install Tater firmware after the target's amonet unlock")
     parser.add_argument("--adb", default="adb", help="path to adb")
     parser.add_argument("--serial", help="ADB serial when more than one device is connected")
     parser.add_argument("--yes", action="store_true", help="skip the INSTALL confirmation")
@@ -375,7 +452,7 @@ def main() -> int:
         if args.verify_bundle:
             return 0
         adb = select_adb(args.adb, args.serial)
-        require_twrp(adb)
+        require_twrp(adb, manifest["target"])
         if args.restore:
             restore(adb, args.restore.resolve())
         else:

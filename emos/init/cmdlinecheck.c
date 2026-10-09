@@ -43,6 +43,39 @@ static void check(const char *what, const char *cmdline, int want)
     }
 }
 
+static void check_data(const char *what, const char *cmdline, int want)
+{
+    int got = cmdline_data_part(cmdline);
+    if (got == want) {
+        printf("ok    %-46s -> p%d\n", what, got);
+    } else {
+        printf("FAIL  %-46s -> p%d, wanted p%d\n", what, got, want);
+        fails++;
+    }
+}
+
+static void check_boot(const char *what, const char *cmdline, int want)
+{
+    int got = cmdline_boot_part(cmdline);
+    if (got == want) {
+        printf("ok    %-46s -> p%d\n", what, got);
+    } else {
+        printf("FAIL  %-46s -> p%d, wanted p%d\n", what, got, want);
+        fails++;
+    }
+}
+
+static void check_cache(const char *what, const char *cmdline, int want)
+{
+    int got = cmdline_cache_part(cmdline);
+    if (got == want) {
+        printf("ok    %-46s -> p%d\n", what, got);
+    } else {
+        printf("FAIL  %-46s -> p%d, wanted p%d\n", what, got, want);
+        fails++;
+    }
+}
+
 int main(void)
 {
     const int D = SYSTEM_PART_DEFAULT;
@@ -93,6 +126,28 @@ int main(void)
      * range test above is ever tightened past them. */
     check("system_a", "ro emos.system=/dev/block/mmcblk0p13", 13);
     check("system_b", "ro emos.system=/dev/block/mmcblk0p14", 14);
+
+    /* userdata is resolved through TWRP and stamped independently. This lets
+     * the same init boot Puffin devices without assuming Biscuit's GPT. */
+    check_data("stamped userdata",
+               "ro emos.data=/dev/block/mmcblk0p17", 17);
+    check_data("userdata stamp absent", "ro init=/init", DATA_PART_DEFAULT);
+    check_data("invalid userdata stamp",
+               "ro emos.data=/dev/block/mmcblk0p0", DATA_PART_DEFAULT);
+
+    /* These are write targets, so a wrong guess is worse than a failed mount:
+     * rollback could overwrite another partition and the boot trail could
+     * corrupt one a kilobyte at a time. */
+    check_boot("stamped active boot",
+               "ro emos.boot=/dev/block/mmcblk0p19", 19);
+    check_boot("boot stamp absent", "ro init=/init", BOOT_PART_DEFAULT);
+    check_boot("invalid boot stamp",
+               "ro emos.boot=/dev/block/mmcblk0p0", BOOT_PART_DEFAULT);
+    check_cache("stamped cache",
+                "ro emos.cache=/dev/block/mmcblk0p23", 23);
+    check_cache("cache stamp absent", "ro init=/init", CACHE_PART_DEFAULT);
+    check_cache("invalid cache stamp",
+                "ro emos.cache=/dev/block/mmcblk0p999", CACHE_PART_DEFAULT);
 
     printf("\n%s\n", fails ? "FAILED" : "all ok");
     return fails ? 1 : 0;

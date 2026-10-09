@@ -320,6 +320,10 @@ func DefaultCapabilities() map[string]any {
 func CapabilitiesForTarget(target string) map[string]any {
 	capabilities := DefaultCapabilities()
 	target = strings.ToLower(strings.TrimSpace(target))
+	switch target {
+	case "biscuit", "radar", "checkers", "rook":
+		capabilities["output_chain"] = true
+	}
 	if target == "checkers" || target == "rook" {
 		// Checkers owns /dev/stpbt directly, while Rook uses the BlueZ backend
 		// already responsible for hci0. Server startup removes these claims if

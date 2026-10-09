@@ -147,9 +147,9 @@ def test_agrees_with_mkboot(tmp_path):
         "module docstring in tater_emos_build.py")
 
 
-def test_the_two_packers_stamp_the_system_partition_identically(tmp_path):
-    """The stamp decides which FireOS userspace emOS mounts, so the wizard's
-    packer and the standalone tool must write it the same way.
+def test_the_two_packers_stamp_the_runtime_partitions_identically(tmp_path):
+    """The stamps decide every runtime block partition emOS uses, so the
+    factory and standalone packers must write them the same way.
 
     Drift here is invisible: both images boot, and the one built by the wrong
     tool mounts a different Amazon userspace than it was built beside."""
@@ -160,32 +160,57 @@ def test_the_two_packers_stamp_the_system_partition_identically(tmp_path):
     ramdisk = eb.build_ramdisk(fake_init(), "0.1-test")
 
     mine = eb.pack(parts, parts["zimage"], parts["dtbs"], ramdisk,
-                   system_part=14)
+                   system_part=14, data_part=16, boot_part=10, cache_part=15)
 
     ref_p, z_p = tmp_path / "ref.img", tmp_path / "zimage"
     rd_p, out_p = tmp_path / "ramdisk.gz", tmp_path / "out.img"
     ref_p.write_bytes(ref)
     z_p.write_bytes(parts["zimage"])
     rd_p.write_bytes(ramdisk)
-    argv, env = sys.argv, os.environ.get("EMOS_SYSTEM_PART")
+    argv = sys.argv
+    env_system = os.environ.get("EMOS_SYSTEM_PART")
+    env_data = os.environ.get("EMOS_DATA_PART")
+    env_boot = os.environ.get("EMOS_BOOT_PART")
+    env_cache = os.environ.get("EMOS_CACHE_PART")
     sys.argv = ["mkboot.py", str(ref_p), str(z_p), str(rd_p), str(out_p)]
     os.environ["EMOS_SYSTEM_PART"] = "14"
+    os.environ["EMOS_DATA_PART"] = "16"
+    os.environ["EMOS_BOOT_PART"] = "10"
+    os.environ["EMOS_CACHE_PART"] = "15"
     try:
         mkboot.main()
     finally:
         sys.argv = argv
-        if env is None:
+        if env_system is None:
             os.environ.pop("EMOS_SYSTEM_PART", None)
         else:
-            os.environ["EMOS_SYSTEM_PART"] = env
+            os.environ["EMOS_SYSTEM_PART"] = env_system
+        if env_data is None:
+            os.environ.pop("EMOS_DATA_PART", None)
+        else:
+            os.environ["EMOS_DATA_PART"] = env_data
+        if env_boot is None:
+            os.environ.pop("EMOS_BOOT_PART", None)
+        else:
+            os.environ["EMOS_BOOT_PART"] = env_boot
+        if env_cache is None:
+            os.environ.pop("EMOS_CACHE_PART", None)
+        else:
+            os.environ["EMOS_CACHE_PART"] = env_cache
 
     assert out_p.read_bytes() == mine, (
-        "the two packers stamp emos.system= differently")
+        "the two packers stamp runtime partitions differently")
     cmdline = mine[64:64 + 512].split(b"\0")[0].decode()
     assert "emos.system=/dev/block/mmcblk0p14" in cmdline
+    assert "emos.data=/dev/block/mmcblk0p16" in cmdline
+    assert "emos.boot=/dev/block/mmcblk0p10" in cmdline
+    assert "emos.cache=/dev/block/mmcblk0p15" in cmdline
     # Exactly one. The kernel takes the last of a repeated parameter, so a
     # second stamp is an image that works and reads as whichever you looked at.
     assert cmdline.count("emos.system=") == 1
+    assert cmdline.count("emos.data=") == 1
+    assert cmdline.count("emos.boot=") == 1
+    assert cmdline.count("emos.cache=") == 1
 
 
 def test_restamping_replaces_rather_than_appends():
@@ -208,6 +233,23 @@ def test_the_system_stamp_key_is_the_same_string():
         "init.c does not parse the key the packers write")
 
 
+def test_the_data_stamp_key_is_the_same_string():
+    """Factory builds must tell init which device partition is userdata."""
+    assert eb.DATA_CMDLINE_KEY == _load_mkboot().DATA_CMDLINE_KEY
+    init_c = (REPO / "emos" / "init" / "init.c").read_text()
+    assert f'"{eb.DATA_CMDLINE_KEY}"' in init_c, (
+        "init.c does not parse the data key the packers write")
+
+
+def test_the_writable_partition_stamp_keys_are_the_same_strings():
+    """Rollback and boot-trail writes must use the exact resolved targets."""
+    mkboot = _load_mkboot()
+    init_c = (REPO / "emos" / "init" / "init.c").read_text()
+    for key in ("BOOT_CMDLINE_KEY", "CACHE_CMDLINE_KEY"):
+        assert getattr(eb, key) == getattr(mkboot, key)
+        assert f'"{getattr(eb, key)}"' in init_c
+
+
 def test_an_impossible_system_partition_is_refused():
     """A wrong partition mounts a different userspace and boots, so this is
     refused at build time rather than discovered on a device."""
@@ -217,6 +259,25 @@ def test_an_impossible_system_partition_is_refused():
         with pytest.raises(eb.BuildError, match="mmcblk0 partition number"):
             eb.pack(parts, parts["zimage"], parts["dtbs"], ramdisk,
                     system_part=bad)
+
+
+def test_an_impossible_data_partition_is_refused():
+    parts = eb.split_reference(make_reference())
+    ramdisk = eb.build_ramdisk(fake_init(), "0.1")
+    for bad in (0, -1, 128, 999):
+        with pytest.raises(eb.BuildError, match="mmcblk0 partition number"):
+            eb.pack(parts, parts["zimage"], parts["dtbs"], ramdisk,
+                    data_part=bad)
+
+
+def test_impossible_writable_partitions_are_refused():
+    parts = eb.split_reference(make_reference())
+    ramdisk = eb.build_ramdisk(fake_init(), "0.1")
+    for argument in ("boot_part", "cache_part"):
+        for bad in (0, -1, 128, 999):
+            with pytest.raises(eb.BuildError, match="mmcblk0 partition number"):
+                eb.pack(parts, parts["zimage"], parts["dtbs"], ramdisk,
+                        **{argument: bad})
 
 
 def test_the_ramoops_cmdline_is_the_same_string():

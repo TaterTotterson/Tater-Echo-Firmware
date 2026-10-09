@@ -1,5 +1,6 @@
 /*
- * First-boot init for biscuit: bring up a serial console over USB.
+ * First-boot init for Puffin-platform Echo speakers: bring up a serial
+ * console over USB.
  *
  * Depends on nothing but the kernel — no shell, no shebang, no busybox, no
  * dynamic loader. An earlier busybox-script version produced no evidence at
@@ -44,11 +45,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CACHE     "/dev/block/mmcblk0p15"
 #define USBDIR    "/sys/class/android_usb/android0"
 #define TTY       "/dev/ttyGS0"
 #define TRAIL_OFF 1024
 
+static char cachedev[48] = "/dev/block/mmcblk0p15";
+static char bootdev[48] = "/dev/block/mmcblk0p10";
+#define CACHE   cachedev
+#define BOOTDEV bootdev
 
 /* Every device node this system needs, created by hand.
  *
@@ -777,12 +781,11 @@ static void led_end(int mode)
  * this recovers, and it is the one we actually hit: an image that reached the
  * USB gadget and then crash-looped, needing TWRP and physical handling.
  *
- * The mechanism is deliberately ours and not the bootloader's. biscuit has a
- * real second slot (boot_b_x, mmcblk0p11) but LK chooses between them and we
- * have not reverse-engineered how — the standing guess is three tries per slot
- * and then a soft brick, which is plausible and UNTESTED. Building on that
- * guess would risk a device that boots something we did not choose, so instead
- * init keeps its own known-good copy on /data and restores it.
+ * The mechanism is deliberately ours and not the bootloader's. Puffin has a
+ * real second slot but LK chooses between the two, and its failure policy has
+ * not been reverse engineered. Building on a guess would risk a device that
+ * boots something we did not choose, so instead init keeps its own known-good
+ * copy on /data and restores it to the boot partition stamped by the installer.
  *
  * Honest about what it does NOT cover: an image that fails before init runs
  * executes none of this and still needs recovery over USB. That case is what
@@ -798,7 +801,6 @@ static void note(const char *fmt, ...);
 static void netlog(const char *fmt, ...);
 static int  readint(const char *path);
 
-#define BOOTDEV   "/dev/block/mmcblk0p10"
 #define GOODIMG   "/data/emos/boot-good.img"
 #define BOOTSTATE "/data/emos/boot.state"
 #define MAX_TRIES 3
@@ -1013,10 +1015,13 @@ static int wr(const char *path, const char *val)
     return n > 0 ? 0 : -1;
 }
 
-/* ── Which /system this image was built against ───────────────────────────
+/* ── Runtime partition map stamped by the factory installer ──────────────
  *
  * `emos.system=` is stamped onto the cmdline by the packer at BUILD time and
  * names the partition holding the FireOS userspace this image was built from.
+ * `emos.data=`, `emos.boot=`, and `emos.cache=` name persistent state, the
+ * rollback/update target, and the crash-safe boot trail respectively. The
+ * latter two are write targets, so guessing them would be especially unsafe.
  *
  * It is a build-time fact on purpose. emOS carries Amazon's kernel and its own
  * ramdisk, and nothing else: bionic, the linker, tinyalsa, /system/bin/sh and
@@ -1031,10 +1036,13 @@ static int wr(const char *path, const char *val)
  * slot says where these bytes live; it says nothing about which userspace they
  * were built against.
  *
- * Absent means an image built before this existed: fall back to p13, which is
- * what those images hardcoded, so they keep booting exactly as they did.
+ * Absent means an image built before these stamps existed: each key falls back
+ * to the partition old Biscuit images hardcoded, preserving older behaviour.
  */
 #define SYSTEM_PART_DEFAULT 13
+#define DATA_PART_DEFAULT   16
+#define BOOT_PART_DEFAULT   10
+#define CACHE_PART_DEFAULT  15
 
 /* The value of `key` on the cmdline, copied into `out`. NULL when absent.
  *
@@ -1069,7 +1077,7 @@ static const char *cmdline_value(const char *cmdline, const char *key,
     return NULL;
 }
 
-/* The mmcblk0 partition minor named by emos.system=, or SYSTEM_PART_DEFAULT.
+/* The mmcblk0 partition minor named by a known emOS key, or its fallback.
  *
  * The value is a full device path rather than a bare number so it reads as
  * what it is in a header dump and in /proc/cmdline -- this is the one field
@@ -1080,29 +1088,49 @@ static const char *cmdline_value(const char *cmdline, const char *key,
  * was built by something we do not know, and guessing at its intent is how a
  * wrong partition gets mounted and reported as a healthy boot.
  */
-static int cmdline_system_part(const char *cmdline)
+static int cmdline_mmc_part(const char *cmdline, const char *key, int fallback)
 {
     char val[64];
-    if (!cmdline_value(cmdline, "emos.system=", val, sizeof val))
-        return SYSTEM_PART_DEFAULT;
+    if (!cmdline_value(cmdline, key, val, sizeof val))
+        return fallback;
 
     static const char pfx[] = "/dev/block/mmcblk0p";
     size_t plen = sizeof pfx - 1;
     if (strncmp(val, pfx, plen))
-        return SYSTEM_PART_DEFAULT;
+        return fallback;
 
     const char *d = val + plen;
     if (!*d)
-        return SYSTEM_PART_DEFAULT;
+        return fallback;
     int n = 0;
     for (; *d; d++) {
         if (*d < '0' || *d > '9')
-            return SYSTEM_PART_DEFAULT;
+            return fallback;
         n = n * 10 + (*d - '0');
         if (n > 127)                      /* minor 0 is the whole device */
-            return SYSTEM_PART_DEFAULT;
+            return fallback;
     }
-    return n > 0 ? n : SYSTEM_PART_DEFAULT;
+    return n > 0 ? n : fallback;
+}
+
+static int cmdline_system_part(const char *cmdline)
+{
+    return cmdline_mmc_part(cmdline, "emos.system=", SYSTEM_PART_DEFAULT);
+}
+
+static int cmdline_data_part(const char *cmdline)
+{
+    return cmdline_mmc_part(cmdline, "emos.data=", DATA_PART_DEFAULT);
+}
+
+static int cmdline_boot_part(const char *cmdline)
+{
+    return cmdline_mmc_part(cmdline, "emos.boot=", BOOT_PART_DEFAULT);
+}
+
+static int cmdline_cache_part(const char *cmdline)
+{
+    return cmdline_mmc_part(cmdline, "emos.cache=", CACHE_PART_DEFAULT);
 }
 
 /* Copy a serial out of `raw` into `out`, trimmed and validated.
@@ -2349,6 +2377,23 @@ int main(int argc, char **argv)
     int dtr = mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
     mount("proc", "/proc", "proc", 0, NULL);
     mount("sysfs", "/sys", "sysfs", 0, NULL);
+
+    /* The factory installer resolves every writable/mounted block partition
+     * by name in TWRP and stamps its concrete device path into our cmdline.
+     * Read it before creating nodes: the boot trail itself writes to cache,
+     * so even the first diagnostic byte must use the resolved partition. */
+    char cmdl[2048] = "";
+    int cfd = open("/proc/cmdline", O_RDONLY);
+    if (cfd >= 0) {
+        ssize_t cn = read(cfd, cmdl, sizeof cmdl - 1);
+        close(cfd);
+        if (cn > 0)
+            cmdl[cn] = 0;
+    }
+    int bootp = cmdline_boot_part(cmdl);
+    int cachep = cmdline_cache_part(cmdl);
+    snprintf(bootdev, sizeof bootdev, "/dev/block/mmcblk0p%d", bootp);
+    snprintf(cachedev, sizeof cachedev, "/dev/block/mmcblk0p%d", cachep);
     /* debugfs, for the eMMC's own health.
      *
      * The flash reports wear through PRE_EOL_INFO and two life-time estimates
@@ -2379,14 +2424,15 @@ int main(int argc, char **argv)
      *
      * 247:0 is ttyGS0, read off a running FireOS device rather than guessed.
      */
-    mknod(CACHE, S_IFBLK | 0600, makedev(179, 15));
-    /* boot_a_x, so emOS can reflash itself over the network: the device has
+    mknod(CACHE, S_IFBLK | 0600, makedev(179, cachep));
+    /* The active emOS boot partition, so emOS can reflash itself over the
+     * network: the device has
      * curl, busybox and dd, which turns a flash cycle from a TWRP trip into
      * about thirty seconds. It is also the recovery target, so verify any
      * write to it by dropping caches and reading BACK — a dd here can complete
      * at page-cache speed, verify against that same cache, and be lost on the
      * next reboot. Real writes to this eMMC run at about 9MB/s. */
-    mknod("/dev/block/mmcblk0p10", S_IFBLK | 0600, makedev(179, 10));
+    mknod(BOOTDEV, S_IFBLK | 0600, makedev(179, bootp));
     mknod("/dev/null",    S_IFCHR | 0666, makedev(1, 3));
     mknod("/dev/zero",    S_IFCHR | 0666, makedev(1, 5));
     mknod("/dev/tty",     S_IFCHR | 0666, makedev(5, 0));
@@ -2415,24 +2461,15 @@ int main(int argc, char **argv)
         close(fd);
         if (n > 0) write_at(512, buf, n);
     }
-    note("stage=mounts done devtmpfs_rc=%d tty=%d\n", dtr, access(TTY, F_OK));
+    note("stage=mounts done boot_part=%d cache_part=%d devtmpfs_rc=%d tty=%d\n",
+         bootp, cachep, dtr, access(TTY, F_OK));
     led_claim();
     led_step();                                  /* 1: mounts and device nodes */
 
     /* /system read-only: this is a diagnostic boot and nothing here should be
      * able to damage the Android install we still rely on for recovery. */
     mkdir("/system", 0755);
-    /* Which partition, from the stamp the packer put on our own cmdline --
-     * see cmdline_system_part(). Read here rather than at the top of main so
-     * the number appears in the stage line beside the mount it explains. */
-    char cmdl[2048] = "";
-    int cfd = open("/proc/cmdline", O_RDONLY);
-    if (cfd >= 0) {
-        ssize_t cn = read(cfd, cmdl, sizeof cmdl - 1);
-        close(cfd);
-        if (cn > 0)
-            cmdl[cn] = 0;
-    }
+    /* Which partition, from the stamp the packer put on our own cmdline. */
     int sysp = cmdline_system_part(cmdl);
     char sysdev[48];
     snprintf(sysdev, sizeof sysdev, "/dev/block/mmcblk0p%d", sysp);
@@ -2482,7 +2519,10 @@ int main(int argc, char **argv)
      * there. /system stays read-only — nothing here should be able to damage
      * the Android install we still rely on for recovery. */
     mkdir("/data", 0755);
-    mknod("/dev/block/mmcblk0p16", S_IFBLK | 0600, makedev(179, 16));
+    int datap = cmdline_data_part(cmdl);
+    char datadev[48];
+    snprintf(datadev, sizeof datadev, "/dev/block/mmcblk0p%d", datap);
+    mknod(datadev, S_IFBLK | 0600, makedev(179, datap));
 
     /* Check /data before mounting it read-write.
      *
@@ -2493,13 +2533,14 @@ int main(int argc, char **argv)
      * there is nobody at the console to answer one. Anything needing a real
      * decision is left alone and shows up in the trail.
      */
-    char *fsck[] = { "/system/bin/e2fsck", "-p", "/dev/block/mmcblk0p16", NULL };
+    char *fsck[] = { "/system/bin/e2fsck", "-p", datadev, NULL };
     int fs = run_wait(fsck);
-    note("stage=fsck_data status=%d\n", fs);
+    note("stage=fsck_data part=%d status=%d\n", datap, fs);
     led_step();                                  /* 3: fsck /data */
 
-    r = mount("/dev/block/mmcblk0p16", "/data", "ext4", 0, NULL);
-    note("stage=mount_data rc=%d errno=%d\n", r, r ? errno : 0);
+    r = mount(datadev, "/data", "ext4", 0, NULL);
+    note("stage=mount_data part=%d rc=%d errno=%d\n",
+         datap, r, r ? errno : 0);
     if (r) led_fail(); else led_step();          /* 4: /data */
 
     /* Android's own root has these two symlinks and a surprising amount of

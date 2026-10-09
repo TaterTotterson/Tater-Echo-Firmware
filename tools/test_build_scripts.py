@@ -8,6 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MWW_BUILD_SCRIPT = ROOT / "device" / "build_microwakeword_runtime.sh"
 ORT_BUILD_SCRIPT = ROOT / "device" / "prepare_onnxruntime_linux_armv7.sh"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 
 
 class BuildScriptTests(unittest.TestCase):
@@ -41,6 +42,21 @@ class BuildScriptTests(unittest.TestCase):
             check=True,
             cwd=ROOT,
         )
+
+    def test_release_builds_both_puffin_emos_targets(self) -> None:
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        em_os_job = workflow.split("\n  biscuit:\n", 1)[1].split(
+            "\n  checkers:\n", 1
+        )[0]
+        self.assertIn("- target: biscuit", em_os_job)
+        self.assertIn("- target: radar", em_os_job)
+        self.assertIn("FirmwareTarget=${{ matrix.target }}", em_os_job)
+        self.assertIn("--target '${{ matrix.target }}'", em_os_job)
+        self.assertIn("Compile both emOS init architectures", em_os_job)
+        self.assertIn("aarch64-linux-android21-clang", em_os_job)
+        self.assertIn("armv7a-linux-androideabi21-clang", em_os_job)
+        self.assertIn("emos/build/init emos/build/init32", em_os_job)
+        self.assertIn("staging/radar/firmware-manifest.json", workflow)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ package microwakeword
 
 import _ "embed"
 
-// The Biscuit keeps its existing single-ELF A/B OTA contract so every older
+// The emOS targets keep their existing single-ELF A/B OTA contract so every older
 // installation can consume the update. Release builds embed the target-native
 // companions in that ELF; startup verifies and materializes them before either
 // OWW lane is allowed to run.

@@ -23,6 +23,33 @@ func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesForTargetKeepsRadarRing(t *testing.T) {
+	got := CapabilitiesForTarget("radar")
+	if got["led_ring"] != true || got["microphone"] != true || got["speaker"] != true {
+		t.Fatalf("radar shared voice/ring capabilities = %#v", got)
+	}
+	if _, ok := got["screen"]; ok {
+		t.Fatal("radar unexpectedly advertises a screen")
+	}
+	if got["ble_gatt"] != true || got["ota"] != true {
+		t.Fatalf("radar native capabilities = %#v", got)
+	}
+	if got["output_chain"] != true {
+		t.Fatalf("radar output_chain = %#v, want true", got["output_chain"])
+	}
+}
+
+func TestSupportedEchoTargetsAdvertiseOutputChain(t *testing.T) {
+	for _, target := range []string{"biscuit", "radar", "checkers", "rook"} {
+		if got := CapabilitiesForTarget(target)["output_chain"]; got != true {
+			t.Errorf("%s output_chain = %#v, want true", target, got)
+		}
+	}
+	if got := CapabilitiesForTarget("future-echo")["output_chain"]; got != nil {
+		t.Fatalf("unknown target output_chain = %#v, want absent", got)
+	}
+}
+
 func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	got := CapabilitiesForTarget("checkers")
 	if got["led_ring"] != false {

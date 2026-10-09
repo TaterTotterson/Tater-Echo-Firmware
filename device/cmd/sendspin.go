@@ -226,7 +226,7 @@ func runSendspinPoll(spk *speaker.PcmSpeaker, ring *server.Server, screen *show.
 }
 
 func shouldShowSendspinMusicVisual(target string, active, linkDown, timerRinging bool, state string) bool {
-	if !strings.EqualFold(strings.TrimSpace(target), "biscuit") || !active || linkDown || timerRinging {
+	if !isRingTarget(target) || !active || linkDown || timerRinging {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(state)) {

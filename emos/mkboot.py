@@ -129,6 +129,9 @@ RAMOOPS_CMDLINE = (
 # so that is where the value normally comes from. An unstamped image falls back
 # to the partition emOS hardcoded before this existed.
 SYSTEM_CMDLINE_KEY = "emos.system="
+DATA_CMDLINE_KEY = "emos.data="
+BOOT_CMDLINE_KEY = "emos.boot="
+CACHE_CMDLINE_KEY = "emos.cache="
 
 
 def stamp_cmdline_key(cmdline: bytes, key: str, value: str) -> bytes:
@@ -150,6 +153,9 @@ def main():
     dtb_p = sys.argv[5] if len(sys.argv) > 5 else None
     extra = sys.argv[6] if len(sys.argv) > 6 else RAMOOPS_CMDLINE
     sys_part = os.environ.get("EMOS_SYSTEM_PART", "").strip()
+    data_part = os.environ.get("EMOS_DATA_PART", "").strip()
+    boot_part = os.environ.get("EMOS_BOOT_PART", "").strip()
+    cache_part = os.environ.get("EMOS_CACHE_PART", "").strip()
     ref = open(ref_p, "rb").read()
     dtbs, hf = split_reference(ref)
     if dtb_p:
@@ -184,6 +190,27 @@ def main():
                 f"(1-127), not {sys_part!r}")
         cmdline = stamp_cmdline_key(cmdline, SYSTEM_CMDLINE_KEY,
                                     f"/dev/block/mmcblk0p{int(sys_part)}")
+    if data_part:
+        if not (data_part.isdigit() and 1 <= int(data_part) <= 127):
+            raise SystemExit(
+                f"EMOS_DATA_PART must be an mmcblk0 partition number "
+                f"(1-127), not {data_part!r}")
+        cmdline = stamp_cmdline_key(cmdline, DATA_CMDLINE_KEY,
+                                    f"/dev/block/mmcblk0p{int(data_part)}")
+    if boot_part:
+        if not (boot_part.isdigit() and 1 <= int(boot_part) <= 127):
+            raise SystemExit(
+                f"EMOS_BOOT_PART must be an mmcblk0 partition number "
+                f"(1-127), not {boot_part!r}")
+        cmdline = stamp_cmdline_key(cmdline, BOOT_CMDLINE_KEY,
+                                    f"/dev/block/mmcblk0p{int(boot_part)}")
+    if cache_part:
+        if not (cache_part.isdigit() and 1 <= int(cache_part) <= 127):
+            raise SystemExit(
+                f"EMOS_CACHE_PART must be an mmcblk0 partition number "
+                f"(1-127), not {cache_part!r}")
+        cmdline = stamp_cmdline_key(cmdline, CACHE_CMDLINE_KEY,
+                                    f"/dev/block/mmcblk0p{int(cache_part)}")
     if len(cmdline) > 511:
         raise SystemExit(f"cmdline too long for the 512-byte field: {len(cmdline)}")
 

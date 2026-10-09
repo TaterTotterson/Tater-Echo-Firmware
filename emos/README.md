@@ -1,7 +1,8 @@
 # emOS
 
-A Linux distribution for the Amazon Echo Dot Gen 2 ("biscuit") that runs
-EchoMuse with **no Amazon userspace at all** — no Android init, no
+A Linux distribution for the Amazon Echo Dot Gen 2 ("biscuit") and the
+experimental Echo 2 ("radar") port that runs EchoMuse with **no Amazon
+userspace at all** — no Android init, no
 `system_server`, no `mediaserver`, no audio HAL.
 
 It is a distribution in the ordinary sense: it does not include a kernel of its
@@ -13,8 +14,9 @@ emOS runs on both of the Echo Dot 2's kernels: FireOS 5's 64-bit one
 (amonet-biscuit v1.1.0) and FireOS 6's 32-bit one (v2.0.0). The wizard picks
 the matching init by reading your own boot image.
 
-**Status: 0.4, bench-proven, not field-proven.** Still a small number of
-devices over a handful of days. A complete voice turn has run on it — wake word
+**Status: 0.4, Biscuit bench-proven, not field-proven; Radar experimental.**
+Still a small number of Biscuit devices over a handful of days. A complete
+voice turn has run on Biscuit — wake word
 scored on-device, Home Assistant pipeline, spoken answer — along with WiFi, the
 9-channel mic array, synchronized hardware echo reference with software AEC,
 the BLE proxy, buttons, ambient light, jack detect and the LED ring. The known
@@ -181,7 +183,10 @@ replace them:
   it, which reads as a DHCP failure and is not.
 - **emOS mounts the `/system` its image was BUILT beside**, named by
   `emos.system=/dev/block/mmcblk0pN` on its own cmdline and parsed by
-  `cmdline_system_part()`. It used to hardcode p13, which is right only while
+  `cmdline_system_part()`. The factory image also carries resolved
+  `emos.data=`, `emos.boot=`, and `emos.cache=` paths so mounts, rollback, OTA,
+  and the boot trail never write to a partition guessed from another board.
+  It used to hardcode p13 for `/system`, which is right only while
   the reference comes from slot A — and since the wizard now leaves stock FireOS
   in its own slot and puts emOS in the other, the boot slot and the system slot
   are deliberately different values. Absent, it falls back to p13, so images
@@ -871,11 +876,12 @@ is not proof it rebooted — compare uptime or a build fingerprint.
   unplug.
 - The speaker amp idles on and hisses. Gating it on idle is **not** the fix —
   toggling it clicks audibly, which is why the injected silence stream exists.
-- Hardware is resolved by fixed major/minor numbers, against the project's own
-  "resolve by name, not number" rule. Fine for biscuit, wrong for a second
-  board. `/system` and `/data` are likewise hardcoded to p13 and p16; those
-  were checked on a FireOS 6 device under amonet v2 and are still correct
-  there, but nothing enforces it.
+- Most hardware nodes are still created from fixed major/minor numbers rather
+  than discovered by name. The writable/mounted block targets are no longer
+  hardcoded: the factory installer resolves system, userdata, active boot, and
+  cache in TWRP and stamps all four paths into the image. Radar still needs
+  physical bring-up to verify that every remaining device node matches its
+  Fire OS 6 kernel.
 - **The provisioning wizard cannot install a FireOS 6 image yet.** It fetches
   the `init` asset from the emOS release and hands it to the controller's
   packer; the supplicant and `wpa_cli` need the same road — a second release

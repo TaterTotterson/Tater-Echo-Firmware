@@ -433,14 +433,17 @@ def reference_kernel_arch(ref: bytes) -> str:
     return ""
 
 
-# The partition holding the FireOS userspace an image was built beside, stamped
-# onto its own cmdline so emOS can mount the right one — see cmdline_system_part
-# in emos/init/init.c, and emos/init/cmdlinecheck.c, which pins this format.
+# Runtime partitions stamped onto the image's own cmdline so emOS can mount the
+# right ones — see the cmdline partition parsers in emos/init/init.c and their
+# off-target checks in emos/init/cmdlinecheck.c.
 #
 # A full device path rather than a bare number because this is the field
 # somebody supporting a device gets asked to read out of `od` on the image or
 # `/proc/cmdline` on the device, and "13" alone says nothing.
 SYSTEM_CMDLINE_KEY = "emos.system="
+DATA_CMDLINE_KEY = "emos.data="
+BOOT_CMDLINE_KEY = "emos.boot="
+CACHE_CMDLINE_KEY = "emos.cache="
 
 
 def _stamp_cmdline_key(cmdline: bytes, key: str, value: str) -> bytes:
@@ -460,7 +463,9 @@ def _stamp_cmdline_key(cmdline: bytes, key: str, value: str) -> bytes:
 
 
 def pack(parts: dict, zimage: bytes, dtbs: bytes, ramdisk: bytes,
-         extra_cmdline: str = RAMOOPS_CMDLINE, system_part: int = None) -> bytes:
+         extra_cmdline: str = RAMOOPS_CMDLINE, system_part: int = None,
+         data_part: int = None, boot_part: int = None,
+         cache_part: int = None) -> bytes:
     """Assemble a boot image from its parts, using the reference's own header."""
     cmdline = parts["cmdline"]
     # Appended only if it is not already there.
@@ -483,6 +488,30 @@ def pack(parts: dict, zimage: bytes, dtbs: bytes, ramdisk: bytes,
         cmdline = _stamp_cmdline_key(
             cmdline, SYSTEM_CMDLINE_KEY,
             f"/dev/block/mmcblk0p{int(system_part)}")
+    if data_part is not None:
+        if not 1 <= int(data_part) <= 127:
+            raise BuildError(
+                f"the /data partition must be an mmcblk0 partition number, "
+                f"not {data_part!r}")
+        cmdline = _stamp_cmdline_key(
+            cmdline, DATA_CMDLINE_KEY,
+            f"/dev/block/mmcblk0p{int(data_part)}")
+    if boot_part is not None:
+        if not 1 <= int(boot_part) <= 127:
+            raise BuildError(
+                f"the boot partition must be an mmcblk0 partition number, "
+                f"not {boot_part!r}")
+        cmdline = _stamp_cmdline_key(
+            cmdline, BOOT_CMDLINE_KEY,
+            f"/dev/block/mmcblk0p{int(boot_part)}")
+    if cache_part is not None:
+        if not 1 <= int(cache_part) <= 127:
+            raise BuildError(
+                f"the cache partition must be an mmcblk0 partition number, "
+                f"not {cache_part!r}")
+        cmdline = _stamp_cmdline_key(
+            cmdline, CACHE_CMDLINE_KEY,
+            f"/dev/block/mmcblk0p{int(cache_part)}")
     if len(cmdline) > 511:
         raise BuildError(
             f"the kernel command line is too long for the 512-byte field "
@@ -637,7 +666,8 @@ def init_binary_problems(init_binary: bytes, arch: str = ARCH_ARM64) -> list:
 
 def build_emos_image(reference: bytes, init_binary: bytes, version: str,
                      build_id: str = "", sbin: dict = None,
-                     system_part: int = None) -> dict:
+                     system_part: int = None, data_part: int = None,
+                     boot_part: int = None, cache_part: int = None) -> dict:
     """Build the image, refusing rather than warning at every gate.
 
     Returns the image and what went into it, so the wizard can show the user
@@ -649,6 +679,11 @@ def build_emos_image(reference: bytes, init_binary: bytes, version: str,
     system_a/system_b through TWRP's by-name map, which is the one place those
     names exist. Omitted, the image carries no stamp and emOS falls back to the
     partition it hardcoded before this existed, so older behaviour is kept.
+    `data_part` similarly records the device's userdata partition; it is
+    resolved from TWRP rather than assuming every supported Puffin GPT uses
+    Biscuit's partition number.
+    `boot_part` and `cache_part` protect rollback and the persistent boot trail
+    from writing to guessed partition numbers on another Puffin board.
     """
     # Against the REFERENCE's kernel, not a constant: the same function builds
     # for both, and only the user's own image knows which.
@@ -710,7 +745,8 @@ def build_emos_image(reference: bytes, init_binary: bytes, version: str,
 
     ramdisk = build_ramdisk(init_binary, version, build_id, sbin)
     image = pack(parts, parts["zimage"], parts["dtbs"], ramdisk,
-                 system_part=system_part)
+                 system_part=system_part, data_part=data_part,
+                 boot_part=boot_part, cache_part=cache_part)
     return dict(
         image=image,
         md5=hashlib.md5(image).hexdigest(),

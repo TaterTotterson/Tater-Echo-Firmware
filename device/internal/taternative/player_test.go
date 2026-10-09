@@ -1,15 +1,41 @@
 package taternative
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestEmbeddedTimerSoundMatchesESP32ZenChime(t *testing.T) {
+	const wantSHA256 = "2790812c4e289a679c8711e1a61344750921763a6511979d7622859365cc54f7"
+	if got := fmt.Sprintf("%x", sha256.Sum256(embeddedZenTimerSoundWAV)); got != wantSHA256 {
+		t.Fatalf("embedded timer sound SHA-256 = %s, want %s", got, wantSHA256)
+	}
+
+	pcm := timerSound()
+	const wantBytes = 34 * playbackRate * 2 / 10 // 3.4 seconds of 48 kHz mono S16_LE.
+	if len(pcm) != wantBytes {
+		t.Fatalf("decoded timer sound bytes = %d, want %d", len(pcm), wantBytes)
+	}
+	if bytes.Equal(pcm, legacyTimerTone()) {
+		t.Fatal("embedded zen timer sound fell back to the legacy two-tone alarm")
+	}
+
+	// The shared sound intentionally ends with a quiet listening window so a
+	// local stop word remains easy to hear between repeats.
+	quietTail := pcm[len(pcm)-playbackRate:]
+	if !bytes.Equal(quietTail, make([]byte, len(quietTail))) {
+		t.Fatal("timer sound is missing its final quiet listening gap")
+	}
+}
 
 type drainTestSpeaker struct {
 	ended      chan struct{}

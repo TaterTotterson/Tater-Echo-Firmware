@@ -76,6 +76,46 @@ func TestCheckersRoutesUseItsMeasuredCodecs(t *testing.T) {
 	}
 }
 
+func TestRadarRoutesKeepPuffinCaptureAndOpenItsAmpGate(t *testing.T) {
+	got := map[string]string{}
+	for _, write := range RadarRoutes {
+		if _, duplicate := got[write.Name]; duplicate {
+			t.Fatalf("duplicate Radar route %q", write.Name)
+		}
+		got[write.Name] = write.Value
+	}
+	for _, name := range []string{
+		"ADC_A Left Ip Select ADC_A DIF1_L switch",
+		"ADC_B Left Ip Select ADC_B DIF1_L switch",
+		"ADC_C Left Ip Select ADC_C DIF1_L switch",
+		"ADC_D Left Ip Select ADC_D DIF1_L switch",
+		"HPL Output Mixer L_DAC Switch",
+		"HPR Output Mixer R_DAC Switch",
+	} {
+		if got[name] != "1" {
+			t.Errorf("Radar route %q = %q, want 1", name, got[name])
+		}
+	}
+	if got["MFP Gpio Mute"] != "Off" {
+		t.Fatalf("Radar MFP2 gate = %q, want Off (active-low enable)", got["MFP Gpio Mute"])
+	}
+	if got["Headphone_Speaker_Mux"] != "Speaker" {
+		t.Fatalf("Radar output mux = %q, want Speaker", got["Headphone_Speaker_Mux"])
+	}
+	if got["Right Channel Only"] != "On" {
+		t.Fatalf("Radar internal speaker channel = %q, want On", got["Right Channel Only"])
+	}
+	if len(radarSpeakerEQ) != 117 {
+		t.Fatalf("Radar speaker EQ has %d bytes, want the measured 117-byte control", len(radarSpeakerEQ))
+	}
+	for block := 0; block < 6; block++ {
+		off := block * 15
+		if radarSpeakerEQ[off] != 128 || radarSpeakerEQ[off+2] != 1 {
+			t.Fatalf("Radar unity EQ block %d is corrupt: %v", block, radarSpeakerEQ[off:off+15])
+		}
+	}
+}
+
 func TestRookRoutesUseTwoADCsAndDotStyleOutput(t *testing.T) {
 	got := map[string]string{}
 	for _, write := range RookRoutes {

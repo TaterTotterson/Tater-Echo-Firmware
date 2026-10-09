@@ -30,13 +30,17 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 		"A3S5BH2HU6VAYF\n":   Biscuit,
 		"A4ZP7ZC4PI6TO\x00":  Checkers,
 		"A4ZP7ZC4PI6TO\n":    Checkers,
+		"A7WXQPH584YP\x00":   Radar,
+		"A7WXQPH584YP\n":     Radar,
 		"\x00A3S5BH2HU6VAYF": nil,
 		"A3S5BH2HU6VAYF":     Biscuit,
 		"A4ZP7ZC4PI6TO":      Checkers,
+		"A7WXQPH584YP":       Radar,
 		"A3S5BH2HU6VAYFX":    nil,
 		"A4ZP7ZC4PI6TOX":     nil,
 		"a3s5bh2hu6vayf":     nil,
 		"a4zp7zc4pi6to":      nil,
+		"a7wxqph584yp":       nil,
 		"":                   nil,
 		"\n":                 nil,
 	}
@@ -51,6 +55,12 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 func TestCheckersHasNoBorrowedThermalPolicy(t *testing.T) {
 	if Checkers.Tuning != nil {
 		t.Fatal("checkers must not inherit biscuit thermal tuning")
+	}
+}
+
+func TestRadarHasNoBorrowedThermalPolicy(t *testing.T) {
+	if Radar.Tuning != nil {
+		t.Fatal("radar must not inherit biscuit thermal tuning")
 	}
 }
 

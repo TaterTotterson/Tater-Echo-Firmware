@@ -7,9 +7,10 @@ import (
 )
 
 type fake struct {
-	sets   [][]string
-	values map[string]string
-	fail   bool
+	sets     [][]string
+	byteSets map[string][]byte
+	values   map[string]string
+	fail     bool
 }
 
 func (f *fake) Set(name string, v []string) error {
@@ -28,6 +29,17 @@ func (f *fake) Get(name string) (string, error) {
 	return v, nil
 }
 
+func (f *fake) SetBytes(name string, values []byte) error {
+	if f.fail {
+		return errors.New("no such control")
+	}
+	if f.byteSets == nil {
+		f.byteSets = make(map[string][]byte)
+	}
+	f.byteSets[name] = append([]byte(nil), values...)
+	return nil
+}
+
 func TestSetPassesNameAndValues(t *testing.T) {
 	f := &fake{}
 	Use(f)
@@ -41,6 +53,22 @@ func TestSetPassesNameAndValues(t *testing.T) {
 	}
 	if err := Set(SpeakerAmp); err == nil {
 		t.Fatal("a write with no value must be refused")
+	}
+}
+
+func TestSetBytesUsesTheAtomicByteBackend(t *testing.T) {
+	f := &fake{}
+	Use(f)
+	defer Use(unavailable{})
+	want := []byte{128, 0, 1, 247}
+	if err := SetBytes("biquad coefficients", want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.byteSets["biquad coefficients"], want) {
+		t.Fatalf("byte control = %v, want %v", f.byteSets["biquad coefficients"], want)
+	}
+	if err := SetBytes("biquad coefficients", nil); err == nil {
+		t.Fatal("empty byte control write was accepted")
 	}
 }
 
@@ -164,6 +192,23 @@ func TestBiscuitSpeakerAmpIsActiveHigh(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.sets, [][]string{{"Ext_Speaker_Amp_Switch", "On"}}) {
 		t.Fatalf("biscuit amp writes = %v", f.sets)
+	}
+}
+
+func TestRadarEnablesBothSpeakerAmplifierGates(t *testing.T) {
+	f := &fake{}
+	Use(f)
+	ConfigureTarget("radar")
+	defer func() { ConfigureTarget("biscuit"); Use(unavailable{}) }()
+	if err := SetSpeakerEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"Speaker_Amp_Switch", "On"},
+		{"Ext_Speaker_Amp_Switch", "On"},
+	}
+	if !reflect.DeepEqual(f.sets, want) {
+		t.Fatalf("radar amp writes = %v, want %v", f.sets, want)
 	}
 }
 

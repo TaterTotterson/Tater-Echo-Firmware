@@ -339,9 +339,13 @@ func main() {
 	}
 	if nativeMode {
 		// Direct-native mode always needs the local detector. The incoming
-		// settings frame may refine model/threshold after hello.
+		// settings frame may refine model/threshold after hello. Tater's native
+		// playback path is unprocessed, so this device also owns its speaker EQ,
+		// bass guard, and limiter for the whole native session.
 		enabled := true
 		config.Get().Apply(config.ConfigMessage{MwwShadowEnabled: &enabled})
+		pcmSpeaker.SetOutputChain(config.Get().OutputChain())
+		pcmSpeaker.SetOutputChainActive(true)
 	}
 
 	dataClient := client.NewDataClientForTarget(deviceID, microphone, pcmSpeaker, canceller, client.FirmwareTarget)
@@ -462,7 +466,7 @@ func main() {
 	// controller without this callback being rebuilt, and a stale choice
 	// would either strand the adverts or put them back on the liveness
 	// channel. It is two map reads on a path that runs a few times a second.
-	nativeBLEEnabled := nativeMode && (strings.EqualFold(client.FirmwareTarget, "biscuit") ||
+	nativeBLEEnabled := nativeMode && (isRingTarget(client.FirmwareTarget) ||
 		isScreenTarget(client.FirmwareTarget))
 	bleScanner := bluetooth.NewScanner(func(batch []bluetooth.Advert) {
 		if nativeBLEEnabled {
@@ -881,12 +885,13 @@ func main() {
 			Settings: func(values map[string]any) (map[string]any, error) {
 				applied, err := applyTaterSettings(values, s, canceller, dataClient, nativePlayer)
 				if err == nil {
+					pcmSpeaker.SetOutputChain(config.Get().OutputChain())
 					if value, ok := applied["display_theme"]; ok {
 						updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 							snapshot.DisplayTheme = normalizeDisplayTheme(value)
 						})
 					}
-					if _, ok := applied["led_music_animation"]; ok && nativeClient != nil && strings.EqualFold(client.FirmwareTarget, "biscuit") {
+					if _, ok := applied["led_music_animation"]; ok && nativeClient != nil && isRingTarget(client.FirmwareTarget) {
 						state := nativeClient.State()
 						if player := sendspinPlayer(); player != nil && shouldShowSendspinMusicVisual(
 							client.FirmwareTarget,
@@ -1413,6 +1418,11 @@ func main() {
 
 func isScreenTarget(target string) bool {
 	return strings.EqualFold(strings.TrimSpace(target), "checkers") || strings.EqualFold(strings.TrimSpace(target), "rook")
+}
+
+func isRingTarget(target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	return target == "biscuit" || target == "radar"
 }
 
 func runScreenSetupMode() error {
@@ -2670,6 +2680,9 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		enabled := nativeBool(value, true)
 		msg.BargeInEnabled = &enabled
 		applied["barge_in_enabled"] = enabled
+	}
+	if err := applyNativeOutputSettings(values, applied, &msg); err != nil {
+		return applied, err
 	}
 	config.Get().Apply(msg)
 	applyAecConfig(canceller, dc)

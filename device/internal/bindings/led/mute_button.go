@@ -30,6 +30,12 @@ func InitMuteButtonLED() error {
 	if screenOnly() {
 		return nil
 	}
+	// Fire OS 6 binds the privacy line to the keypad driver, so the raw GPIO
+	// cannot be exported. Radar always uses this path, and Fire OS 6 Biscuit
+	// builds may expose it as well. Its polarity is inverted: 1 is dim/off.
+	if _, err := os.Stat(privacyBrightnessPath); err == nil {
+		return SetMuteButtonLED(false)
+	}
 	if _, err := os.Stat(muteButtonValuePath); os.IsNotExist(err) {
 		if err := os.WriteFile(gpioExportPath, []byte(muteButtonGPIO), 0644); err != nil {
 			return fmt.Errorf("mute button LED: export gpio%s: %w", muteButtonGPIO, err)
@@ -45,6 +51,16 @@ func InitMuteButtonLED() error {
 // Active-high (see package comment): 1 = on, 0 = off.
 func SetMuteButtonLED(on bool) error {
 	if screenOnly() {
+		return nil
+	}
+	if _, err := os.Stat(privacyBrightnessPath); err == nil {
+		v := []byte("1")
+		if on {
+			v = []byte("0")
+		}
+		if err := os.WriteFile(privacyBrightnessPath, v, 0644); err != nil {
+			return fmt.Errorf("mute button LED: write privacy brightness: %w", err)
+		}
 		return nil
 	}
 	v := []byte("0")

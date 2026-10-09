@@ -226,8 +226,8 @@ func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeake
 }
 
 // NewPcmSpeakerForTarget opens the measured playback endpoint and applies
-// board-specific codec/amp semantics. Both current targets use pcm23p, but
-// their codecs and external-amplifier polarity are different.
+// board-specific codec/amp semantics. The Puffin targets use pcm23p; the
+// screen targets use their measured MediaTek DL1 paths.
 func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeaker, error) {
 	s := &PcmSpeaker{
 		stopCh:   make(chan struct{}),
@@ -744,9 +744,10 @@ func (p *PcmSpeaker) WaitDuckRamp(ctx context.Context) error {
 func (p *PcmSpeaker) SetOutputChain(params outchain.Params) { p.chain.SetParams(params) }
 
 // SetOutputChainActive hands the output chain to this device (true) or back
-// to the controller (false). Only the controller's `output_chain` feature
-// may turn it on: a controller that does not announce it is still
-// processing the audio itself, and the chain run twice doubles the EQ.
+// to the controller (false). Legacy sessions enable it only when the
+// controller announces `output_chain`; direct Tater-native playback is
+// unprocessed and therefore enables it locally. The two paths must not both
+// process the same audio, because that would double the EQ curve and limiter.
 func (p *PcmSpeaker) SetOutputChainActive(on bool) {
 	if on == p.chain.Active() {
 		return

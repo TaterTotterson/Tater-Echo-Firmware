@@ -36,6 +36,15 @@ var Biscuit = &Board{
 	Tuning:       biscuitTuning,
 }
 
+// Radar is the full-size Echo 2nd gen (MT8163). Its product id is distinct
+// from Biscuit even though both products use the Puffin platform. Radar keeps
+// the kernel's conservative thermal defaults until its stock policy has been
+// measured; copying Biscuit's enclosure-specific profile would be unsafe.
+var Radar = &Board{
+	ID:           "radar",
+	DeviceTypeID: "A7WXQPH584YP",
+}
+
 // Checkers is the Echo Show 5 first generation (MT8163). Its product id was
 // read from /proc/idme/device_type_id on rooted Fire OS 6574.1. It does not
 // inherit Biscuit's thermal policy: the two products have different
@@ -47,7 +56,7 @@ var Checkers = &Board{
 }
 
 // Known is every board the firmware can identify.
-var Known = []*Board{Biscuit, Checkers}
+var Known = []*Board{Biscuit, Radar, Checkers}
 
 // Detect returns the board beneath root, or nil when none matches. root is ""
 // on a device and a fixture directory in tests.

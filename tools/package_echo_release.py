@@ -22,6 +22,43 @@ import tempfile
 
 REPO = Path(__file__).resolve().parents[1]
 TARGETS = REPO / "targets" / "targets.json"
+EMOS_TARGETS = {"biscuit", "radar"}
+ELFCLASS32 = 1
+ELFCLASS64 = 2
+EM_ARM = 40
+EM_AARCH64 = 183
+
+
+def require_elf(path: Path, elf_class: int, machine: int, description: str) -> None:
+    """Reject stale host executables before they enter a release bundle."""
+    try:
+        header = path.read_bytes()[:20]
+    except OSError as exc:
+        raise SystemExit(f"required release input is missing: {path}") from exc
+    class_names = {ELFCLASS32: "32-bit", ELFCLASS64: "64-bit"}
+    machine_names = {EM_ARM: "ARM", EM_AARCH64: "AArch64"}
+    expected = f"{class_names[elf_class]} {machine_names[machine]} ELF"
+    if (len(header) < 20 or header[:4] != b"\x7fELF"
+            or header[4] != elf_class or header[5] != 1
+            or struct.unpack_from("<H", header, 18)[0] != machine):
+        raise SystemExit(f"{description} must be a little-endian {expected}: {path}")
+
+
+def verify_emos_release_inputs(repo: Path) -> None:
+    specs = (
+        ("device/build/server", ELFCLASS32, EM_ARM, "emOS firmware"),
+        ("device/build/microwakeword-android/libtater_microwakeword.so",
+         ELFCLASS32, EM_ARM, "microWakeWord runtime"),
+        ("device/build/onnxruntime/armeabi-v7a/libonnxruntime.so",
+         ELFCLASS32, EM_ARM, "ONNX Runtime"),
+        ("emos/build/init", ELFCLASS64, EM_AARCH64, "AArch64 emOS init"),
+        ("emos/build/init32", ELFCLASS32, EM_ARM, "ARM emOS init"),
+        ("emos/build/wpa/wpa_supplicant", ELFCLASS32, EM_ARM, "wpa_supplicant"),
+        ("emos/build/wpa/wpa_cli", ELFCLASS32, EM_ARM, "wpa_cli"),
+        ("emos/build/bb/busybox", ELFCLASS32, EM_ARM, "BusyBox"),
+    )
+    for relative, elf_class, machine, description in specs:
+        require_elf(repo / relative, elf_class, machine, description)
 
 
 def digest(path: Path) -> str:
@@ -118,11 +155,13 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     targets = json.loads(TARGETS.read_text())["targets"]
     if target not in targets:
         raise SystemExit(f"unknown target {target!r}")
+    if target in EMOS_TARGETS:
+        verify_emos_release_inputs(REPO)
 
     output.mkdir(parents=True, exist_ok=True)
     stem = f"tater-echo-{target}-{version}"
     artifacts: dict[str, Path] = {}
-    if target == "biscuit":
+    if target in EMOS_TARGETS:
         ota = output / f"{stem}-ota.bin"
         copy(REPO / "device/build/server", ota, 0o755)
         artifacts["ota"] = ota
@@ -163,7 +202,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         raise SystemExit(f"factory packaging is not implemented for {target!r}")
 
     runtime_source = REPO / "device/build" / (
-        "microwakeword-android/libtater_microwakeword.so" if target == "biscuit"
+        "microwakeword-android/libtater_microwakeword.so" if target in EMOS_TARGETS
         else ("rook/microwakeword/libtater_microwakeword.so" if target == "rook"
               else "microwakeword-linux/libtater_microwakeword.so")
     )
@@ -172,7 +211,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     artifacts["wake_runtime"] = runtime_asset
 
     ort_source = REPO / "device/build" / (
-        "onnxruntime/armeabi-v7a/libonnxruntime.so" if target == "biscuit"
+        "onnxruntime/armeabi-v7a/libonnxruntime.so" if target in EMOS_TARGETS
         else "onnxruntime-linux-armv7/libonnxruntime.so"
     )
     ort_asset = output / f"{stem}-onnxruntime.so"
@@ -182,11 +221,12 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     with tempfile.TemporaryDirectory(prefix="tater-echo-package-") as temporary:
         factory = Path(temporary) / f"{stem}-factory"
         factory.mkdir()
-        if target == "biscuit":
+        if target in EMOS_TARGETS:
+            target_factory = REPO / "factory" / target
             inputs = {
-                "install.sh": (REPO / "factory/biscuit/install.sh", 0o755),
+                "install.sh": (target_factory / "install.sh", 0o755),
                 "install.py": (REPO / "factory/biscuit/install.py", 0o755),
-                "README.md": (REPO / "factory/biscuit/README.md", 0o644),
+                "README.md": (target_factory / "README.md", 0o644),
                 "LICENSE": (REPO / "LICENSE", 0o644),
                 "NOTICE.md": (REPO / "NOTICE.md", 0o644),
                 "tools/tater_emos_build.py": (
@@ -216,6 +256,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "device/build/microwakeword-testdata/melspectrogram.onnx", 0o644),
                 "payload/embedding_model.onnx": (
                     REPO / "device/build/microwakeword-testdata/embedding_model.onnx", 0o644),
+                "payload/init": (REPO / "emos/build/init", 0o755),
                 "payload/init32": (REPO / "emos/build/init32", 0o755),
                 "payload/wpa_supplicant": (REPO / "emos/build/wpa/wpa_supplicant", 0o755),
                 "payload/wpa_cli": (REPO / "emos/build/wpa/wpa_cli", 0o755),

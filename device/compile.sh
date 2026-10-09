@@ -18,7 +18,7 @@ if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$'
 fi
 TARGET="${TATER_FIRMWARE_TARGET:-biscuit}"
 case "$TARGET" in
-    biscuit) ;;
+    biscuit|radar) ;;
     checkers)
         echo "Checkers uses the Linux image build in linux/checkers/build_linux.sh" >&2
         exit 1

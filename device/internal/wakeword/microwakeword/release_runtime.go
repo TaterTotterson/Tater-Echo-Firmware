@@ -22,7 +22,7 @@ var ReleaseRuntimeSHA256 string
 // companion can never prevent the satellite from booting or using MWW alone.
 var ReleaseORTRuntimeSHA256 string
 
-// This is the pinned Android/Bionic artifact used by local Biscuit developer
+// This is the pinned Android/Bionic artifact used by local Biscuit/Radar developer
 // builds. Releases always embed their target-specific digest, including the
 // separate Linux/musl ARMv7 build used by Checkers and Rook.
 const openWakeWordORTRuntimeSHA = "174233cf1a3f841f1eac82a4328f4f23f8819d5c62969c09e994a6b1abf498c1"
@@ -56,7 +56,7 @@ func expectedORTRuntimeSHA256() string {
 }
 
 // EnsureReleaseCompanionRuntime lets an ordinary executable-only OTA cross the
-// one-time native ABI boundary safely. Biscuit release executables carry these
+// one-time native ABI boundary safely. Biscuit and Radar release executables carry these
 // files inside the OTA itself and install them before anything dlopen's them.
 // Older or developer builds retain the verified download path as a fallback.
 // Failure does not stop the daemon: MWW-only remains available, explicitly
@@ -69,7 +69,7 @@ func EnsureReleaseCompanionRuntime(parent context.Context, target, version strin
 		return false, nil
 	}
 	switch target {
-	case "biscuit", "checkers", "rook":
+	case "biscuit", "radar", "checkers", "rook":
 	default:
 		return false, fmt.Errorf("microwakeword: unsupported release runtime target %q", target)
 	}

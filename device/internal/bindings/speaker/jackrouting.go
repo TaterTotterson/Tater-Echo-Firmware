@@ -105,11 +105,36 @@ func jackRouting(inserted bool) []mixerWrite {
 	}
 }
 
-// The Spot shares the DAC family with Biscuit, but not its complete analog
-// speaker path. These values are from the Rook-specific TECHO5 path, measured
-// against the Spot's Fire OS audio_device.xml on LineageOS.
+// Radar and Spot share the DAC family with Biscuit, but not its complete
+// analog speaker path. Radar follows the hardware-tested echolocal path; Rook
+// follows TECHO5's route measured against the Spot Fire OS audio_device.xml.
 func jackRoutingForTarget(target string, inserted bool) []mixerWrite {
-	if !strings.EqualFold(strings.TrimSpace(target), "rook") {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "radar" {
+		if inserted {
+			return []mixerWrite{
+				{Ctl: mixer.InternalSpeakerAmp, Args: []string{"Off"}},
+				{Ctl: "MFP Gpio Mute", Args: []string{"Off"}},
+				{Ctl: ctlSpeakerAmp, Args: []string{"On"}},
+				{Ctl: "Headphone_Speaker_Mux", Args: []string{"Headphone"}},
+				{Ctl: "Ignore Ramp Up", Args: []string{"On"}},
+				{Ctl: ctlHPDriverGain, Args: []string{hpGainJack, hpGainJack}},
+				{Ctl: ctlDacMux, Args: []string{dacMuxJack}},
+				{Ctl: "Right Channel Only", Args: []string{"Off"}},
+			}
+		}
+		return []mixerWrite{
+			{Ctl: mixer.InternalSpeakerAmp, Args: []string{"On"}},
+			{Ctl: "MFP Gpio Mute", Args: []string{"Off"}},
+			{Ctl: ctlSpeakerAmp, Args: []string{"On"}},
+			{Ctl: "Headphone_Speaker_Mux", Args: []string{"Speaker"}},
+			{Ctl: "Ignore Ramp Up", Args: []string{"Off"}},
+			{Ctl: ctlHPDriverGain, Args: []string{hpGainInternal, hpGainInternal}},
+			{Ctl: ctlDacMux, Args: []string{dacMuxInternal}},
+			{Ctl: "Right Channel Only", Args: []string{"On"}},
+		}
+	}
+	if target != "rook" {
 		return jackRouting(inserted)
 	}
 	if inserted {

@@ -38,7 +38,7 @@ func NewOTAInstaller() *OTAInstaller {
 }
 
 // NewOTAInstallerForTarget selects the transaction appropriate to the target.
-// Biscuit remains a single ELF A/B update. The Linux screen targets use
+// Biscuit and Radar remain single ELF A/B updates. The Linux screen targets use
 // coordinated daemon/renderer slots on /data; a pre-Linux unit needs USB.
 func NewOTAInstallerForTarget(target string) *OTAInstaller {
 	installer := NewOTAInstaller()

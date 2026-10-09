@@ -5,26 +5,29 @@
 # kernel and DTBs out of it, so the artifact is reconstructed on the user's
 # side from software already on their device. See README.md.
 #
-#   ./build.sh <reference boot_a_x.img> [output.img]
+#   ./build.sh <reference-boot.img> [output.img]
 #
 # Pull the reference off a rooted device first:
-#   adb shell su -c 'dd if=/dev/block/mmcblk0p10' > boot_a_x.img
+# Resolve the correct target first; this Biscuit example reads boot_a:
+#   adb shell su -c 'dd if=/dev/block/mmcblk0p10' > stock-boot-a.img
 #
 # and KEEP IT. It is the recovery image as well as the build input.
 #
-# EMOS_SYSTEM_PART names the partition holding the FireOS userspace this
-# reference was read beside, and is stamped onto the image's cmdline so emOS
-# mounts that one rather than assuming. It is optional here because this script
-# runs against a FILE and cannot know which slot it came from -- unset, the
-# image carries no stamp and emOS falls back to the partition it hardcoded
-# before this existed. The provisioning wizard always sets it, because it reads
-# the partition by name off the device.
+# EMOS_SYSTEM_PART names the FireOS userspace this reference was read beside;
+# EMOS_DATA_PART, EMOS_BOOT_PART, and EMOS_CACHE_PART name userdata, the active
+# emOS boot target, and its persistent boot trail. All are stamped onto the
+# image's cmdline so emOS uses partitions the installer actually resolved.
+# They are optional here because this script runs against a FILE and cannot
+# know which device or slot it came from -- unset, emOS uses legacy Biscuit
+# defaults. The factory installer always sets all four from TWRP's by-name map.
 #
-#   EMOS_SYSTEM_PART=13 ./build.sh boot_a_x.img     # built beside system_a
-#   EMOS_SYSTEM_PART=14 ./build.sh boot_a_x.img     # built beside system_b
+#   EMOS_SYSTEM_PART=13 ./build.sh stock-boot-a.img # built beside system_a
+#   EMOS_SYSTEM_PART=14 ./build.sh stock-boot-b.img # built beside system_b
+#   EMOS_SYSTEM_PART=14 EMOS_DATA_PART=16 EMOS_BOOT_PART=10 \
+#     EMOS_CACHE_PART=15 ./build.sh stock-boot-b.img
 set -e
 
-REF=${1:?usage: build.sh <reference boot_a_x.img> [output.img]}
+REF=${1:?usage: build.sh <reference-boot.img> [output.img]}
 OUT=${2:-emos-boot.img}
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(mktemp -d)
@@ -159,7 +162,9 @@ install -m 0755 "$WORK/init" "$WORK/root/init"
 # LK gunzips an AArch64 Image, so the kernel must go back in COMPRESSED — the
 # same bytes the reference image carries. Handing it an uncompressed Image
 # silently doubles the image and does not boot.
-EMOS_SYSTEM_PART="${EMOS_SYSTEM_PART:-}" python3 "$HERE/mkboot.py" "$REF" <(python3 - "$REF" <<'EOF'
+EMOS_SYSTEM_PART="${EMOS_SYSTEM_PART:-}" EMOS_DATA_PART="${EMOS_DATA_PART:-}" \
+EMOS_BOOT_PART="${EMOS_BOOT_PART:-}" EMOS_CACHE_PART="${EMOS_CACHE_PART:-}" \
+    python3 "$HERE/mkboot.py" "$REF" <(python3 - "$REF" <<'EOF'
 import struct, sys
 ref = open(sys.argv[1], "rb").read()
 ksz = struct.unpack("<I", ref[8:12])[0]
@@ -170,7 +175,7 @@ EOF
 ) "$WORK/ramdisk.gz" "$OUT"
 
 echo
-echo "built $OUT — flash with:"
-echo "  dd if=$OUT of=/dev/block/mmcblk0p10   (boot_a_x on biscuit)"
-echo "recover with:"
-echo "  dd if=$REF of=/dev/block/mmcblk0p10"
+echo "built $OUT"
+echo "The standalone builder cannot resolve your device's boot target safely."
+echo "Prefer the target factory installer; if flashing manually, resolve and"
+echo "verify the exact boot partition before both the flash and recovery dd."

@@ -48,7 +48,9 @@ echo "TaterEcho" > /sys/power/wake_lock
 
 # Mixer controls are named, never numbered: the FireOS 6 kernel shifts ids
 # from ~161 on, so a number can name a different control there (#546).
-# Speaker mixer init
+# Speaker mixer init. Radar's MFP2 gate is active-low, but leave it muted here:
+# the daemon keeps both amplifier switches off while selecting the route and
+# opening the DAC on silence, then enables the target-specific gates.
 tinymix -D 0 "Audio_I2S1_Setting" On
 tinymix -D 0 "HP DAC Playback Switch" 1 1
 tinymix -D 0 "MFP Gpio Mute" On
@@ -165,7 +167,9 @@ fi
 # the server re-enables the amp in its own startup sequence.
 amp_off() {
     tinymix -D 0 "PCM Playback Volume" 0 0 2>/dev/null
+    tinymix -D 0 "Speaker_Amp_Switch" Off 2>/dev/null
     tinymix -D 0 "Ext_Speaker_Amp_Switch" Off 2>/dev/null
+    tinymix -D 0 "MFP Gpio Mute" On 2>/dev/null
 }
 
 # ── Signal handling ───────────────────────────────────────────────────────────

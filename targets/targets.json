@@ -11,6 +11,18 @@
       "factory_installer": "factory/biscuit/install.py",
       "status": "hardware-tested"
     },
+    "radar": {
+      "display_name": "Amazon Echo 2nd Generation (2017)",
+      "amazon_codename": "radar",
+      "cpu": "armv7a",
+      "unlock": "amonet-radar-v1.0.0",
+      "native_base_os": "tater-emos",
+      "factory_transport": "usb-twrp",
+      "factory_install": true,
+      "ota": true,
+      "factory_installer": "factory/radar/install.sh",
+      "status": "experimental"
+    },
     "checkers": {
       "display_name": "Amazon Echo Show 5 1st Generation (2019)",
       "amazon_codename": "checkers",

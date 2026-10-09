@@ -464,8 +464,9 @@ func (p *LocalPlayer) StopMedia() {
 	setSpeakerDuck(p.Speaker, 0, 0)
 }
 
-// SetTimerAlarm starts or stops a local repeating two-tone alarm. The tone
-// uses the voice plane and needs no separately installed audio asset.
+// SetTimerAlarm starts or stops the local repeating timer-finished sound. The
+// embedded zen chime matches the ESP32 satellites and includes its own quiet
+// listening gap before each repeat.
 func (p *LocalPlayer) SetTimerAlarm(active bool) {
 	p.alarmMu.Lock()
 	if p.alarmCancel != nil {
@@ -485,16 +486,16 @@ func (p *LocalPlayer) SetTimerAlarm(active bool) {
 	p.alarmMu.Unlock()
 	go func() {
 		defer p.Speaker.EndStream()
-		tone := timerTone()
+		sound := timerSound()
 		for {
-			if err := p.pump(ctx, tone, 80); err != nil {
+			if err := p.pump(ctx, sound, 80); err != nil {
 				return
 			}
 		}
 	}()
 }
 
-func timerTone() []byte {
+func legacyTimerTone() []byte {
 	const duration = 900 * time.Millisecond
 	samples := int(duration.Seconds() * playbackRate)
 	out := make([]byte, samples*2)

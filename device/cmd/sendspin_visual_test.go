@@ -23,6 +23,7 @@ func TestShouldShowSendspinMusicVisual(t *testing.T) {
 	}{
 		{name: "biscuit idle playback", target: "biscuit", state: "idle", active: true, want: true},
 		{name: "biscuit playing state", target: "BISCUIT", state: "playing", active: true, want: true},
+		{name: "radar ring", target: "RADAR", state: "idle", active: true, want: true},
 		{name: "stopped", target: "biscuit", state: "idle", want: false},
 		{name: "reply owns ring", target: "biscuit", state: "speaking", active: true, want: false},
 		{name: "timer owns ring", target: "biscuit", state: "idle", active: true, ringing: true, want: false},

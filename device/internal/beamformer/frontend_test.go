@@ -37,10 +37,13 @@ func TestTargetFrontEndsStayDistinct(t *testing.T) {
 	if _, ok := NewForTarget("biscuit").(*Beamformer); !ok {
 		t.Fatal("biscuit did not get seven-mic beamformer")
 	}
+	if _, ok := NewForTarget("radar").(*Beamformer); !ok {
+		t.Fatal("radar did not get the shared Puffin seven-mic beamformer")
+	}
 	if _, ok := NewForTarget("checkers").(*CheckersFrontEnd); !ok {
 		t.Fatal("checkers did not get four-channel front end")
 	}
-	for _, target := range []string{"biscuit", "rook", "checkers"} {
+	for _, target := range []string{"biscuit", "radar", "rook", "checkers"} {
 		if _, ok := NewForTarget(target).(WakeArray); !ok {
 			t.Fatalf("%s did not expose its independent wake beams", target)
 		}

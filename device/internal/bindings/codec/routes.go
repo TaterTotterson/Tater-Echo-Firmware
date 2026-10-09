@@ -76,6 +76,47 @@ var Routes = []Write{
 	{"HPL Output Mixer L_DAC Switch", "1"},
 }
 
+// Radar shares Puffin's four-ADC capture topology and HPL/HPR DAC route with
+// Biscuit, but its TLV320AIC3204 drives a separate external amplifier gate on
+// MFP2. The pin is active-low: "Off" drives it low and permits audio. Radar
+// also exposes an explicit speaker/headphone mux. These values are the route
+// used by the independently hardware-tested echolocal Radar port; absent
+// controls still fail loudly through the normal route accounting.
+var RadarRoutes = []Write{
+	{"ADC_D Right Ip Select ADC_D DIF1_R switch", "1"},
+	{"ADC_D Left Ip Select ADC_D DIF1_L switch", "1"},
+	{"ADC_C Right Ip Select ADC_C DIF1_R switch", "1"},
+	{"ADC_C Left Ip Select ADC_C DIF1_L switch", "1"},
+	{"ADC_B Right Ip Select ADC_B DIF1_R switch", "1"},
+	{"ADC_B Left Ip Select ADC_B DIF1_L switch", "1"},
+	{"ADC_A Right Ip Select ADC_A DIF1_R switch", "1"},
+	{"ADC_A Left Ip Select ADC_A DIF1_L switch", "1"},
+
+	{"HPR Output Mixer R_DAC Switch", "1"},
+	{"HPL Output Mixer L_DAC Switch", "1"},
+	{"MFP Gpio Mute", "Off"},
+	{"Headphone_Speaker_Mux", "Speaker"},
+	{"Audio_DacMux_Setting", "Off"},
+	{"Ignore Ramp Up", "Off"},
+	{"HP Driver Gain Volume", "6"},
+	{"Right Channel Only", "On"},
+}
+
+// radarSpeakerEQ is Radar's vendor DAC filter chain: six unity blocks and one
+// speaker-specific filter. The control reads back as all zeroes until userspace
+// writes it, so opening the analog route alone is not a complete speaker init.
+// Captured and hardware-tested by echolocal's Radar port (MIT; NOTICE.md).
+var radarSpeakerEQ = []byte{
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	128, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	127, 247, 0, 0, 128, 9, 0, 0, 127, 239, 0, 0, 0, 17, 0, 0,
+	0, 17, 0, 0, 127, 222, 0, 0, 15, 0, 0,
+}
+
 // CheckersRoutes is the Fire OS 6574.1 audio_device.xml route verified
 // against the live Checkers mixer and playback trace. Checkers has one
 // TLV320AIC3101 ADC and an RT5616 DAC; applying Biscuit's four-ADC / HPL-HPR
@@ -138,12 +179,26 @@ var once sync.Once
 func EnsureRoutes(target string) {
 	once.Do(func() {
 		routes := Routes
-		if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+		isRadar := strings.EqualFold(strings.TrimSpace(target), "radar")
+		total := len(routes)
+		if isRadar {
+			routes = RadarRoutes
+			total = len(routes) + 1 // scalar routes plus the byte-typed EQ
+		} else if strings.EqualFold(strings.TrimSpace(target), "checkers") {
 			routes = CheckersRoutes
+			total = len(routes)
 		} else if strings.EqualFold(strings.TrimSpace(target), "rook") {
 			routes = RookRoutes
+			total = len(routes)
 		}
 		var failed int
+		if isRadar {
+			// Program the filter while every external amp gate is still held
+			// off by start_server.sh, before opening the analog route below.
+			if err := mixer.SetBytes("biquad coefficients", radarSpeakerEQ); err != nil {
+				failed++
+			}
+		}
 		for _, w := range routes {
 			if err := mixer.Set(w.Name, w.Value); err != nil {
 				failed++
@@ -151,9 +206,9 @@ func EnsureRoutes(target string) {
 		}
 		if failed > 0 {
 			log.Printf("[codec] %d of %d DAPM routes failed — audio may be silent",
-				failed, len(routes))
+				failed, total)
 		} else {
-			log.Printf("[codec] %d DAPM routes closed", len(routes))
+			log.Printf("[codec] %d DAPM routes/tuning controls applied", total)
 		}
 	})
 }

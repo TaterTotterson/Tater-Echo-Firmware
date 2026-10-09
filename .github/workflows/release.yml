@@ -2,10 +2,10 @@ name: Tater Echo Firmware Release
 
 # One annotated vX.Y.Z tag builds every target, sharing one pinned/cached Linux
 # ARMv7 ONNX Runtime, then publishes a single compatibility manifest. Biscuit
-# produces factory + OTA firmware;
+# and Radar produce factory + OTA emOS firmware;
 # Checkers and Rook produce A/B application OTAs and USB Linux factory bundles
 # around pinned, hash-verified TECHO5 hardware enablement.
-# Biscuit remains on its existing emOS path.
+# Biscuit and Radar share the Puffin emOS path.
 
 on:
   push:
@@ -66,10 +66,18 @@ jobs:
           if-no-files-found: error
 
   biscuit:
-    name: Echo Dot 2 (biscuit)
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: biscuit
+            name: Echo Dot 2 (biscuit)
+          - target: radar
+            name: Echo 2 (radar, experimental)
 
     steps:
       - name: Checkout
@@ -144,18 +152,19 @@ jobs:
             -v "${{ github.workspace }}/device":/sdk \
             tater-echo-compiler -c "cd /sdk && go build -tags server,releaseassets \
               -ldflags '-X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.Version=${{ steps.version.outputs.version }} \
-                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=biscuit \
+                        -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/client.FirmwareTarget=${{ matrix.target }} \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock.BuildUnix=$build_unix \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseRuntimeSHA256=$runtime_sha \
                         -X github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword.ReleaseORTRuntimeSHA256=$ort_sha' \
               -o build/server ./cmd/"
 
-      - name: Compile emOS init32
+      - name: Compile both emOS init architectures
         run: |
           mkdir -p emos/build
           docker run --rm -v "${{ github.workspace }}/emos":/emos -w /emos \
             tater-echo-compiler bash -lc \
-            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
+            '/opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang -static -O2 -Wall -o build/init init/init.c && \
+             /opt/android/ndk/21.4.7075529/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang -static -O2 -Wall -o build/init32 init/init.c'
 
       - name: Build static Wi-Fi tools
         run: |
@@ -184,10 +193,12 @@ jobs:
         run: |
           file device/build/server device/build/microwakeword-android/libtater_microwakeword.so \
             device/build/onnxruntime/armeabi-v7a/libonnxruntime.so \
-            emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
+            emos/build/init emos/build/init32 emos/build/wpa/wpa_supplicant emos/build/bb/busybox
           file device/build/server | grep -q '32-bit.*ARM'
           file device/build/microwakeword-android/libtater_microwakeword.so | grep -q '32-bit.*ARM'
           file device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | grep -q '32-bit.*ARM'
+          file emos/build/init | grep -q 'ARM aarch64'
+          file emos/build/init | grep -q 'statically linked'
           file emos/build/init32 | grep -q '32-bit LSB executable, ARM'
           file emos/build/init32 | grep -q 'statically linked'
           file emos/build/wpa/wpa_supplicant | grep -q '32-bit LSB executable, ARM'
@@ -198,16 +209,16 @@ jobs:
           runtime_sha=$(sha256sum device/build/microwakeword-android/libtater_microwakeword.so | awk '{print $1}')
           ort_sha=$(sha256sum device/build/onnxruntime/armeabi-v7a/libonnxruntime.so | awk '{print $1}')
           strings device/build/server | grep -qF "$runtime_sha" || {
-            echo '::error::Biscuit firmware is missing its wake-runtime digest'; exit 1; }
+            echo '::error::${{ matrix.target }} firmware is missing its wake-runtime digest'; exit 1; }
           strings device/build/server | grep -qF "$ort_sha" || {
-            echo '::error::Biscuit firmware is missing its ONNX Runtime digest'; exit 1; }
+            echo '::error::${{ matrix.target }} firmware is missing its ONNX Runtime digest'; exit 1; }
           test "$(stat -c %s device/build/server)" -gt 30000000 || {
-            echo '::error::Biscuit OTA does not contain its self-contained wake assets'; exit 1; }
+            echo '::error::${{ matrix.target }} OTA does not contain its self-contained wake assets'; exit 1; }
           if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
-            echo '::error::Biscuit firmware requires unavailable pcm_readi'; exit 1;
+            echo '::error::${{ matrix.target }} firmware requires unavailable pcm_readi'; exit 1;
           fi
           readelf -Ws device/build/server | grep -E 'UND.* pcm_read(@|$)' >/dev/null || {
-            echo '::error::Biscuit firmware is missing the compatible pcm_read import'; exit 1; }
+            echo '::error::${{ matrix.target }} firmware is missing the compatible pcm_read import'; exit 1; }
           python3 -m unittest factory.biscuit.test_install
 
       - name: Exercise emOS invariants
@@ -223,9 +234,9 @@ jobs:
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' \
-            --target biscuit --output release
+            --target '${{ matrix.target }}' --output release
           mkdir /tmp/tater-factory-check
-          tar -xzf release/tater-echo-biscuit-${{ steps.version.outputs.version }}-factory.tar.gz \
+          tar -xzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-factory.tar.gz \
             -C /tmp/tater-factory-check
           /tmp/tater-factory-check/*/install.sh --verify-bundle
           (cd release && sha256sum -c SHA256SUMS)
@@ -233,7 +244,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: tater-echo-biscuit-${{ steps.version.outputs.version }}
+          name: tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}
           path: release/
           if-no-files-found: error
 
@@ -545,6 +556,12 @@ jobs:
           name: tater-echo-biscuit-${{ steps.version.outputs.version }}
           path: staging/biscuit
 
+      - name: Download Radar artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tater-echo-radar-${{ steps.version.outputs.version }}
+          path: staging/radar
+
       - name: Download Checkers artifacts
         uses: actions/download-artifact@v8
         with:
@@ -562,6 +579,7 @@ jobs:
           python3 tools/merge_release_manifests.py \
             --version '${{ steps.version.outputs.version }}' --output release \
             staging/biscuit/firmware-manifest.json \
+            staging/radar/firmware-manifest.json \
             staging/checkers/firmware-manifest.json \
             staging/rook/firmware-manifest.json
           (cd release && sha256sum -c SHA256SUMS)

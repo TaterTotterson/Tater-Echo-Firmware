@@ -10,20 +10,25 @@ Only tags in that format trigger a firmware release.
 
 Every native `hello` reports `firmware_target`, alongside the existing Echo
 hardware identity. Tater uses that target key with `targets/targets.json`;
-current keys are `biscuit`, `checkers`, and `rook`. A future model receives its own
-target and factory installer even when its userspace binary can be shared.
+current keys are `biscuit`, `radar`, `checkers`, and `rook`. A future model
+receives its own target and factory installer even when its userspace binary
+can be shared.
 
 ## Factory artifact
 
 The factory archive is for a device already unlocked with the target's listed
-amonet version. Biscuit's archive includes Tater userspace, microWakeWord,
-emOS tools, the image builder, installer, licenses, and matching BusyBox source.
+amonet version. Biscuit and Radar archives include Tater userspace,
+microWakeWord, emOS tools, the image builder, installer, licenses, and matching
+BusyBox source.
 Checkers' and Rook's archives include their complete Tater Linux rootfs, pinned
 target boot image, USB installer, and the attributed TECHO5 components used for
 platform setup. Checkers also includes its optional USB provisioning helper.
 
-Biscuit does not include a boot image: its final emOS image is built from the
-attached device's own stock boot partition. Checkers and Rook use hash-pinned
+Biscuit and Radar do not include boot images: each final emOS image is built
+from the attached device's own stock boot partition. Radar resolves the
+canonical `boot_a`/`boot_b` slots after amonet restores the GPT and never
+selects stale `_x` aliases from an interrupted older unlock.
+Checkers and Rook use hash-pinned
 TECHO5 platform images, with upstream licenses and notices, and retain TWRP.
 Their USB installations use target-matched LineageOS packages only as the
 source of each unit's vendor driver tree, then replace Android's system
@@ -31,7 +36,7 @@ partition with the A/B store.
 
 ## OTA artifacts
 
-Biscuit's OTA asset is the ARM userspace ELF. Checkers' and Rook's routine OTA
+Biscuit and Radar OTA assets are ARM userspace ELFs. Checkers' and Rook's routine OTA
 assets are deterministic gzip-compressed application bundles containing the
 native daemon, native screen renderer, and a per-file manifest. The daemon
 embeds and verifies the matched built-in Hey Tater MWW/OWW package, so an
@@ -40,7 +45,7 @@ root filesystems remain in USB factory bundles for recovery and rare
 base-system changes.
 
 Each target also publishes target-specific `wake-runtime.so` and
-`onnxruntime.so` sidecars. Biscuit receives the Android/Bionic ARMv7 ONNX
+`onnxruntime.so` sidecars. Biscuit and Radar receive the Android/Bionic ARMv7 ONNX
 Runtime; Checkers and Rook receive the reduced Linux/musl ARMv7 build. A
 firmware OTA that first introduces either runtime verifies and installs that
 exact library plus the matching shared feature models before wake startup.
@@ -65,7 +70,7 @@ selection. The device rejects a missing/invalid digest, a size mismatch, an
 artifact of the wrong target format, an HTTP error, or an artifact over the
 configured limit.
 
-On Biscuit, success writes the inactive userspace slot and atomically switches
+On Biscuit and Radar, success writes the inactive userspace slot and atomically switches
 `/data/local/bin/server`; the supervisor switches back after three fast startup
 failures. Checkers and Rook follow the same model under `/data/tater-linux/app`:
 the daemon and renderer are staged together, their shared slot is switched

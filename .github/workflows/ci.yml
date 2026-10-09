@@ -99,6 +99,18 @@ jobs:
           fi
           readelf -Ws device/build/server | grep -E 'UND.* pcm_read(@|$)' >/dev/null || {
             echo "::error::Biscuit firmware is missing the compatible pcm_read import"; exit 1; }
+      - name: Build Radar firmware from the shared emOS target
+        working-directory: device
+        run: TATER_FIRMWARE_TARGET=radar ./compile.sh
+      - name: Verify Radar ARM userspace output
+        run: |
+          file device/build/server | grep -q "ARM" || {
+            echo "::error::Radar firmware is not an ARM binary"; exit 1; }
+          if readelf -Ws device/build/server | grep -E 'UND.* pcm_readi(@|$)' >/dev/null; then
+            echo "::error::Radar firmware requires unavailable pcm_readi"; exit 1;
+          fi
+          strings device/build/server | grep -qF radar || {
+            echo "::error::Radar firmware target was not embedded"; exit 1; }
       - name: Build static emOS init for aarch64
         run: |
           mkdir -p emos/build
