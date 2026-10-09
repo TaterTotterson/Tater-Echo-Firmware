@@ -25,7 +25,7 @@ installer on a similar-looking Echo from another generation.
 
 | Device | Target | Required unlock | Installed system | Factory | OTA |
 |---|---|---|---|---:|---:|
-| Echo Dot 2nd Generation (2016) | `biscuit` | amonet-biscuit v2.0.0 | emOS | Yes | Yes |
+| Echo Dot 2nd Generation (2016) | `biscuit` | amonet-biscuit v2.0.0 | Tater emOS | Yes | Yes |
 | Echo Show 5 1st Generation (2019) | `checkers` | amonet-checkers v2.0.1+ | Tater Linux | Yes | Yes |
 | Echo Spot 1st Generation (2017) | `rook` | amonet-rook v2.0.0 | Tater Linux | Yes | Yes |
 
