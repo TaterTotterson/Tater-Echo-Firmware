@@ -14,74 +14,84 @@
 </p>
 
 Tater Echo Firmware turns supported, unlocked Amazon Echo hardware into native
-Tater voice satellites. Wake detection, audio processing, playback, LEDs,
-controls, presence scanning, and OTA run on the Echo without Home Assistant or
-a separate Echo controller.
+Tater voice satellites. Wake detection, audio processing, playback, displays,
+controls, Bluetooth, and OTA updates run directly on the Echo. Home Assistant
+and a separate Echo controller are not required.
 
-## Supported hardware
+## Supported devices
 
-| Target | Device | Required unlock | Factory | OTA |
-|---|---|---|---:|---:|
-| `biscuit` | Echo Dot 2nd Generation (2016) | amonet-biscuit v2.0.0 | Yes | Yes |
-| `checkers` | Echo Show 5 1st Generation (2019) | amonet-checkers v2.0.1+ | Yes | Yes |
-| `rook` | Echo Spot 1st Generation (2017) | amonet-rook v2.0.0 | Yes | Yes |
+Only the exact generations and codenames below are supported. Do not use an
+installer on a similar-looking Echo from another generation.
 
-Target metadata used by builds and Tater lives in
+| Device | Target | Required unlock | Installed system | Factory | OTA |
+|---|---|---|---|---:|---:|
+| Echo Dot 2nd Generation (2016) | `biscuit` | amonet-biscuit v2.0.0 | emOS | Yes | Yes |
+| Echo Show 5 1st Generation (2019) | `checkers` | amonet-checkers v2.0.1+ | Tater Linux | Yes | Yes |
+| Echo Spot 1st Generation (2017) | `rook` | amonet-rook v2.0.0 | Tater Linux | Yes | Yes |
+
+Target metadata used by Tater and the release builds lives in
 [`targets/targets.json`](targets/targets.json).
 
-## What it supports
+## Features
 
-- Independently selectable microWakeWord and openWakeWord engines: MWW-only,
-  MWW + OWW agreement, or OWW-only before the optional STT wake check. Tater
-  manages built-in/custom model sources, sensitivity, and wake sounds live.
-  The built-in Hey Tater profile includes a matched, jointly packaged MWW and
-  OWW pair so dual mode cannot accidentally combine different phrases.
-  Biscuit, Checkers, and Rook all execute OWW with the optimized ARMv7 ONNX
-  Runtime/XNNPACK path. Android/Bionic and Linux/musl receive separately built,
-  hash-verified runtime libraries for their matching ABI.
-- Wake-audio training uploads, continued conversation, barge-in, intercom,
-  timers, announcements, mute, volume, and device controls.
-- Sendspin multi-room and stereo-pair playback, including direct discovery by
-  compatible servers such as Music Assistant, plus native TTS overlays, audio
-  scenes, music ducking, clock correction, and underrun recovery.
-- Tater-selectable LED animations on Biscuit. Biscuit includes seven-mic
-  direction of arrival and reply direction; Checkers and Rook have complete
-  native Tater display experiences and selectable color themes.
-- BLE presence advertisements through Tater's room-level presence system.
-- Captive-portal Wi-Fi and Tater pairing on all three devices. Checkers can
-  also be provisioned over USB during factory installation.
-- Verified OTA with rollback. Checkers and Rook stage their daemon and native
-  screen together in A/B application slots on writable `/data`.
-- Checkers and Rook weather, selected room sensors, notifications, Room Vision,
-  timers, live tool status, audio-reactive response visuals, and on-screen
-  press-and-hold intercom.
+- On-device microWakeWord, openWakeWord, or Dual Wake Word detection, with
+  built-in and custom models managed from Tater.
+- Hardware-appropriate microphone processing and beamforming: seven
+  microphones on Biscuit, two on Checkers, and four on Rook.
+- Continued conversation, barge-in, intercom, timers, announcements, wake
+  sounds, mute, volume, and wake-audio training samples.
+- Sendspin multi-room and stereo-pair playback with synchronized PCM/FLAC,
+  native TTS overlays, audio scenes, music ducking, and persistent output
+  channel selection.
+- Tater-controlled Biscuit LED animations and complete native Checkers and
+  Rook display experiences for weather, timers, notifications, Room Vision,
+  music, and live tool status.
+- Passive BLE advertisement forwarding for room-level presence.
+- Secure active BLE GATT connections for services such as Meshtastic Core,
+  including PIN pairing, persistent bonds, notifications, and unpairing.
+- Captive-portal Wi-Fi and Tater pairing, followed by verified A/B OTA updates
+  with automatic rollback.
 
-### Sendspin playback
+## Meshtastic through an Echo satellite
 
-Every supported Echo advertises a Sendspin v1 player over mDNS at
-`_sendspin._tcp` and listens on TCP port `8928` at `/sendspin`. It accepts
-48 kHz/16-bit PCM stereo from Tater's Sendspin source and the encrypted FLAC
-profile used by Music Assistant. The device identity, pairings, volume, delay,
-and Tater stereo-pair channel assignment survive a reboot.
+Tater v1.4.0 and Echo firmware v2.4.0 add active Bluetooth GATT on Biscuit,
+Checkers, and Rook. The Meshtastic Core from the Tater Shop can therefore use a
+nearby Echo's Bluetooth radio instead of a separate external bridge.
 
-Tater assigns `left`, `right`, `mono`, or `stereo` output when it builds a
-pair or group; all members receive the same synchronized stream and each Echo
-renders its assigned channel through its physical mono speaker. The former
-Tater-specific `audio.clock.sync` and `media.session.*` transport is no longer
-advertised or accepted. Native single-satellite replies, announcements,
-timers, overlays, and foreground/background audio scenes remain available and
-duck the Sendspin music plane in hardware.
+### Requirements
 
-## Install Biscuit (Echo Dot 2)
+- Tater v1.4.0 or newer.
+- Tater Echo Firmware v2.4.0 or newer on at least one supported Echo.
+- The current Meshtastic Core from the Tater Shop.
+- Bluetooth enabled on the Meshtastic radio and its six-digit Bluetooth PIN.
 
-First complete the
+### Pair a radio
+
+1. In Tater, install or update **Meshtastic Core** from the Tater Shop.
+2. Open the Core and select **Bluetooth Pairing**.
+3. Scan for radios. The results intentionally show compatible Meshtastic
+   devices rather than every unrelated BLE advertisement in the room.
+4. Select the radio and enter its six-digit Bluetooth PIN. This is the radio's
+   PIN, not the Echo setup code or Wi-Fi password.
+5. Confirm the radio and satellite in the **Current Connection** card. Use
+   **Unpair** there when the bond should be removed.
+
+The PIN is used only during pairing and is not stored. The resulting bond keys
+are stored on the satellite and restore the encrypted Bluetooth connection
+after a reboot. GATT commands travel over the existing authenticated Tater
+satellite link; the firmware does not expose a separate Bluetooth-control
+network listener. Passive BLE presence forwarding remains available alongside
+active connections.
+
+## Install Biscuit — Echo Dot 2
+
+Start with an Echo Dot 2nd Generation (`biscuit`) that has completed the
 [amonet-biscuit v2.0.0 unlock, Fire OS 6 flash, and root procedure](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/).
-Then:
 
-1. Boot the Echo into TWRP (white ring) and connect USB.
+1. Boot the Echo into TWRP—the ring should be white—and connect USB.
 2. Download `tater-echo-biscuit-<version>-factory.tar.gz` from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
-3. Extract it, enter the extracted directory, and run the installer:
+3. Extract the archive and run its installer:
 
    ```bash
    tar -xzf tater-echo-biscuit-v*-factory.tar.gz
@@ -89,109 +99,91 @@ Then:
    ./install.sh
    ```
 
-4. After reboot, join `Tater-Setup-XXXX` and complete the captive portal.
+4. After reboot, join `Tater-Setup-XXXX` and complete the setup page.
 
-The computer needs Python 3 and `adb`. The installer validates TWRP and the
-Biscuit A/B layout, reads both boot slots, builds emOS locally from that Echo's
-own stock boot image, verifies every write, preserves stock in `boot_b`, and
-saves a private recovery image under `factory-backups/`. Never publish that
-backup because it contains code from your device.
+The computer needs Python 3 and `adb`. The installer validates the device and
+both boot slots, builds emOS from that Echo's own stock boot image, preserves
+stock in `boot_b`, verifies every write, and saves a private recovery image in
+`factory-backups/`. Never publish that backup. See the
+[`factory/biscuit` guide](factory/biscuit/README.md) for recovery details.
 
-Full safety checks and recovery options are in
-[`factory/biscuit/README.md`](factory/biscuit/README.md).
+## Install Checkers — Echo Show 5
 
-## Install Checkers (Echo Show 5, 1st gen)
+Start with an unlocked Echo Show 5 **1st Generation** (`checkers`),
+amonet-checkers 2.0.1 or newer, and working TWRP. The
+[Checkers unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-1st-gen-2019-checkers.4762900/)
+covers those prerequisites.
 
-Checkers 2.x runs Tater Linux while retaining TWRP. Start with an unlocked
-Echo Show 5 **1st generation** (`checkers`), amonet-checkers 2.0.1 or newer,
-and working TWRP ([Checkers unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-1st-gen-2019-checkers.4762900/)).
-The USB installer installs a pinned LineageOS image for this unit's Wi-Fi and
-Bluetooth drivers; LineageOS is not booted.
-
-The installer automatically downloads the tested
-[Checkers LineageOS 18.1 v0.7 ZIP](https://github.com/amazon-oss/releases/releases/download/lineage-18.1-checkers-v0.7/lineage-18.1-20260904-UNOFFICIAL-checkers.zip)
-(`lineage-18.1-20260904-UNOFFICIAL-checkers.zip`) when needed. It verifies the
-pinned SHA-256 before formatting or flashing; `--lineage-zip PATH` uses a local
-copy instead.
-
-1. Download and extract
-   `tater-echo-checkers-<version>-factory.tar.gz` from a
-   [Tater Echo Linux release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases).
-2. Boot the intended Show into TWRP, connect only that device using a USB
-   **data** cable, and keep external power connected. The installer does not
-   migrate credentials from earlier firmware; pair it as a new satellite.
-3. From the extracted factory bundle, verify it and run the USB conversion:
+1. Download and extract `tater-echo-checkers-<version>-factory.tar.gz` from the
+   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
+2. Boot Checkers into TWRP. Connect a USB **data** cable and keep external
+   power connected.
+3. Verify the bundle, then run the conversion:
 
    ```bash
    ./install.sh --verify-bundle
    ./install.sh
    ```
 
-This installation reformats userdata and turns the former system partition into
-an A/B rootfs store, so it must be done by USB, not OTA. The installer preserves
-TWRP and device-specific recovery backups. After conversion, routine updates
-use the normal Tater OTA path. A fresh Checkers shows its open
-`Tater-Setup-XXXX` hotspot and setup page at `http://192.168.4.1`; `--wifi` and
-`--usb-pair` remain available for USB provisioning. Windows commands, checksum verification, and
-recovery details are in
-[`factory/checkers-linux/README.md`](factory/checkers-linux/README.md).
+4. On first boot, join `Tater-Setup-XXXX` and complete the setup page.
 
-## Install Rook (Echo Spot, 1st gen)
+This factory conversion reformats userdata and turns the former system
+partition into an A/B Tater Linux store. It preserves TWRP and recovery
+backups, downloads only the pinned and checksum-verified LineageOS driver
+source, and never boots LineageOS. Routine updates are OTA afterward. See the
+[`factory/checkers-linux` guide](factory/checkers-linux/README.md) for Windows,
+USB provisioning, checksum, and recovery instructions.
 
-Rook 2.1 runs Tater Linux while retaining TWRP. Start with an unlocked 2017
-Echo Spot **1st generation** (`rook`), amonet-rook v2.0.0, and working TWRP.
-The USB installer uses the hash-pinned Rook LineageOS 18.1 v0.3 package only
-as the source of that device's vendor drivers; LineageOS is not booted.
+## Install Rook — Echo Spot
+
+Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`),
+amonet-rook v2.0.0, and working TWRP.
 
 1. Download and extract `tater-echo-rook-<version>-factory.tar.gz` from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
-2. Boot the Spot into TWRP, connect USB while keeping normal power connected,
-   and run the read-only verification first:
+2. Boot Rook into TWRP. Connect USB while keeping normal power connected.
+3. Verify the bundle and device without writing anything:
 
    ```bash
    ./install.sh --verify-bundle
    ./install.sh --preflight-only
    ```
 
-3. Run `./install.sh` and type `ERASE` only after verifying the displayed
-   device and partitions. Keep both cables connected until the first-boot
-   checks finish, then join the `Tater-Setup-XXXX` network shown on the Spot.
+4. Run `./install.sh` and type `ERASE` only after checking the displayed model
+   and partition information. Keep both cables connected until first-boot
+   checks finish.
+5. Join the `Tater-Setup-XXXX` network shown on the Spot and complete setup.
 
-The installer verifies the exact Rook model and partition map, downloads and
-hash-checks the pinned vendor source, saves checksum-verified private recovery
-images, preserves TWRP, and refuses destructive writes until confirmation.
-Keep `backups/<serial>/` private and safe. Full prerequisites, Windows commands,
-reinstall rules, and recovery guidance are in
-[`factory/rook-linux/README.md`](factory/rook-linux/README.md).
+The conversion creates an A/B Tater Linux store, preserves TWRP, and saves
+private recovery backups. It uses only the pinned and checksum-verified Rook
+LineageOS package as a source for hardware drivers; LineageOS is not booted.
+See the [`factory/rook-linux` guide](factory/rook-linux/README.md) for complete
+prerequisites, Windows commands, reinstall rules, and recovery steps.
 
-## Releases and OTA
+## Updates and release files
 
-An annotated `vX.Y.Z` tag creates factory and OTA assets for every supported
-target plus `firmware-manifest.json` and `SHA256SUMS`.
+After factory installation, use Tater's normal satellite updater. Biscuit
+switches its inactive userspace slot; Checkers and Rook stage their daemon and
+native display together in A/B application slots. A failed health check rolls
+back to the preceding working slot.
 
-| Artifact | Purpose |
+| Release file | Use |
 |---|---|
-| `tater-echo-biscuit-vX.Y.Z-factory.tar.gz` | Complete post-amonet Biscuit install/recovery bundle |
-| `tater-echo-biscuit-vX.Y.Z-ota.bin` | Biscuit userspace OTA |
-| `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Checkers USB-to-Tater Linux factory conversion bundle |
-| `tater-echo-checkers-vX.Y.Z-ota.tar.gz` | Checkers daemon + native screen A/B application OTA |
-| `tater-echo-rook-vX.Y.Z-factory.tar.gz` | Rook USB-to-Tater Linux factory conversion bundle |
-| `tater-echo-rook-vX.Y.Z-ota.tar.gz` | Rook daemon + native screen A/B application OTA |
-| `tater-echo-<target>-vX.Y.Z-{wake-runtime,onnxruntime}.so` | ABI-matched native wake-runtime sidecars used during OTA bootstrap |
-| `firmware-manifest.json` | Target compatibility, filenames, sizes, and SHA-256 hashes |
+| `tater-echo-biscuit-vX.Y.Z-factory.tar.gz` | Complete Biscuit installation or recovery |
+| `tater-echo-biscuit-vX.Y.Z-ota.bin` | Biscuit OTA update |
+| `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Complete Checkers USB conversion |
+| `tater-echo-checkers-vX.Y.Z-ota.tar.gz` | Checkers application OTA |
+| `tater-echo-rook-vX.Y.Z-factory.tar.gz` | Complete Rook USB conversion |
+| `tater-echo-rook-vX.Y.Z-ota.tar.gz` | Rook application OTA |
+| `firmware-manifest.json` | Version, compatibility, filename, size, and SHA-256 metadata used by Tater |
 
-Tater reads the manifest, selects the asset matching `firmware_target`, and
-sends its URL, size, and digest to the satellite. Biscuit switches its inactive
-userspace slot and rolls back after repeated fast failures. Checkers and Rook
-mirror that transaction for coordinated daemon/renderer application slots;
-their full root filesystems remain USB/recovery platform artifacts.
-
-See [`docs/firmware-releases.md`](docs/firmware-releases.md) for the release and
-OTA contract.
+An annotated `vX.Y.Z` tag builds all three targets and publishes the shared
+manifest and checksums. See [`docs/firmware-releases.md`](docs/firmware-releases.md)
+for the complete release and OTA contract.
 
 ## Development
 
-Build the pinned compiler and device firmware:
+Build and test the Biscuit firmware and native wake runtime:
 
 ```bash
 docker build -t tater-echo-compiler device/compiler/
@@ -199,72 +191,40 @@ cd device
 ./compile.sh
 ./build_microwakeword_runtime.sh
 ./test_microwakeword_runtime.sh
-
-# Checkers Linux (requires the pinned TECHO5 checkout and base rootfs)
-cd ..
-linux/checkers/build_linux.sh --version v2.1.0-dev \
-  --base-rootfs /path/to/rootfs-v0.9.26.tar.gz \
-  --techo5 /path/to/techo5
+go test -race ./internal/... ./pkg/...
 ```
 
-Run the main regression suites:
+Checkers and Rook release builds also compile their native screen, camera, wake
+runtime, and complete Linux rootfs in GitHub Actions.
 
-```bash
-cd device && go test -race ./internal/... ./pkg/...
-cd ..
-python3 -m unittest factory.biscuit.test_install tools.test_merge_release_manifests tools.test_package_echo_release
-python3 -m unittest discover -s linux/checkers -p 'test_*.py'
-python3 -m unittest discover -s factory/checkers-linux -p 'test_*.py'
-python3 -m unittest discover -s linux/rook -p 'test_*.py'
-python3 -m unittest discover -s factory/rook-linux -p 'test_*.py'
-python3 -m pytest -q factory/biscuit/test_emos_build.py
-```
+Technical references:
 
-Release builds also compile the static emOS init, Wi-Fi tools, BusyBox, all
-target binaries, the native Checkers and Rook display/camera/wake runtimes, and
-both Tater Linux root filesystems in GitHub Actions.
-
-Useful technical references:
-
-- [`docs/tater-native-port.md`](docs/tater-native-port.md) — Tater protocol and runtime layout
-- [`docs/biscuit-hardware.md`](docs/biscuit-hardware.md) — measured Biscuit audio hardware
-- [`docs/checkers.md`](docs/checkers.md) — Checkers hardware and native integration
-- [`linux/rook/README.md`](linux/rook/README.md) — Rook hardware and native integration
-- [`docs/led-ring-states.md`](docs/led-ring-states.md) — LED state and animation behavior
-- [`docs/listening.md`](docs/listening.md) — bounded on-device private-listening sessions
-
-## Adding another Echo model
-
-Start with the read-only profiler and guided stock-firmware probe in the
-[`porting/` hardware-discovery guide](porting/README.md). After the hardware is
-understood, add its metadata to `targets/targets.json`, create a target-specific
-factory installer, and add hardware-backed boot, partition, audio, control, and
-recovery tests. Never assume another Echo shares Biscuit, Checkers, or Rook
-partition maps, kernel architecture, microphones, LEDs, controls, or recovery
-procedure.
+- [`docs/tater-native-port.md`](docs/tater-native-port.md) — native protocol,
+  Bluetooth, runtime layout, and OTA behavior
+- [`docs/biscuit-hardware.md`](docs/biscuit-hardware.md) — measured Biscuit
+  audio hardware
+- [`docs/checkers.md`](docs/checkers.md) — Checkers hardware and native Linux
+  integration
+- [`linux/rook/README.md`](linux/rook/README.md) — Rook hardware and native
+  Linux integration
+- [`docs/listening.md`](docs/listening.md) — bounded on-device private listening
+- [`docs/led-ring-states.md`](docs/led-ring-states.md) — Biscuit LED behavior
+- [`porting/README.md`](porting/README.md) — adding another Echo model
 
 ## Credits and license
 
-This project builds on three open-source firmware projects:
-
-- [EchoMuse](https://github.com/wilbowes/EchoMuse) by Wil Bowes supplied the
-  Sendspin player, Biscuit hardware work, and emOS boot/init foundation used by
-  Tater's Echo firmware. The original copyright and MIT license remain in this
-  repository.
-- [TECHO5](https://github.com/HuskerMinion/techo5) by HuskerMinion supplied
-  the Checkers Linux hardware enablement, boot/rescue and A/B platform work.
-  Adapted installer code and its MIT license are included in the factory
-  bundle; the platform is pinned and verified before release.
-- [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) by HuskerMinion
-  supplied the Rook Linux hardware enablement and signed platform base. Tater's
-  Rook release pins and verifies that base and retains its MIT attribution.
+This project builds on open-source work from
+[EchoMuse](https://github.com/wilbowes/EchoMuse) by Wil Bowes,
+[TECHO5](https://github.com/HuskerMinion/techo5) by HuskerMinion, and
+[TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) by HuskerMinion.
+Their retained licenses and full attribution are recorded in [`NOTICE.md`](NOTICE.md).
 
 Additional credit goes to R0rt1z2 for amonet-biscuit, Binozo for EchoGo and
-GoTinyAlsa, Dragon863 for EchoCLI, microWakeWord, openWakeWord, Microsoft ONNX
-Runtime, TensorFlow Lite Micro, Xiph.Org, and all hardware testers and
-contributors.
+GoTinyAlsa, Dragon863 for EchoCLI, and the microWakeWord, openWakeWord,
+Microsoft ONNX Runtime, TensorFlow Lite Micro, Xiph.Org, and hardware-testing
+communities.
 
-The repository is [MIT licensed](LICENSE); third-party terms are recorded in
-[`NOTICE.md`](NOTICE.md). Factory releases include the matching BusyBox source,
-license, and build script. This project is independent and is not affiliated
-with or endorsed by Amazon.
+Tater Echo Firmware is [MIT licensed](LICENSE), with third-party terms recorded
+in [`NOTICE.md`](NOTICE.md). Factory releases include the matching BusyBox
+source, license, and build script. This project is independent and is not
+affiliated with or endorsed by Amazon.

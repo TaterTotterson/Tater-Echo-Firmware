@@ -167,7 +167,11 @@ The native protocol supports:
   left/right stereo-pair routing, clock correction, and underrun recovery;
 - native TTS overlays, local audio scenes, and sample-counted music ducking;
 - Tater-selected LED/display animations and tool progress; and
-- bounded BLE advertisement batches for Tater presence.
+- bounded BLE advertisement batches for Tater presence; and
+- active BLE GATT discovery, reads, writes, notifications, indications,
+  disconnects, and persistent authenticated six-digit-PIN bonds for services
+  such as Meshtastic Core. The PIN is not stored, unpairing removes the bond,
+  and all control stays inside the authenticated native satellite connection.
 
 Capabilities are negotiated explicitly. Unknown fields are ignored safely so
 mixed firmware versions can remain online during rollout.
