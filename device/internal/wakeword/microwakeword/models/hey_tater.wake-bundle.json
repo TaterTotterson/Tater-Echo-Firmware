@@ -21,8 +21,8 @@
       }
     },
     "recommended_threshold": 0.99,
-    "recommended_patience": 3,
+    "recommended_patience": 2,
     "recommended_confirmation_threshold": 0.92,
-    "recommended_confirmation_patience": 3
+    "recommended_confirmation_patience": 2
   }
 }

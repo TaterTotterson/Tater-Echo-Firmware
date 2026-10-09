@@ -27,6 +27,8 @@ func (c *Client) handle(message Envelope) {
 		}
 	case "camera.snapshot":
 		go c.captureCameraSnapshot(message.ID)
+	case "ble.gatt":
+		c.handleBLEGATT(message.ID, payload)
 	case "settings":
 		applied := payload
 		result := map[string]any{"ok": true}

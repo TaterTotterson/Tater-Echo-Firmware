@@ -740,6 +740,27 @@ def test_busybox_brings_a_udhcpc_symlink():
     assert not target.startswith(b"/"), "the link target must be relative"
 
 
+def test_fireos6_udhcpc_requests_broadcast_replies():
+    """A FireOS 6 Dot can associate yet never receive a unicast DHCP offer.
+    BusyBox's -B keeps the exchange broadcast until the interface has its
+    address, matching the traffic the pre-address firewall already permits."""
+    init_c = (REPO / "emos" / "init" / "init.c").read_text()
+
+    assert 'char *dhcp_fos6[] = { "/sbin/udhcpc", "-B", "-f"' in init_c
+
+
+def test_ipv6_is_disabled_when_its_input_policy_cannot_be_installed():
+    """FireOS 6 has no ip6tables. Leaving IPv6 enabled after that failure
+    would put wlan0 on the LAN without the inbound policy promised by emOS."""
+    init_c = (REPO / "emos" / "init" / "init.c").read_text()
+
+    policy_check = "ip6tables -S INPUT 2>/dev/null | grep -q '^-P INPUT DROP'"
+    disable_knob = "/proc/sys/net/ipv6/conf/*/disable_ipv6"
+    assert policy_check in init_c
+    assert disable_knob in init_c
+    assert init_c.index(disable_knob) > init_c.index(policy_check)
+
+
 def test_no_udhcpc_symlink_without_busybox():
     """A dangling /sbin/udhcpc would make init exec something that is not
     there, which reads as a DHCP failure rather than as a missing binary."""

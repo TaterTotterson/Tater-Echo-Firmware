@@ -88,15 +88,48 @@ type Scanner struct {
 	// gate decides which adverts are worth the control plane (#404)
 	gate *emitGate
 
+	// conns shares the controller with the passive scanner. connHold asks the
+	// session loop to pause advertisements while an LE connection is being
+	// established, which avoids the MediaTek radio starving the initiator.
+	conns    *ConnManager
+	connHold atomic.Bool
+	connSig  chan struct{}
+
 	bluedroidDisabled bool
 }
 
 func NewScanner(onBatch BatchCallback) *Scanner {
-	return &Scanner{
+	s := &Scanner{
 		onBatch: onBatch,
 		unique:  make(map[string]time.Time),
 		pending: make(map[string]Advert),
 		gate:    newEmitGate(),
+		connSig: make(chan struct{}, 1),
+	}
+	s.conns = newConnManager(func(hold bool) {
+		if s.connHold.Swap(hold) != hold {
+			select {
+			case s.connSig <- struct{}{}:
+			default:
+			}
+		}
+	})
+	return s
+}
+
+// Conns exposes the active LE connection manager. It is attached only when
+// the scanner owns the raw controller; Linux hci0 remains owned by BlueZ.
+func (s *Scanner) Conns() *ConnManager { return s.conns }
+
+// SetConnectionHold pauses raw passive scanning while another connection
+// manager (BlueZ on Rook) discovers or connects a peer. It uses the same
+// session signal as direct-HCI connection establishment.
+func (s *Scanner) SetConnectionHold(hold bool) {
+	if s.connHold.Swap(hold) != hold {
+		select {
+		case s.connSig <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -206,36 +239,23 @@ func (s *Scanner) session(stopCh chan struct{}) error {
 		}
 	}
 	defer f.Close()
+	return s.serveMode(f, stopCh, kernel)
+}
 
-	// events carries every parsed HCI event out of the read pump; activity
-	// feeds the watchdog. The pump exits when the fd closes.
-	events := make(chan []byte, 64)
-	readErr := make(chan error, 1)
-	go readH4Packets(f, stopCh, events, readErr)
+// serve runs a raw-controller session on an already-open transport. Keeping
+// this boundary also lets the complete HCI/GATT stack run against a simulated
+// controller in unit tests.
+func (s *Scanner) serve(rw io.ReadWriteCloser, stopCh chan struct{}) error {
+	return s.serveMode(rw, stopCh, false)
+}
 
-	sendCmd := func(opcode uint16, params []byte) (commandComplete, error) {
-		if _, err := f.Write(buildCommand(opcode, params)); err != nil {
-			return commandComplete{}, fmt.Errorf("write cmd %04x: %w", opcode, err)
-		}
-		deadline := time.After(cmdTimeout)
-		for {
-			select {
-			case pkt := <-events:
-				if cc, ok := parseCommandComplete(pkt); ok && cc.opcode == opcode {
-					if cc.status != 0 {
-						return cc, fmt.Errorf("cmd %04x status 0x%02x", opcode, cc.status)
-					}
-					return cc, nil
-				}
-			case err := <-readErr:
-				return commandComplete{}, fmt.Errorf("read during cmd %04x: %w", opcode, err)
-			case <-deadline:
-				return commandComplete{}, fmt.Errorf("cmd %04x timeout", opcode)
-			case <-stopCh:
-				return commandComplete{}, fmt.Errorf("stopped")
-			}
-		}
-	}
+func (s *Scanner) serveMode(rw io.ReadWriteCloser, stopCh chan struct{}, kernel bool) error {
+
+	// One host owns the read pump so command replies, advertisements, ACL
+	// packets, and link events cannot consume each other.
+	_, isDeviceFile := rw.(*os.File)
+	host := newHCIHostWithIdleReads(rw, !kernel && isDeviceFile)
+	sendCmd := host.Cmd
 
 	if kernel {
 		// bluetoothd has already powered and initialized the controller. Never
@@ -246,6 +266,8 @@ func (s *Scanner) session(stopCh chan struct{}) error {
 		if _, err := sendCmd(opReset, nil); err != nil {
 			return err
 		}
+		s.conns.attach(host)
+		defer s.conns.detach()
 	}
 	if cc, err := sendCmd(opReadBdAddr, nil); err == nil {
 		s.bdAddrMu.Lock()
@@ -261,9 +283,21 @@ func (s *Scanner) session(stopCh chan struct{}) error {
 	if _, err := sendCmd(opLESetScanParams, scanParams(intervalMs, windowMs)); err != nil {
 		return err
 	}
-	// filter_duplicates=0 — every advert is forwarded so the controller/HA
-	// (Bermuda) sees continuous RSSI updates.
-	if _, err := sendCmd(opLESetScanEnable, []byte{0x01, 0x00}); err != nil {
+	scanOn := false
+	setScan := func(on bool) error {
+		enable := byte(0)
+		if on {
+			enable = 1
+		}
+		// filter_duplicates=0 — every advert is forwarded so the controller/HA
+		// (Bermuda) sees continuous RSSI updates.
+		if _, err := sendCmd(opLESetScanEnable, []byte{enable, 0x00}); err != nil {
+			return err
+		}
+		scanOn = on
+		return nil
+	}
+	if err := setScan(true); err != nil {
 		return err
 	}
 	s.scanning.Store(true)
@@ -284,14 +318,31 @@ func (s *Scanner) session(stopCh chan struct{}) error {
 	defer s.flush()
 	watchdog := time.NewTimer(watchdogQuiet)
 	defer watchdog.Stop()
+	resetWatchdog := func() {
+		if !watchdog.Stop() {
+			select {
+			case <-watchdog.C:
+			default:
+			}
+		}
+		if scanOn {
+			watchdog.Reset(watchdogQuiet)
+		}
+	}
 
 	for {
 		select {
-		case pkt := <-events:
-			if !watchdog.Stop() {
-				<-watchdog.C
+		case <-s.connSig:
+			want := !s.connHold.Load()
+			if want != scanOn {
+				if err := setScan(want); err != nil {
+					return err
+				}
+				resetWatchdog()
 			}
-			watchdog.Reset(watchdogQuiet)
+		case <-host.active:
+			resetWatchdog()
+		case pkt := <-host.adv:
 			if adverts := parseAdvReports(pkt); len(adverts) > 0 {
 				if s.ingest(adverts) {
 					// Keep the total flush rate at or below the plain tick.
@@ -304,11 +355,16 @@ func (s *Scanner) session(stopCh chan struct{}) error {
 			s.gate.prune(time.Now())
 		case <-watchdog.C:
 			return fmt.Errorf("watchdog: no HCI events for %s — re-initialising", watchdogQuiet)
-		case err := <-readErr:
-			return fmt.Errorf("read: %w", err)
+		case <-host.dead:
+			return fmt.Errorf("read: %w", host.err)
 		case <-stopCh:
-			// Best-effort orderly shutdown: stop the scan so the chip idles.
-			_, _ = f.Write(buildCommand(opLESetScanEnable, []byte{0x00, 0x00}))
+			// Best-effort orderly shutdown. A raw reset drops active links too;
+			// hci0 is shared with BlueZ, so only stop this scan there.
+			if kernel {
+				_ = host.write(buildCommand(opLESetScanEnable, []byte{0x00, 0x00}))
+			} else {
+				_ = host.write(buildCommand(opReset, nil))
+			}
 			time.Sleep(100 * time.Millisecond)
 			return nil
 		}

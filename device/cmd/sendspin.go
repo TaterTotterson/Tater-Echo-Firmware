@@ -38,7 +38,11 @@ func startSendspinPlayer(spk *speaker.PcmSpeaker, volume *server.Server, deviceI
 		Product:   "Tater Echo " + strings.TrimSpace(target),
 		Version:   version,
 		Screen:    isScreenTarget(target),
-		Visuals:   strings.EqualFold(strings.TrimSpace(target), "biscuit") || isScreenTarget(target),
+		// Do not request Sendspin's high-rate remote visualizer stream on Echo
+		// hardware. It competes with the always-on OWW feature pipeline even
+		// while the player is idle. Screens still receive metadata/artwork, and
+		// every target keeps locally derived playback-reactive animation.
+		Visuals: false,
 		// Tater's ESP satellites are immediately usable by Tater and Music
 		// Assistant. Echoes follow the same no-extra-pairing behavior.
 		Unpaired: true,

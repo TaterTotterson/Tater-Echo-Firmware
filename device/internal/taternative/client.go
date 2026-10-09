@@ -134,8 +134,12 @@ type Hooks struct {
 	DisplayWeather      func(payload map[string]any)
 	DisplayNotification func(payload map[string]any)
 	CameraSnapshot      func(context.Context) (CameraSnapshot, error)
-	SetupReset          func() error
-	OTA                 func(context.Context, OTARequest, func(status string, progress int, message string)) error
+	// BLEGATT forwards an authenticated controller request to the local BLE
+	// connection manager. Results and notifications return through
+	// ReportBLEGATT; the PIN is therefore never exposed on a new listener.
+	BLEGATT    func([]byte)
+	SetupReset func() error
+	OTA        func(context.Context, OTARequest, func(status string, progress int, message string)) error
 }
 
 type outbound struct {
@@ -188,6 +192,8 @@ type Client struct {
 	voiceStopAfterAck bool
 	audioDropped      atomic.Uint64
 	bleBatchID        atomic.Uint32
+	bleGATTRequestMu  sync.Mutex
+	bleGATTRequests   map[uint32]string
 	wakeSuppressed    uint64
 
 	verifyMu         sync.Mutex
@@ -271,12 +277,13 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 			"barge_in_enabled": false,
 			"continued_chat":   true,
 		},
-		preRoll:        make([][]byte, 0, preRollChunks),
-		captureRoll:    make([][]byte, 0, trainerCaptureChunks),
-		trainerHTTP:    &http.Client{Timeout: 15 * time.Second},
-		verifyRequests: make(map[uint32]*wakeVerification),
-		voiceQueue:     make(chan queuedVoice, 32),
-		voiceStop:      make(chan uint64, 1),
+		preRoll:         make([][]byte, 0, preRollChunks),
+		captureRoll:     make([][]byte, 0, trainerCaptureChunks),
+		trainerHTTP:     &http.Client{Timeout: 15 * time.Second},
+		verifyRequests:  make(map[uint32]*wakeVerification),
+		bleGATTRequests: make(map[uint32]string),
+		voiceQueue:      make(chan queuedVoice, 32),
+		voiceStop:       make(chan uint64, 1),
 	}
 	c.timers = NewTimerManager(c.sendJSON, hooks.TimerAlarm, hooks.TimerUpdate)
 	go c.voiceWorker()
@@ -302,6 +309,8 @@ func DefaultCapabilities() map[string]any {
 		"openwakeword": true, "wake_detector_selection": true,
 		"dual_wake_confirmation": true,
 		"ble_advertisements":     true, "ble_advertisements_version": 1,
+		"ble_gatt": true, "ble_gatt_version": 1,
+		"ble_gatt_pairing": true, "ble_gatt_pairing_version": 1,
 	}
 }
 
@@ -312,6 +321,9 @@ func CapabilitiesForTarget(target string) map[string]any {
 	capabilities := DefaultCapabilities()
 	target = strings.ToLower(strings.TrimSpace(target))
 	if target == "checkers" || target == "rook" {
+		// Checkers owns /dev/stpbt directly, while Rook uses the BlueZ backend
+		// already responsible for hci0. Server startup removes these claims if
+		// the selected backend cannot attach.
 		capabilities["led_ring"] = false
 		capabilities["ota"] = true
 		capabilities["screen"] = true

@@ -491,6 +491,35 @@ func main() {
 		}
 		controlClient.SendBleAdverts(batch)
 	})
+	bleScanner.Conns().SetOwnAddress(bluetooth.StaticRandomAddr(deviceID))
+	bondPath := strings.TrimSpace(os.Getenv("TATER_BLE_BONDS_PATH"))
+	if bondPath == "" {
+		bondPath = "/data/local/etc/tater/ble_bonds.json"
+		if platform.Base() == platform.TaterLinux {
+			bondPath = "/data/tater-linux/ble_bonds.json"
+		}
+	}
+	if err := bleScanner.Conns().SetBondStore(bondPath); err != nil {
+		log.Printf("[ble] bonded-device store unavailable: %v", err)
+	}
+	var bleGATTManager bluetooth.GATTManager = bleScanner.Conns()
+	activeGATTEnabled := nativeBLEEnabled
+	if nativeBLEEnabled && strings.EqualFold(client.FirmwareTarget, "rook") {
+		manager, err := bluetooth.NewBlueZGATTManager(bleScanner.SetConnectionHold)
+		if err != nil {
+			activeGATTEnabled = false
+			log.Printf("[ble] BlueZ active GATT unavailable: %v", err)
+		} else {
+			bleGATTManager = manager
+			log.Printf("[ble] active GATT uses BlueZ on hci0")
+		}
+	}
+	bleGATTBridge := bluetooth.NewBridge(bleGATTManager, func(raw []byte) {
+		if nativeClient != nil {
+			nativeClient.ReportBLEGATT(raw)
+		}
+	})
+	bleGATTBridge.SetEnabled(activeGATTEnabled)
 	if !nativeBLEEnabled {
 		applyBleConfig(bleScanner)
 	}
@@ -692,13 +721,19 @@ func main() {
 			detectedBoard = client.FirmwareTarget
 		}
 		var nativeErr error
+		nativeCapabilities := taternative.CapabilitiesForTarget(client.FirmwareTarget)
+		if !activeGATTEnabled {
+			nativeCapabilities["ble_gatt"] = false
+			nativeCapabilities["ble_gatt_pairing"] = false
+		}
 		nativeClient, nativeErr = taternative.New(taternative.Config{
 			URL: nativeURL, Token: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_TOKEN")), bootstrap.Token), TokenPath: tokenPath,
 			DeviceID: deviceID, HardwareID: deviceID, DeviceName: deviceName,
 			Board: detectedBoard, FirmwareTarget: client.FirmwareTarget, FirmwareVersion: client.Version,
-			Room: room, Capabilities: taternative.CapabilitiesForTarget(client.FirmwareTarget),
+			Room: room, Capabilities: nativeCapabilities,
 		}, taternative.Hooks{
 			ReplyDirection: s.SetReplyDirectionDegrees,
+			BLEGATT:        bleGATTBridge.Handle,
 			CameraSnapshot: func(captureCtx context.Context) (taternative.CameraSnapshot, error) {
 				if s.IsMuted() {
 					return taternative.CameraSnapshot{}, fmt.Errorf("camera unavailable while muted")
@@ -1913,6 +1948,7 @@ var owwCompanionState struct {
 	mode      string
 	ready     bool
 	lastErr   string
+	settings  microwakeword.OWWSettings
 	verifier  *microwakeword.CompanionVerifier
 	agreement *microwakeword.AgreementMatcher
 	scorers   []*microwakeword.ShadowScorer
@@ -1925,7 +1961,8 @@ var owwCompanionState struct {
 // reports the pinning error instead of disabling wake detection.
 const owwInferenceCPU = 1
 
-func replaceOWWCompanion(model, mode string, ready bool, verifier *microwakeword.CompanionVerifier,
+func replaceOWWCompanion(model, mode string, ready bool, settings microwakeword.OWWSettings,
+	verifier *microwakeword.CompanionVerifier,
 	agreement *microwakeword.AgreementMatcher, scorers []*microwakeword.ShadowScorer, err error) {
 	lastErr := ""
 	if !ready {
@@ -1947,6 +1984,7 @@ func replaceOWWCompanion(model, mode string, ready bool, verifier *microwakeword
 	owwCompanionState.mode = mode
 	owwCompanionState.ready = ready
 	owwCompanionState.lastErr = lastErr
+	owwCompanionState.settings = settings
 	owwCompanionState.verifier = verifier
 	owwCompanionState.agreement = agreement
 	owwCompanionState.scorers = append([]*microwakeword.ShadowScorer(nil), scorers...)
@@ -1962,6 +2000,7 @@ func owwCompanionStatus() map[string]any {
 	mode := owwCompanionState.mode
 	ready := owwCompanionState.ready
 	lastErr := owwCompanionState.lastErr
+	settings := owwCompanionState.settings
 	verifier := owwCompanionState.verifier
 	agreement := owwCompanionState.agreement
 	scorers := append([]*microwakeword.ShadowScorer(nil), owwCompanionState.scorers...)
@@ -1970,10 +2009,14 @@ func owwCompanionStatus() map[string]any {
 		"name": "open_wake_word", "mode": mode, "ready": ready,
 		"model": model, "last_error": lastErr,
 	}
-	if verifier != nil {
-		settings := verifier.Settings()
+	if settings.Threshold > 0 && settings.Patience > 0 {
 		status["threshold"] = settings.Threshold
 		status["patience"] = settings.Patience
+	}
+	if verifier != nil {
+		verifierSettings := verifier.Settings()
+		status["threshold"] = verifierSettings.Threshold
+		status["patience"] = verifierSettings.Patience
 		status["runtime"] = verifier.Info()
 		status["stats"] = verifier.Stats()
 	}
@@ -2052,9 +2095,9 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if owwModel == "" {
 		owwModel = microwakeword.DefaultPackage
 	}
-	// The selected model package is authoritative for detector calibration.
-	// Controller settings choose the package and engine mode; they must not
-	// silently replace thresholds or patience from the model JSON files.
+	// A wake package is the sole source of its calibrated scoring policy.
+	// Controller settings select the package and detector mode, but must not
+	// silently replace the package threshold, window, or environment policy.
 	sensitivity := "normal"
 	environment := "balanced"
 	threshold := float64(0)
@@ -2071,7 +2114,6 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 			closeMiss = float64(calibrated.CloseMissThreshold)
 		}
 	}
-
 	if !enabled {
 		if dc.MWWShadowScorer() != nil {
 			dc.SetMWWShadowScorer(nil)
@@ -2080,7 +2122,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		setMWWState(false, false, model, "", "", "", sensitivity, environment,
 			threshold, slidingWindow, closeMiss, "")
 		setWakeDetectorSelection(false, false, owwModel)
-		replaceOWWCompanion(owwModel, "disabled", false, nil, nil, nil, nil)
+		replaceOWWCompanion(owwModel, "disabled", false, microwakeword.OWWSettings{}, nil, nil, nil, nil)
 		return
 	}
 
@@ -2115,6 +2157,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 
 	scorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
 	owwScorers := make([]*microwakeword.ShadowScorer, 0, expectedScorers)
+	var activeOWWSettings microwakeword.OWWSettings
 	var agreement *microwakeword.AgreementMatcher
 	if mwwEnabled && owwEnabled {
 		agreement = microwakeword.NewAgreementMatcher(microwakeword.DualWakeAgreementWindow)
@@ -2168,7 +2211,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 			scorers = append(scorers, sc)
 			if agreement != nil {
 				owwCPU := owwInferenceCPU
-				owwScorer, _, err := microwakeword.OpenCompanionAgreementShadow(owwModel, microwakeword.ShadowHooks{
+				owwScorer, bundle, err := microwakeword.OpenCompanionAgreementShadow(owwModel, microwakeword.ShadowHooks{
 					AffinityCPU: &owwCPU,
 					Cross: func(score float32, at time.Time) {
 						if match, ok := agreement.Observe(microwakeword.AgreementOWW, lane, score, at); ok {
@@ -2179,6 +2222,10 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 				if err != nil {
 					openErr = err
 					break
+				}
+				activeOWWSettings = microwakeword.OWWSettings{
+					Threshold: bundle.OpenWakeWord.RecommendedConfirmationThreshold,
+					Patience:  bundle.OpenWakeWord.RecommendedConfirmationPatience,
 				}
 				owwScorers = append(owwScorers, owwScorer)
 			}
@@ -2198,6 +2245,10 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 			if err != nil {
 				openErr = err
 				break
+			}
+			activeOWWSettings = microwakeword.OWWSettings{
+				Threshold: bundle.OpenWakeWord.RecommendedThreshold,
+				Patience:  bundle.OpenWakeWord.RecommendedPatience,
 			}
 			if lane == 0 {
 				wakeWord = strings.TrimSpace(bundle.Key)
@@ -2230,7 +2281,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		} else if owwEnabled {
 			mode = "oww_only"
 		}
-		replaceOWWCompanion(owwModel, mode, false, nil, nil, nil, openErr)
+		replaceOWWCompanion(owwModel, mode, false, activeOWWSettings, nil, nil, nil, openErr)
 		return
 	}
 
@@ -2249,7 +2300,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	if !mwwEnabled {
 		activeOWWScorers = scorers
 	}
-	replaceOWWCompanion(owwModel, detectorMode, owwEnabled, nil, agreement, activeOWWScorers, nil)
+	replaceOWWCompanion(owwModel, detectorMode, owwEnabled, activeOWWSettings, nil, agreement, activeOWWScorers, nil)
 	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
 	setWakeDetectorSelection(mwwEnabled, owwEnabled, owwModel)
@@ -2309,7 +2360,8 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 		scorers = append(scorers, scorer)
 	}
 	dc.SetMWWShadowScorers(scorers)
-	replaceOWWCompanion(microwakeword.TimerStopPackage, "timer_stop", false, nil, nil, nil, nil)
+	replaceOWWCompanion(microwakeword.TimerStopPackage, "timer_stop", false,
+		microwakeword.OWWSettings{}, nil, nil, nil, nil)
 	setWakeDetectorSelection(true, false, "")
 	label := strings.TrimSpace(manifest.Label)
 	if label == "" {
