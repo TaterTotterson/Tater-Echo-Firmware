@@ -1,6 +1,18 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestSendspinScreenPollMatchesDisplayCadence(t *testing.T) {
+	if sendspinScreenPollInterval != time.Second/30 {
+		t.Fatalf("screen poll interval = %s, want %s", sendspinScreenPollInterval, time.Second/30)
+	}
+	if sendspinPollInterval != 100*time.Millisecond {
+		t.Fatalf("non-screen poll interval = %s, want 100ms", sendspinPollInterval)
+	}
+}
 
 func TestShouldShowSendspinMusicVisual(t *testing.T) {
 	tests := []struct {

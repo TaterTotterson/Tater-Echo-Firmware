@@ -16,6 +16,11 @@ import (
 
 const sendspinStore = "/data/local/etc/tater/sendspin.json"
 
+const (
+	sendspinPollInterval       = 100 * time.Millisecond
+	sendspinScreenPollInterval = time.Second / 30
+)
+
 var taterSendspin struct {
 	sync.Mutex
 	client *sendspin.Client
@@ -110,7 +115,14 @@ func sendspinStatus() any {
 }
 
 func runSendspinPoll(spk *speaker.PcmSpeaker, ring *server.Server, screen *show.Server, target string, state func() string, timerRinging func() bool) {
-	ticker := time.NewTicker(100 * time.Millisecond)
+	interval := sendspinPollInterval
+	if screen != nil {
+		// Screen targets render at 30 FPS. Drain timestamped Sendspin visualizer
+		// frames at the same cadence so the display does not hold each spectrum
+		// sample for 100 ms and visibly step between them.
+		interval = sendspinScreenPollInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var logged time.Time
 	showingMusic := false

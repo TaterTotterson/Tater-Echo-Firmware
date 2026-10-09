@@ -255,7 +255,8 @@ func (s *Server) Run(ctx context.Context) error {
 
 // SetMedia updates Sendspin's compact now-playing state. Artwork is served on
 // loopback instead of being embedded in every snapshot, just like awareness
-// images, so the visualizer may update without copying a cover image at 20 Hz.
+// images, so the visualizer may update at display cadence without copying a
+// cover image into every frame.
 func (s *Server) SetMedia(media *Media, image []byte, contentType string) {
 	s.mu.Lock()
 	if media == nil {

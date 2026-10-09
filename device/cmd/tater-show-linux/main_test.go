@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -252,6 +253,30 @@ func TestCheckersReplyRimFollowsAudioWithoutCoveringWeather(t *testing.T) {
 	}
 	if quiet.RGBAAt(480, 434) != loud.RGBAAt(480, 434) {
 		t.Fatal("reply audio changed the former compact-orb area")
+	}
+}
+
+func TestMusicSpectrumUsesFastAttackAndSmoothRelease(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	media := &show.Media{Active: true, Title: "Garden Song", Spectrum: []float64{.1}}
+	r := &renderer{state: show.Snapshot{Media: media}}
+	r.updateMusicLevels(now, 0)
+	if got := r.musicBinLevel(0, 0); math.Abs(got-.1) > .001 {
+		t.Fatalf("initial music level = %.3f, want .1", got)
+	}
+
+	media.Spectrum[0] = .9
+	r.updateMusicLevels(now.Add(33*time.Millisecond), .033)
+	risen := r.musicBinLevel(0, .033)
+	if risen <= .55 || risen >= .9 {
+		t.Fatalf("attack level = %.3f, want a fast smoothed rise between .55 and .9", risen)
+	}
+
+	media.Spectrum[0] = .1
+	r.updateMusicLevels(now.Add(66*time.Millisecond), .066)
+	released := r.musicBinLevel(0, .066)
+	if released <= .1 || released >= risen {
+		t.Fatalf("release level = %.3f, want a smoothed fall between .1 and %.3f", released, risen)
 	}
 }
 

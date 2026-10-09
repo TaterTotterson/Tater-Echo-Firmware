@@ -155,6 +155,10 @@ type renderer struct {
 	spotTimerDown     bool
 	spotReplyGlow     float64
 	checkersReplyGlow float64
+	musicLevels       [12]float64
+	musicLevelsAt     time.Time
+	musicLevelsMedia  string
+	musicLevelsReady  bool
 }
 
 const (
@@ -187,6 +191,7 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 	if r.animationStart.IsZero() {
 		seconds = 0
 	}
+	r.updateMusicLevels(now, seconds)
 	if width == height {
 		r.renderSpot(canvas, now, seconds, accent)
 		return
@@ -423,7 +428,7 @@ func (r *renderer) drawMusicVisualizer(canvas *image.RGBA, bounds image.Rectangl
 	cx, cy := (bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2
 	circle(canvas, cx, cy, min(bounds.Dx(), bounds.Dy())/3, color.RGBA{ink.R, ink.G, ink.B, 30})
 	for index := 0; index < 5; index++ {
-		height := int((.18 + .52*musicBinLevel(r.state.Media, index, seconds, r.state.AudioLevel)) * float64(bounds.Dy()))
+		height := int((.18 + .52*r.musicBinLevel(index, seconds)) * float64(bounds.Dy()))
 		x := cx - 42 + index*21
 		roundedRect(canvas, image.Rect(x-5, cy-height/2, x+6, cy+height/2), 5, color.RGBA{ink.R, ink.G, ink.B, 210})
 	}
@@ -434,12 +439,57 @@ func (r *renderer) drawMusicBars(canvas *image.RGBA, bounds image.Rectangle, sec
 	gap := 7
 	barWidth := max(3, (bounds.Dx()-gap*(count-1))/count)
 	for index := 0; index < count; index++ {
-		level := musicBinLevel(r.state.Media, index, seconds, r.state.AudioLevel)
+		level := r.musicBinLevel(index, seconds)
 		height := max(3, int(level*float64(bounds.Dy())))
 		x := bounds.Min.X + index*(barWidth+gap)
 		roundedRect(canvas, image.Rect(x, bounds.Max.Y-height, x+barWidth, bounds.Max.Y), barWidth/2,
 			color.RGBA{ink.R, ink.G, ink.B, uint8(85 + 170*level)})
 	}
+}
+
+func (r *renderer) updateMusicLevels(now time.Time, seconds float64) {
+	media := r.state.Media
+	if media == nil || !media.Active || len(media.Spectrum) == 0 {
+		r.musicLevelsAt = time.Time{}
+		r.musicLevelsMedia = ""
+		r.musicLevelsReady = false
+		return
+	}
+
+	identity := mediaIdentity(media)
+	if !r.musicLevelsReady || r.musicLevelsAt.IsZero() || identity != r.musicLevelsMedia || now.Before(r.musicLevelsAt) {
+		for index := range r.musicLevels {
+			r.musicLevels[index] = musicBinLevel(media, index, seconds, r.state.AudioLevel)
+		}
+		r.musicLevelsAt = now
+		r.musicLevelsMedia = identity
+		r.musicLevelsReady = true
+		return
+	}
+
+	delta := now.Sub(r.musicLevelsAt)
+	if delta <= 0 {
+		return
+	}
+	// A fast attack keeps beats feeling immediate; the gentler release removes
+	// the jagged stepping between incoming Sendspin spectrum frames.
+	for index := range r.musicLevels {
+		target := musicBinLevel(media, index, seconds, r.state.AudioLevel)
+		tau := 85 * time.Millisecond
+		if target > r.musicLevels[index] {
+			tau = 28 * time.Millisecond
+		}
+		alpha := 1 - math.Exp(-float64(delta)/float64(tau))
+		r.musicLevels[index] += (target - r.musicLevels[index]) * alpha
+	}
+	r.musicLevelsAt = now
+}
+
+func (r *renderer) musicBinLevel(index int, seconds float64) float64 {
+	if r.musicLevelsReady && r.state.Media != nil && len(r.state.Media.Spectrum) > 0 {
+		return r.musicLevels[index%len(r.musicLevels)]
+	}
+	return musicBinLevel(r.state.Media, index, seconds, r.state.AudioLevel)
 }
 
 func musicBinLevel(media *show.Media, index int, seconds, fallback float64) float64 {
