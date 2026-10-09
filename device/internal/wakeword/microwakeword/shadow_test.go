@@ -192,6 +192,95 @@ func TestShadowPushNeverBlocksAndCountsDrops(t *testing.T) {
 	}
 }
 
+func TestShadowQueueKeepsNewestAudioWithoutResettingModel(t *testing.T) {
+	engine := &fakeShadowEngine{delay: 20 * time.Millisecond}
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Let the first inference leave the queue, then overflow the pending work
+	// with easily identifiable sample values.
+	s.Push([]int16{1})
+	waitShadow(t, "first inference to start", func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return len(engine.inputs) == 1
+	})
+	for value := int16(2); value <= int16(ShadowQueueChunks+4); value++ {
+		s.Push([]int16{value})
+	}
+	waitShadow(t, "newest queued audio", func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		for _, input := range engine.inputs {
+			if len(input) == 1 && input[0] == int16(ShadowQueueChunks+4) {
+				return true
+			}
+		}
+		return false
+	})
+	engine.mu.Lock()
+	resets := engine.resetCount
+	engine.mu.Unlock()
+	if resets != 0 {
+		t.Fatalf("internal queue gaps reset continuous model state %d times", resets)
+	}
+	if health := s.Health(); health.TotalDrops == 0 {
+		t.Fatal("queue overflow was not visible in lifetime telemetry")
+	}
+}
+
+func TestShadowStallRequestsOneSafeRecovery(t *testing.T) {
+	oldTimeout := shadowStallTimeout
+	shadowStallTimeout = 5 * time.Millisecond
+	defer func() { shadowStallTimeout = oldTimeout }()
+
+	engine := &fakeShadowEngine{}
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Push([]int16{1})
+	waitShadow(t, "initial scorer progress", func() bool { return s.Health().TotalChunks == 1 })
+	time.Sleep(10 * time.Millisecond)
+	s.Push([]int16{2})
+	waitShadow(t, "stalled scorer reset", func() bool {
+		return s.Health().TotalRecoveries == 1 && s.Health().TotalResets == 1
+	})
+	if health := s.Health(); health.RecoveryPending {
+		t.Fatalf("recovery remained pending after reset: %+v", health)
+	}
+}
+
+func TestShadowCapturePauseDoesNotRequestStallRecovery(t *testing.T) {
+	oldTimeout := shadowStallTimeout
+	oldActiveWindow := shadowProducerActiveWindow
+	shadowStallTimeout = 5 * time.Millisecond
+	shadowProducerActiveWindow = 2 * time.Millisecond
+	defer func() {
+		shadowStallTimeout = oldTimeout
+		shadowProducerActiveWindow = oldActiveWindow
+	}()
+
+	engine := &fakeShadowEngine{}
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Push([]int16{1})
+	waitShadow(t, "initial scorer progress", func() bool { return s.Health().TotalChunks == 1 })
+	time.Sleep(10 * time.Millisecond)
+	s.Push([]int16{2})
+	waitShadow(t, "scoring after capture pause", func() bool { return s.Health().TotalChunks == 2 })
+	if health := s.Health(); health.TotalRecoveries != 0 || health.TotalResets != 0 {
+		t.Fatalf("ordinary capture pause requested recovery: %+v", health)
+	}
+}
+
 func TestShadowResetDoesNotSpliceStreams(t *testing.T) {
 	engine := &fakeShadowEngine{batches: [][]float32{{0.9}, {0.9}, {0.9}}}
 	s, err := NewShadowScorer(engine, 0.5, 2, 0, nil)

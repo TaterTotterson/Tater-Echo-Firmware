@@ -870,6 +870,9 @@ func main() {
 			},
 			Status: func() map[string]any {
 				wakeEngine := mwwNativeStatus()
+				if scorerStats := shadowScorerStats(dataClient.MWWShadowScorers()); scorerStats != nil {
+					wakeEngine["scorer_stats"] = scorerStats
+				}
 				for key, value := range nativePlayer.WakeSoundStatus() {
 					wakeEngine[key] = value
 				}
@@ -1473,14 +1476,23 @@ func restartScreenAfterSetup() error {
 // sliding maxima are both retained: the former diagnoses model activity while
 // the latter is the actual value tested against the manifest threshold.
 func mwwShadowStats(dc *client.DataClient) interface{} {
-	scorers := dc.MWWShadowScorers()
+	return shadowScorerStats(dc.MWWShadowScorers())
+}
+
+func shadowScorerStats(scorers []*microwakeword.ShadowScorer) interface{} {
 	if len(scorers) == 0 {
 		return nil
 	}
 	var st microwakeword.ShadowStats
 	ready := true
-	for _, scorer := range scorers {
+	queueDepth := 0
+	lastPushAgeMs := int64(0)
+	lastProcessAgeMs := int64(0)
+	var totalChunks, totalDrops, totalResets, totalErrors, totalRecoveries uint64
+	lanes := make([]map[string]any, 0, len(scorers))
+	for index, scorer := range scorers {
 		lane := scorer.Drain()
+		health := scorer.Health()
 		st.Chunks += lane.Chunks
 		st.Samples += lane.Samples
 		st.Scores += lane.Scores
@@ -1490,6 +1502,7 @@ func mwwShadowStats(dc *client.DataClient) interface{} {
 		st.Crossings += lane.Crossings
 		st.CloseMisses += lane.CloseMisses
 		st.Errors += lane.Errors
+		st.Recoveries += lane.Recoveries
 		if lane.MaxRawScore > st.MaxRawScore {
 			st.MaxRawScore = lane.MaxRawScore
 		}
@@ -1509,29 +1522,60 @@ func mwwShadowStats(dc *client.DataClient) interface{} {
 			st.LastErr = lane.LastErr
 		}
 		st.Threshold, st.CloseMiss, st.WindowSize = lane.Threshold, lane.CloseMiss, lane.WindowSize
-		ready = ready && scorer.Ready()
+		ready = ready && health.Ready
+		queueDepth += health.QueueDepth
+		if health.LastPushAgeMs > lastPushAgeMs {
+			lastPushAgeMs = health.LastPushAgeMs
+		}
+		if health.LastProcessAgeMs > lastProcessAgeMs {
+			lastProcessAgeMs = health.LastProcessAgeMs
+		}
+		totalChunks += health.TotalChunks
+		totalDrops += health.TotalDrops
+		totalResets += health.TotalResets
+		totalErrors += health.TotalErrors
+		totalRecoveries += health.TotalRecoveries
+		lanes = append(lanes, map[string]any{
+			"lane": index, "ready": health.Ready, "closed": health.Closed,
+			"affinityCpu": health.AffinityCPU, "queueDepth": health.QueueDepth,
+			"recoveryPending": health.RecoveryPending,
+			"lastPushAgeMs":   health.LastPushAgeMs, "lastProcessAgeMs": health.LastProcessAgeMs,
+			"totalChunks": health.TotalChunks, "totalDrops": health.TotalDrops,
+			"totalResets": health.TotalResets, "totalErrors": health.TotalErrors,
+			"totalRecoveries": health.TotalRecoveries,
+		})
 	}
 	return map[string]interface{}{
-		"beamScorers": len(scorers),
-		"chunks":      st.Chunks,
-		"samples":     st.Samples,
-		"scores":      st.Scores,
-		"drops":       st.Drops,
-		"staleDrops":  st.StaleDrops,
-		"resets":      st.Resets,
-		"crossings":   st.Crossings,
-		"closeMisses": st.CloseMisses,
-		"maxRawScore": st.MaxRawScore,
-		"maxScore":    st.MaxScore,
-		"threshold":   st.Threshold,
-		"closeMiss":   st.CloseMiss,
-		"windowSize":  st.WindowSize,
-		"errors":      st.Errors,
-		"lastErr":     st.LastErr,
-		"ready":       ready,
-		"maxInferMs":  st.MaxInferMs,
-		"maxGapMs":    st.MaxGapMs,
-		"maxQueueMs":  st.MaxQueueMs,
+		"beamScorers":      len(scorers),
+		"chunks":           st.Chunks,
+		"samples":          st.Samples,
+		"scores":           st.Scores,
+		"drops":            st.Drops,
+		"staleDrops":       st.StaleDrops,
+		"resets":           st.Resets,
+		"crossings":        st.Crossings,
+		"closeMisses":      st.CloseMisses,
+		"maxRawScore":      st.MaxRawScore,
+		"maxScore":         st.MaxScore,
+		"threshold":        st.Threshold,
+		"closeMiss":        st.CloseMiss,
+		"windowSize":       st.WindowSize,
+		"errors":           st.Errors,
+		"recoveries":       st.Recoveries,
+		"lastErr":          st.LastErr,
+		"ready":            ready,
+		"maxInferMs":       st.MaxInferMs,
+		"maxGapMs":         st.MaxGapMs,
+		"maxQueueMs":       st.MaxQueueMs,
+		"queueDepth":       queueDepth,
+		"lastPushAgeMs":    lastPushAgeMs,
+		"lastProcessAgeMs": lastProcessAgeMs,
+		"totalChunks":      totalChunks,
+		"totalDrops":       totalDrops,
+		"totalResets":      totalResets,
+		"totalErrors":      totalErrors,
+		"totalRecoveries":  totalRecoveries,
+		"lanes":            lanes,
 	}
 }
 
@@ -1871,10 +1915,18 @@ var owwCompanionState struct {
 	lastErr   string
 	verifier  *microwakeword.CompanionVerifier
 	agreement *microwakeword.AgreementMatcher
+	scorers   []*microwakeword.ShadowScorer
 }
 
+// CPU 1 is kept online by the Echo platform core floor where hot-plugging is
+// present. Only OWW's locked inference thread is pinned there; the microphone,
+// MWW, audio, networking, and UI remain under the normal Go/kernel scheduler.
+// If a platform cannot honor the affinity, scoring continues and status
+// reports the pinning error instead of disabling wake detection.
+const owwInferenceCPU = 1
+
 func replaceOWWCompanion(model, mode string, ready bool, verifier *microwakeword.CompanionVerifier,
-	agreement *microwakeword.AgreementMatcher, err error) {
+	agreement *microwakeword.AgreementMatcher, scorers []*microwakeword.ShadowScorer, err error) {
 	lastErr := ""
 	if !ready {
 		// An absent optional companion is intentionally quiet while OWW is
@@ -1897,6 +1949,7 @@ func replaceOWWCompanion(model, mode string, ready bool, verifier *microwakeword
 	owwCompanionState.lastErr = lastErr
 	owwCompanionState.verifier = verifier
 	owwCompanionState.agreement = agreement
+	owwCompanionState.scorers = append([]*microwakeword.ShadowScorer(nil), scorers...)
 	owwCompanionState.Unlock()
 	if old != nil && old != verifier {
 		old.Close()
@@ -1911,6 +1964,7 @@ func owwCompanionStatus() map[string]any {
 	lastErr := owwCompanionState.lastErr
 	verifier := owwCompanionState.verifier
 	agreement := owwCompanionState.agreement
+	scorers := append([]*microwakeword.ShadowScorer(nil), owwCompanionState.scorers...)
 	owwCompanionState.RUnlock()
 	status := map[string]any{
 		"name": "open_wake_word", "mode": mode, "ready": ready,
@@ -1926,6 +1980,9 @@ func owwCompanionStatus() map[string]any {
 	if agreement != nil {
 		status["agreement_window_ms"] = microwakeword.DualWakeAgreementWindow.Milliseconds()
 		status["stats"] = agreement.Stats()
+	}
+	if scorerStats := shadowScorerStats(scorers); scorerStats != nil {
+		status["scorer_stats"] = scorerStats
 	}
 	return status
 }
@@ -2023,7 +2080,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		setMWWState(false, false, model, "", "", "", sensitivity, environment,
 			threshold, slidingWindow, closeMiss, "")
 		setWakeDetectorSelection(false, false, owwModel)
-		replaceOWWCompanion(owwModel, "disabled", false, nil, nil, nil)
+		replaceOWWCompanion(owwModel, "disabled", false, nil, nil, nil, nil)
 		return
 	}
 
@@ -2110,7 +2167,9 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 			}
 			scorers = append(scorers, sc)
 			if agreement != nil {
+				owwCPU := owwInferenceCPU
 				owwScorer, _, err := microwakeword.OpenCompanionAgreementShadow(owwModel, microwakeword.ShadowHooks{
+					AffinityCPU: &owwCPU,
 					Cross: func(score float32, at time.Time) {
 						if match, ok := agreement.Observe(microwakeword.AgreementOWW, lane, score, at); ok {
 							dispatchAgreement(match)
@@ -2127,7 +2186,9 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	} else {
 		for lane := 0; lane < expectedScorers; lane++ {
 			lane := lane
+			owwCPU := owwInferenceCPU
 			sc, bundle, err := microwakeword.OpenCompanionShadow(owwModel, microwakeword.ShadowHooks{
+				AffinityCPU: &owwCPU,
 				Cross: func(score float32, at time.Time) {
 					if dc.ClaimWakeLane(lane, at) {
 						dispatch(lane, wakeWord, score, at)
@@ -2169,7 +2230,7 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 		} else if owwEnabled {
 			mode = "oww_only"
 		}
-		replaceOWWCompanion(owwModel, mode, false, nil, nil, openErr)
+		replaceOWWCompanion(owwModel, mode, false, nil, nil, nil, openErr)
 		return
 	}
 
@@ -2184,7 +2245,11 @@ func applyMWWConfig(dc *client.DataClient, cc *client.ControlClient,
 	} else if owwEnabled {
 		detectorMode = "oww_only"
 	}
-	replaceOWWCompanion(owwModel, detectorMode, owwEnabled, nil, agreement, nil)
+	activeOWWScorers := owwScorers
+	if !mwwEnabled {
+		activeOWWScorers = scorers
+	}
+	replaceOWWCompanion(owwModel, detectorMode, owwEnabled, nil, agreement, activeOWWScorers, nil)
 	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
 	setWakeDetectorSelection(mwwEnabled, owwEnabled, owwModel)
@@ -2244,7 +2309,7 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 		scorers = append(scorers, scorer)
 	}
 	dc.SetMWWShadowScorers(scorers)
-	replaceOWWCompanion(microwakeword.TimerStopPackage, "timer_stop", false, nil, nil, nil)
+	replaceOWWCompanion(microwakeword.TimerStopPackage, "timer_stop", false, nil, nil, nil, nil)
 	setWakeDetectorSelection(true, false, "")
 	label := strings.TrimSpace(manifest.Label)
 	if label == "" {
