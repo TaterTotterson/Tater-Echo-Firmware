@@ -1,5 +1,45 @@
 # Changelog
 
+## v2.4.0
+
+### What's Changed
+
+- Added secure active Bluetooth GATT connections on Biscuit, Checkers, and
+  Rook, allowing Tater services such as Meshtastic Core to use a nearby Echo's
+  Bluetooth radio without a separate bridge. The native satellite link now
+  supports service discovery, characteristic reads and writes, notifications,
+  indications, disconnects, and explicit unpairing while preserving passive
+  BLE advertisement proxying.
+- Added authenticated six-digit PIN pairing and persistent BLE bonds. Pairing
+  credentials stay on the satellite, the PIN is never stored, and Bluetooth
+  control continues to travel over the existing authenticated Tater native
+  connection rather than opening another network listener.
+- Added shared-controller coordination and ordered per-device GATT workers so
+  scanning pauses cleanly during connection setup, active traffic cannot be
+  consumed by the passive scanner, and multiple connected devices remain
+  isolated. Biscuit and Checkers use the direct HCI stack required by their
+  FireOS hardware, while Rook integrates with BlueZ.
+- Kept openWakeWord responsive under load by pinning its native scorers to
+  stable low-numbered CPUs, retaining the freshest pending audio when the
+  inference queue fills, and preserving feature history across ordinary queue
+  gaps. Runtime health now reports scorer affinity, queue, recovery, and drop
+  diagnostics.
+- Made the selected wake package the sole source of detector calibration and
+  reduced the built-in Hey Tater openWakeWord patience from three frames to
+  two for quicker activation. A real microphone capture-generation change
+  still performs a full state reset.
+- Disabled Echo requests for Sendspin's high-rate remote visualizer stream to
+  prevent music telemetry from competing with wake inference. Artwork,
+  metadata, playback progress, and local playback-reactive visuals remain
+  available on supported Echo displays and LEDs.
+- Restored Biscuit headphone-jack output to normal volume by switching the DAC
+  mux together with the jack route, and protected tinyalsa writes from signal
+  interruption to prevent partial PCM buffers and intermittent clicks.
+- Hardened emOS networking on FireOS 6 by requesting broadcast DHCP replies
+  from `udhcpc`. If an IPv6 input-drop policy cannot be installed because the
+  device lacks `ip6tables`, emOS now disables IPv6 instead of leaving inbound
+  IPv6 traffic unfiltered.
+
 ## v2.3.2
 
 ### What's Changed
