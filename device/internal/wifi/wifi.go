@@ -91,7 +91,7 @@ const (
 
 	// Tater Linux owns this supplicant directly.
 	linuxSupp = "/sbin/wpa_supplicant"
-	linuxNet  = "/usr/local/sbin/techo5-net"
+	linuxNet  = "/usr/local/sbin/tater-net"
 	linuxSock = "/run/wpa"
 
 	// 20s (the provisioning wizard's window) proved too tight on hardware

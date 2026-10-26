@@ -1,0 +1,243 @@
+#!/bin/sh
+# Prefer a usable USB Ethernet adapter on Biscuit while preserving a recovery
+# path. Wi-Fi stays up during the host-mode probe. Only an Ethernet interface
+# with a DHCP address and default route is allowed to replace Wi-Fi. Missing
+# hardware, DHCP failure, disable, or sustained link loss stops only Ethernet's
+# DHCP client, restores the USB serial gadget, and brings Wi-Fi back.
+set -u
+PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+export PATH
+
+DATA=${TATER_DATA_DIR:-/data/tater-linux}
+RUN=${TATER_RUN_DIR:-/run}
+SYS_NET=${TATER_SYS_NET:-/sys/class/net}
+PROC=${TATER_PROC_DIR:-/proc}
+MCHANGE=${TATER_MCHANGE:-/proc/mchange}
+TARGET_FILE=${TATER_TARGET_FILE:-/etc/hostname}
+NET=${TATER_NET_SCRIPT:-/usr/local/sbin/tater-net}
+ENUM_TIMEOUT=${TATER_ETH_ENUM_TIMEOUT:-15}
+DHCP_TIMEOUT=${TATER_ETH_DHCP_TIMEOUT:-45}
+MONITOR_INTERVAL=${TATER_ETH_MONITOR_INTERVAL:-2}
+FAILURE_LIMIT=${TATER_ETH_FAILURE_LIMIT:-3}
+CONF=$DATA/net-mode
+LOG=$DATA/eth.log
+[ -d "$DATA" ] || LOG=/tmp/eth.log
+STATE=$RUN/tater-usb-ethernet.state
+LOCK=$RUN/tater-usb-ethernet.lock
+DHCP_PID=$RUN/eth-dhcp.pid
+HOOK=$RUN/tater-udhcpc-ethernet.sh
+LEASE=$RUN/tater-usb-ethernet.lease
+RESOLV=${TATER_RESOLV_CONF:-/etc/resolv.conf}
+say() { echo "tater-eth: $*" >> "$LOG"; }
+desired() { [ "$(cat "$CONF" 2>/dev/null)" = wired ]; }
+set_state() { printf '%s\n' "$*" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; }
+
+pid_is() {
+	pid=$1
+	want=$2
+	[ -n "$pid" ] && [ -r "$PROC/$pid/comm" ] && [ "$(cat "$PROC/$pid/comm" 2>/dev/null)" = "$want" ]
+}
+
+stop_eth_dhcp() {
+	pid=$(cat "$DHCP_PID" 2>/dev/null || true)
+	if pid_is "$pid" udhcpc; then
+		kill "$pid" 2>/dev/null || true
+	fi
+	rm -f "$DHCP_PID"
+	if [ -n "${iface:-}" ]; then
+		while route del default gw 0.0.0.0 dev "$iface" 2>/dev/null; do :; done
+		ifconfig "$iface" 0.0.0.0 2>/dev/null || true
+	fi
+	rm -f "$LEASE"
+}
+
+has_eth_default() {
+	route -n | awk -v dev="$iface" '$1 == "0.0.0.0" && $8 == dev { found=1 } END { exit !found }'
+}
+
+restore_serial() {
+	[ -e "$MCHANGE" ] && echo device > "$MCHANGE" 2>/dev/null || true
+}
+
+fallback() {
+	reason=${1:-fallback}
+	stop_eth_dhcp
+	restore_serial
+	set_state fallback "$reason"
+	if [ "${wifi_disabled:-0}" -eq 1 ]; then
+		say "$reason; restored USB serial and restarting Wi-Fi"
+		"$NET" fallback >> "$LOG" 2>&1 || say "Wi-Fi fallback did not obtain a lease"
+	else
+		say "$reason; restored USB serial; Wi-Fi remained available"
+	fi
+}
+
+target=${TATER_TARGET:-$(cat "$TARGET_FILE" 2>/dev/null || true)}
+case "$target" in
+biscuit | tater-biscuit) ;;
+*) set_state unsupported "$target"; exit 0 ;;
+esac
+
+if [ "${1:-}" = stop ]; then
+	# The daemon removes CONF first. Give the active controller time to observe
+	# that and perform the ordered fallback; recover directly if it is wedged.
+	i=0
+	while [ -d "$LOCK" ] && [ "$i" -lt 10 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	if [ -d "$LOCK" ]; then
+		set -- $(cat "$STATE" 2>/dev/null || true)
+		iface=${2:-}
+		[ "${1:-}" = active ] && wifi_disabled=1 || wifi_disabled=0
+		fallback disabled
+	else
+		set -- $(cat "$STATE" 2>/dev/null || true)
+		iface=${2:-}
+		case "${1:-}" in
+		fallback | disabled) : ;;
+		active) wifi_disabled=1; fallback disabled ;;
+		*) wifi_disabled=0; fallback disabled ;;
+		esac
+	fi
+	exit 0
+fi
+
+[ -e "$MCHANGE" ] || { set_state unsupported no-mchange; exit 0; }
+desired || { set_state disabled; exit 0; }
+
+exec >> "$LOG" 2>&1
+echo "--- $0 start $(date)"
+if ! mkdir "$LOCK" 2>/dev/null; then
+	say "another controller is already probing or monitoring"
+	exit 0
+fi
+needs_fallback=0
+wifi_disabled=0
+cleanup() {
+	if [ "$needs_fallback" -eq 1 ]; then
+		fallback controller-exit
+	fi
+	rmdir "$LOCK" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+force=$(sed -n 's/.*force:\([0-9]\).*/\1/p' "$MCHANGE" 2>/dev/null)
+case "$force" in
+2)
+	echo host > "$MCHANGE"
+	;;
+"")
+	say "unexpected mchange state: $(cat "$MCHANGE" 2>/dev/null)"
+	set_state fallback bad-mchange
+	exit 1
+	;;
+*)
+	say "adopting existing host mode (force=$force)"
+	;;
+esac
+needs_fallback=1
+set_state probing
+say "entered host mode; Wi-Fi remains available during the probe"
+
+# Linux 3.18 normally names this eth0; accept usbN for other usbnet naming.
+iface=
+i=0
+while [ "$i" -lt "$ENUM_TIMEOUT" ] && [ -z "$iface" ]; do
+	desired || { fallback disabled; needs_fallback=0; exit 0; }
+	for d in "$SYS_NET"/*; do
+		n=${d##*/}
+		case "$n" in
+		eth[0-9]* | usb[0-9]*) iface=$n; break 2 ;;
+		esac
+	done
+	sleep 1
+	i=$((i + 1))
+done
+if [ -z "$iface" ]; then
+	{
+		ls /sys/bus/usb/devices 2>/dev/null
+		dmesg | tail -60
+	} >> "$LOG" 2>&1
+	fallback no-adapter
+	needs_fallback=0
+	exit 1
+fi
+say "$iface appeared"
+set_state probing "$iface"
+
+cat > "$HOOK" <<'EOF'
+#!/bin/sh
+LEASE=${TATER_ETH_LEASE_FILE:-/run/tater-usb-ethernet.lease}
+case "$1" in
+deconfig)
+	ifconfig "$interface" 0.0.0.0
+	rm -f "$LEASE"
+	;;
+bound | renew)
+	ifconfig "$interface" "$ip" netmask "$subnet"
+	gateway=${router%% *}
+	{ printf '%s\n' "$gateway"; printf '%s\n' "$dns"; } > "$LEASE.tmp.$$" && mv -f "$LEASE.tmp.$$" "$LEASE"
+	;;
+esac
+EOF
+chmod 0755 "$HOOK"
+ifconfig "$iface" up
+stop_eth_dhcp
+ifconfig "$iface" up
+export TATER_ETH_LEASE_FILE=$LEASE
+udhcpc -i "$iface" -s "$HOOK" -b -t 8 -p "$DHCP_PID" 2>&1
+
+address=
+gateway=
+i=0
+while [ "$i" -lt "$DHCP_TIMEOUT" ]; do
+	desired || { fallback disabled; needs_fallback=0; exit 0; }
+	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+	gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+	if [ -n "$address" ] && [ -n "$gateway" ]; then
+		if has_eth_default || route add default gw "$gateway" dev "$iface" metric 50 2>/dev/null; then
+			has_eth_default && break
+		fi
+	fi
+	sleep 1
+	i=$((i + 1))
+done
+if [ -z "$address" ] || [ -z "$gateway" ] || ! has_eth_default; then
+	fallback no-lease
+	needs_fallback=0
+	exit 1
+fi
+
+set_state active "$iface" "$address"
+say "$iface is usable at $address; disabling Wi-Fi"
+wifi_disabled=1
+"$NET" stop >> "$LOG" 2>&1
+dns=$(sed -n '2p' "$LEASE" 2>/dev/null || true)
+if [ -n "$dns" ]; then
+	{ for server in $dns; do echo "nameserver $server"; done; } > "$RESOLV"
+fi
+ifconfig
+route -n
+
+failures=0
+while desired; do
+	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+	carrier=$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo 1)
+	if [ -n "$address" ] && [ "$carrier" != 0 ] && has_eth_default; then
+		failures=0
+	else
+		failures=$((failures + 1))
+		[ "$failures" -ge "$FAILURE_LIMIT" ] && break
+	fi
+	sleep "$MONITOR_INTERVAL"
+done
+
+if desired; then
+	fallback link-lost
+else
+	fallback disabled
+fi
+needs_fallback=0
+exit 0

@@ -888,10 +888,11 @@ func main() {
 				s.StartAnim(nativeStateAnimation("idle"))
 				dataClient.StartLocalMic()
 			}
-			nativeClient.ReportSettings(map[string]any{
-				"volume_percent":       deviceVolumePercent(s.VolumeLevel()),
-				"usb_ethernet_enabled": usbEthernetFlagEnabled(),
-			})
+			settings := map[string]any{"volume_percent": deviceVolumePercent(s.VolumeLevel())}
+			for key, value := range usbEthernetSettings() {
+				settings[key] = value
+			}
+			nativeClient.ReportSettings(settings)
 			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 				if snapshot.SatChat == nil {
 					snapshot.SatChat = &show.SatChat{}
@@ -1039,6 +1040,7 @@ func main() {
 				"led_owner":                  s.LEDOwner(),
 				"wake_engine":                wakeEngine,
 				"ble":                        bleScanner.Stats(),
+				"usb_ethernet":               usbEthernetDiagnostics(),
 				"memory": map[string]any{
 					"heap_alloc_kb": memory.HeapAlloc / 1024,
 					"heap_sys_kb":   memory.HeapSys / 1024,

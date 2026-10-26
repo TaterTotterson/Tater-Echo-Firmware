@@ -324,8 +324,11 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     platform_source / "tools/linux/back-to-linux.sh", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/slotctl": (
                     platform_source / "tools/linux/rootfs/usr/local/sbin/slotctl", 0o755),
+                "tools/linux/rootfs/usr/local/sbin/tater-net": (
+                    REPO / "linux/dot/tater-net", 0o755),
+                # The pinned platform rescue init still invokes the old name.
                 "tools/linux/rootfs/usr/local/sbin/techo5-net": (
-                    REPO / "linux/dot/techo5-net", 0o755),
+                    REPO / "linux/dot/tater-net", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/wifi-set": (
                     REPO / "linux/dot/wifi-set", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/to-twrp": (

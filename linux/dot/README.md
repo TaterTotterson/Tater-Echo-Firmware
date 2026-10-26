@@ -22,6 +22,8 @@ application layer while retaining its hardware-proven Linux boot contract.
 serves first-boot pairing on the resulting `ap0`. Early Linux boot shows an
 orange ring with a moving white segment. Once the setup hotspot is ready, the
 ring changes to Tater's familiar warm-white twinkle until pairing completes.
-`techo5-net` and `wifi-set`
-own station association and DHCP using only Tater's private configuration;
-they never import an old userspace network.
+`tater-net`, `tater-usb-ethernet`, and `wifi-set` own station association and
+DHCP using only Tater's private configuration;
+they never import an old userspace network. Compatibility links keep the old
+`techo5-net` and `techo5-eth` command names working while installed images and
+new code use the Tater names.

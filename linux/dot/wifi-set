@@ -11,8 +11,7 @@ die() { echo "wifi-set: $*" >&2; exit 1; }
 case "${1:-}" in
 --forget)
 	rm -f "$CONF"
-	killall udhcpc wpa_supplicant 2>/dev/null || true
-	ifconfig wlan0 0.0.0.0 2>/dev/null || true
+	tater-net stop 2>/dev/null || true
 	sync
 	echo "wifi-set: Tater network forgotten"
 	exit 0
@@ -43,4 +42,4 @@ esac
   mv -f "$CONF.tmp" "$CONF" )
 sync
 echo "wifi-set: saved"
-exec techo5-net restart
+exec tater-net restart

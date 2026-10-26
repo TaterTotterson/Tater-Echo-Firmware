@@ -291,7 +291,7 @@ say "ready at $($BB date)"
 INITTAB = """# Tater Linux for Biscuit and Radar — BusyBox init.
 ::sysinit:/etc/techo5/boot.sh
 ::respawn:/usr/local/sbin/tater-run
-::once:/usr/local/sbin/techo5-eth
+::once:/usr/local/sbin/tater-usb-ethernet
 ::respawn:/usr/local/sbin/techo5-console
 ::respawn:/usr/local/sbin/techo5-logs
 ::ctrlaltdel:/usr/local/bin/tater-reboot-now
@@ -487,8 +487,15 @@ def build(args: argparse.Namespace) -> None:
 
         copy(args.setup_ap, root / "usr/local/sbin/tater-setup-ap", 0o755)
         copy(args.setup_ap_base, root / "usr/local/sbin/tater-setup-ap-base", 0o755)
-        copy(args.network, root / "usr/local/sbin/techo5-net", 0o755)
-        copy(args.eth, root / "usr/local/sbin/techo5-eth", 0o755)
+        copy(args.network, root / "usr/local/sbin/tater-net", 0o755)
+        copy(args.eth, root / "usr/local/sbin/tater-usb-ethernet", 0o755)
+        for old_name, tater_name in (
+            ("techo5-net", "tater-net"),
+            ("techo5-eth", "tater-usb-ethernet"),
+        ):
+            compatibility = root / "usr/local/sbin" / old_name
+            compatibility.unlink(missing_ok=True)
+            compatibility.symlink_to(tater_name)
         copy(args.wifi_set, root / "usr/local/sbin/wifi-set", 0o755)
         for name, digest, member in SETUP_PACKAGES:
             alpine_file(args.apk_cache, name, digest, member, root / member)

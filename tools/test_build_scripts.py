@@ -39,8 +39,8 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "linux/rook/build_linux.sh",
             ROOT / "device/tools/build_tools.sh",
             ROOT / "linux/dot/setup-ap.sh",
-            ROOT / "linux/dot/techo5-net",
-            ROOT / "linux/dot/techo5-eth",
+            ROOT / "linux/dot/tater-net",
+            ROOT / "linux/dot/tater-usb-ethernet",
             ROOT / "linux/dot/wifi-set",
         ):
             subprocess.run(["sh", "-n", str(script)], check=True, cwd=ROOT)
@@ -70,6 +70,25 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn('mktemp "${TMPDIR:-/tmp}/tater-$target-rootfs.XXXXXX"', script)
         self.assertIn("trap 'rm -f \"$listing\"' EXIT HUP INT TERM", script)
         self.assertNotIn("build/dot/$target-rootfs.list", script)
+
+    def test_dot_network_controllers_keep_dhcp_clients_separate(self) -> None:
+        wifi = (ROOT / "linux/dot/tater-net").read_text(encoding="utf-8")
+        ethernet = (ROOT / "linux/dot/tater-usb-ethernet").read_text(encoding="utf-8")
+        setter = (ROOT / "linux/dot/wifi-set").read_text(encoding="utf-8")
+        builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")
+        build_script = DOT_BUILD_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertNotIn("killall", wifi + ethernet + setter)
+        self.assertIn("wifi-dhcp.pid", wifi)
+        self.assertIn("eth-dhcp.pid", ethernet)
+        self.assertIn("tater-udhcpc-wlan0.sh", wifi)
+        self.assertIn("tater-udhcpc-ethernet.sh", ethernet)
+        self.assertIn('set_state active "$iface" "$address"', ethernet)
+        self.assertLess(ethernet.index('set_state active "$iface" "$address"'),
+                        ethernet.index('"$NET" stop'))
+        self.assertIn('root / "usr/local/sbin/tater-net"', builder)
+        self.assertIn('root / "usr/local/sbin/tater-usb-ethernet"', builder)
+        self.assertIn('./usr/local/sbin/tater-usb-ethernet', build_script)
 
     def test_dot_rootfs_probes_both_fireos_system_layouts(self) -> None:
         builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")

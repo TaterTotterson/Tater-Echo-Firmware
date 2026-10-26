@@ -79,7 +79,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
             "factory/to_twrp.py",
             "factory/dot-linux/README.md",
             "factory/checkers-linux/tools/techo5/techo5lib.py",
-            "linux/dot/techo5-net",
+            "linux/dot/tater-net",
             "linux/dot/wifi-set",
             "LICENSE",
             "LICENSES/ECHOLOCAL-MIT.txt",
@@ -167,6 +167,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
                         "payload/rootfs.tar.gz", "payload/kernel.zImage-dtb",
                         "payload/rescue-apks.tar", "payload/alpine-minirootfs.tar.gz",
                         "tools/dotimage.py", "tools/linux/mkimage.py",
+                        "tools/linux/rootfs/usr/local/sbin/tater-net",
                         "tools/linux/rootfs/usr/local/sbin/techo5-net",
                         "tools/linux/rootfs/usr/local/sbin/wifi-set",
                         "licenses/ECHOLOCAL-MIT.txt",
@@ -189,9 +190,10 @@ class PackageEchoReleaseTests(unittest.TestCase):
                     installer = archive.extractfile(f"{prefix}/install.py").read().decode()
                     self.assertIn("rm -rf $S/slots/a $S/slots/b", installer)
                     network = archive.extractfile(
-                        f"{prefix}/tools/linux/rootfs/usr/local/sbin/techo5-net"
+                        f"{prefix}/tools/linux/rootfs/usr/local/sbin/tater-net"
                     ).read().decode()
-                    self.assertIn("/data/tater-linux/wpa_supplicant.conf", network)
+                    self.assertIn("DATA=${TATER_DATA_DIR:-/data/tater-linux}", network)
+                    self.assertIn("CONF=$DATA/wpa_supplicant.conf", network)
                     self.assertNotIn("/data/misc/wifi", network)
                     archive.extractall(extract)
                 verified = subprocess.run(

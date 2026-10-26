@@ -128,8 +128,8 @@ python3 "$script_dir/build_rootfs.py" \
     --tinyalsa "$device/build/dot/libtinyalsa.so.2.0.0" \
     --setup-ap "$script_dir/setup-ap.sh" \
     --setup-ap-base "$repo/linux/checkers/setup-ap.sh" \
-    --network "$script_dir/techo5-net" \
-    --eth "$script_dir/techo5-eth" \
+    --network "$script_dir/tater-net" \
+    --eth "$script_dir/tater-usb-ethernet" \
     --wifi-set "$script_dir/wifi-set" \
     --apk-cache "$device/build" \
     --platform-license "$platform_source/LICENSE" \
@@ -148,7 +148,10 @@ tar -tzf "$output" > "$listing"
 for required in \
     ./usr/local/bin/tater-echo \
     ./usr/local/sbin/tater-run \
+    ./usr/local/sbin/tater-net \
+    ./usr/local/sbin/tater-usb-ethernet \
     ./usr/local/sbin/techo5-net \
+    ./usr/local/sbin/techo5-eth \
     ./usr/local/sbin/wifi-set \
     ./usr/local/sbin/tater-setup-ap \
     ./usr/sbin/hostapd \

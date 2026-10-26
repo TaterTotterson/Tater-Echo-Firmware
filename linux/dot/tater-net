@@ -1,0 +1,127 @@
+#!/bin/sh
+# Own the Biscuit/Radar Wi-Fi station without touching the independent USB
+# Ethernet DHCP client. Wired mode calls `stop` only after Ethernet has a lease
+# and calls `fallback` when the cable, adapter, or lease disappears.
+set -u
+PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+export PATH
+
+DATA=${TATER_DATA_DIR:-/data/tater-linux}
+RUN=${TATER_RUN_DIR:-/run}
+SYS_NET=${TATER_SYS_NET:-/sys/class/net}
+PROC=${TATER_PROC_DIR:-/proc}
+CONF=$DATA/wpa_supplicant.conf
+LOG=$DATA
+[ -d "$LOG" ] || LOG=/tmp
+WPA_PID=$RUN/wpa.pid
+DHCP_PID=$RUN/wifi-dhcp.pid
+HOOK=$RUN/tater-udhcpc-wlan0.sh
+ETH_STATE=$RUN/tater-usb-ethernet.state
+say() { echo "tater-net: $*" >&2; }
+
+pid_is() {
+	pid=$1
+	want=$2
+	[ -n "$pid" ] && [ -r "$PROC/$pid/comm" ] && [ "$(cat "$PROC/$pid/comm" 2>/dev/null)" = "$want" ]
+}
+
+stop_pidfile() {
+	file=$1
+	want=$2
+	pid=$(cat "$file" 2>/dev/null || true)
+	if pid_is "$pid" "$want"; then
+		kill "$pid" 2>/dev/null || true
+	fi
+	rm -f "$file"
+}
+
+stop_wifi() {
+	stop_pidfile "$DHCP_PID" udhcpc
+	stop_pidfile "$WPA_PID" wpa_supplicant
+	while route del default gw 0.0.0.0 dev wlan0 2>/dev/null; do :; done
+	ifconfig wlan0 0.0.0.0 2>/dev/null || true
+	ifconfig wlan0 down 2>/dev/null || true
+}
+
+ethernet_active() {
+	set -- $(cat "$ETH_STATE" 2>/dev/null || true)
+	[ "${1:-}" = active ]
+}
+
+associate() {
+	if [ "$(wpa_cli -p "$RUN/wpa" -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p')" = COMPLETED ]; then
+		return 0
+	fi
+	mkdir -p "$RUN/wpa"
+	stop_pidfile "$WPA_PID" wpa_supplicant
+	ifconfig wlan0 up 2>/dev/null || true
+	wpa_supplicant -B -i wlan0 -D nl80211 -c "$CONF" -P "$WPA_PID" >> "$LOG/wpa.log" 2>&1
+	i=0
+	while [ "$i" -lt 45 ]; do
+		[ "$(wpa_cli -p "$RUN/wpa" -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p')" = COMPLETED ] && return 0
+		sleep 1
+		i=$((i + 1))
+	done
+	say "not associated after 45 seconds"
+	return 1
+}
+
+lease() {
+	cat > "$HOOK" <<'EOF'
+#!/bin/sh
+case "$1" in
+deconfig)
+	ifconfig "$interface" 0.0.0.0
+	;;
+bound | renew)
+	RESOLV=${TATER_RESOLV_CONF:-/etc/resolv.conf}
+	ifconfig "$interface" "$ip" netmask "$subnet"
+	if [ -n "$router" ]; then
+		while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
+		route add default gw "${router%% *}" dev "$interface"
+	fi
+	[ -n "$dns" ] && { for server in $dns; do echo "nameserver $server"; done > "$RESOLV"; }
+	;;
+esac
+EOF
+	chmod 0755 "$HOOK"
+	stop_pidfile "$DHCP_PID" udhcpc
+	udhcpc -i wlan0 -s "$HOOK" -b -t 8 -p "$DHCP_PID" >> "$LOG/udhcpc-wifi.log" 2>&1
+	i=0
+	while [ "$i" -lt 30 ]; do
+		address=$(ifconfig wlan0 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+		[ -n "$address" ] && { echo "$address"; return 0; }
+		sleep 1
+		i=$((i + 1))
+	done
+	say "associated but no DHCP lease"
+	return 1
+}
+
+command=${1:-start}
+case "$command" in
+stop)
+	stop_wifi
+	exit 0
+	;;
+restart)
+	stop_wifi
+	ethernet_active && exit 0
+	;;
+start)
+	ethernet_active && exit 0
+	;;
+fallback)
+	# Forced by tater-usb-ethernet after it has restored the USB serial role.
+	stop_wifi
+	;;
+*)
+	say "unknown command: $command"
+	exit 2
+	;;
+esac
+
+[ -e "$SYS_NET/wlan0" ] || { say "no wlan0"; exit 1; }
+[ -s "$CONF" ] || { say "no Tater network configured"; exit 1; }
+associate || exit 1
+lease
