@@ -40,6 +40,7 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "device/tools/build_tools.sh",
             ROOT / "linux/dot/setup-ap.sh",
             ROOT / "linux/dot/techo5-net",
+            ROOT / "linux/dot/techo5-eth",
             ROOT / "linux/dot/wifi-set",
         ):
             subprocess.run(["sh", "-n", str(script)], check=True, cwd=ROOT)

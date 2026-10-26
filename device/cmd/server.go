@@ -889,7 +889,8 @@ func main() {
 				dataClient.StartLocalMic()
 			}
 			nativeClient.ReportSettings(map[string]any{
-				"volume_percent": deviceVolumePercent(s.VolumeLevel()),
+				"volume_percent":       deviceVolumePercent(s.VolumeLevel()),
+				"usb_ethernet_enabled": usbEthernetFlagEnabled(),
 			})
 			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 				if snapshot.SatChat == nil {
@@ -2702,6 +2703,9 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 			return applied, err
 		}
 		applied["output_channel_mode"] = sendspinOutputChannel()
+	}
+	if err := applyUSBEthernetSetting(values, applied); err != nil {
+		return applied, err
 	}
 	if value, ok := values["wake_threshold"]; ok {
 		threshold := nativeNumber(value, 0)

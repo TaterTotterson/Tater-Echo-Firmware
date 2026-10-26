@@ -1,0 +1,64 @@
+# 0049-usbnet-report-probe-failures.patch — Tater USB-Ethernet work (2026-10-25)
+#
+# Not a CVE backport: Tater diagnostics for the Biscuit's 3.18 vendor tree.
+# The 3.18 usbnet probe path never explains failures on a kernel without
+# dynamic debug (bind/init_status/register_netdev failures are dev_dbg-only,
+# and driver_info-0 table entries reject silently). This prints each failure
+# step. Kept intentionally small; drop entirely if unwanted — it is not part
+# of the fix (see 0052). usbnet.c is grafted from upstream linux-3.18.19 by
+# build-kernel.sh.
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -1597,7 +1597,9 @@
+ 	name = udev->dev.driver->name;
+ 	info = (struct driver_info *) prod->driver_info;
+ 	if (!info) {
+-		dev_dbg (&udev->dev, "blacklisted by %s\n", name);
++		/* Tater 3.18 port: driver_info-0 table entries are silent blacklist
++		 * rejects (dev_dbg-only); make them visible without dynamic debug. */
++		dev_info(&udev->dev, "usbnet: blacklisted by %s, no driver_info\n", name);
+ 		return -ENODEV;
+ 	}
+ 	xdev = interface_to_usbdev (udev);
+@@ -1659,8 +1661,13 @@
+ 	// NOTE net->name still not usable ...
+ 	if (info->bind) {
+ 		status = info->bind (dev, udev);
+-		if (status < 0)
++		if (status < 0) {
++			/* Tater 3.18 port: bind failures were dev_dbg-only and invisible
++			 * on a kernel without dynamic debug; print the reason. */
++			dev_err(&udev->dev, "usbnet: %s bind failed, error %d\n",
++					info->description, status);
+ 			goto out1;
++		}
+ 
+ 		// heuristic:  "usb%d" for links we know are two-host,
+ 		// else "eth%d" when there's reasonable doubt.  userspace
+@@ -1698,8 +1705,11 @@
+ 	}
+ 	if (status >= 0 && dev->status)
+ 		status = init_status (dev, udev);
+-	if (status < 0)
++	if (status < 0) {
++		/* Tater 3.18 port: print which step failed. */
++		dev_err(&udev->dev, "usbnet: init_status failed, error %d\n", status);
+ 		goto out3;
++	}
+ 
+ 	if (!dev->rx_urb_size)
+ 		dev->rx_urb_size = dev->hard_mtu;
+@@ -1727,8 +1737,12 @@
+ 	}
+ 
+ 	status = register_netdev (net);
+-	if (status)
++	if (status) {
++		/* Tater 3.18 port: print which step failed. */
++		dev_err(&udev->dev, "usbnet: register_netdev %s failed, error %d\n",
++				net->name, status);
+ 		goto out5;
++	}
+ 	netif_info(dev, probe, dev->net,
+ 		   "register '%s' at usb-%s-%s, %s, %pM\n",
+ 		   udev->dev.driver->name,

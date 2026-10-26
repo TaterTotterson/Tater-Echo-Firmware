@@ -1,0 +1,116 @@
+#!/bin/sh
+# Bring up the wired interface on the micro-USB port. The unit boots as a USB
+# gadget (the serial console); when /data/tater-linux/net-mode is "wired", this
+# switches the MUSB controller to host mode ("/proc/mchange", Amazon's
+# CMD_MODE_CHANGE facility — no ID-pin grounding involved), waits for the CDC-ECM
+# netdev, and DHCPs on it. Without a carrier or a lease it reverts to device
+# mode, so booting a wired unit straight into a PC gets the console back and
+# stays maintainable. Wi-Fi (techo5-net) is unaffected. Never in the critical
+# boot path (non-waiting ::once: from /etc/inittab).
+# Verified on device 2026-10-25 (RTL8152 CDC-ECM config 2 via a U6113), through
+# a DHCP lease and both revert paths.
+set -u
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+CONF=/data/tater-linux/net-mode
+LOG=/data/tater-linux/eth.log
+[ -d /data/tater-linux ] || LOG=/tmp/eth.log
+say() { echo "tater-eth: $*" >> "$LOG"; }
+
+[ -e /proc/mchange ] || exit 0
+force=$(sed -n 's/.*force:\([0-9]\).*/\1/p' /proc/mchange 2>/dev/null)
+case "$force" in
+2) : ;;
+"") say "unexpected /proc/mchange: $(cat /proc/mchange 2>/dev/null)"; exit 0 ;;
+*) say "already host (force=$force), leaving it"; exit 0 ;;
+esac
+[ -f "$CONF" ] || exit 0
+[ "$(cat "$CONF" 2>/dev/null)" = "wired" ] || exit 0
+
+exec >> "$LOG" 2>&1
+echo "--- $0 start $(date)"
+
+# one instance at a time (a stale lock can't outlive the boot: /run is tmpfs)
+if ! mkdir /run/techo5-eth.lock 2>/dev/null; then
+	say "another instance holds the lock, skipping"
+	exit 1
+fi
+trap 'rmdir /run/techo5-eth.lock 2>/dev/null' EXIT
+
+echo host > /proc/mchange
+say "entered host mode"
+
+# 3.18's usbnet names CDC netdevs via alloc_etherdev, so this is eth0; accept
+# usb%d spellings too in case another kernel names it differently.
+iface=
+i=0
+while [ "$i" -lt 15 ] && [ -z "$iface" ]; do
+	for d in /sys/class/net/*; do
+		n=${d##*/}
+		case "$n" in
+		eth[0-9]* | usb[0-9]*) iface=$n; break 2 ;;
+		esac
+	done
+	sleep 1
+	i=$((i + 1))
+done
+[ -n "$iface" ] || {
+	say "no cdc-ethernet netdev in 15s, back to device mode"
+	{
+		ls /sys/bus/usb/devices
+		ls -l /dev/bus/usb/001/ 2>/dev/null
+		dmesg | tail -60
+	} >> "$LOG" 2>&1
+	echo device > /proc/mchange
+	exit 1
+}
+say "$iface appeared"
+
+# Same DHCP hook techo5-net's lease() writes; identical content, whichever runs
+# first creates it.
+cat > /run/udhcpc.sh <<'EOF'
+#!/bin/sh
+case "$1" in
+deconfig)
+	ifconfig "$interface" 0.0.0.0
+	;;
+bound | renew)
+	ifconfig "$interface" "$ip" netmask "$subnet"
+	if [ -n "$router" ]; then
+		while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
+		route add default gw "${router%% *}" dev "$interface"
+	fi
+	[ -n "$dns" ] && { for server in $dns; do echo "nameserver $server"; done > /etc/resolv.conf; }
+	;;
+esac
+EOF
+chmod 0755 /run/udhcpc.sh
+
+ifconfig "$iface" up
+udhcpc -i "$iface" -s /run/udhcpc.sh -b -t 8 -p /run/eth-dhcp.pid 2>&1
+
+i=0
+while [ "$i" -lt 45 ]; do
+	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+	[ -n "$address" ] && break
+	sleep 1
+	i=$((i + 1))
+done
+if [ -n "$address" ]; then
+	say "$iface up, $address"
+	say "staying in host mode; remove /data/tater-linux/net-mode and reboot to disable"
+	ifconfig
+	route -n
+	exit 0
+fi
+
+killall udhcpc 2>/dev/null || true
+sleep 1
+{
+	ifconfig -a
+	dmesg | tail -20
+} >> "$LOG" 2>&1
+echo device > /proc/mchange
+say "no DHCP lease in 45s, back to device mode"
+exit 1
