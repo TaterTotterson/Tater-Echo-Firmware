@@ -282,7 +282,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
             ort.write_bytes(b"crown-onnx-runtime")
             rootfs = build / f"tater-crown-rootfs-{version}.tar.gz"
             rootfs.write_bytes(b"crown-rootfs")
-            boot = root / "linux/checkers/inputs/techo5-boot-crown-v1.0.1.img"
+            boot = root / "linux/checkers/inputs/tater-echo-crown-baseline-boot.img"
             boot.parent.mkdir(parents=True)
             boot.write_bytes(b"pinned-crown-boot")
 

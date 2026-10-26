@@ -101,8 +101,9 @@ kernel or root filesystem lacks the required controller.
 ## Recommended order
 
 1. Re-test Biscuit with the exact published Tater kernel artifact.
-2. Publish and boot unchanged Tater baselines for Checkers, Crown, Athena, and
-   Rook.
+2. Boot the unchanged, hash-identical Tater custody baselines for Checkers,
+   Crown, Athena, and Rook, then replace each one with a Tater-built artifact
+   only after its separate boot and recovery gate passes.
 3. Qualify Rook's external `usb0`, then Checkers and Crown independently.
 4. Implement Athena's explicit OTG/role-switch and VBUS device-tree work.
 5. Treat Radar as an experimental internal hardware modification, not a normal

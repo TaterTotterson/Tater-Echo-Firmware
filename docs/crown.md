@@ -14,11 +14,11 @@ installer.
 
 - Unlock and TWRP: [amonet-crown v2.0.1+ guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-1st-gen-2019-crown.4766687/)
 - Linux platform: [TECHO5 getting started](https://github.com/HuskerMinion/techo5/blob/main/docs/getting-started.md)
-- Pinned rescue boot: TECHO5 `techo5-boot-crown-v1.0.1.img`, SHA-256
+- Pinned rescue boot: Tater custody baseline `tater-echo-crown-baseline-boot.img`, SHA-256
   `e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7`
 - Pinned vendor image: [LineageOS 18.1 Crown v0.5](https://github.com/amazon-oss/releases/releases/tag/lineage-18.1-crown-v0.5), SHA-256
   `a01359a5e13dad8ac24c5507e8a747163b992012410b14d2ca9a8711ec4a1491`
-- Shared rootfs base: TECHO5 `rootfs-v0.9.26.tar.gz`
+- Shared rootfs base: Tater custody baseline `tater-echo-show-baseline-rootfs.tar.gz`
 
 Tater preserves the upstream kernel, boot parameters, vendor modules, camera
 helper, partition handling, and A/B rootfs store. It replaces the application

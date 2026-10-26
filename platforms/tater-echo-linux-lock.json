@@ -68,22 +68,23 @@
     "show": {
       "checkers_commit": "0f042360fbc22d798930cfd683d251606bfb7412",
       "release": "v0.9.26",
+      "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v0.9.26/rootfs-v0.9.26.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-show-baseline-rootfs.tar.gz",
         "sha256": "a72bbdfd0d26f536552b44aa9258f136e05d5243220c761a22c0f691a943f14e"
       },
       "targets": {
         "checkers": {
           "boot": {
-            "name": "techo5-boot-checkers-v0.7.16.img",
-            "url": "https://github.com/HuskerMinion/techo5/releases/download/v0.7.16/techo5-boot-checkers-v0.7.16.img",
+            "name": "tater-echo-checkers-baseline-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-checkers-baseline-boot.img",
             "sha256": "46c19fd23c210714e29eb2bf88c77b540f3290c0cf50b680b22032e7a4771da7"
           }
         },
         "crown": {
           "boot": {
-            "name": "techo5-boot-crown-v1.0.1.img",
-            "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.0.1/techo5-boot-crown-v1.0.1.img",
+            "name": "tater-echo-crown-baseline-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-crown-baseline-boot.img",
             "sha256": "e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7"
           }
         }
@@ -92,29 +93,31 @@
     "athena": {
       "commit": "3062cb0a7b812145248c9b60ce88ee3c6474924d",
       "release": "v1.6.4",
+      "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.6.4/techo5-rootfs-athena-v1.6.4.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-rootfs.tar.gz",
         "sha256": "cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5"
       },
       "boot": {
-        "name": "techo5-boot-athena-v1.6.4.img",
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.6.4/techo5-boot-athena-v1.6.4.img",
+        "name": "tater-echo-athena-baseline-boot.img",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-boot.img",
         "sha256": "ccea79be61d8d3b99a9851f004b0f3974fee6e8028f8fbd1b4fab03eace65e68"
       }
     },
     "rook": {
       "release": "spot-v0.5.25",
+      "custody_release": "satellite-baselines-v1.0.0",
       "commit": "8253a4a1d52dd37dd152dd1d435b97e541e0a191",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-rootfs.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rootfs.tar.gz",
         "sha256": "c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2"
       },
       "kernel": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-kernel-bt.Image.gz-dtb",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-kernel.Image.gz-dtb",
         "sha256": "368738ee20b86dc3dc0268d3b4b145e67cca9666379ac26b2379abd6c9136298"
       },
       "rescue": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-rescue.tar",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rescue.tar",
         "sha256": "a6f3860d0e3bd5b298ff310d8fe0d6a9a7885a2f6aa792e4134783df4cbf15bf"
       },
       "lineage": {

@@ -346,8 +346,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 or os.getenv("TATER_LINUX_BOOT_IMAGE", "").strip()
             )
             default_boot = {
-                "checkers": REPO / "linux/checkers/inputs/techo5-boot-checkers-v0.7.16.img",
-                "crown": REPO / "linux/checkers/inputs/techo5-boot-crown-v1.0.1.img",
+                "checkers": REPO / "linux/checkers/inputs/tater-echo-checkers-baseline-boot.img",
+                "crown": REPO / "linux/checkers/inputs/tater-echo-crown-baseline-boot.img",
             }[target]
             boot_source = (
                 Path(configured_boot) if configured_boot

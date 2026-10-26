@@ -222,7 +222,7 @@ class BuildScriptTests(unittest.TestCase):
         show_job = workflow.split("\n  checkers:\n", 1)[1].split("\n  rook:\n", 1)[0]
         self.assertIn("- target: checkers", show_job)
         self.assertIn("- target: crown", show_job)
-        self.assertIn("techo5-boot-crown-v1.0.1.img", show_job)
+        self.assertIn("tater-echo-crown-baseline-boot.img", show_job)
         self.assertIn("source.repository", show_job)
         self.assertIn("--platform /tmp/tater-echo-linux-show", show_job)
         self.assertIn("--target '${{ matrix.target }}'", show_job)
@@ -237,6 +237,33 @@ class BuildScriptTests(unittest.TestCase):
         self.assertNotIn("get platforms.dot.repository", workflow)
         self.assertNotIn("get platforms.rook.repository", workflow)
         self.assertIn("--show-source /tmp/tater-echo-linux-show", workflow)
+
+    def test_non_dot_release_inputs_are_tater_hosted(self) -> None:
+        lock = json.loads((ROOT / "platforms/tater-echo-linux-lock.json").read_text(encoding="utf-8"))
+        release = "satellite-baselines-v1.0.0"
+        for platform in ("show", "athena", "rook"):
+            self.assertEqual(release, lock["platforms"][platform]["custody_release"])
+
+        urls: list[str] = []
+        def collect(node: object) -> None:
+            if isinstance(node, dict):
+                if isinstance(node.get("url"), str):
+                    urls.append(node["url"])
+                for value in node.values():
+                    collect(value)
+            elif isinstance(node, list):
+                for value in node:
+                    collect(value)
+
+        collect(lock["platforms"]["show"]["rootfs"])
+        collect(lock["platforms"]["show"]["targets"])
+        collect(lock["platforms"]["athena"]["rootfs"])
+        collect(lock["platforms"]["athena"]["boot"])
+        for role in ("rootfs", "kernel", "rescue"):
+            collect(lock["platforms"]["rook"][role])
+        custody = "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/"
+        self.assertTrue(urls)
+        self.assertTrue(all(url.startswith(custody) for url in urls))
 
     def test_athena_store_build_avoids_incomplete_runner_id_map(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")

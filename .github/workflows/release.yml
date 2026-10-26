@@ -212,10 +212,10 @@ jobs:
         include:
           - target: checkers
             name: Echo Show 5 (checkers)
-            boot_name: techo5-boot-checkers-v0.7.16.img
+            boot_name: tater-echo-checkers-baseline-boot.img
           - target: crown
             name: Echo Show 8 1st Gen (crown)
-            boot_name: techo5-boot-crown-v1.0.1.img
+            boot_name: tater-echo-crown-baseline-boot.img
 
     steps:
       - name: Checkout
@@ -304,7 +304,7 @@ jobs:
         run: |
           mkdir -p linux/checkers/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.show.rootfs linux/checkers/inputs/rootfs-v0.9.26.tar.gz
+            platforms.show.rootfs linux/checkers/inputs/tater-echo-show-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
             'platforms.show.targets.${{ matrix.target }}.boot' \
             'linux/checkers/inputs/${{ matrix.boot_name }}'
@@ -327,7 +327,7 @@ jobs:
           linux/checkers/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --target '${{ matrix.target }}' \
-            --base-rootfs linux/checkers/inputs/rootfs-v0.9.26.tar.gz \
+            --base-rootfs linux/checkers/inputs/tater-echo-show-baseline-rootfs.tar.gz \
             --platform /tmp/tater-echo-linux-show \
             --output device/build/tater-${{ matrix.target }}-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
@@ -451,9 +451,9 @@ jobs:
         run: |
           mkdir -p linux/athena/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.athena.rootfs linux/athena/inputs/rootfs-v1.6.4.tar.gz
+            platforms.athena.rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            platforms.athena.boot linux/athena/inputs/techo5-boot-athena-v1.6.4.img
+            platforms.athena.boot linux/athena/inputs/tater-echo-athena-baseline-boot.img
           git clone --filter=blob:none \
             "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
           git -C /tmp/tater-echo-linux-show checkout \
@@ -471,7 +471,7 @@ jobs:
           linux/checkers/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --target athena \
-            --base-rootfs linux/athena/inputs/rootfs-v1.6.4.tar.gz \
+            --base-rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz \
             --platform /tmp/tater-echo-linux-show \
             --output device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
@@ -508,7 +508,7 @@ jobs:
           TATER_ATHENA_PLATFORM_SOURCE: /tmp/tater-echo-linux-show
           TATER_ATHENA_ROOTFS: device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
           TATER_ATHENA_SYSTEM_IMAGE: device/build/tater-athena-system-${{ steps.version.outputs.version }}.img.gz
-          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/techo5-boot-athena-v1.6.4.img
+          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/tater-echo-athena-baseline-boot.img
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' --target athena --output release
@@ -620,11 +620,11 @@ jobs:
         run: |
           mkdir -p linux/rook/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.rook.rootfs linux/rook/inputs/techo5-spot-rootfs.tar.gz
+            platforms.rook.rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            platforms.rook.kernel linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb
+            platforms.rook.kernel linux/rook/inputs/tater-echo-rook-baseline-kernel.Image.gz-dtb
           python3 tools/fetch_platform_input.py \
-            platforms.rook.rescue linux/rook/inputs/techo5-spot-rescue.tar
+            platforms.rook.rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar
           python3 tools/fetch_platform_input.py \
             platforms.rook.lineage linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip
           python3 tools/fetch_platform_input.py \
@@ -653,15 +653,15 @@ jobs:
         run: |
           python3 linux/rook/build_boot.py \
             --lineage-zip linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip \
-            --kernel linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb \
-            --rescue linux/rook/inputs/techo5-spot-rescue.tar \
+            --kernel linux/rook/inputs/tater-echo-rook-baseline-kernel.Image.gz-dtb \
+            --rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar \
             --alpine-rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz \
             --spot-source /tmp/tater-echo-linux-spot \
             --show-source /tmp/tater-echo-linux-show \
             --output device/build/rook/tater-rook-boot.img
           sh linux/rook/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
-            --base-rootfs linux/rook/inputs/techo5-spot-rootfs.tar.gz \
+            --base-rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz \
             --spot-source /tmp/tater-echo-linux-spot --show-source /tmp/tater-echo-linux-show \
             --output device/build/rook/tater-rook-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
