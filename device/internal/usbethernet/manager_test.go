@@ -68,7 +68,7 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 
 	for target, capability := range capabilities {
 		if capability.Target != target || capability.Backend == "" || capability.Status == "" ||
-			capability.Port == "" || capability.Recovery == "" || capability.Reason == "" {
+			capability.Port == "" || capability.Power == "" || capability.Recovery == "" || capability.Reason == "" {
 			t.Errorf("incomplete %s capability: %#v", target, capability)
 		}
 		if target == "biscuit" && !capability.qualified() {
@@ -221,5 +221,16 @@ func TestFallbackDiagnosticsReportReasonNotInterface(t *testing.T) {
 	}
 	if _, exists := got["interface"]; exists {
 		t.Fatalf("fallback reason was exposed as an interface: %#v", got)
+	}
+}
+
+func TestWaitingDiagnosticsReportWhyWifiIsStillActive(t *testing.T) {
+	manager, _ := testManager(t, "biscuit")
+	if err := os.WriteFile(manager.Paths.State, []byte("waiting no-adapter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Diagnostics()
+	if got["state"] != "waiting" || got["reason"] != "no-adapter" || got["active"] != false {
+		t.Fatalf("unexpected waiting diagnostics: %#v", got)
 	}
 }

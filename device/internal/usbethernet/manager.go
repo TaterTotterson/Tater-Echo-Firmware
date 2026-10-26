@@ -21,8 +21,8 @@ type Paths struct {
 }
 
 // State separates the user's persistent preference from the link that is
-// actually carrying traffic. Phase is one of disabled, probing, active, or
-// fallback; Interface and Address are populated while probing/active, and
+// actually carrying traffic. Phase is one of disabled, waiting, probing,
+// active, or fallback; Interface and Address are populated while probing/active, and
 // Reason records a fallback or unsupported cause.
 type State struct {
 	Phase     string
@@ -111,7 +111,7 @@ func (m *Manager) State() State {
 		if len(fields) > 2 {
 			state.Address = fields[2]
 		}
-	case "fallback", "unsupported":
+	case "fallback", "unsupported", "waiting":
 		if len(fields) > 1 {
 			state.Reason = fields[1]
 		}
@@ -127,6 +127,9 @@ func (m *Manager) Diagnostics() map[string]any {
 		"target":        capability.Target,
 		"backend":       capability.Backend,
 		"qualification": capability.Status,
+		"port":          capability.Port,
+		"power":         capability.Power,
+		"recovery":      capability.Recovery,
 		"supported":     supported,
 		"enabled":       supported && m.Enabled(),
 		"active":        supported && state.Phase == "active",
@@ -148,9 +151,9 @@ func (m *Manager) Diagnostics() map[string]any {
 }
 
 // SetEnabled records the desired behavior and starts the platform controller.
-// Repeated settings reconciliation is intentionally idempotent: after a failed
-// probe, the user can explicitly toggle off/on to retry without every Tater
-// reconnect repeatedly taking the serial port through a new host-mode probe.
+// Repeated settings reconciliation is intentionally idempotent. The platform
+// supervisor owns automatic retries while wired preference remains enabled, so
+// a Tater reconnect never launches a second controller.
 func (m *Manager) SetEnabled(enabled bool) error {
 	wasEnabled := m.Enabled()
 	if enabled {

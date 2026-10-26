@@ -135,6 +135,8 @@ class BuildScriptTests(unittest.TestCase):
         self.assertEqual(1, capabilities["schema"])
         self.assertEqual(set(targets), set(capabilities["targets"]))
         self.assertEqual("qualified", capabilities["targets"]["biscuit"]["status"])
+        for capability in capabilities["targets"].values():
+            self.assertTrue(capability["power"])
         for target in set(targets) - {"biscuit"}:
             self.assertNotEqual("qualified", capabilities["targets"][target]["status"])
 

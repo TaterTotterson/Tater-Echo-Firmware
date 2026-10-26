@@ -18,6 +18,7 @@ type Capability struct {
 	Backend  string `json:"backend"`
 	Status   string `json:"status"`
 	Port     string `json:"port"`
+	Power    string `json:"power"`
 	Recovery string `json:"recovery"`
 	Reason   string `json:"reason"`
 }

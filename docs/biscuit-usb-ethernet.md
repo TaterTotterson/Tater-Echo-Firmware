@@ -9,7 +9,7 @@ verified on an Echo Dot 2nd Gen with a powered UCTRONICS U6113 adapter
 ## Runtime behavior
 
 The default remains USB serial plus Wi-Fi. Enabling `usb_ethernet_enabled`
-starts an ordered probe:
+starts a persistent, wired-preferred supervisor. It performs an ordered probe:
 
 1. Keep Wi-Fi connected while switching the shared micro-USB controller from
    gadget/device mode to host mode.
@@ -20,9 +20,19 @@ starts an ordered probe:
    only Ethernet DHCP, restore USB serial, and reconnect Wi-Fi.
 
 If no adapter appears or DHCP fails, the controller restores USB serial and
-leaves the already-running Wi-Fi connection alone. Wi-Fi and Ethernet use
-different pid files and DHCP hooks, so changing Wi-Fi cannot kill the wired
-lease.
+leaves the already-running Wi-Fi connection alone. While the setting remains
+enabled it waits 60 seconds and tries again, so a later hot-plug can take over
+without another settings change. After link loss it restores serial and Wi-Fi,
+then continues waiting for Ethernet to return. Wi-Fi and Ethernet use different
+pid files and DHCP hooks, so changing Wi-Fi cannot kill the wired lease.
+
+Biscuit is powered through this same micro-USB connector. Use a powered
+pass-through Ethernet adapter such as the verified UCTRONICS U6113, with its
+own 5 V input connected. A passive OTG adapter cannot simultaneously provide
+reliable device power. Because Biscuit cannot enumerate a host adapter while
+the controller is in USB gadget mode, each enabled retry temporarily removes
+USB serial for up to the enumeration timeout; disabling the setting stops the
+retries and restores normal USB serial plus Wi-Fi.
 
 The daemon reports desired state separately from live state:
 
@@ -30,7 +40,7 @@ The daemon reports desired state separately from live state:
   role control installed.
 - `usb_ethernet_enabled`: the user's persistent preference is `wired`.
 - `usb_ethernet_active`: Ethernet currently owns network traffic.
-- `usb_ethernet_state`: `disabled`, `pending`, `probing`, `active`,
+- `usb_ethernet_state`: `disabled`, `pending`, `waiting`, `probing`, `active`,
   `probe-complete`, `fallback`, or `unsupported`.
 
 The installed Tater commands are `/usr/local/sbin/tater-net` and
@@ -45,8 +55,11 @@ and `/proc/mchange` from a compatible kernel. This prevents an application OTA
 from accepting a toggle that its installed Linux image cannot implement.
 
 Radar shares parts of the Dot root filesystem, but it is intentionally gated
-off until its USB controller, power arrangement, adapter enumeration, and
-fallback path are verified on real hardware. Checkers, Crown, Athena, and Rook
+off until its USB controller, internal-pad wiring, adapter power, enumeration,
+and fallback path are verified on real hardware. The currently documented
+Radar hardware uses its barrel jack for device power; its internal USB pads
+expose D+/D-/GND, so the Ethernet adapter still needs external power. Checkers,
+Crown, Athena, and Rook
 have separate kernels and board plumbing and require their own platform work;
 the common daemon contract can be reused after each target supplies and tests
 an equivalent controller. The six-target readiness catalog, evidence command,

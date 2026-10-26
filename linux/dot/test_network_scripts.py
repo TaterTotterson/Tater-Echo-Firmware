@@ -67,7 +67,7 @@ class USBEthernetControllerTests(unittest.TestCase):
 
     def test_missing_adapter_restores_serial_without_flapping_wifi(self) -> None:
         result = subprocess.run(
-            ["sh", str(ETHERNET)],
+            ["sh", str(ETHERNET), "once"],
             env=self._environment(),
             capture_output=True,
             text=True,
@@ -79,6 +79,63 @@ class USBEthernetControllerTests(unittest.TestCase):
         self.assertEqual("fallback no-adapter", (self.run / "tater-usb-ethernet.state").read_text().strip())
         self.assertEqual("device", self.mchange.read_text().strip())
         self.assertFalse(self.net_log.exists(), "Wi-Fi was restarted during a non-disruptive probe")
+
+    def test_supervisor_retries_hotplug_then_prefers_usable_ethernet(self) -> None:
+        process = subprocess.Popen(
+            ["sh", str(ETHERNET)],
+            env=self._environment(
+                TATER_ETH_ENUM_TIMEOUT="1",
+                TATER_ETH_RETRY_INTERVAL="1",
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        state = self.run / "tater-usb-ethernet.state"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if state.exists() and state.read_text().startswith("waiting no-adapter"):
+                break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Ethernet supervisor never entered waiting state: {stdout=} {stderr=}")
+
+        # A real /proc/mchange read reports force:2 after restoring device mode.
+        self.mchange.write_text("Active:1 host:0 force:2\n", encoding="utf-8")
+        interface = self.sys_net / "eth0"
+        interface.mkdir()
+        (interface / "carrier").write_text("1\n", encoding="utf-8")
+        self._install_usable_ethernet_commands()
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if state.read_text().startswith("active eth0 192.168.1.9"):
+                if self.net_log.exists() and self.net_log.read_text().splitlines() == ["stop"]:
+                    break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Hot-plugged Ethernet never became active: {stdout=} {stderr=}")
+
+        (interface / "carrier").write_text("0\n", encoding="utf-8")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if state.read_text().startswith("waiting link-lost"):
+                if self.net_log.read_text().splitlines() == ["stop", "fallback"]:
+                    break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Wired loss did not restore Wi-Fi and enter waiting: {stdout=} {stderr=}")
+
+        (self.data / "net-mode").unlink()
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+        self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
 
     def test_bounded_probe_restores_serial_without_dhcp_or_wifi_changes(self) -> None:
         (self.data / "net-mode").unlink()
@@ -146,10 +203,7 @@ class USBEthernetControllerTests(unittest.TestCase):
         self.assertEqual("Active:1 host:0 force:2", self.mchange.read_text().strip())
         self.assertFalse(self.net_log.exists(), "unknown mode changed Wi-Fi")
 
-    def _start_usable_ethernet(self) -> tuple[subprocess.Popen[str], Path, Path]:
-        interface = self.sys_net / "eth0"
-        interface.mkdir()
-        (interface / "carrier").write_text("1\n", encoding="utf-8")
+    def _install_usable_ethernet_commands(self) -> None:
         self._command(
             "ifconfig",
             """#!/bin/sh
@@ -183,8 +237,14 @@ exit 0
 """,
         )
 
+    def _start_usable_ethernet(self) -> tuple[subprocess.Popen[str], Path, Path]:
+        interface = self.sys_net / "eth0"
+        interface.mkdir()
+        (interface / "carrier").write_text("1\n", encoding="utf-8")
+        self._install_usable_ethernet_commands()
+
         process = subprocess.Popen(
-            ["sh", str(ETHERNET)],
+            ["sh", str(ETHERNET), "once"],
             env=self._environment(TATER_ETH_ENUM_TIMEOUT="1"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

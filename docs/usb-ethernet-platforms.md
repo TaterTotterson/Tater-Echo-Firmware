@@ -17,8 +17,8 @@ enough.
 
 | Target | Status | Candidate role backend | Hardware boundary |
 |---|---|---|---|
-| Biscuit | `qualified` | MediaTek `/proc/mchange` | External micro-USB; CDC-ECM verified on hardware |
-| Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | No external port; internal D+/D-/GND pads and external adapter power |
+| Biscuit | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered pass-through adapter required; CDC-ECM verified |
+| Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
 | Checkers | `baseline-required` | MediaTek MUSB candidate | Its own boot image, device tree, VBUS behavior, and USB-serial recovery |
 | Crown | `baseline-required` | MediaTek MUSB candidate | Must be qualified separately from Checkers despite shared source |
 | Athena | `kernel-work` | Mainline MediaTek MTU3 role-switch candidate | Current device tree is peripheral-only and disables the host controller |
@@ -26,6 +26,14 @@ enough.
 
 Only Biscuit is enabled. The other records document what to investigate; their
 candidate backend names do not make them available to the daemon.
+
+On a qualified target, enabling Ethernet means wired-preferred automatic mode.
+Wi-Fi stays connected while USB host enumeration and Ethernet DHCP run. A usable
+Ethernet route disables Wi-Fi; link loss or unplug restores the device/serial
+role and Wi-Fi, then the supervisor waits and retries. Biscuit has no
+non-disruptive way to see a host adapter while its shared controller is in
+gadget mode, so an enabled waiting state briefly interrupts USB serial once per
+60-second retry. This never occurs while USB Ethernet is disabled.
 
 ## Evidence collection
 
