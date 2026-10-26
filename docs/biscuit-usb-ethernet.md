@@ -1,91 +1,88 @@
 # Biscuit USB Ethernet
 
-USB Ethernet is an opt-in Biscuit feature for the micro-USB port. It was
-verified on an Echo Dot 2nd Gen with a powered UCTRONICS U6113 adapter
-(`0bda:8152`) using its CDC-ECM configuration. The device obtained
-`192.168.1.9` by DHCP and installed a default route through `eth0` on
-2026-10-25.
+USB Ethernet is automatic on Biscuit's micro-USB port. It was verified on an
+Echo Dot 2nd Gen with a powered UCTRONICS U6113 adapter (`0bda:8152`) using its
+CDC-ECM configuration. The device obtained `192.168.1.9` by DHCP and installed
+a default route through `eth0` on 2026-10-25.
 
-## Runtime behavior
+## Automatic runtime behavior
 
-The default remains USB serial plus Wi-Fi. Enabling `usb_ethernet_enabled`
-starts a persistent, wired-preferred supervisor. It performs an ordered probe:
+There is no enable setting. The init-supervised controller continuously applies
+this policy:
 
-1. Keep Wi-Fi connected while switching the shared micro-USB controller from
-   gadget/device mode to host mode.
-2. Wait for `ethN` or `usbN`, then run an Ethernet-specific DHCP client.
-3. Require both an IPv4 address and a default route on that interface.
-4. Only after Ethernet is usable, stop the Wi-Fi DHCP client and supplicant.
-5. Monitor carrier and the address. On disable or sustained link loss, stop
+1. Keep Wi-Fi connected while looking for an enumerated USB Ethernet interface.
+2. On Biscuit, briefly switch the shared micro-USB controller from gadget mode
+   to host mode for a bounded adapter probe.
+3. Run an Ethernet-specific DHCP client and require both an IPv4 address and a
+   default route on that interface.
+4. Only after Ethernet is usable, stop Wi-Fi DHCP and association.
+5. Monitor carrier, address, and route. On unplug or sustained failure, stop
    only Ethernet DHCP, restore USB serial, and reconnect Wi-Fi.
 
 If no adapter appears or DHCP fails, the controller restores USB serial and
-leaves the already-running Wi-Fi connection alone. While the setting remains
-enabled it waits 60 seconds and tries again, so a later hot-plug can take over
-without another settings change. After link loss it restores serial and Wi-Fi,
-then continues waiting for Ethernet to return. Wi-Fi and Ethernet use different
-pid files and DHCP hooks, so changing Wi-Fi cannot kill the wired lease.
+leaves the already-running Wi-Fi connection alone. It waits 60 seconds before
+the next bounded Biscuit probe. A later hot-plug therefore takes over without a
+setting change or reboot. Wi-Fi and Ethernet use separate PID files and DHCP
+hooks, so changing one transport cannot kill the other's lease client.
 
-Biscuit is powered through this same micro-USB connector. Use a powered
-pass-through Ethernet adapter such as the verified UCTRONICS U6113, with its
-own 5 V input connected. A passive OTG adapter cannot simultaneously provide
-reliable device power. Because Biscuit cannot enumerate a host adapter while
-the controller is in USB gadget mode, each enabled retry temporarily removes
-USB serial for up to the enumeration timeout; disabling the setting stops the
-retries and restores normal USB serial plus Wi-Fi.
+Biscuit is powered through this same connector. Use a powered pass-through
+Ethernet adapter such as the verified UCTRONICS U6113 with its own 5 V input.
+A passive OTG adapter cannot reliably power Biscuit and the NIC together.
 
-The daemon reports desired state separately from live state:
+Biscuit cannot identify a host adapter while the port is still a USB gadget.
+Consequently each automatic detection attempt temporarily removes USB serial
+for at most the enumeration timeout, even when no adapter is connected. Every
+exit, timeout, DHCP failure, or link loss restores device mode. This tradeoff is
+specific to the shared power/data micro-USB design.
 
-- `usb_ethernet_supported`: this target has the controller script and kernel
-  role control installed.
-- `usb_ethernet_enabled`: the user's persistent preference is `wired`.
+The daemon exposes detection separately from qualification and live state:
+
+- `usb_ethernet_prepared`: the automatic controller is installed.
+- `usb_ethernet_automatic`: hardware detection is running under init.
+- `usb_ethernet_supported`: board-controlled role switching is qualified.
 - `usb_ethernet_active`: Ethernet currently owns network traffic.
-- `usb_ethernet_state`: `disabled`, `pending`, `waiting`, `probing`, `active`,
-  `probe-complete`, `fallback`, or `unsupported`.
+- `usb_ethernet_state`: `pending`, `waiting`, `probing`, `active`,
+  `probe-complete`, `fallback`, `stopped`, `unsupported`, or `unavailable`.
 
-The installed Tater commands are `/usr/local/sbin/tater-net` and
+The old `usb_ethernet_enabled` setting is ignored. The installed Tater commands
+are `/usr/local/sbin/tater-net` and
 `/usr/local/sbin/tater-usb-ethernet`. Compatibility links preserve the former
-`techo5-net` and `techo5-eth` names for existing platform scripts.
+`techo5-net` and `techo5-eth` names on Dot-family images.
 
-## Availability and safety gate
+## Every satellite image
 
-The setting is currently advertised only on Biscuit. A daemon-only OTA does
-not enable it: support also requires the immutable root filesystem controller
-and `/proc/mchange` from a compatible kernel. This prevents an application OTA
-from accepting a toggle that its installed Linux image cannot implement.
-
-Radar shares parts of the Dot root filesystem, but it is intentionally gated
-off until its USB controller, internal-pad wiring, adapter power, enumeration,
-and fallback path are verified on real hardware. The currently documented
-Radar hardware uses its barrel jack for device power; its internal USB pads
-expose D+/D-/GND, so the Ethernet adapter still needs external power. Checkers,
-Crown, Athena, and Rook
-have separate kernels and board plumbing and require their own platform work;
-the common daemon contract can be reused after each target supplies and tests
-an equivalent controller. The six-target readiness catalog, evidence command,
-and release gates are in
+The same controller is installed and supervised on Biscuit, Radar, Checkers,
+Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
+already enumerated, after DHCP and route validation. Only Biscuit currently
+performs an active role switch: the other boards passively detect interfaces so
+untested role or VBUS writes cannot break power, serial, recovery, or internal
+USB Wi-Fi. Their next hardware qualification step is documented in
 [`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
+
+Radar shares the Dot userspace but has no external USB port. Its barrel jack
+powers the device, while its internal USB pads expose D+/D-/GND; the adapter
+therefore needs external power. Checkers, Crown, and Rook already have the
+static kernel USB-network prerequisites but still need connector/role/VBUS
+qualification. Athena remains peripheral-only until its kernel and device tree
+gain a tested MTU3 host path.
 
 ## Platform dependency
 
 The branch pins the Tater Echo Linux `dot-kernel-v1.0.0` prerelease. Its
 Biscuit kernel is
 `dd2cb1cc375c396b08720b3248330fcb70ae5b9113a689c6fad7a78f39bacffa`;
-Radar has a separate target image and hash. The source is maintained under
+Radar has a separate target image and hash. Source is maintained under
 [`Tater-Echo-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Echo-Linux/tree/main/platforms/dot).
 The functional kernel change is `0052-cdcether-rtl8152-no-blacklist.patch`,
-which lets the generic `cdc_ether` driver bind the adapter. The fragment enables
-MediaTek forced USB role control and the required usbnet/CDC-ECM support.
+which lets `cdc_ether` bind the verified adapter. The kernel fragment enables
+MediaTek forced role control, MII, usbnet, and CDC-ECM.
 
-Before promoting the firmware release, boot the exact published Biscuit kernel
-and repeat enumeration, DHCP/default-route, unplug, link-loss, reboot, Wi-Fi
-fallback, and USB-serial restoration. This closes the gap between the recorded
-source-equivalent bench build and the distributed binary.
-
-For a non-disruptive inventory run `tater-usb-inventory`. On Biscuit,
-`tater-usb-ethernet probe` performs a bounded enumeration-only host-mode test:
-it never starts DHCP or stops Wi-Fi and restores USB serial automatically.
+Before release promotion, boot the exact published Biscuit kernel and repeat
+enumeration, DHCP/default-route, unplug, link-loss, reboot, Wi-Fi fallback, and
+USB-serial restoration. `tater-usb-inventory` collects read-only evidence, and
+`tater-usb-ethernet probe` performs a bounded enumeration-only check without
+DHCP or a Wi-Fi change.
 
 Do not distribute `r8152.ko` as a loose binary. CDC-ECM is the verified path,
-and all kernel outputs should be reproducibly built from the pinned Tater
-Linux source and published with hashes.
+and kernel outputs must be built from the pinned Tater Linux source and
+published with hashes.

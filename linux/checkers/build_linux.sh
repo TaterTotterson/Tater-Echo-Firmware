@@ -154,6 +154,18 @@ python3 "$script_dir/build_rootfs.py" \
     --version "$version" \
     --output "$output"
 
+listing=$(mktemp "${TMPDIR:-/tmp}/tater-$target-rootfs.XXXXXX")
+trap 'rm -f "$listing"' EXIT HUP INT TERM
+tar -tzf "$output" > "$listing"
+for required in \
+    ./usr/local/sbin/tater-usb-ethernet \
+    ./usr/local/sbin/tater-usb-inventory; do
+    grep -qx "$required" "$listing" || {
+        echo "built $target rootfs is missing $required" >&2
+        exit 1
+    }
+done
+
 file "$device/build/tater-echo" "$device/build/tater-show-linux" "$device/build/tater-reboot-now" \
     "$device/build/tater-camera" \
     "$device/build/microwakeword-linux/libtater_microwakeword.so" \

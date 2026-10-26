@@ -129,7 +129,7 @@ python3 "$script_dir/build_rootfs.py" \
     --setup-ap "$script_dir/setup-ap.sh" \
     --setup-ap-base "$repo/linux/checkers/setup-ap.sh" \
     --network "$script_dir/tater-net" \
-    --eth "$script_dir/tater-usb-ethernet" \
+    --eth "$repo/linux/common/tater-usb-ethernet" \
     --wifi-set "$script_dir/wifi-set" \
     --apk-cache "$device/build" \
     --platform-license "$platform_source/LICENSE" \

@@ -9,18 +9,18 @@ import (
 
 const qualifiedStatus = "qualified"
 
-// Capability records the hardware boundary that must be satisfied before a
-// target may advertise USB Ethernet. Backend is a candidate implementation
-// until Status is qualified; merely sharing a controller family never enables
-// a target.
+// Capability records both safe detection and the hardware boundary that must
+// be satisfied before a target may advertise board-controlled role switching.
+// Merely sharing a controller family never qualifies a backend.
 type Capability struct {
-	Target   string `json:"-"`
-	Backend  string `json:"backend"`
-	Status   string `json:"status"`
-	Port     string `json:"port"`
-	Power    string `json:"power"`
-	Recovery string `json:"recovery"`
-	Reason   string `json:"reason"`
+	Target    string `json:"-"`
+	Backend   string `json:"backend"`
+	Detection string `json:"detection"`
+	Status    string `json:"status"`
+	Port      string `json:"port"`
+	Power     string `json:"power"`
+	Recovery  string `json:"recovery"`
+	Reason    string `json:"reason"`
 }
 
 type capabilityFile struct {

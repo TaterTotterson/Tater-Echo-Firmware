@@ -44,7 +44,7 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "device/tools/build_tools.sh",
             ROOT / "linux/dot/setup-ap.sh",
             ROOT / "linux/dot/tater-net",
-            ROOT / "linux/dot/tater-usb-ethernet",
+            ROOT / "linux/common/tater-usb-ethernet",
             USB_INVENTORY,
             ROOT / "linux/dot/wifi-set",
         ):
@@ -127,6 +127,29 @@ class BuildScriptTests(unittest.TestCase):
         ):
             self.assertIn("tater-usb-inventory", builder.read_text(encoding="utf-8"), builder)
 
+    def test_every_linux_rootfs_installs_and_supervises_automatic_usb_ethernet(self) -> None:
+        for builder in (
+            DOT_ROOTFS_BUILDER,
+            ROOT / "linux/checkers/build_rootfs.py",
+            ROOT / "linux/rook/build_rootfs.py",
+        ):
+            contents = builder.read_text(encoding="utf-8")
+            self.assertIn("tater-usb-ethernet", contents, builder)
+        self.assertIn("::respawn:/usr/local/sbin/tater-usb-ethernet", DOT_ROOTFS_BUILDER.read_text())
+        self.assertIn(
+            "::respawn:/usr/local/sbin/tater-usb-ethernet",
+            (ROOT / "linux/checkers/build_rootfs.py").read_text(),
+        )
+        self.assertIn("common.INITTAB", (ROOT / "linux/rook/build_rootfs.py").read_text())
+        for script in (
+            DOT_BUILD_SCRIPT,
+            ROOT / "linux/checkers/build_linux.sh",
+            ROOT / "linux/rook/build_linux.sh",
+        ):
+            contents = script.read_text(encoding="utf-8")
+            self.assertIn("./usr/local/sbin/tater-usb-ethernet", contents, script)
+            self.assertIn("./usr/local/sbin/tater-usb-inventory", contents, script)
+
     def test_usb_ethernet_catalog_covers_every_firmware_target(self) -> None:
         targets = json.loads((ROOT / "targets/targets.json").read_text(encoding="utf-8"))["targets"]
         capabilities = json.loads(
@@ -137,6 +160,7 @@ class BuildScriptTests(unittest.TestCase):
         self.assertEqual("qualified", capabilities["targets"]["biscuit"]["status"])
         for capability in capabilities["targets"].values():
             self.assertTrue(capability["power"])
+            self.assertTrue(capability["detection"])
         for target in set(targets) - {"biscuit"}:
             self.assertNotEqual("qualified", capabilities["targets"][target]["status"])
 
@@ -170,7 +194,7 @@ class BuildScriptTests(unittest.TestCase):
 
     def test_dot_network_controllers_keep_dhcp_clients_separate(self) -> None:
         wifi = (ROOT / "linux/dot/tater-net").read_text(encoding="utf-8")
-        ethernet = (ROOT / "linux/dot/tater-usb-ethernet").read_text(encoding="utf-8")
+        ethernet = (ROOT / "linux/common/tater-usb-ethernet").read_text(encoding="utf-8")
         setter = (ROOT / "linux/dot/wifi-set").read_text(encoding="utf-8")
         builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")
         build_script = DOT_BUILD_SCRIPT.read_text(encoding="utf-8")
@@ -182,10 +206,12 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("tater-udhcpc-ethernet.sh", ethernet)
         self.assertIn('set_state active "$iface" "$address"', ethernet)
         self.assertLess(ethernet.index('set_state active "$iface" "$address"'),
-                        ethernet.index('"$NET" stop'))
+                        ethernet.index('wifi_stop ||'))
         self.assertIn('root / "usr/local/sbin/tater-net"', builder)
         self.assertIn('root / "usr/local/sbin/tater-usb-ethernet"', builder)
         self.assertIn('./usr/local/sbin/tater-usb-ethernet', build_script)
+        self.assertNotIn("net-mode", ethernet)
+        self.assertIn("automatic USB Ethernet supervisor", ethernet)
 
     def test_dot_rootfs_probes_both_fireos_system_layouts(self) -> None:
         builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")

@@ -306,6 +306,7 @@ log "boot script done"
             with tarfile.open(output, "r:gz") as archive:
                 camera = archive.extractfile("./usr/local/bin/tater-camera").read()
                 inittab = archive.extractfile("./etc/inittab").read().decode()
+                ethernet = archive.extractfile("./usr/local/sbin/tater-usb-ethernet").read().decode()
                 runner = archive.extractfile("./usr/local/sbin/tater-camera-run").read().decode()
                 license_text = archive.extractfile("./usr/share/licenses/tater-linux/TECHO5-LICENSE").read().decode()
                 wake_bundle = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.wake-bundle.json").read()
@@ -313,6 +314,8 @@ log "boot script done"
                 onnx_classifier = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.oww.onnx").read()
             self.assertEqual(camera, b"trial-binary")
             self.assertIn("::respawn:/usr/local/sbin/tater-camera-run", inittab)
+            self.assertIn("::respawn:/usr/local/sbin/tater-usb-ethernet", inittab)
+            self.assertIn("automatic USB Ethernet supervisor", ethernet)
             self.assertIn("/usr/local/bin/tater-camera", runner)
             self.assertEqual(license_text, "MIT license\n")
             self.assertEqual(wake_bundle, b"trial-binary")

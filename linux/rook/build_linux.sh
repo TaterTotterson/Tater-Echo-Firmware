@@ -147,6 +147,18 @@ python3 "$script_dir/build_rootfs.py" \
     --version "$version" \
     --output "$output"
 
+listing=$(mktemp "${TMPDIR:-/tmp}/tater-rook-rootfs.XXXXXX")
+trap 'rm -f "$listing"' EXIT HUP INT TERM
+tar -tzf "$output" > "$listing"
+for required in \
+    ./usr/local/sbin/tater-usb-ethernet \
+    ./usr/local/sbin/tater-usb-inventory; do
+    grep -qx "$required" "$listing" || {
+        echo "built Rook rootfs is missing $required" >&2
+        exit 1
+    }
+done
+
 file "$device/build/rook/tater-echo" "$device/build/rook/tater-show" "$device/build/rook/tater-reboot-now" "$device/build/rook/tater-camera" \
     "$device/build/onnxruntime-linux-armv7/libonnxruntime.so"
 file "$device/build/rook/tater-echo" | grep -q '32-bit.*ARM'

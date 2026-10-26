@@ -291,7 +291,7 @@ say "ready at $($BB date)"
 INITTAB = """# Tater Linux for Biscuit and Radar — BusyBox init.
 ::sysinit:/etc/techo5/boot.sh
 ::respawn:/usr/local/sbin/tater-run
-::once:/usr/local/sbin/tater-usb-ethernet
+::respawn:/usr/local/sbin/tater-usb-ethernet
 ::respawn:/usr/local/sbin/techo5-console
 ::respawn:/usr/local/sbin/techo5-logs
 ::ctrlaltdel:/usr/local/bin/tater-reboot-now

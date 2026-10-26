@@ -156,6 +156,28 @@ def patch_rook_wifi_mac(root: Path) -> None:
     path.write_text(contents)
 
 
+def patch_network_keeper(contents: str) -> str:
+    """Keep the vendor Wi-Fi watchdog from fighting an active wired route."""
+    marker = (
+        "\twhile true; do\n"
+        "\t\tsleep 60\n"
+        "\t\t# Someone is choosing a network on the screen: not a fault, no reboot.\n"
+    )
+    if marker not in contents:
+        return contents
+    replacement = (
+        "\twhile true; do\n"
+        "\t\tsleep 60\n"
+        "\t\t# USB Ethernet owns the default route only after DHCP succeeds. Do\n"
+        "\t\t# not restart Wi-Fi or reboot while that wired link is active.\n"
+        "\t\tif grep -q '^active ' /run/tater-usb-ethernet.state 2>/dev/null; then\n"
+        "\t\t\tdown=0; lost=0; continue\n"
+        "\t\tfi\n"
+        "\t\t# Someone is choosing a network on the screen: not a fault, no reboot.\n"
+    )
+    return contents.replace(marker, replacement, 1)
+
+
 def patch_boot(root: Path, *, target: str = "checkers") -> None:
     if target == "athena":
         patch_boot_athena(root)
@@ -309,7 +331,7 @@ def patch_boot(root: Path, *, target: str = "checkers") -> None:
     if final_log not in contents:
         raise SystemExit("pinned base boot script no longer has its final log marker")
     contents = contents.replace(final_log, app_health + final_log, 1)
-    path.write_text(contents)
+    path.write_text(patch_network_keeper(contents))
 
 
 def patch_boot_athena(root: Path) -> None:
@@ -366,7 +388,7 @@ def patch_boot_athena(root: Path) -> None:
     if final not in contents:
         raise SystemExit("pinned Athena boot script no longer has its final marker")
     contents = contents.replace(final, APP_HEALTH + final, 1)
-    path.write_text(contents)
+    path.write_text(patch_network_keeper(contents))
 
 
 def patch_slotctl(root: Path) -> None:
@@ -543,6 +565,8 @@ def build(args: argparse.Namespace) -> None:
             copy(Path(__file__).with_name("setup-ap.sh"), root / "usr/local/sbin/tater-setup-ap", 0o755)
         copy(Path(__file__).parents[1] / "common/tater-usb-inventory",
              root / "usr/local/sbin/tater-usb-inventory", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-usb-ethernet",
+             root / "usr/local/sbin/tater-usb-ethernet", 0o755)
         for name in ("libtinyalsa.so", "libtinyalsa.so.2"):
             link = root / "usr/lib" / name
             link.unlink(missing_ok=True)
@@ -588,6 +612,7 @@ def build(args: argparse.Namespace) -> None:
 
 INITTAB = """# Tater Linux {target} — BusyBox init.
 ::sysinit:/etc/techo5/boot.sh
+::respawn:/usr/local/sbin/tater-usb-ethernet
 ::respawn:/usr/local/sbin/tater-run
 ::respawn:/usr/local/sbin/tater-show-run
 ::respawn:/usr/local/sbin/tater-camera-run

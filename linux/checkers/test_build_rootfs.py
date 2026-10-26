@@ -15,6 +15,24 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class BootPatchTests(unittest.TestCase):
+    def test_network_keeper_yields_to_active_usb_ethernet(self):
+        source = """(
+\tdown=0; lost=0
+\twhile true; do
+\t\tsleep 60
+\t\t# Someone is choosing a network on the screen: not a fault, no reboot.
+\t\t[ -e /run/techo5/wifi-setup ] && continue
+\tdone
+) &
+"""
+        patched = build_rootfs.patch_network_keeper(source)
+        self.assertIn("grep -q '^active ' /run/tater-usb-ethernet.state", patched)
+        self.assertIn("down=0; lost=0; continue", patched)
+        self.assertLess(
+            patched.index("/run/tater-usb-ethernet.state"),
+            patched.index("/run/techo5/wifi-setup"),
+        )
+
     def test_safe_extract_allows_rootfs_absolute_links_but_not_link_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

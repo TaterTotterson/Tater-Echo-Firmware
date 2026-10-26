@@ -8,15 +8,12 @@ import (
 var usbEthernet = usbethernet.New(client.FirmwareTarget)
 
 func applyUSBEthernetSetting(values, applied map[string]any) error {
-	value, ok := values["usb_ethernet_enabled"]
-	if !ok {
-		return nil
+	// USB Ethernet is hardware-detected, not a remotely persisted preference.
+	// Silently discard the retired key from older servers or cached settings so
+	// it cannot suppress detection or make a full settings update fail.
+	if _, ok := values["usb_ethernet_enabled"]; ok {
+		delete(applied, "usb_ethernet_enabled")
 	}
-	enabled := nativeBool(value, false)
-	if err := usbEthernet.SetEnabled(enabled); err != nil {
-		return err
-	}
-	applied["usb_ethernet_enabled"] = usbEthernet.Enabled()
 	return nil
 }
 
@@ -24,9 +21,10 @@ func usbEthernetSettings() map[string]any {
 	diagnostics := usbEthernet.Diagnostics()
 	settings := map[string]any{
 		"usb_ethernet_supported": diagnostics["supported"],
+		"usb_ethernet_prepared":  diagnostics["prepared"],
+		"usb_ethernet_automatic": diagnostics["automatic"],
 	}
-	if supported, _ := diagnostics["supported"].(bool); supported {
-		settings["usb_ethernet_enabled"] = diagnostics["enabled"]
+	if prepared, _ := diagnostics["prepared"].(bool); prepared {
 		settings["usb_ethernet_active"] = diagnostics["active"]
 		settings["usb_ethernet_state"] = diagnostics["state"]
 	}

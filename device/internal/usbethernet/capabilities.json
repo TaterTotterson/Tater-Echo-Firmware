@@ -3,6 +3,7 @@
   "targets": {
     "biscuit": {
       "backend": "mediatek-mchange",
+      "detection": "bounded-active-probe",
       "status": "qualified",
       "port": "external-micro-usb",
       "power": "shared-micro-usb-powered-pass-through",
@@ -11,6 +12,7 @@
     },
     "radar": {
       "backend": "mediatek-mchange-candidate",
+      "detection": "passive-until-role-qualified",
       "status": "hardware-validation",
       "port": "internal-usb-pads",
       "power": "barrel-jack-device-powered-adapter-required",
@@ -19,22 +21,25 @@
     },
     "checkers": {
       "backend": "mediatek-musb-candidate",
-      "status": "baseline-required",
+      "detection": "passive-until-role-qualified",
+      "status": "baseline-validation",
       "port": "external-micro-usb",
       "power": "separate-device-power-vbus-unverified",
       "recovery": "usb-serial",
-      "reason": "Publish and boot a Tater-built baseline, then qualify board-specific role control, VBUS, enumeration, and serial recovery."
+      "reason": "The Tater custody baseline is pinned; boot it, then qualify board-specific role control, VBUS, enumeration, and serial recovery."
     },
     "crown": {
       "backend": "mediatek-musb-candidate",
-      "status": "baseline-required",
+      "detection": "passive-until-role-qualified",
+      "status": "baseline-validation",
       "port": "external-micro-usb",
       "power": "separate-device-power-vbus-unverified",
       "recovery": "usb-serial",
-      "reason": "Crown has its own configuration and device tree; publish its baseline and qualify it independently of Checkers."
+      "reason": "Crown's Tater custody baseline is pinned; its connector, role control, VBUS, and recovery still require independent qualification."
     },
     "athena": {
       "backend": "mediatek-mtu3-role-switch-candidate",
+      "detection": "passive-until-kernel-host-mode",
       "status": "kernel-work",
       "port": "external-usb",
       "power": "separate-device-power-vbus-gpio-unverified",
@@ -43,11 +48,12 @@
     },
     "rook": {
       "backend": "mediatek-musb-candidate",
-      "status": "baseline-required",
+      "detection": "passive-until-role-qualified",
+      "status": "baseline-validation",
       "port": "external-micro-usb",
       "power": "separate-device-power-vbus-unverified",
       "recovery": "usb-serial",
-      "reason": "Publish and boot a Tater-built baseline, then qualify external usb0 without disturbing the separate usb1 Wi-Fi bus."
+      "reason": "The Tater custody baseline is pinned; boot it, then qualify external usb0 without disturbing the separate usb1 Wi-Fi bus."
     }
   }
 }

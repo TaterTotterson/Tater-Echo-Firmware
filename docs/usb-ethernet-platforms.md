@@ -1,17 +1,18 @@
 # USB Ethernet platform qualification
 
-USB Ethernet has one shared network policy and a separate hardware role backend
-for every board family. The shared policy may keep Wi-Fi up during a probe,
-accept Ethernet only after DHCP and a default route succeed, and restore Wi-Fi
-after a wired failure. It must never guess how another board changes USB role or
-drives VBUS.
+USB Ethernet has one automatic network policy and a separate hardware role
+backend for every board family. Every image passively detects a USB-network
+interface, keeps Wi-Fi up through DHCP and route validation, and restores Wi-Fi
+after a wired failure. The shared policy must never guess how an unqualified
+board changes USB role or drives VBUS.
 
 The runtime source of truth is
 [`device/internal/usbethernet/capabilities.json`](../device/internal/usbethernet/capabilities.json).
-A target is advertised only when that record is `qualified`, its controller is
-installed and executable, and its kernel exposes the role control required by
-the selected backend. Sharing a SoC, kernel family, or root filesystem is not
-enough.
+`prepared` means the controller is installed and can use an interface the
+kernel has already enumerated. A target advertises board-controlled role
+switching as `supported` only when its record is `qualified` and the required
+kernel control exists. Sharing a SoC, kernel family, or root filesystem is not
+enough to qualify active switching.
 
 ## Current qualification state
 
@@ -19,21 +20,22 @@ enough.
 |---|---|---|---|
 | Biscuit | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered pass-through adapter required; CDC-ECM verified |
 | Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
-| Checkers | `baseline-required` | MediaTek MUSB candidate | Its own boot image, device tree, VBUS behavior, and USB-serial recovery |
-| Crown | `baseline-required` | MediaTek MUSB candidate | Must be qualified separately from Checkers despite shared source |
+| Checkers | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline, own boot image, device tree, VBUS behavior, and USB-serial recovery |
+| Crown | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; must be qualified separately from Checkers despite shared source |
 | Athena | `kernel-work` | Mainline MediaTek MTU3 role-switch candidate | Current device tree is peripheral-only and disables the host controller |
-| Rook | `baseline-required` | MediaTek MUSB candidate | External `usb0`; internal USB Wi-Fi remains on separate `usb1` |
+| Rook | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; external `usb0`; internal USB Wi-Fi remains on separate `usb1` |
 
-Only Biscuit is enabled. The other records document what to investigate; their
-candidate backend names do not make them available to the daemon.
+All six images start the controller automatically. Radar, Checkers, Crown,
+Athena, and Rook are passive until their board-specific role backend is
+qualified: if their kernel/connector enumerates a supported USB NIC, the common
+policy can use it, but firmware performs no speculative role or VBUS write.
 
-On a qualified target, enabling Ethernet means wired-preferred automatic mode.
-Wi-Fi stays connected while USB host enumeration and Ethernet DHCP run. A usable
-Ethernet route disables Wi-Fi; link loss or unplug restores the device/serial
-role and Wi-Fi, then the supervisor waits and retries. Biscuit has no
-non-disruptive way to see a host adapter while its shared controller is in
-gadget mode, so an enabled waiting state briefly interrupts USB serial once per
-60-second retry. This never occurs while USB Ethernet is disabled.
+Wi-Fi stays connected while Ethernet DHCP runs. A usable Ethernet route
+disables Wi-Fi; link loss or unplug restores Wi-Fi and, where the controller
+claimed the port, the device/serial role. Biscuit has no non-disruptive way to
+see a host adapter while its shared controller is in gadget mode, so automatic
+detection briefly interrupts USB serial once per 60-second retry. There is no
+user enable flag.
 
 ## Evidence collection
 
@@ -78,8 +80,9 @@ Complete these in order for each target:
 2. Capture `tater-usb-inventory` while USB serial/device mode is working.
 3. Identify the physical connector, controller, ID/role signal, VBUS source,
    power budget, and whether the Ethernet adapter must be externally powered.
-4. Add a target-specific role backend. Default to device mode, fail closed when
-   any required control is absent, and keep the target unqualified.
+4. Add a target-specific role backend. Passive USB-interface detection remains
+   available, but role writes must fail closed when any required control is
+   absent and the target must remain unqualified.
 5. Run a bounded enumeration test with Wi-Fi left up. Prove that timeout,
    interruption, adapter absence, and explicit cancellation all restore USB
    serial without requiring the daemon.

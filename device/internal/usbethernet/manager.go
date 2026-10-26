@@ -1,29 +1,21 @@
 package usbethernet
 
 import (
-	"fmt"
-	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
-const wiredFlag = "wired"
-
-// Paths are the persistent desired-mode flag, the platform control script,
-// the MediaTek USB role control, and the runtime state written by that script.
+// Paths are the installed automatic controller, MediaTek USB role control,
+// and runtime state written by the controller.
 type Paths struct {
-	Flag    string
 	Script  string
 	MChange string
 	State   string
 }
 
-// State separates the user's persistent preference from the link that is
-// actually carrying traffic. Phase is one of disabled, waiting, probing,
-// active, or fallback; Interface and Address are populated while probing/active, and
-// Reason records a fallback or unsupported cause.
+// State describes the detected link rather than a user preference. Phase is
+// one of pending, waiting, probing, active, probe-complete, fallback, stopped,
+// unsupported, or unavailable.
 type State struct {
 	Phase     string
 	Interface string
@@ -31,72 +23,52 @@ type State struct {
 	Reason    string
 }
 
-// Starter launches the platform script without making the settings handler
-// wait for USB enumeration or DHCP.
-type Starter func(path string, args ...string) error
-
-// Manager owns the small persistent/runtime contract shared by the daemon and
-// /usr/local/sbin/tater-usb-ethernet.
+// Manager exposes the automatic USB Ethernet controller to status/settings
+// reporting. Process supervision belongs to BusyBox init in every rootfs.
 type Manager struct {
 	Target string
 	Paths  Paths
-	Start  Starter
 }
 
 func New(target string) *Manager {
 	return &Manager{
 		Target: target,
 		Paths: Paths{
-			Flag:    "/data/tater-linux/net-mode",
 			Script:  "/usr/local/sbin/tater-usb-ethernet",
 			MChange: "/proc/mchange",
 			State:   "/run/tater-usb-ethernet.state",
 		},
-		Start: startCommand,
 	}
 }
 
-func startCommand(path string, args ...string) error {
-	cmd := exec.Command(path, args...)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("[eth] %s exited: %v (see /data/tater-linux/eth.log)", filepath.Base(path), err)
-		}
-	}()
-	return nil
-}
-
-// Supported is deliberately hardware- and installation-gated. A daemon-only
-// OTA must not advertise wired networking when the immutable rootfs or kernel
-// is still the old version, and a candidate backend must not become usable
-// until its exact target is marked qualified in the capability catalog.
-func (m *Manager) Supported() bool {
-	backend := backendFor(CapabilityForTarget(m.Target))
-	if !backend.available(m.Paths) {
+// Prepared means the common controller is installed for a known satellite.
+// It does not imply that unverified role/VBUS hardware is qualified.
+func (m *Manager) Prepared() bool {
+	capability := CapabilityForTarget(m.Target)
+	if capability.Backend == "none" {
 		return false
 	}
 	info, err := os.Stat(m.Paths.Script)
-	if err != nil || info.Mode()&0o111 == 0 {
-		return false
-	}
-	return true
+	return err == nil && info.Mode()&0o111 != 0
 }
 
-func (m *Manager) Enabled() bool {
-	data, err := os.ReadFile(m.Paths.Flag)
-	return err == nil && strings.TrimSpace(string(data)) == wiredFlag
+// Supported remains the strict hardware qualification gate. All targets can
+// passively detect an already-enumerated adapter, but only qualified backends
+// may advertise board-controlled role switching.
+func (m *Manager) Supported() bool {
+	if !m.Prepared() {
+		return false
+	}
+	return backendFor(CapabilityForTarget(m.Target)).available(m.Paths)
 }
 
 func (m *Manager) State() State {
 	data, err := os.ReadFile(m.Paths.State)
 	if err != nil {
-		if m.Enabled() {
+		if m.Prepared() {
 			return State{Phase: "pending"}
 		}
-		return State{Phase: "disabled"}
+		return State{Phase: "unavailable"}
 	}
 	fields := strings.Fields(string(data))
 	if len(fields) == 0 {
@@ -121,18 +93,21 @@ func (m *Manager) State() State {
 
 func (m *Manager) Diagnostics() map[string]any {
 	state := m.State()
+	prepared := m.Prepared()
 	supported := m.Supported()
 	capability := CapabilityForTarget(m.Target)
 	diagnostics := map[string]any{
 		"target":        capability.Target,
 		"backend":       capability.Backend,
+		"detection":     capability.Detection,
 		"qualification": capability.Status,
 		"port":          capability.Port,
 		"power":         capability.Power,
 		"recovery":      capability.Recovery,
+		"prepared":      prepared,
+		"automatic":     prepared,
 		"supported":     supported,
-		"enabled":       supported && m.Enabled(),
-		"active":        supported && state.Phase == "active",
+		"active":        prepared && state.Phase == "active",
 		"state":         state.Phase,
 	}
 	if capability.Reason != "" {
@@ -148,99 +123,4 @@ func (m *Manager) Diagnostics() map[string]any {
 		diagnostics["reason"] = state.Reason
 	}
 	return diagnostics
-}
-
-// SetEnabled records the desired behavior and starts the platform controller.
-// Repeated settings reconciliation is intentionally idempotent. The platform
-// supervisor owns automatic retries while wired preference remains enabled, so
-// a Tater reconnect never launches a second controller.
-func (m *Manager) SetEnabled(enabled bool) error {
-	wasEnabled := m.Enabled()
-	if enabled {
-		if !m.Supported() {
-			return fmt.Errorf("USB Ethernet is unavailable on this target or installed platform")
-		}
-		if wasEnabled {
-			return nil
-		}
-		if err := m.writeFlag(true); err != nil {
-			return err
-		}
-		if err := m.start(); err != nil {
-			_ = m.writeFlag(false)
-			return fmt.Errorf("start USB Ethernet controller: %w", err)
-		}
-		return nil
-	}
-
-	if err := m.writeFlag(false); err != nil {
-		return err
-	}
-	state := m.State()
-	if m.Supported() && (wasEnabled || state.Phase == "active" || state.Phase == "probing") {
-		if err := m.start("stop"); err != nil {
-			m.restoreDeviceMode()
-			return fmt.Errorf("stop USB Ethernet controller: %w", err)
-		}
-		return nil
-	}
-	if backendFor(CapabilityForTarget(m.Target)).available(m.Paths) {
-		m.restoreDeviceMode()
-	}
-	return nil
-}
-
-func (m *Manager) start(args ...string) error {
-	if m.Start == nil {
-		return fmt.Errorf("no command starter configured")
-	}
-	return m.Start(m.Paths.Script, args...)
-}
-
-func (m *Manager) writeFlag(enabled bool) error {
-	if !enabled {
-		if err := os.Remove(m.Paths.Flag); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", m.Paths.Flag, err)
-		}
-		return nil
-	}
-	dir := filepath.Dir(m.Paths.Flag)
-	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("USB Ethernet is unavailable: %s is missing", dir)
-	}
-	temporary, err := os.CreateTemp(dir, ".net-mode-*")
-	if err != nil {
-		return fmt.Errorf("create temporary network mode: %w", err)
-	}
-	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
-	if _, err := temporary.WriteString(wiredFlag + "\n"); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write temporary network mode: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return fmt.Errorf("sync temporary network mode: %w", err)
-	}
-	if err := temporary.Chmod(0o644); err != nil {
-		temporary.Close()
-		return fmt.Errorf("chmod temporary network mode: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary network mode: %w", err)
-	}
-	if err := os.Rename(temporaryName, m.Paths.Flag); err != nil {
-		return fmt.Errorf("install %s: %w", m.Paths.Flag, err)
-	}
-	if directory, err := os.Open(dir); err == nil {
-		_ = directory.Sync()
-		_ = directory.Close()
-	}
-	return nil
-}
-
-func (m *Manager) restoreDeviceMode() {
-	if err := backendFor(CapabilityForTarget(m.Target)).restoreDeviceMode(m.Paths); err != nil {
-		log.Printf("[eth] could not restore USB device mode: %v", err)
-	}
 }
