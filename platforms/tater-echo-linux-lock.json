@@ -34,6 +34,7 @@
   "platforms": {
     "dot": {
       "release": "dot-v1.0.24",
+      "kernel_release": "dot-kernel-v1.0.0",
       "commit": "d5867a594f1707964f2ee58fbb773da522a3a6cd",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",
@@ -50,16 +51,16 @@
       "targets": {
         "biscuit": {
           "kernel": {
-            "name": "techo5-dot-kernel-bt.zImage-dtb",
-            "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-kernel-bt.zImage-dtb",
-            "sha256": "c2981fc9b8451a29b2d8a38bfd0029c62d78cf65d641bd03640df70e4a098082"
+            "name": "tater-echo-biscuit-kernel.zImage-dtb",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.0/tater-echo-biscuit-kernel.zImage-dtb",
+            "sha256": "dd2cb1cc375c396b08720b3248330fcb70ae5b9113a689c6fad7a78f39bacffa"
           }
         },
         "radar": {
           "kernel": {
-            "name": "techo5-dot-kernel-bt-radar.zImage-dtb",
-            "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-kernel-bt-radar.zImage-dtb",
-            "sha256": "d17465f61dd1261aa84b44955c1c0c3f821943ac91162979c9ff214b8ad5adda"
+            "name": "tater-echo-radar-kernel.zImage-dtb",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.0/tater-echo-radar-kernel.zImage-dtb",
+            "sha256": "ea717698c493e6a139d178b862a7b06f9dd21bda82ac86713704d7f0cc38903a"
           }
         }
       }

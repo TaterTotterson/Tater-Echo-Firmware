@@ -61,6 +61,8 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("- target: radar", dot_job)
         self.assertIn("linux/dot/build_linux.sh", dot_job)
         self.assertIn("platforms.dot.rootfs", dot_job)
+        self.assertIn("tater-echo-biscuit-kernel.zImage-dtb", dot_job)
+        self.assertIn("tater-echo-radar-kernel.zImage-dtb", dot_job)
         self.assertIn("TATER_DOT_PLATFORM_SOURCE", dot_job)
         self.assertNotIn("Android compiler", dot_job)
         self.assertIn("staging/radar/firmware-manifest.json", workflow)

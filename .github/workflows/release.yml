@@ -82,10 +82,10 @@ jobs:
         include:
           - target: biscuit
             name: Echo Dot 2 (biscuit)
-            kernel_name: techo5-dot-kernel-bt.zImage-dtb
+            kernel_name: tater-echo-biscuit-kernel.zImage-dtb
           - target: radar
             name: Echo 2 (radar)
-            kernel_name: techo5-dot-kernel-bt-radar.zImage-dtb
+            kernel_name: tater-echo-radar-kernel.zImage-dtb
 
     steps:
       - name: Checkout
@@ -181,8 +181,8 @@ jobs:
           TATER_DOT_PLATFORM_SOURCE: /tmp/tater-echo-linux-dot
           TATER_DOT_RESCUE_APKS: /tmp/techo5-dot-rescue-apks.tar
           TATER_DOT_ALPINE_ROOTFS: /tmp/alpine-minirootfs.tar.gz
-          TATER_BISCUIT_KERNEL: /tmp/techo5-dot-kernel-bt.zImage-dtb
-          TATER_RADAR_KERNEL: /tmp/techo5-dot-kernel-bt-radar.zImage-dtb
+          TATER_BISCUIT_KERNEL: /tmp/tater-echo-biscuit-kernel.zImage-dtb
+          TATER_RADAR_KERNEL: /tmp/tater-echo-radar-kernel.zImage-dtb
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' \

@@ -37,12 +37,16 @@ Completed:
   commits until their replacement artifacts are reproduced.
 - Added a six-target manifest and validation workflow covering Biscuit, Radar,
   Checkers, Crown, Athena, and Rook.
+- Built and published separately hashed Biscuit and Radar kernels from the
+  pinned Tater Dot source as the `dot-kernel-v1.0.0` prerelease. Firmware now
+  consumes those Tater-named kernel artifacts.
 
 Remaining release work:
 
-1. Reproduce the exact currently pinned binary artifacts before changing each
-   target's download. Source now comes from Tater Echo Linux; the existing
-   binary URLs remain verified upstream baselines during this gate.
+1. Reproduce the exact currently pinned Show, Athena, and Spot binary artifacts
+   before changing each target's download. Source now comes from Tater Echo
+   Linux; those existing binary URLs remain verified upstream baselines during
+   this gate.
 2. Build and publish separate, hash-pinned Tater artifacts for every board. A
    Biscuit kernel must never silently replace Radar or Show artifacts.
 3. Change each firmware artifact URL to its Tater Echo Linux release only

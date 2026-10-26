@@ -49,7 +49,8 @@ def platform_provenance(target: str) -> dict:
         source = {
             "repository": PLATFORM_REPOSITORY,
             "commit": platforms["dot"]["commit"],
-            "release": platforms["dot"]["release"],
+            "release": platforms["dot"]["kernel_release"],
+            "base_release": platforms["dot"]["release"],
         }
     elif target in LINUX_SHOW_TARGETS:
         source = {
