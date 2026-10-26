@@ -56,7 +56,7 @@ an equivalent controller.
 The currently pinned TECHO5 Dot v1.0.24 release does not contain the required
 kernel changes, so the feature remains unavailable in a normal release until
 the changes now maintained in
-[`Tater-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Linux/tree/main/platforms/dot)
+[`Tater-Echo-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Echo-Linux/tree/main/platforms/dot)
 are built and published as a pinned Biscuit platform artifact. The functional
 kernel change is `0052-cdcether-rtl8152-no-blacklist.patch`, which lets the
 generic `cdc_ether` driver bind the adapter. The fragment enables MediaTek

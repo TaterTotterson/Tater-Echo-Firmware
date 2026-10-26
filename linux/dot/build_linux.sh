@@ -36,7 +36,7 @@ mkdir -p "$device/build" "$(dirname "$output")"
 expected_platform=$(python3 "$repo/tools/platform_lock.py" get platforms.dot.commit)
 actual_platform=$(git -C "$platform_source" rev-parse HEAD)
 [ "$actual_platform" = "$expected_platform" ] || {
-    echo "TECHO5 Dot checkout is $actual_platform, expected $expected_platform" >&2
+    echo "Tater Echo Linux Dot checkout is $actual_platform, expected $expected_platform" >&2
     exit 1
 }
 

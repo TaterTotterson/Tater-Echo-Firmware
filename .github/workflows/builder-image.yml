@@ -34,8 +34,8 @@ jobs:
           echo "image=$(lock builder.image)" >> "$GITHUB_OUTPUT"
           echo "tag=$(lock builder.tag)" >> "$GITHUB_OUTPUT"
           echo "base_image=$(lock builder.base_image)" >> "$GITHUB_OUTPUT"
-          echo "techo5_repository=$(lock platforms.techo5.repository)" >> "$GITHUB_OUTPUT"
-          echo "techo5_athena_commit=$(lock platforms.techo5.athena_commit)" >> "$GITHUB_OUTPUT"
+          echo "platform_repository=$(lock source.repository)" >> "$GITHUB_OUTPUT"
+          echo "athena_commit=$(lock platforms.athena.commit)" >> "$GITHUB_OUTPUT"
           for package in bash build-base ca-certificates cmake e2fsprogs e2fsprogs-extra file git linux-headers patch py3-flatbuffers py3-pip python3 samurai tinyalsa-dev; do
             key=${package//-/_}
             echo "${key}_version=$(lock builder.packages.$package)" >> "$GITHUB_OUTPUT"
@@ -68,8 +68,8 @@ jobs:
             PYTHON3_VERSION=${{ steps.lock.outputs.python3_version }}
             SAMURAI_VERSION=${{ steps.lock.outputs.samurai_version }}
             TINYALSA_DEV_VERSION=${{ steps.lock.outputs.tinyalsa_dev_version }}
-            TECHO5_REPOSITORY=${{ steps.lock.outputs.techo5_repository }}
-            TECHO5_ATHENA_COMMIT=${{ steps.lock.outputs.techo5_athena_commit }}
+            TECHO5_REPOSITORY=${{ steps.lock.outputs.platform_repository }}
+            TECHO5_ATHENA_COMMIT=${{ steps.lock.outputs.athena_commit }}
 
       - name: Report immutable reference
         run: echo '${{ steps.lock.outputs.image }}@${{ steps.build.outputs.digest }}'

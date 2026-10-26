@@ -11,9 +11,10 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCK_PATH = ROOT / "platforms" / "techo5-lock.json"
+LOCK_PATH = ROOT / "platforms" / "tater-echo-linux-lock.json"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+CANONICAL_REPOSITORY = "https://github.com/TaterTotterson/Tater-Echo-Linux.git"
 
 
 def load() -> dict:
@@ -21,7 +22,7 @@ def load() -> dict:
         value = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read {LOCK_PATH}: {error}") from error
-    if value.get("schema") != 1:
+    if value.get("schema") != 2:
         raise SystemExit("unsupported platform lock schema")
     return value
 
@@ -36,6 +37,10 @@ def get(value: object, dotted: str) -> object:
 
 
 def verify(value: dict, require_builder_digest: bool = False) -> None:
+    source = value.get("source", {})
+    if source.get("repository") != CANONICAL_REPOSITORY:
+        raise SystemExit("platform source is not the canonical Tater Echo Linux repository")
+
     builder = value.get("builder", {})
     digest = builder.get("digest")
     if require_builder_digest and not isinstance(digest, str):
@@ -63,15 +68,16 @@ def verify(value: dict, require_builder_digest: bool = False) -> None:
             raise SystemExit("builder packages must have exact versions")
 
     platforms = value.get("platforms", {})
-    for key in ("techo5", "dot", "show", "athena", "rook"):
+    for key in ("dot", "show", "athena", "rook"):
         if key not in platforms:
             raise SystemExit(f"platform lock is missing {key}")
-    for key in ("checkers_commit", "athena_commit"):
-        if not COMMIT.fullmatch(platforms["techo5"].get(key, "")):
-            raise SystemExit(f"invalid TECHO5 {key}")
     for platform in ("dot", "rook"):
         if not COMMIT.fullmatch(platforms[platform].get("commit", "")):
             raise SystemExit(f"invalid {platform} source commit")
+    if not COMMIT.fullmatch(platforms["show"].get("checkers_commit", "")):
+        raise SystemExit("invalid Checkers/Crown source commit")
+    if not COMMIT.fullmatch(platforms["athena"].get("commit", "")):
+        raise SystemExit("invalid Athena source commit")
 
     def walk(node: object, path: str = "") -> None:
         if isinstance(node, dict):

@@ -1,5 +1,8 @@
 {
-  "schema": 1,
+  "schema": 2,
+  "source": {
+    "repository": "https://github.com/TaterTotterson/Tater-Echo-Linux.git"
+  },
   "builder": {
     "image": "ghcr.io/tatertotterson/tater-echo-firmware-builder",
     "tag": "go1.24.0-alpine3.21-v3",
@@ -29,15 +32,9 @@
     }
   },
   "platforms": {
-    "techo5": {
-      "repository": "https://github.com/HuskerMinion/techo5.git",
-      "checkers_commit": "0f042360fbc22d798930cfd683d251606bfb7412",
-      "athena_commit": "3062cb0a7b812145248c9b60ce88ee3c6474924d"
-    },
     "dot": {
-      "repository": "https://github.com/HuskerMinion/techo5-dot.git",
       "release": "dot-v1.0.24",
-      "commit": "33b402480ed946dda98bd615a2dfcdeeb4e7a167",
+      "commit": "d5867a594f1707964f2ee58fbb773da522a3a6cd",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",
         "sha256": "7b78889fd2d7df25cc5816b4fe29190980fda6ff1c880f287017d0d6e98604ac"
@@ -68,6 +65,7 @@
       }
     },
     "show": {
+      "checkers_commit": "0f042360fbc22d798930cfd683d251606bfb7412",
       "release": "v0.9.26",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5/releases/download/v0.9.26/rootfs-v0.9.26.tar.gz",
@@ -91,6 +89,7 @@
       }
     },
     "athena": {
+      "commit": "3062cb0a7b812145248c9b60ce88ee3c6474924d",
       "release": "v1.6.4",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.6.4/techo5-rootfs-athena-v1.6.4.tar.gz",
@@ -103,7 +102,6 @@
       }
     },
     "rook": {
-      "repository": "https://github.com/HuskerMinion/techo5-spot.git",
       "release": "spot-v0.5.25",
       "commit": "8253a4a1d52dd37dd152dd1d435b97e541e0a191",
       "rootfs": {

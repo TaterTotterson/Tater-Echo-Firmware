@@ -128,7 +128,7 @@ Fetch the pinned rootfs and TECHO5 checkout, then run:
 linux/checkers/build_linux.sh \
   --version v3.0.0-dev \
   --base-rootfs /path/to/rootfs-v0.9.26.tar.gz \
-  --techo5 /path/to/techo5
+  --platform /path/to/tater-echo-linux-show
 ```
 
 The build uses an ARMv7 Alpine container for the CGO daemon, native UI,

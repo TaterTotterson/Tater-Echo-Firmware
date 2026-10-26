@@ -1,7 +1,7 @@
-# Tater Linux platform repository
+# Tater Echo Linux platform repository
 
 Tater owns one public platform repository,
-[`TaterTotterson/Tater-Linux`](https://github.com/TaterTotterson/Tater-Linux),
+[`TaterTotterson/Tater-Echo-Linux`](https://github.com/TaterTotterson/Tater-Echo-Linux),
 rather than maintaining three unrelated forks. It imports the histories needed
 by Tater Echo Firmware:
 
@@ -31,14 +31,22 @@ Completed:
   source patches into `platforms/dot/`.
 - Made `Tater` names canonical for the new platform repository and firmware
   network controllers while retaining required compatibility names.
+- Switched every firmware platform source checkout to the Tater repository.
+  The Dot family uses a Tater-owned commit based directly on the pinned
+  `dot-v1.0.24` source; Show and Spot retain their exact imported baseline
+  commits until their replacement artifacts are reproduced.
+- Added a six-target manifest and validation workflow covering Biscuit, Radar,
+  Checkers, Crown, Athena, and Rook.
 
 Remaining release work:
 
-1. Reproduce the exact currently pinned artifacts before changing inputs.
-2. Build and publish separate, hash-pinned artifacts for every board. A
+1. Reproduce the exact currently pinned binary artifacts before changing each
+   target's download. Source now comes from Tater Echo Linux; the existing
+   binary URLs remain verified upstream baselines during this gate.
+2. Build and publish separate, hash-pinned Tater artifacts for every board. A
    Biscuit kernel must never silently replace Radar or Show artifacts.
-3. Change Tater Echo Firmware's platform lock to the Tater Linux repository
-   and release URLs.
+3. Change each firmware artifact URL to its Tater Echo Linux release only
+   after its factory and OTA bundles pass verification.
 4. Keep compatibility links for legacy paths such as `/etc/techo5` and
    `techo5-*` until factory, rescue, rollback, and upgrade paths no longer
    reference them.

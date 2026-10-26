@@ -312,7 +312,7 @@ Tagged release builds compile the appropriate daemon, native screen/camera
 components, wake runtime, and complete Tater Linux rootfs in GitHub Actions.
 All TECHO5 revisions, downloaded platform images, package versions, and the
 multi-architecture build container are controlled by
-[`platforms/techo5-lock.json`](platforms/techo5-lock.json). Release manifests
+[`platforms/tater-echo-linux-lock.json`](platforms/tater-echo-linux-lock.json). Release manifests
 include that lock's SHA-256, the upstream source revision, and the immutable
 builder image digest. The lock also records each builder platform's immutable
 manifest digest so mixed ARMv7/AMD64 jobs never have to retarget one local

@@ -36,7 +36,8 @@ SHOW_BOOT_LOGO_SHA256 = "1354914c8a2498a7f69a8ebc4a23782ff3369f9e4f980de04f7b9b7
 SHOW_BOOT_LOGO_SIZE = 6105
 PLATFORM_LOCK = platform_lock.load()
 DOT_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["dot"]["commit"]
-ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["techo5"]["athena_commit"]
+ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
+PLATFORM_REPOSITORY = PLATFORM_LOCK["source"]["repository"]
 
 
 def platform_provenance(target: str) -> dict:
@@ -46,28 +47,28 @@ def platform_provenance(target: str) -> dict:
     builder = PLATFORM_LOCK["builder"]
     if target in LINUX_DOT_TARGETS:
         source = {
-            "repository": platforms["dot"]["repository"],
+            "repository": PLATFORM_REPOSITORY,
             "commit": platforms["dot"]["commit"],
             "release": platforms["dot"]["release"],
         }
     elif target in LINUX_SHOW_TARGETS:
         source = {
-            "repository": platforms["techo5"]["repository"],
-            "commit": platforms["techo5"]["checkers_commit"],
+            "repository": PLATFORM_REPOSITORY,
+            "commit": platforms["show"]["checkers_commit"],
             "release": platforms["show"]["release"],
         }
     elif target in LINUX_ATHENA_TARGETS:
         source = {
-            "repository": platforms["techo5"]["repository"],
-            "commit": platforms["techo5"]["athena_commit"],
+            "repository": PLATFORM_REPOSITORY,
+            "commit": platforms["athena"]["commit"],
             "release": platforms["athena"]["release"],
         }
     elif target == "rook":
         source = {
-            "repository": platforms["rook"]["repository"],
+            "repository": PLATFORM_REPOSITORY,
             "commit": platforms["rook"]["commit"],
             "release": platforms["rook"]["release"],
-            "techo5_helper_commit": platforms["techo5"]["checkers_commit"],
+            "show_helper_commit": platforms["show"]["checkers_commit"],
         }
     else:
         return {}
@@ -382,7 +383,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 raise SystemExit(f"cannot verify TECHO5 Athena source: {platform_source}") from error
             if platform_commit != ATHENA_PLATFORM_COMMIT:
                 raise SystemExit(
-                    f"TECHO5 Athena checkout is {platform_commit}, expected {ATHENA_PLATFORM_COMMIT}"
+                    f"Tater Echo Linux Athena checkout is {platform_commit}, expected {ATHENA_PLATFORM_COMMIT}"
                 )
             system_value = os.getenv("TATER_ATHENA_SYSTEM_IMAGE", "").strip()
             boot_value = os.getenv("TATER_ATHENA_BOOT_IMAGE", "").strip()

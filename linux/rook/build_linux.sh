@@ -2,26 +2,26 @@
 set -eu
 
 usage() {
-    echo "usage: $0 --version vX.Y.Z --base-rootfs FILE --spot-source DIR --techo5 DIR [--output FILE]" >&2
+    echo "usage: $0 --version vX.Y.Z --base-rootfs FILE --spot-source DIR --show-source DIR [--output FILE]" >&2
     exit 2
 }
 
 version=
 base_rootfs=
 spot_source=
-techo5=
+show_source=
 output=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
         --base-rootfs) [ "$#" -ge 2 ] || usage; base_rootfs=$2; shift 2 ;;
         --spot-source) [ "$#" -ge 2 ] || usage; spot_source=$2; shift 2 ;;
-        --techo5) [ "$#" -ge 2 ] || usage; techo5=$2; shift 2 ;;
+        --show-source|--techo5) [ "$#" -ge 2 ] || usage; show_source=$2; shift 2 ;;
         --output) [ "$#" -ge 2 ] || usage; output=$2; shift 2 ;;
         *) usage ;;
     esac
 done
-[ -n "$version" ] && [ -n "$base_rootfs" ] && [ -n "$spot_source" ] && [ -n "$techo5" ] || usage
+[ -n "$version" ] && [ -n "$base_rootfs" ] && [ -n "$spot_source" ] && [ -n "$show_source" ] || usage
 case "$version" in
     v[0-9]*.[0-9]*.[0-9]*) ;;
     *) echo "version must look like v2.0.0" >&2; exit 2 ;;
@@ -32,17 +32,17 @@ repo=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 device=$repo/device
 base_rootfs=$(CDPATH= cd -- "$(dirname "$base_rootfs")" && pwd)/$(basename "$base_rootfs")
 spot_source=$(CDPATH= cd -- "$spot_source" && pwd)
-techo5=$(CDPATH= cd -- "$techo5" && pwd)
+show_source=$(CDPATH= cd -- "$show_source" && pwd)
 expected_spot=$(python3 "$repo/tools/platform_lock.py" get platforms.rook.commit)
 actual_spot=$(git -C "$spot_source" rev-parse HEAD)
 [ "$actual_spot" = "$expected_spot" ] || {
-    echo "TECHO5 Spot source is $actual_spot, expected $expected_spot" >&2
+    echo "Tater Echo Linux Spot checkout is $actual_spot, expected $expected_spot" >&2
     exit 1
 }
-expected_techo5=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.checkers_commit)
-actual_techo5=$(git -C "$techo5" rev-parse HEAD)
-[ "$actual_techo5" = "$expected_techo5" ] || {
-    echo "TECHO5 checkout is $actual_techo5, expected $expected_techo5" >&2
+expected_show=$(python3 "$repo/tools/platform_lock.py" get platforms.show.checkers_commit)
+actual_show=$(git -C "$show_source" rev-parse HEAD)
+[ "$actual_show" = "$expected_show" ] || {
+    echo "Tater Echo Linux Show checkout is $actual_show, expected $expected_show" >&2
     exit 1
 }
 
@@ -106,7 +106,7 @@ tiny=$(readlink -f /usr/lib/libtinyalsa.so.2)
 cp "$tiny" build/rook/libtinyalsa.so.2.0.0
 '
 
-sh "$script_dir/build_camera_helper.sh" "$techo5" "$device/build/rook/tater-camera"
+sh "$script_dir/build_camera_helper.sh" "$show_source" "$device/build/rook/tater-camera"
 
 for required in \
     "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
@@ -142,7 +142,7 @@ python3 "$script_dir/build_rootfs.py" \
     --oww-embedding-onnx "$device/build/microwakeword-testdata/embedding_model.onnx" \
     --tinyalsa "$device/build/rook/libtinyalsa.so.2.0.0" \
     --techo5-spot-license "$spot_source/LICENSE" \
-    --techo5-license "$techo5/LICENSE" \
+    --techo5-license "$show_source/LICENSE" \
     --apk-cache "$device/build" \
     --version "$version" \
     --output "$output"

@@ -12,6 +12,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PlatformLockTests(unittest.TestCase):
+    def test_all_platform_source_commits_live_in_tater_echo_linux(self) -> None:
+        value = platform_lock.load()
+        self.assertEqual(
+            "https://github.com/TaterTotterson/Tater-Echo-Linux.git",
+            value["source"]["repository"],
+        )
+        for commit in (
+            value["platforms"]["dot"]["commit"],
+            value["platforms"]["show"]["checkers_commit"],
+            value["platforms"]["athena"]["commit"],
+            value["platforms"]["rook"]["commit"],
+        ):
+            self.assertRegex(commit, r"^[0-9a-f]{40}$")
+
     def test_lock_has_a_published_builder_digest(self) -> None:
         value = platform_lock.load()
         platform_lock.verify(value, require_builder_digest=True)
@@ -59,7 +73,7 @@ class PlatformLockTests(unittest.TestCase):
             self.assertIn(f'"{package}=${{{variable}}}"', dockerfile)
 
     def test_lock_is_canonical_json(self) -> None:
-        path = ROOT / "platforms/techo5-lock.json"
+        path = ROOT / "platforms/tater-echo-linux-lock.json"
         value = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(path.read_text(encoding="utf-8"), json.dumps(value, indent=2) + "\n")
 

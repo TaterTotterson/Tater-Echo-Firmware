@@ -2,26 +2,26 @@
 set -eu
 
 usage() {
-    echo "usage: $0 --version vX.Y.Z --target checkers|crown|athena --base-rootfs FILE --techo5 DIR [--output FILE]" >&2
+    echo "usage: $0 --version vX.Y.Z --target checkers|crown|athena --base-rootfs FILE --platform DIR [--output FILE]" >&2
     exit 2
 }
 
 version=
 target=checkers
 base_rootfs=
-techo5=
+platform_source=
 output=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
         --target) [ "$#" -ge 2 ] || usage; target=$2; shift 2 ;;
         --base-rootfs) [ "$#" -ge 2 ] || usage; base_rootfs=$2; shift 2 ;;
-        --techo5) [ "$#" -ge 2 ] || usage; techo5=$2; shift 2 ;;
+        --platform|--techo5) [ "$#" -ge 2 ] || usage; platform_source=$2; shift 2 ;;
         --output) [ "$#" -ge 2 ] || usage; output=$2; shift 2 ;;
         *) usage ;;
     esac
 done
-[ -n "$version" ] && [ -n "$base_rootfs" ] && [ -n "$techo5" ] || usage
+[ -n "$version" ] && [ -n "$base_rootfs" ] && [ -n "$platform_source" ] || usage
 
 case "$target" in
     checkers|crown|athena) ;;
@@ -37,18 +37,18 @@ script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 device=$repo/device
 base_rootfs=$(CDPATH= cd -- "$(dirname "$base_rootfs")" && pwd)/$(basename "$base_rootfs")
-techo5=$(CDPATH= cd -- "$techo5" && pwd)
+platform_source=$(CDPATH= cd -- "$platform_source" && pwd)
 output=${output:-$device/build/tater-$target-rootfs-$version.tar.gz}
 output_dir=$(dirname "$output")
 mkdir -p "$device/build" "$output_dir"
 output=$(CDPATH= cd -- "$output_dir" && pwd)/$(basename "$output")
 
-expected_techo5=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.checkers_commit)
+expected_platform=$(python3 "$repo/tools/platform_lock.py" get platforms.show.checkers_commit)
 [ "$target" = athena ] && \
-    expected_techo5=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.athena_commit)
-actual_techo5=$(git -C "$techo5" rev-parse HEAD)
-[ "$actual_techo5" = "$expected_techo5" ] || {
-    echo "TECHO5 checkout is $actual_techo5, expected $expected_techo5" >&2
+    expected_platform=$(python3 "$repo/tools/platform_lock.py" get platforms.athena.commit)
+actual_platform=$(git -C "$platform_source" rev-parse HEAD)
+[ "$actual_platform" = "$expected_platform" ] || {
+    echo "Tater Echo Linux Show checkout is $actual_platform, expected $expected_platform" >&2
     exit 1
 }
 
@@ -110,9 +110,9 @@ mkdir -p build/tater-linux-libs
 cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 '
 
-"$script_dir/build_camera_helper.sh" "$techo5" "$device/build/tater-camera"
+"$script_dir/build_camera_helper.sh" "$platform_source" "$device/build/tater-camera"
 if [ "$target" != athena ]; then
-    python3 "$script_dir/build_rescue_fbprobe.py" "$techo5" "$device/build/tater-rescue-fbprobe"
+    python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
 fi
 
 for required in \
@@ -149,7 +149,7 @@ python3 "$script_dir/build_rootfs.py" \
     --oww-melspectrogram-onnx "$device/build/microwakeword-testdata/melspectrogram.onnx" \
     --oww-embedding-onnx "$device/build/microwakeword-testdata/embedding_model.onnx" \
     --tinyalsa "$device/build/tater-linux-libs/libtinyalsa.so.2.0.0" \
-    --techo5-license "$techo5/LICENSE" \
+    --techo5-license "$platform_source/LICENSE" \
     --apk-cache "$device/build" \
     --version "$version" \
     --output "$output"

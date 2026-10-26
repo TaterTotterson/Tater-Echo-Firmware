@@ -8,7 +8,7 @@ Only tags in that format trigger a firmware release.
 
 ## Build provenance
 
-[`platforms/techo5-lock.json`](../platforms/techo5-lock.json) is the single
+[`platforms/tater-echo-linux-lock.json`](../platforms/tater-echo-linux-lock.json) is the single
 source of truth for TECHO5 family commits, platform downloads and hashes, the
 Go/Alpine base, exact build packages, and the immutable multi-architecture
 builder index and per-platform digests. Firmware build scripts disable Go's automatic toolchain

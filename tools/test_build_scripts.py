@@ -120,16 +120,26 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn('./usr/bin/arecord', build_script)
         self.assertIn('linuxCapture: platform.Base() == platform.TaterLinux', mic)
 
-    def test_release_builds_both_techo5_show_targets(self) -> None:
+    def test_release_builds_both_tater_show_targets(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         show_job = workflow.split("\n  checkers:\n", 1)[1].split("\n  rook:\n", 1)[0]
         self.assertIn("- target: checkers", show_job)
         self.assertIn("- target: crown", show_job)
         self.assertIn("techo5-boot-crown-v1.0.1.img", show_job)
+        self.assertIn("source.repository", show_job)
+        self.assertIn("--platform /tmp/tater-echo-linux-show", show_job)
         self.assertIn("--target '${{ matrix.target }}'", show_job)
         self.assertIn("staging/crown/firmware-manifest.json", workflow)
         show_build = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
         self.assertIn("-X main.target=$TATER_TARGET", show_build)
+
+    def test_release_uses_tater_echo_linux_for_every_platform_source(self) -> None:
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("get source.repository"), 5)
+        self.assertNotIn("get platforms.techo5", workflow)
+        self.assertNotIn("get platforms.dot.repository", workflow)
+        self.assertNotIn("get platforms.rook.repository", workflow)
+        self.assertIn("--show-source /tmp/tater-echo-linux-show", workflow)
 
     def test_athena_store_build_avoids_incomplete_runner_id_map(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
