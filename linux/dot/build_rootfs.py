@@ -489,6 +489,8 @@ def build(args: argparse.Namespace) -> None:
         copy(args.setup_ap_base, root / "usr/local/sbin/tater-setup-ap-base", 0o755)
         copy(args.network, root / "usr/local/sbin/tater-net", 0o755)
         copy(args.eth, root / "usr/local/sbin/tater-usb-ethernet", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-usb-inventory",
+             root / "usr/local/sbin/tater-usb-inventory", 0o755)
         for old_name, tater_name in (
             ("techo5-net", "tater-net"),
             ("techo5-eth", "tater-usb-ethernet"),

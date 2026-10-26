@@ -150,6 +150,7 @@ for required in \
     ./usr/local/sbin/tater-run \
     ./usr/local/sbin/tater-net \
     ./usr/local/sbin/tater-usb-ethernet \
+    ./usr/local/sbin/tater-usb-inventory \
     ./usr/local/sbin/techo5-net \
     ./usr/local/sbin/techo5-eth \
     ./usr/local/sbin/wifi-set \

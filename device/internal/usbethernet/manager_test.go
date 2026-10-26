@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -50,6 +51,45 @@ func TestSupportIsBiscuitAndPlatformGated(t *testing.T) {
 	}
 	if manager.Supported() {
 		t.Fatal("daemon-only OTA without kernel support must be unavailable")
+	}
+}
+
+func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
+	capabilities := Capabilities()
+	got := make([]string, 0, len(capabilities))
+	for target := range capabilities {
+		got = append(got, target)
+	}
+	sort.Strings(got)
+	want := []string{"athena", "biscuit", "checkers", "crown", "radar", "rook"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("capability targets = %v, want %v", got, want)
+	}
+
+	for target, capability := range capabilities {
+		if capability.Target != target || capability.Backend == "" || capability.Status == "" ||
+			capability.Port == "" || capability.Recovery == "" || capability.Reason == "" {
+			t.Errorf("incomplete %s capability: %#v", target, capability)
+		}
+		if target == "biscuit" && !capability.qualified() {
+			t.Errorf("Biscuit must remain the qualified baseline: %#v", capability)
+		}
+		if target != "biscuit" && capability.qualified() {
+			t.Errorf("unvalidated target %s became qualified: %#v", target, capability)
+		}
+	}
+
+	unknown := CapabilityForTarget("future-echo")
+	if unknown.Status != "unknown" || unknown.Backend != "none" || unknown.qualified() {
+		t.Fatalf("unknown target did not fail closed: %#v", unknown)
+	}
+}
+
+func TestTaterHostnameAliasUsesTheSameCapability(t *testing.T) {
+	plain := CapabilityForTarget("biscuit")
+	aliased := CapabilityForTarget("  TATER-BISCUIT\n")
+	if !reflect.DeepEqual(plain, aliased) {
+		t.Fatalf("aliased capability = %#v, want %#v", aliased, plain)
 	}
 }
 
@@ -151,8 +191,22 @@ func TestDiagnosticsSeparateDesiredAndActiveState(t *testing.T) {
 	}
 	got := manager.Diagnostics()
 	if got["supported"] != true || got["enabled"] != true || got["active"] != true ||
-		got["interface"] != "eth0" || got["address"] != "192.168.1.9" {
+		got["interface"] != "eth0" || got["address"] != "192.168.1.9" ||
+		got["target"] != "biscuit" || got["backend"] != "mediatek-mchange" ||
+		got["qualification"] != "qualified" {
 		t.Fatalf("unexpected diagnostics: %#v", got)
+	}
+}
+
+func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
+	manager, _ := testManager(t, "athena")
+	got := manager.Diagnostics()
+	if got["supported"] != false || got["qualification"] != "kernel-work" ||
+		got["backend"] != "mediatek-mtu3-role-switch-candidate" {
+		t.Fatalf("unexpected Athena diagnostics: %#v", got)
+	}
+	if reason, _ := got["qualification_reason"].(string); reason == "" {
+		t.Fatalf("Athena diagnostics omitted the qualification blocker: %#v", got)
 	}
 }
 

@@ -80,6 +80,72 @@ class USBEthernetControllerTests(unittest.TestCase):
         self.assertEqual("device", self.mchange.read_text().strip())
         self.assertFalse(self.net_log.exists(), "Wi-Fi was restarted during a non-disruptive probe")
 
+    def test_bounded_probe_restores_serial_without_dhcp_or_wifi_changes(self) -> None:
+        (self.data / "net-mode").unlink()
+        interface = self.sys_net / "eth0"
+        interface.mkdir()
+        (interface / "carrier").write_text("1\n", encoding="utf-8")
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "probe"],
+            env=self._environment(
+                TATER_ETH_ENUM_TIMEOUT="1",
+                TATER_ETH_PROBE_MAX_SECONDS="2",
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            "probe-complete eth0",
+            (self.run / "tater-usb-ethernet.state").read_text().strip(),
+        )
+        self.assertEqual("device", self.mchange.read_text().strip())
+        self.assertFalse(self.net_log.exists(), "bounded probe changed Wi-Fi")
+        self.assertFalse((self.run / "tater-usb-ethernet.lease").exists(), "bounded probe ran DHCP")
+
+    def test_bounded_probe_watchdog_restores_serial(self) -> None:
+        (self.data / "net-mode").unlink()
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "probe"],
+            env=self._environment(
+                TATER_ETH_ENUM_TIMEOUT="30",
+                TATER_ETH_PROBE_MAX_SECONDS="1",
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual(
+            "fallback probe-timeout",
+            (self.run / "tater-usb-ethernet.state").read_text().strip(),
+        )
+        self.assertEqual("device", self.mchange.read_text().strip())
+        self.assertFalse(self.net_log.exists(), "probe watchdog changed Wi-Fi")
+
+    def test_unknown_mode_fails_without_changing_usb_or_wifi(self) -> None:
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "typo"],
+            env=self._environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual(
+            "unsupported bad-command",
+            (self.run / "tater-usb-ethernet.state").read_text().strip(),
+        )
+        self.assertEqual("Active:1 host:0 force:2", self.mchange.read_text().strip())
+        self.assertFalse(self.net_log.exists(), "unknown mode changed Wi-Fi")
+
     def _start_usable_ethernet(self) -> tuple[subprocess.Popen[str], Path, Path]:
         interface = self.sys_net / "eth0"
         interface.mkdir()

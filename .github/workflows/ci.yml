@@ -59,6 +59,7 @@ jobs:
           sh -n linux/dot/setup-ap.sh
           sh -n linux/dot/tater-net
           sh -n linux/dot/tater-usb-ethernet
+          sh -n linux/common/tater-usb-inventory
           sh -n linux/dot/wifi-set
           sh -n factory/dot-linux/install.sh
       - name: Test native microWakeWord runtime

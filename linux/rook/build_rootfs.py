@@ -70,6 +70,8 @@ def build(args: argparse.Namespace) -> None:
                     root / "usr/local/sbin/tater-setup-ap-base", 0o755)
         common.copy(Path(__file__).with_name("setup-ap.sh"),
                     root / "usr/local/sbin/tater-setup-ap", 0o755)
+        common.copy(Path(__file__).parents[1] / "common/tater-usb-inventory",
+                    root / "usr/local/sbin/tater-usb-inventory", 0o755)
         for name in ("libtinyalsa.so", "libtinyalsa.so.2"):
             link = root / "usr/lib" / name
             link.unlink(missing_ok=True)

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 
@@ -11,6 +14,7 @@ ORT_BUILD_SCRIPT = ROOT / "device" / "prepare_onnxruntime_linux_armv7.sh"
 DOT_BUILD_SCRIPT = ROOT / "linux" / "dot" / "build_linux.sh"
 DOT_ROOTFS_BUILDER = ROOT / "linux" / "dot" / "build_rootfs.py"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+USB_INVENTORY = ROOT / "linux" / "common" / "tater-usb-inventory"
 
 
 class BuildScriptTests(unittest.TestCase):
@@ -41,9 +45,98 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "linux/dot/setup-ap.sh",
             ROOT / "linux/dot/tater-net",
             ROOT / "linux/dot/tater-usb-ethernet",
+            USB_INVENTORY,
             ROOT / "linux/dot/wifi-set",
         ):
             subprocess.run(["sh", "-n", str(script)], check=True, cwd=ROOT)
+
+    def test_usb_inventory_is_read_only_cross_target_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            proc = root / "proc"
+            sys = root / "sys"
+            etc = root / "etc"
+            boot = root / "boot"
+            bin_dir = root / "bin"
+            for path in (proc, sys, etc, boot, bin_dir):
+                path.mkdir(parents=True)
+
+            (etc / "hostname").write_text("tater-rook\n")
+            (etc / "tater-release").write_text("Tater Linux Rook test\n")
+            (boot / "config-test").write_text(
+                "CONFIG_USB_MTK_HDRC=y\nCONFIG_USB_USBNET=y\nCONFIG_USB_NET_CDCETHER=y\n"
+            )
+            (proc / "mchange").write_text("Active:1 host:0 force:2\n")
+            (proc / "modules").write_text("cdc_ether 123 0 - Live 0x0\n")
+            role = sys / "class" / "usb_role" / "usb0" / "role"
+            role.parent.mkdir(parents=True)
+            role.write_text("device\n")
+            uevent = sys / "bus" / "usb" / "devices" / "1-1" / "uevent"
+            uevent.parent.mkdir(parents=True)
+            uevent.write_text(
+                "DRIVER=cdc_ether\nPRODUCT=bda/8152/2000\nTYPE=0/0/0\nSERIAL=private-unit-id\n"
+            )
+            interface = sys / "class" / "net" / "eth0"
+            interface.mkdir(parents=True)
+            (interface / "operstate").write_text("up\n")
+            (interface / "carrier").write_text("1\n")
+
+            uname = bin_dir / "uname"
+            uname.write_text(
+                "#!/bin/sh\n[ \"${1:-}\" = -r ] && { echo test; exit; }\necho 'Linux tater-rook test'\n"
+            )
+            uname.chmod(0o755)
+            dmesg = bin_dir / "dmesg"
+            dmesg.write_text(
+                "#!/bin/sh\necho 'usb SerialNumber=private-unit-id'\necho 'musb host ready'\n"
+            )
+            dmesg.chmod(0o755)
+
+            environment = os.environ.copy()
+            environment.update({
+                "TATER_PROC_ROOT": str(proc),
+                "TATER_SYS_ROOT": str(sys),
+                "TATER_ETC_ROOT": str(etc),
+                "TATER_BOOT_ROOT": str(boot),
+                "TATER_PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+            })
+            result = subprocess.run(
+                ["sh", str(USB_INVENTORY), "--include-logs"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("read_only=true", result.stdout)
+        self.assertIn("target=tater-rook", result.stdout)
+        self.assertIn("CONFIG_USB_NET_CDCETHER=y", result.stdout)
+        self.assertIn("/class/usb_role/usb0/role=device", result.stdout)
+        self.assertIn("DRIVER=cdc_ether", result.stdout)
+        self.assertIn("interface=eth0 operstate=up carrier=1", result.stdout)
+        self.assertIn("musb host ready", result.stdout)
+        self.assertNotIn("private-unit-id", result.stdout)
+
+    def test_every_linux_rootfs_installs_usb_inventory(self) -> None:
+        for builder in (
+            DOT_ROOTFS_BUILDER,
+            ROOT / "linux/checkers/build_rootfs.py",
+            ROOT / "linux/rook/build_rootfs.py",
+        ):
+            self.assertIn("tater-usb-inventory", builder.read_text(encoding="utf-8"), builder)
+
+    def test_usb_ethernet_catalog_covers_every_firmware_target(self) -> None:
+        targets = json.loads((ROOT / "targets/targets.json").read_text(encoding="utf-8"))["targets"]
+        capabilities = json.loads(
+            (ROOT / "device/internal/usbethernet/capabilities.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, capabilities["schema"])
+        self.assertEqual(set(targets), set(capabilities["targets"]))
+        self.assertEqual("qualified", capabilities["targets"]["biscuit"]["status"])
+        for target in set(targets) - {"biscuit"}:
+            self.assertNotEqual("qualified", capabilities["targets"][target]["status"])
 
     def test_dot_setup_uses_mediatek_vendor_ap_interface(self) -> None:
         setup = (ROOT / "linux/dot/setup-ap.sh").read_text(encoding="utf-8")

@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "targets": {
+    "biscuit": {
+      "backend": "mediatek-mchange",
+      "status": "qualified",
+      "port": "external-micro-usb",
+      "recovery": "usb-serial",
+      "reason": "Real-hardware host-mode, CDC-ECM, DHCP, link-loss, and USB-serial restoration are implemented."
+    },
+    "radar": {
+      "backend": "mediatek-mchange-candidate",
+      "status": "hardware-validation",
+      "port": "internal-usb-pads",
+      "recovery": "usb-serial-on-internal-pads",
+      "reason": "Radar has no external USB port; power, enumeration, and recovery must be qualified with the internal pads and a powered adapter."
+    },
+    "checkers": {
+      "backend": "mediatek-musb-candidate",
+      "status": "baseline-required",
+      "port": "external-micro-usb",
+      "recovery": "usb-serial",
+      "reason": "Publish and boot a Tater-built baseline, then qualify board-specific role control, VBUS, enumeration, and serial recovery."
+    },
+    "crown": {
+      "backend": "mediatek-musb-candidate",
+      "status": "baseline-required",
+      "port": "external-micro-usb",
+      "recovery": "usb-serial",
+      "reason": "Crown has its own configuration and device tree; publish its baseline and qualify it independently of Checkers."
+    },
+    "athena": {
+      "backend": "mediatek-mtu3-role-switch-candidate",
+      "status": "kernel-work",
+      "port": "external-usb",
+      "recovery": "usb-serial-and-rndis",
+      "reason": "The current device tree forces peripheral mode and disables the host controller; OTG role switching and VBUS drive require kernel and device-tree work."
+    },
+    "rook": {
+      "backend": "mediatek-musb-candidate",
+      "status": "baseline-required",
+      "port": "external-micro-usb",
+      "recovery": "usb-serial",
+      "reason": "Publish and boot a Tater-built baseline, then qualify external usb0 without disturbing the separate usb1 Wi-Fi bus."
+    }
+  }
+}

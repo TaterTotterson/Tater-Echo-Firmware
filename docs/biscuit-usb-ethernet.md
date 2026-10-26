@@ -31,7 +31,7 @@ The daemon reports desired state separately from live state:
 - `usb_ethernet_enabled`: the user's persistent preference is `wired`.
 - `usb_ethernet_active`: Ethernet currently owns network traffic.
 - `usb_ethernet_state`: `disabled`, `pending`, `probing`, `active`,
-  `fallback`, or `unsupported`.
+  `probe-complete`, `fallback`, or `unsupported`.
 
 The installed Tater commands are `/usr/local/sbin/tater-net` and
 `/usr/local/sbin/tater-usb-ethernet`. Compatibility links preserve the former
@@ -49,18 +49,29 @@ off until its USB controller, power arrangement, adapter enumeration, and
 fallback path are verified on real hardware. Checkers, Crown, Athena, and Rook
 have separate kernels and board plumbing and require their own platform work;
 the common daemon contract can be reused after each target supplies and tests
-an equivalent controller.
+an equivalent controller. The six-target readiness catalog, evidence command,
+and release gates are in
+[`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
 
 ## Platform dependency
 
-The currently pinned TECHO5 Dot v1.0.24 release does not contain the required
-kernel changes, so the feature remains unavailable in a normal release until
-the changes now maintained in
-[`Tater-Echo-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Echo-Linux/tree/main/platforms/dot)
-are built and published as a pinned Biscuit platform artifact. The functional
-kernel change is `0052-cdcether-rtl8152-no-blacklist.patch`, which lets the
-generic `cdc_ether` driver bind the adapter. The fragment enables MediaTek
-forced USB role control and the required usbnet/CDC-ECM support.
+The branch pins the Tater Echo Linux `dot-kernel-v1.0.0` prerelease. Its
+Biscuit kernel is
+`dd2cb1cc375c396b08720b3248330fcb70ae5b9113a689c6fad7a78f39bacffa`;
+Radar has a separate target image and hash. The source is maintained under
+[`Tater-Echo-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Echo-Linux/tree/main/platforms/dot).
+The functional kernel change is `0052-cdcether-rtl8152-no-blacklist.patch`,
+which lets the generic `cdc_ether` driver bind the adapter. The fragment enables
+MediaTek forced USB role control and the required usbnet/CDC-ECM support.
+
+Before promoting the firmware release, boot the exact published Biscuit kernel
+and repeat enumeration, DHCP/default-route, unplug, link-loss, reboot, Wi-Fi
+fallback, and USB-serial restoration. This closes the gap between the recorded
+source-equivalent bench build and the distributed binary.
+
+For a non-disruptive inventory run `tater-usb-inventory`. On Biscuit,
+`tater-usb-ethernet probe` performs a bounded enumeration-only host-mode test:
+it never starts DHCP or stops Wi-Fi and restores USB serial automatically.
 
 Do not distribute `r8152.ko` as a loose binary. CDC-ECM is the verified path,
 and all kernel outputs should be reproducibly built from the pinned Tater

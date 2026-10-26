@@ -71,18 +71,18 @@ func startCommand(path string, args ...string) error {
 
 // Supported is deliberately hardware- and installation-gated. A daemon-only
 // OTA must not advertise wired networking when the immutable rootfs or kernel
-// is still the old version, and the Biscuit implementation must not leak onto
-// Radar or the screen targets.
+// is still the old version, and a candidate backend must not become usable
+// until its exact target is marked qualified in the capability catalog.
 func (m *Manager) Supported() bool {
-	if !strings.EqualFold(strings.TrimSpace(m.Target), "biscuit") {
+	backend := backendFor(CapabilityForTarget(m.Target))
+	if !backend.available(m.Paths) {
 		return false
 	}
 	info, err := os.Stat(m.Paths.Script)
 	if err != nil || info.Mode()&0o111 == 0 {
 		return false
 	}
-	_, err = os.Stat(m.Paths.MChange)
-	return err == nil
+	return true
 }
 
 func (m *Manager) Enabled() bool {
@@ -104,7 +104,7 @@ func (m *Manager) State() State {
 	}
 	state := State{Phase: fields[0]}
 	switch state.Phase {
-	case "active", "probing":
+	case "active", "probing", "probe-complete":
 		if len(fields) > 1 {
 			state.Interface = fields[1]
 		}
@@ -122,11 +122,18 @@ func (m *Manager) State() State {
 func (m *Manager) Diagnostics() map[string]any {
 	state := m.State()
 	supported := m.Supported()
+	capability := CapabilityForTarget(m.Target)
 	diagnostics := map[string]any{
-		"supported": supported,
-		"enabled":   supported && m.Enabled(),
-		"active":    supported && state.Phase == "active",
-		"state":     state.Phase,
+		"target":        capability.Target,
+		"backend":       capability.Backend,
+		"qualification": capability.Status,
+		"supported":     supported,
+		"enabled":       supported && m.Enabled(),
+		"active":        supported && state.Phase == "active",
+		"state":         state.Phase,
+	}
+	if capability.Reason != "" {
+		diagnostics["qualification_reason"] = capability.Reason
 	}
 	if state.Interface != "" {
 		diagnostics["interface"] = state.Interface
@@ -174,7 +181,7 @@ func (m *Manager) SetEnabled(enabled bool) error {
 		}
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(m.Target), "biscuit") {
+	if backendFor(CapabilityForTarget(m.Target)).available(m.Paths) {
 		m.restoreDeviceMode()
 	}
 	return nil
@@ -230,20 +237,7 @@ func (m *Manager) writeFlag(enabled bool) error {
 }
 
 func (m *Manager) restoreDeviceMode() {
-	data, err := os.ReadFile(m.Paths.MChange)
-	if err != nil {
-		return
-	}
-	for _, field := range strings.Fields(string(data)) {
-		if !strings.HasPrefix(field, "force:") {
-			continue
-		}
-		if strings.TrimPrefix(field, "force:") == "2" {
-			return
-		}
-		if err := os.WriteFile(m.Paths.MChange, []byte("device\n"), 0o644); err != nil {
-			log.Printf("[eth] could not restore USB device mode: %v", err)
-		}
-		return
+	if err := backendFor(CapabilityForTarget(m.Target)).restoreDeviceMode(m.Paths); err != nil {
+		log.Printf("[eth] could not restore USB device mode: %v", err)
 	}
 }

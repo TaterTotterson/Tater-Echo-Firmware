@@ -26,4 +26,7 @@ ring changes to Tater's familiar warm-white twinkle until pairing completes.
 DHCP using only Tater's private configuration;
 they never import an old userspace network. Compatibility links keep the old
 `techo5-net` and `techo5-eth` command names working while installed images and
-new code use the Tater names.
+new code use the Tater names. `tater-usb-inventory` is the shared read-only
+hardware evidence collector installed on every Tater Linux target. Biscuit's
+`tater-usb-ethernet probe` is a bounded enumeration-only test that leaves Wi-Fi
+up and restores USB serial without attempting DHCP.

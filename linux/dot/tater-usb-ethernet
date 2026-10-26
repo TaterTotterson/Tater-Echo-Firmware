@@ -19,6 +19,7 @@ ENUM_TIMEOUT=${TATER_ETH_ENUM_TIMEOUT:-15}
 DHCP_TIMEOUT=${TATER_ETH_DHCP_TIMEOUT:-45}
 MONITOR_INTERVAL=${TATER_ETH_MONITOR_INTERVAL:-2}
 FAILURE_LIMIT=${TATER_ETH_FAILURE_LIMIT:-3}
+PROBE_MAX_SECONDS=${TATER_ETH_PROBE_MAX_SECONDS:-60}
 CONF=$DATA/net-mode
 LOG=$DATA/eth.log
 [ -d "$DATA" ] || LOG=/tmp/eth.log
@@ -30,6 +31,7 @@ LEASE=$RUN/tater-usb-ethernet.lease
 RESOLV=${TATER_RESOLV_CONF:-/etc/resolv.conf}
 say() { echo "tater-eth: $*" >> "$LOG"; }
 desired() { [ "$(cat "$CONF" 2>/dev/null)" = wired ]; }
+wanted() { [ "${probe_only:-0}" -eq 1 ] || desired; }
 set_state() { printf '%s\n' "$*" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; }
 
 pid_is() {
@@ -56,13 +58,14 @@ has_eth_default() {
 }
 
 restore_serial() {
-	[ -e "$MCHANGE" ] && echo device > "$MCHANGE" 2>/dev/null || true
+	[ -e "$MCHANGE" ] || return 1
+	echo device > "$MCHANGE" 2>/dev/null
 }
 
 fallback() {
 	reason=${1:-fallback}
 	stop_eth_dhcp
-	restore_serial
+	restore_serial || say "$reason; could not request USB device mode"
 	set_state fallback "$reason"
 	if [ "${wifi_disabled:-0}" -eq 1 ]; then
 		say "$reason; restored USB serial and restarting Wi-Fi"
@@ -78,7 +81,23 @@ biscuit | tater-biscuit) ;;
 *) set_state unsupported "$target"; exit 0 ;;
 esac
 
-if [ "${1:-}" = stop ]; then
+mode=${1:-start}
+probe_only=0
+case "$mode" in
+start | stop) ;;
+probe)
+	# A bounded qualification probe only checks host-mode enumeration. It never
+	# starts DHCP or disables Wi-Fi, and its watchdog restores device mode even
+	# if the foreground controller is interrupted or wedges after the switch.
+	probe_only=1
+	;;
+*)
+	set_state unsupported bad-command
+	exit 2
+	;;
+esac
+
+if [ "$mode" = stop ]; then
 	# The daemon removes CONF first. Give the active controller time to observe
 	# that and perform the ordered fallback; recover directly if it is wedged.
 	i=0
@@ -104,7 +123,7 @@ if [ "${1:-}" = stop ]; then
 fi
 
 [ -e "$MCHANGE" ] || { set_state unsupported no-mchange; exit 0; }
-desired || { set_state disabled; exit 0; }
+wanted || { set_state disabled; exit 0; }
 
 exec >> "$LOG" 2>&1
 echo "--- $0 start $(date)"
@@ -114,7 +133,12 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 needs_fallback=0
 wifi_disabled=0
+watchdog_pid=
 cleanup() {
+	if [ -n "$watchdog_pid" ]; then
+		kill "$watchdog_pid" 2>/dev/null || true
+		wait "$watchdog_pid" 2>/dev/null || true
+	fi
 	if [ "$needs_fallback" -eq 1 ]; then
 		fallback controller-exit
 	fi
@@ -122,6 +146,20 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
+trap 'fallback probe-timeout; needs_fallback=0; exit 1' USR1
+
+if [ "$probe_only" -eq 1 ]; then
+	controller_pid=$$
+	(
+		sleep "$PROBE_MAX_SECONDS"
+		if [ -d "$LOCK" ]; then
+			restore_serial || true
+			set_state fallback probe-timeout
+			kill -USR1 "$controller_pid" 2>/dev/null || true
+		fi
+	) &
+	watchdog_pid=$!
+fi
 
 force=$(sed -n 's/.*force:\([0-9]\).*/\1/p' "$MCHANGE" 2>/dev/null)
 case "$force" in
@@ -145,7 +183,7 @@ say "entered host mode; Wi-Fi remains available during the probe"
 iface=
 i=0
 while [ "$i" -lt "$ENUM_TIMEOUT" ] && [ -z "$iface" ]; do
-	desired || { fallback disabled; needs_fallback=0; exit 0; }
+	wanted || { fallback disabled; needs_fallback=0; exit 0; }
 	for d in "$SYS_NET"/*; do
 		n=${d##*/}
 		case "$n" in
@@ -166,6 +204,17 @@ if [ -z "$iface" ]; then
 fi
 say "$iface appeared"
 set_state probing "$iface"
+
+if [ "$probe_only" -eq 1 ]; then
+	say "bounded probe found $iface; restoring USB serial without touching Wi-Fi"
+	if ! restore_serial; then
+		set_state fallback restore-failed
+		exit 1
+	fi
+	needs_fallback=0
+	set_state probe-complete "$iface"
+	exit 0
+fi
 
 cat > "$HOOK" <<'EOF'
 #!/bin/sh
