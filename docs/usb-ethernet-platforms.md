@@ -23,12 +23,17 @@ enough to qualify active switching.
 | Checkers | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline, own boot image, device tree, VBUS behavior, and USB-serial recovery |
 | Crown | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; must be qualified separately from Checkers despite shared source |
 | Athena | `hardware-validation` | Mainline MediaTek MTU3 + GPIO OTG | Tater dual-role kernel booted; normal-cable serial/RNDIS, bounded host/device switching, reboot, and Wi-Fi fallback passed; real adapter/VBUS still pending |
-| Rook | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; external `usb0`; internal USB Wi-Fi remains on separate `usb1` |
+| Rook | `hardware-validation` | MediaTek MUSB physical IDDIG | External micro-USB OTG ID selects host mode; internal USB Wi-Fi remains on a separate controller; real adapter/VBUS test pending |
 
 All six images start the controller automatically. Radar, Checkers, Crown, and
-Rook are passive until their board-specific role backend is qualified: if their
-kernel enumerates a supported USB NIC, the common policy can use it, but
-firmware performs no speculative role or VBUS write. Athena's kernel now follows
+Rook are passive: if their kernel enumerates a supported USB NIC, the common
+policy can use it, but firmware performs no speculative role or VBUS write.
+Rook's stock dual-role sysfs files are intentionally read-only; its kernel
+instead follows the micro-USB OTG plug's physical ID pin (`USB_IDDIG`, IRQ 49).
+The candidate image has passed boot, USB-serial, setup-Wi-Fi, role-reporting,
+and recovery-baseline checks. An OTG Ethernet adapter is still required to
+prove external VBUS, host enumeration, DHCP, traffic, and unplug recovery.
+Athena's kernel now follows
 the connector's physical ID and VBUS-detect GPIOs: a normal cable remains in
 device mode, while an OTG plug selects host mode and enables GPIO150's modelled
 5 V supply. It remains unqualified until those host-side paths are exercised
@@ -121,11 +126,12 @@ kernel or root filesystem lacks the required controller.
 ## Recommended order
 
 1. Re-test Biscuit with the exact published Tater kernel artifact.
-2. Boot the unchanged, hash-identical Tater custody baselines for Checkers,
-   Crown, and Rook, then replace each one with a Tater-built artifact only after
-   its separate boot and recovery gate passes. Athena's Tater-built OTG
-   candidate has passed this no-adapter gate.
-3. Qualify Rook's external `usb0`, then Checkers and Crown independently.
+2. Boot the unchanged, hash-identical Tater custody baselines for Checkers and
+   Crown, then replace each one with a Tater-built artifact only after its
+   separate boot and recovery gate passes. Athena and Rook have passed their
+   current no-adapter baseline gates.
+3. Complete Rook's physical-ID/VBUS and real-adapter tests, then qualify
+   Checkers and Crown independently.
 4. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
    boot qualification with the intended OTG Ethernet adapter.
 5. Treat Radar as an experimental internal hardware modification, not a normal

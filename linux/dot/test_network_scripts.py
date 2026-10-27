@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -412,6 +413,39 @@ exit 0
         self.assertEqual("probe-complete eth0", (self.run / "tater-usb-ethernet.state").read_text().strip())
         self.assertEqual(original, self.mchange.read_text())
         self.assertFalse(self.net_log.exists(), "passive detection changed Wi-Fi")
+
+    def test_supported_usb_network_drivers_are_detected(self) -> None:
+        drivers = (
+            "cdc_ether",
+            "cdc_eem",
+            "cdc_ncm",
+            "cdc_mbim",
+            "rndis_host",
+            "r8152",
+            "asix",
+            "ax88179_178a",
+            "dm9601",
+            "lan78xx",
+            "smsc95xx",
+            "usbnet",
+        )
+        for index, driver in enumerate(drivers):
+            with self.subTest(driver=driver):
+                for child in self.sys_net.iterdir():
+                    shutil.rmtree(child)
+                self._usb_interface(f"eth{index}", driver)
+                result = subprocess.run(
+                    ["sh", str(ETHERNET), "probe"],
+                    env=self._environment(TATER_TARGET="rook"),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertTrue(
+                    (self.run / "tater-usb-ethernet.state").read_text().startswith("probe-complete ")
+                )
 
     def test_passive_target_uses_detected_adapter_and_restores_wifi_on_loss(self) -> None:
         interface = self._usb_interface()

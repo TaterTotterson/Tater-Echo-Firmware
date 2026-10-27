@@ -120,15 +120,25 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 }
 
 func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
-	manager := testManager(t, "athena")
-	got := manager.Diagnostics()
-	if got["prepared"] != true || got["supported"] != false || got["qualification"] != "hardware-validation" ||
-		got["backend"] != "mediatek-mtu3-gpio-otg" ||
-		got["detection"] != "hardware-id-passive" {
-		t.Fatalf("unexpected Athena diagnostics: %#v", got)
+	tests := []struct {
+		target  string
+		backend string
+	}{
+		{target: "athena", backend: "mediatek-mtu3-gpio-otg"},
+		{target: "rook", backend: "mediatek-musb-physical-iddig"},
 	}
-	if reason, _ := got["qualification_reason"].(string); reason == "" {
-		t.Fatalf("Athena diagnostics omitted the qualification blocker: %#v", got)
+	for _, test := range tests {
+		t.Run(test.target, func(t *testing.T) {
+			manager := testManager(t, test.target)
+			got := manager.Diagnostics()
+			if got["prepared"] != true || got["supported"] != false || got["qualification"] != "hardware-validation" ||
+				got["backend"] != test.backend || got["detection"] != "hardware-id-passive" {
+				t.Fatalf("unexpected %s diagnostics: %#v", test.target, got)
+			}
+			if reason, _ := got["qualification_reason"].(string); reason == "" {
+				t.Fatalf("%s diagnostics omitted the qualification blocker: %#v", test.target, got)
+			}
+		})
 	}
 }
 

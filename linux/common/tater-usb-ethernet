@@ -151,7 +151,7 @@ usb_network_iface() {
 		driver=${driver##*/}
 	fi
 	case "$driver" in
-	cdc_ether|cdc_ncm|cdc_mbim|r8152|asix|ax88179_178a|lan78xx|smsc95xx|usbnet) return 0 ;;
+	cdc_ether|cdc_eem|cdc_ncm|cdc_mbim|rndis_host|r8152|asix|ax88179_178a|dm9601|lan78xx|smsc95xx|usbnet) return 0 ;;
 	esac
 	# Old vendor kernels do not always expose DRIVER in the class uevent. Their
 	# USB NIC still has a device link whose path includes a USB bus segment.
