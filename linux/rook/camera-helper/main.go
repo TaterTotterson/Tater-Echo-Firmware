@@ -114,11 +114,11 @@ func snapshot(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	var cameraImage image.Image
 	quality := snapshotJPEGQuality
-	profile := request.URL.Query().Get("profile")
+	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
 	if profile == "video" {
 		cameraImage = frame.Image()
 		quality = streamJPEGQuality
-	} else if profile == "echo-low" {
+	} else if profile == "echo-low" || profile == "echo-balanced" {
 		cameraImage = frame.TaterEchoVideo(nil)
 		quality = echoJPEGQuality
 	} else {
@@ -180,7 +180,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 	var encoded bytes.Buffer
 	encoded.Grow(128 * 1024)
 	var echoFrame *image.RGBA
-	echoLow := request.URL.Query().Get("profile") == "echo-low"
+	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
 	statsStarted := time.Now()
 	statsFrames := 0
 	statsBytes := 0
@@ -198,11 +198,11 @@ func stream(response http.ResponseWriter, request *http.Request) {
 			if now.Before(nextFrame) {
 				continue
 			}
-			nextFrame = now.Add(cameraStreamPeriod(echoLow))
+			nextFrame = now.Add(cameraStreamPeriod(profile))
 			encoded.Reset()
 			var cameraImage image.Image
 			quality := streamJPEGQuality
-			if echoLow {
+			if profile == "echo-low" || profile == "echo-balanced" {
 				echoFrame = frame.TaterEchoVideo(echoFrame)
 				cameraImage = echoFrame
 				quality = echoJPEGQuality
@@ -219,7 +219,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 			statsBytes += encoded.Len()
 			if elapsed := time.Since(statsStarted); elapsed >= 10*time.Second {
 				log.Printf("[camera-video] profile=%s %.1f fps, JPEG avg=%s, bytes avg=%d",
-					firstNonEmptyProfile(echoLow), float64(statsFrames)/elapsed.Seconds(),
+					profile, float64(statsFrames)/elapsed.Seconds(),
 					averageDuration(statsEncode, statsFrames).Round(time.Millisecond), statsBytes/max(statsFrames, 1))
 				statsStarted, statsFrames, statsBytes, statsEncode = time.Now(), 0, 0, 0
 			}
@@ -237,13 +237,6 @@ func stream(response http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func firstNonEmptyProfile(echoLow bool) string {
-	if echoLow {
-		return "echo-low"
-	}
-	return "video"
-}
-
 func averageDuration(total time.Duration, count int) time.Duration {
 	if count <= 0 {
 		return 0
@@ -251,11 +244,20 @@ func averageDuration(total time.Duration, count int) time.Duration {
 	return total / time.Duration(count)
 }
 
-func cameraStreamPeriod(echoLow bool) time.Duration {
-	if echoLow {
+func cameraStreamPeriod(profile string) time.Duration {
+	if cameraVideoProfile(profile) != "video" {
 		return echoStreamPeriod
 	}
 	return streamFramePeriod
+}
+
+func cameraVideoProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "echo-low", "echo-balanced":
+		return strings.ToLower(strings.TrimSpace(profile))
+	default:
+		return "video"
+	}
 }
 
 func echoVideoImage(source *image.RGBA, reuse *image.RGBA) *image.RGBA {

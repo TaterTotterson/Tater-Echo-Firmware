@@ -144,3 +144,19 @@ func TestCaptureCameraVideoFrameProfileRequestsEchoLowProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCaptureCameraVideoFrameProfileRequestsEchoBalancedProfile(t *testing.T) {
+	var requested string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requested = request.URL.Query().Get("profile")
+		response.Header().Set("Content-Type", "image/jpeg")
+		_, _ = response.Write([]byte{0xff, 0xd8, 0xff, 0xd9})
+	}))
+	defer server.Close()
+	if _, err := CaptureCameraVideoFrameProfile(context.Background(), strings.TrimPrefix(server.URL, "http://"), "echo-balanced"); err != nil {
+		t.Fatal(err)
+	}
+	if requested != "echo-balanced" {
+		t.Fatalf("camera profile = %q, want echo-balanced", requested)
+	}
+}
