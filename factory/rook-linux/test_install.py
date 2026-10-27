@@ -130,6 +130,7 @@ class RookInstallerTests(unittest.TestCase):
         self.assertIn("written and read back successfully", result)
         self.assertTrue(any(action.startswith("dd if=/tmp/tater-boot-logo.bin")
                             for action in adb.actions))
+        self.assertFalse(any("conv=notrunc" in action for action in adb.actions))
         self.assertFalse(any("tater-expdb-backup.img" in action for action in adb.actions))
 
     def test_rook_boot_logo_failure_restores_full_expdb(self):
@@ -145,6 +146,7 @@ class RookInstallerTests(unittest.TestCase):
                 )
         self.assertTrue(any(action.startswith("dd if=/tmp/tater-expdb-backup.img")
                             for action in adb.actions))
+        self.assertFalse(any("conv=notrunc" in action for action in adb.actions))
 
     def test_unknown_rook_logo_layout_is_untouched(self):
         adb = FakeLogoAdb("0" * 64, "0" * 64)
@@ -180,6 +182,9 @@ class RookInstallerTests(unittest.TestCase):
             installer.verify_reinstall_boot(
                 FakeReinstallAdb('TYPE="ext4"', installer.sha256(boot)), boot)
             for size, digest in installer.KNOWN_PREVIOUS_TATER_BOOTS:
+                installer.verify_reinstall_boot(
+                    FakeReinstallAdb('TYPE="ext4"', digests={size: digest}), boot)
+            for size, digest in installer.KNOWN_REINSTALL_INTERMEDIATE_BOOTS:
                 installer.verify_reinstall_boot(
                     FakeReinstallAdb('TYPE="ext4"', digests={size: digest}), boot)
             with self.assertRaises(installer.Fail):

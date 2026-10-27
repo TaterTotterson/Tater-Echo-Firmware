@@ -46,10 +46,19 @@ MAX_LINEAGE_BYTES = 1024 * 1024 * 1024
 # Tater boot images may be replaced. The second entry is the locally built
 # v2.5.0 image used for the first multi-Rook installation. Its Android header,
 # pinned kernel, rescue init, slot manager, and ramdisk files were compared with
-# the release image; only fbprobe's Go toolchain/build metadata differs.
+# the release image; only fbprobe's Go toolchain/build metadata differs. The
+# third entry is the exact boot image published in the v3.1.2 Rook factory
+# archive, retained so that released installations can be upgraded safely.
 KNOWN_PREVIOUS_TATER_BOOTS = (
     (13012992, "2496456df296db59349ce8cdc43778fbdb670d92279bb169d76907d8ca7719c7"),
     (13121536, "5c2da30a18b4b3cc6b670bec9d2f08f7ab985453c7179aae4e8d4c9f14f38c6a"),
+    (13121536, "91c8a0a84867b4055594c1d150ea31951f0fc49a05da63ef51217ae1769c2e5c"),
+)
+# A failed reinstall can stop after the installer has written the exact pinned
+# Lineage boot image used to recover Rook's vendor files. Accept that one
+# intermediate image so the same verified factory flow can resume safely.
+KNOWN_REINSTALL_INTERMEDIATE_BOOTS = (
+    (7720960, "f09d7f95a8d5d3519925a7ad865c42bffd8a05e53935bea70210da84a0e51638"),
 )
 ROOK_LOGO_OFFSET = 431416
 ROOK_LOGO_SIZE = 12096
@@ -175,8 +184,12 @@ def has_existing_tater_store(adb: Adb) -> bool:
 
 
 def verify_reinstall_boot(adb: Adb, boot: Path) -> None:
-    """Only allow the bundled boot or an exact verified earlier Tater boot."""
-    accepted = ((boot.stat().st_size, sha256(boot)), *KNOWN_PREVIOUS_TATER_BOOTS)
+    """Only allow a bundled, released, or exact interrupted-install boot."""
+    accepted = (
+        (boot.stat().st_size, sha256(boot)),
+        *KNOWN_PREVIOUS_TATER_BOOTS,
+        *KNOWN_REINSTALL_INTERMEDIATE_BOOTS,
+    )
     for size, digest in accepted:
         current = adb.sh(f"head -c {size} /dev/block/mmcblk0p9 | sha256sum").split()
         if current and current[0] == digest:
@@ -268,7 +281,7 @@ def install_tater_boot_logo(adb: Adb, backup: Path, logo: Path) -> str:
             "the Tater boot logo changed while transferring to Rook")
     adb.sh(
         f"dd if={remote_logo} of={partition} bs=1 seek={ROOK_LOGO_OFFSET} "
-        f"count={ROOK_LOGO_SIZE} conv=notrunc 2>/dev/null; sync; rm -f {remote_logo}"
+        f"count={ROOK_LOGO_SIZE} 2>/dev/null; sync; rm -f {remote_logo}"
     )
     fields = adb.sh(f"echo 3 > /proc/sys/vm/drop_caches; sha256sum {partition}").split()
     if fields and fields[0] == expected_sha:
@@ -279,7 +292,7 @@ def install_tater_boot_logo(adb: Adb, backup: Path, logo: Path) -> str:
     restore_fields = adb.sh(f"sha256sum {remote_backup}").split()
     require(restore_fields and restore_fields[0] == original_sha,
             "boot-logo readback failed and the expdb backup changed during transfer")
-    adb.sh(f"dd if={remote_backup} of={partition} bs=4096 conv=notrunc 2>/dev/null; "
+    adb.sh(f"dd if={remote_backup} of={partition} bs=4096 2>/dev/null; "
            f"sync; rm -f {remote_backup}")
     restored = adb.sh(f"echo 3 > /proc/sys/vm/drop_caches; sha256sum {partition}").split()
     require(restored and restored[0] == original_sha,
