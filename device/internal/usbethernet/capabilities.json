@@ -38,13 +38,13 @@
       "reason": "Crown's Tater custody baseline is pinned; its connector, role control, VBUS, and recovery still require independent qualification."
     },
     "athena": {
-      "backend": "mediatek-mtu3-role-switch-candidate",
-      "detection": "passive-until-kernel-host-mode",
-      "status": "kernel-work",
+      "backend": "mediatek-mtu3-gpio-otg",
+      "detection": "hardware-id-passive",
+      "status": "hardware-validation",
       "port": "external-usb",
-      "power": "separate-device-power-vbus-gpio-unverified",
+      "power": "separate-device-power-gpio150-candidate",
       "recovery": "usb-serial-and-rndis",
-      "reason": "The current device tree forces peripheral mode and disables the host controller; OTG role switching and VBUS drive require kernel and device-tree work."
+      "reason": "The Tater MTU3 dual-role kernel boots on Athena; normal-cable device mode, bounded host/device switching, USB serial/RNDIS restoration, reboot, and Wi-Fi fallback passed. An OTG Ethernet adapter is still required to validate VBUS, enumeration, DHCP, traffic, link loss, and unplug."
     },
     "rook": {
       "backend": "mediatek-musb-candidate",

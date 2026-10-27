@@ -122,9 +122,9 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 	manager := testManager(t, "athena")
 	got := manager.Diagnostics()
-	if got["prepared"] != true || got["supported"] != false || got["qualification"] != "kernel-work" ||
-		got["backend"] != "mediatek-mtu3-role-switch-candidate" ||
-		got["detection"] != "passive-until-kernel-host-mode" {
+	if got["prepared"] != true || got["supported"] != false || got["qualification"] != "hardware-validation" ||
+		got["backend"] != "mediatek-mtu3-gpio-otg" ||
+		got["detection"] != "hardware-id-passive" {
 		t.Fatalf("unexpected Athena diagnostics: %#v", got)
 	}
 	if reason, _ := got["qualification_reason"].(string); reason == "" {

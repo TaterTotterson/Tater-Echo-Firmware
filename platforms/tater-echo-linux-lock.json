@@ -91,7 +91,7 @@
       }
     },
     "athena": {
-      "commit": "f90367a000f2ff831aeafeb1af3a92f172e3360e",
+      "commit": "da9ae4c681df19beb512b9aee8ed6ac51af8b077",
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
