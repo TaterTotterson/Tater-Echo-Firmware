@@ -66,7 +66,7 @@
       }
     },
     "show": {
-      "checkers_commit": "0f042360fbc22d798930cfd683d251606bfb7412",
+      "checkers_commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
       "release": "v0.9.26",
       "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
@@ -91,7 +91,7 @@
       }
     },
     "athena": {
-      "commit": "da9ae4c681df19beb512b9aee8ed6ac51af8b077",
+      "commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
@@ -99,11 +99,13 @@
         "sha256": "cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5"
       },
       "video_decoder": {
-        "archive_member": "usr/local/bin/techo5-ffmpeg",
-        "sha256": "a66662829f1094cc92165ead5f50fa268af214b2545de7cb331eea9b27e2b564",
-        "size": 3750528,
+        "release": "video-decoder-v8.1.2-1",
+        "source_commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/tater-ffmpeg-armv7",
+        "sha256": "8f66c428bfca9ef7990aa1ba20dcf40d48a7cf451c05b733331b75142ae1da89",
+        "size": 4250248,
         "license": {
-          "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/n8.1.2/COPYING.LGPLv2.1",
+          "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/FFMPEG-LGPL-2.1.txt",
           "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
           "size": 26517
         }

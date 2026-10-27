@@ -185,7 +185,11 @@ func (renderer *renderer) applyCameraStream(controller *cameraStreamController, 
 		return
 	}
 	if result.err != nil {
-		renderer.resetCameraStream(controller)
+		// A decoder retry is not a camera selection change. Keep the most
+		// recent live frame, or the snapshot fallback when no live frame has
+		// arrived, visible while the decoder reconnects. Clearing both here
+		// made the Cameras screen flash at every retry.
+		controller.Release(result.image)
 		return
 	}
 	if result.image == nil {

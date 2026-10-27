@@ -177,7 +177,8 @@ tater_rook_wifi_mac wlan0
         decoder_job = release.split("\n  ffmpeg-armv7:\n", 1)[1].split(
             "\n  biscuit:\n", 1
         )[0]
-        self.assertIn("tools/extract_platform_member.py", decoder_job)
+        self.assertIn("tools/fetch_platform_input.py", decoder_job)
+        self.assertIn("platforms.athena.video_decoder device/build/tater-ffmpeg", decoder_job)
         self.assertIn("platforms.athena.video_decoder.license", decoder_job)
         self.assertIn("name: tater-ffmpeg-linux-armv7", decoder_job)
 

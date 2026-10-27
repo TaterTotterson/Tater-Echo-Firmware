@@ -164,20 +164,29 @@ func Args(request Request) ([]string, error) {
 	)
 	protocols := "http,https,tcp,tls,hls,crypto"
 	if parsed.Scheme == "rtsp" || parsed.Scheme == "rtsps" {
-		protocols = "tcp,tls,udp,rtp,crypto"
+		protocols = "tcp,tls,udp,rtp,srtp,crypto"
 	}
 	args := []string{
 		"-hide_banner", "-nostdin", "-loglevel", "error", "-max_pixels", strconv.Itoa(maximumPixels),
 		"-protocol_whitelist", protocols,
-		"-rw_timeout", "15000000",
 	}
 	if parsed.Scheme == "rtsp" || parsed.Scheme == "rtsps" {
 		// Protect's official RTSPS endpoint is TCP based. Keeping media on the
 		// same reliable transport also avoids opening a broad UDP receive range
 		// on the satellite even though the reduced decoder supports RTP/UDP.
 		args = append(args, "-rtsp_transport", "tcp", "-timeout", "15000000")
+		if parsed.Scheme == "rtsps" {
+			// Protect appliances normally use a locally issued certificate for
+			// their LAN-only RTSPS endpoint. The stream URL is already supplied
+			// over the authenticated Tater control channel; allow that local
+			// certificate while retaining TLS encryption on the camera link.
+			args = append(args, "-tls_verify", "0")
+		}
 	} else {
-		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "4")
+		args = append(args,
+			"-rw_timeout", "15000000",
+			"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "4",
+		)
 	}
 	if parsed.Scheme == "https" {
 		args = append(args, "-tls_verify", "1")

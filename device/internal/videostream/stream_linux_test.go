@@ -15,6 +15,7 @@ func TestArgsBoundsNetworkDecode(t *testing.T) {
 	joined := strings.Join(args, " ")
 	for _, expected := range []string{
 		"-protocol_whitelist http,https,tcp,tls,hls,crypto",
+		"-rw_timeout 15000000",
 		"-threads 3",
 		"-f rawvideo -pix_fmt rgba pipe:1",
 		"scale=896:672:force_original_aspect_ratio=decrease",
@@ -44,16 +45,28 @@ func TestArgsSupportsProtectRTSPSOverTCP(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, expected := range []string{
-		"-protocol_whitelist tcp,tls,udp,rtp,crypto",
+		"-protocol_whitelist tcp,tls,udp,rtp,srtp,crypto",
 		"-rtsp_transport tcp -timeout 15000000",
+		"-tls_verify 0",
 		"rtsps://protect.invalid:7441/private-token?enableSrtp",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("decoder arguments %q do not contain %q", joined, expected)
 		}
 	}
-	if strings.Contains(joined, "-reconnect ") || strings.Contains(joined, "live_start_index") {
+	if strings.Contains(joined, "-rw_timeout ") || strings.Contains(joined, "-reconnect ") || strings.Contains(joined, "live_start_index") {
 		t.Fatalf("RTSPS input received HTTP/HLS-only options: %q", joined)
+	}
+}
+
+func TestArgsKeepsRTSPSCertificatePolicyOffPlainRTSP(t *testing.T) {
+	args, err := Args(Request{URL: "rtsp://camera.invalid/live", Width: 640, Height: 360})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "-tls_verify") || strings.Contains(joined, "-rw_timeout") {
+		t.Fatalf("plain RTSP input received TLS or HTTP-only options: %q", joined)
 	}
 }
 

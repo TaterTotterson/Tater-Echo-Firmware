@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"image"
 	"testing"
 
@@ -40,6 +41,57 @@ func TestCameraStreamControllerRecyclesSupersededFrames(t *testing.T) {
 		}
 	default:
 		t.Fatal("superseded frame was not recycled")
+	}
+}
+
+func TestCameraStreamErrorKeepsSnapshotFallback(t *testing.T) {
+	fallback := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	cameras := &show.Cameras{SelectedID: "front", StreamURL: "rtsps://camera.invalid/live"}
+	renderer := &renderer{
+		screenWidth:      960,
+		screenHeight:     480,
+		state:            show.Snapshot{Cameras: cameras},
+		cameraFrameImage: fallback,
+		cameraFrameShown: "snapshot:front",
+	}
+	controller := newCameraStreamController()
+	controller.identity = cameraStreamIdentity(cameras, renderer.cameraVideoBounds().Size())
+
+	renderer.applyCameraStream(controller, cameraStreamResult{
+		identity: controller.identity,
+		err:      errors.New("decoder stopped"),
+	})
+
+	if renderer.cameraFrameImage != fallback || renderer.cameraFrameShown != "snapshot:front" {
+		t.Fatal("decoder retry cleared the snapshot fallback")
+	}
+	if renderer.cameraStreamShown {
+		t.Fatal("snapshot fallback was incorrectly marked as a live stream")
+	}
+}
+
+func TestCameraStreamErrorKeepsLastLiveFrame(t *testing.T) {
+	frame := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	cameras := &show.Cameras{SelectedID: "front", StreamURL: "rtsps://camera.invalid/live"}
+	renderer := &renderer{
+		screenWidth:       960,
+		screenHeight:      480,
+		state:             show.Snapshot{Cameras: cameras},
+		cameraFrameImage:  frame,
+		cameraFrameShown:  "stream:front:1",
+		cameraStreamImage: frame,
+		cameraStreamShown: true,
+	}
+	controller := newCameraStreamController()
+	controller.identity = cameraStreamIdentity(cameras, renderer.cameraVideoBounds().Size())
+
+	renderer.applyCameraStream(controller, cameraStreamResult{
+		identity: controller.identity,
+		err:      errors.New("decoder stopped"),
+	})
+
+	if renderer.cameraStreamImage != frame || renderer.cameraFrameImage != frame || !renderer.cameraStreamShown {
+		t.Fatal("decoder retry cleared the last good live frame")
 	}
 }
 

@@ -73,10 +73,12 @@ class PlatformLockTests(unittest.TestCase):
             variable = package.upper().replace("-", "_") + "_VERSION"
             self.assertIn(f'"{package}=${{{variable}}}"', dockerfile)
 
-    def test_video_decoder_is_a_pinned_safe_archive_member(self) -> None:
+    def test_video_decoder_is_a_pinned_tater_linux_asset(self) -> None:
         value = platform_lock.load()
         decoder = value["platforms"]["athena"]["video_decoder"]
-        self.assertEqual(decoder["archive_member"], "usr/local/bin/techo5-ffmpeg")
+        self.assertEqual(decoder["release"], "video-decoder-v8.1.2-1")
+        self.assertEqual(decoder["source_commit"], value["platforms"]["athena"]["commit"])
+        self.assertIn("TaterTotterson/Tater-Echo-Linux/releases/download/", decoder["url"])
         self.assertRegex(decoder["sha256"], r"^[0-9a-f]{64}$")
         self.assertGreater(decoder["size"], 0)
         self.assertEqual(decoder["license"]["size"], 26517)
@@ -84,8 +86,8 @@ class PlatformLockTests(unittest.TestCase):
         platform_lock.verify(value)
 
         unsafe = copy.deepcopy(value)
-        unsafe["platforms"]["athena"]["video_decoder"]["archive_member"] = "../decoder"
-        with self.assertRaisesRegex(SystemExit, "canonical relative path"):
+        unsafe["platforms"]["athena"]["video_decoder"]["source_commit"] = "not-a-commit"
+        with self.assertRaisesRegex(SystemExit, "source commit"):
             platform_lock.verify(unsafe)
 
     def test_lock_is_canonical_json(self) -> None:

@@ -85,19 +85,13 @@ jobs:
           path: |
             device/build/tater-ffmpeg
             device/build/FFMPEG-LGPL-2.1.txt
-          key: tater-ffmpeg-armv7-${{ hashFiles('platforms/tater-echo-linux-lock.json', 'tools/extract_platform_member.py') }}
+          key: tater-ffmpeg-armv7-${{ hashFiles('platforms/tater-echo-linux-lock.json', 'tools/fetch_platform_input.py') }}
 
-      - name: Extract decoder from pinned Tater Echo Linux baseline
+      - name: Fetch decoder from pinned Tater Echo Linux release
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           python3 tools/fetch_platform_input.py \
-            platforms.athena.rootfs /tmp/tater-echo-athena-baseline-rootfs.tar.gz
-          python3 tools/extract_platform_member.py \
-            /tmp/tater-echo-athena-baseline-rootfs.tar.gz \
-            "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.archive_member)" \
-            device/build/tater-ffmpeg \
-            --sha256 "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.sha256)" \
-            --size "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.size)"
+            platforms.athena.video_decoder device/build/tater-ffmpeg
           python3 tools/fetch_platform_input.py \
             platforms.athena.video_decoder.license device/build/FFMPEG-LGPL-2.1.txt
 
@@ -108,6 +102,8 @@ jobs:
             "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.sha256)"
           test "$(stat -c %s device/build/tater-ffmpeg)" = \
             "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.size)"
+          grep -aq 'Two slices reporting being the first in the same frame' device/build/tater-ffmpeg
+          strings device/build/tater-ffmpeg | grep -qx 'srtp'
           test "$(sha256sum device/build/FFMPEG-LGPL-2.1.txt | awk '{print $1}')" = \
             "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.license.sha256)"
           test "$(stat -c %s device/build/FFMPEG-LGPL-2.1.txt)" = \
