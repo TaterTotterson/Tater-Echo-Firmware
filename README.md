@@ -279,9 +279,11 @@ Crown, Athena, and Rook stage the daemon and native display together. Tater can
 then stage a verified rootfs in the inactive Linux slot. Failed application or
 rootfs health checks roll back to their preceding working slots. Kernel, boot,
 rescue, partition-layout, and bootloader-logo updates still use the
-factory/recovery archive. The monochrome Tater boot logo is currently applied
-only by the guarded Checkers, Crown, and Rook USB factory installers; unsupported or
-unknown bootloader layouts retain Amazon's logo.
+factory/recovery archive. Checkers, Crown, and Rook apply the monochrome Tater
+boot logo only through guarded, verified USB factory steps. Athena never patches
+its protected bootloader; its factory-built system store safely paints the Tater
+mark at the first Linux framebuffer stage, so a brief Amazon frame can remain
+immediately after power-on. Unsupported or unknown layouts retain Amazon's logo.
 
 | Release file | Use |
 |---|---|
@@ -318,7 +320,7 @@ linux/dot/build_linux.sh --version v0.0.0-dev --target biscuit \
 
 Tagged release builds compile the appropriate daemon, native screen/camera
 components, wake runtime, and complete Tater Linux rootfs in GitHub Actions.
-All TECHO5 revisions, downloaded platform images, package versions, and the
+All Tater Echo Linux revisions, downloaded platform images, package versions, and the
 multi-architecture build container are controlled by
 [`platforms/tater-echo-linux-lock.json`](platforms/tater-echo-linux-lock.json). Release manifests
 include that lock's SHA-256, the upstream source revision, and the immutable

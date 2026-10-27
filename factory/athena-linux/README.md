@@ -25,13 +25,20 @@ tuning extracted from this unit's stock boot image into the pinned mainline boot
 image. Keep that backup directory private and never substitute another unit's
 filled boot image.
 
+The system image also includes Tater's monochrome early-Linux splash. Athena's
+first Amazon wordmark is inside the protected `lk_real` unlock chain, so a brief
+Amazon frame can remain immediately after power-on. Tater safely replaces it as
+soon as Linux owns the framebuffer. The installer never writes `tee1`, `tee2`,
+`lk`, `lk2`, the preloader, or TWRP to change branding.
+
 The tested upstream panel variants are checked automatically. An unknown panel
 is refused unless the operator deliberately passes `--force-panel`; a forced
 panel may remain dark. Routine Tater OTA updates the application A/B slots and
 can stage a verified rootfs in the inactive System slot. Use `./install.sh
 --repair` from Tater Recovery when the device cannot boot far enough for OTA.
 
-The low-level Athena kernel, installer, store layout, and hardware enablement are
-from [TECHO5](https://github.com/HuskerMinion/techo5), MIT-licensed. Tater's
-Athena integration includes audio, privacy-switch, camera, touch, display,
-setup, recovery, and application OTA support.
+The Athena kernel, installer, store layout, and hardware enablement are maintained
+in [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux), based
+on MIT-licensed [TECHO5](https://github.com/HuskerMinion/techo5) platform work.
+Tater's Athena integration includes audio, privacy-switch, camera, touch,
+display, setup, recovery, and application OTA support.

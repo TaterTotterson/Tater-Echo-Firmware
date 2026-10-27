@@ -6,21 +6,23 @@ supports Athena factory installation, setup, native display and audio, camera,
 privacy controls, recovery, and application OTA updates. The validated hardware
 contract and ongoing regression checklist are recorded below.
 
-## Upstream foundation
+## Platform foundation
 
 - Unlock and TWRP: [saiyaku-athena on XDA](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/), from Fire OS 7080 / PS7574.1.7080N.
-- Linux platform: [TECHO5 Athena installation](https://github.com/HuskerMinion/techo5/blob/master/docs/install-athena.md).
-- Pinned TECHO5 release: `v1.6.4`, source commit
-  `3062cb0a7b812145248c9b60ce88ee3c6474924d`.
+- Linux platform: [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux),
+  based on the MIT-licensed TECHO5 Athena work.
+- Pinned Tater Echo Linux source commit:
+  `f90367a000f2ff831aeafeb1af3a92f172e3360e` (compatible platform release
+  `v1.6.4`).
 - Base rootfs SHA-256:
   `cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5`.
 - Mainline boot SHA-256:
   `ccea79be61d8d3b99a9851f004b0f3974fee6e8028f8fbd1b4fab03eace65e68`.
 
 The release build layers Tater's ARMv7 daemon, renderer, camera adapter, wake
-runtimes, and setup flow onto that rootfs, then uses TECHO5's Athena store
-builder to produce the `system` image. The 64-bit mainline kernel is kept as a
-pinned upstream input rather than copied into this repository.
+runtimes, and setup flow onto that rootfs, then uses Tater Echo Linux's Athena
+store builder to produce the `system` image. The 64-bit mainline kernel is kept
+as a pinned platform input rather than copied into this repository.
 
 ## Hardware contract used by Tater
 
@@ -57,6 +59,20 @@ preloader, or saiyaku's real partitions. Keep `backups/<serial>` private and
 permanent: its original Fire OS boot image is both the rollback source and the
 source of that unit's speaker tuning.
 
+### Boot branding
+
+Athena's first Amazon wordmark is compiled into `lk_real`, a protected part of
+the saiyaku unlock chain. Tater never patches it, because a bad `lk` write can
+prevent both normal boot and TWRP. A brief Amazon frame can therefore remain
+immediately after power-on.
+
+The factory-built `system` store instead contains a static framebuffer helper
+and Tater's 315 x 170 monochrome mark. Early Linux paints that mark over the
+preserved bootloader framebuffer and leaves it in place until Tater's normal
+animated startup takes over. This path was verified on physical Athena hardware
+on 2026-10-26. It changes only the writable `system` image; `tee1`, `tee2`,
+`lk`, `lk2`, the preloader, and TWRP remain untouched.
+
 ## Hardware validation and regression checklist
 
 Athena was accepted on model A8H3N2 with the ILI9881C/BOE panel after the
@@ -66,7 +82,9 @@ installer, recovery, or OTA paths:
 1. Run `./install.sh --verify-bundle` and `./install.sh --dry-run`; confirm the
    exact partitions, tested panel, and known speaker-tuning hash.
 2. Complete the factory install with both power and USB stable. Confirm TWRP
-   still boots and the private backup can be read.
+   still boots, the private backup can be read, and the early Tater splash
+   appears after the protected power-on frame without modifying the protected
+   boot chain.
 3. Complete `Tater-Setup-XXXX`; verify pairing, Wi-Fi reconnect, reboot, and a
    deliberate loss/recovery of the access point.
 4. Check every screen edge and corner, rotation, backlight levels, idle wake,

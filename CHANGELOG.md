@@ -10,6 +10,13 @@
   arbitrary streaming HTTP chunk boundaries, eliminating static between reply
   chunks; only the final incomplete period is padded with silence.
 
+#### Boot branding
+
+- Added a hardware-verified Athena early-Linux Tater splash without writing its
+  protected saiyaku bootloader chain. Checkers, Crown, and Rook retain their
+  guarded verified bootloader-logo flow; Athena may show a brief protected
+  Amazon frame before Linux safely paints the Tater mark.
+
 ## v3.1.1
 
 ### What's Changed

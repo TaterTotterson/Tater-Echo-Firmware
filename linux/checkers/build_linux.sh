@@ -127,9 +127,7 @@ cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 '
 
 "$script_dir/build_camera_helper.sh" "$platform_source" "$device/build/tater-camera"
-if [ "$target" != athena ]; then
-    python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
-fi
+python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
 
 for required in \
     "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
@@ -194,7 +192,7 @@ grep -qx './usr/local/bin/tater-ffmpeg' "$listing" || {
 }
 
 file "$device/build/tater-echo" "$device/build/tater-show-linux" "$device/build/tater-reboot-now" \
-    "$device/build/tater-camera" \
+    "$device/build/tater-camera" "$device/build/tater-rescue-fbprobe" \
     "$packaged_ffmpeg" \
     "$device/build/microwakeword-linux/libtater_microwakeword.so" \
     "$device/build/onnxruntime-linux-armv7/libonnxruntime.so"
@@ -202,6 +200,7 @@ file "$device/build/tater-echo" | grep -q '32-bit.*ARM'
 file "$device/build/tater-show-linux" | grep -q '32-bit.*ARM'
 file "$device/build/tater-reboot-now" | grep -q '32-bit.*ARM'
 file "$device/build/tater-camera" | grep -q '32-bit.*ARM'
+file "$device/build/tater-rescue-fbprobe" | grep -q '32-bit.*ARM'
 file "$packaged_ffmpeg" | grep -q '32-bit.*ARM'
 file "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | grep -q '32-bit.*ARM'
 strings "$device/build/tater-echo" | grep -qF "$version"

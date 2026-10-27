@@ -532,9 +532,10 @@ jobs:
             "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
           git -C /tmp/tater-echo-linux-show checkout \
             "$(python3 tools/platform_lock.py get platforms.athena.commit)"
-          patch -d /tmp/tater-echo-linux-show -p1 < platforms/techo5-athena-reproducible.patch
+          patch -d /tmp/tater-echo-linux-show/platforms/show -p1 \
+            < platforms/techo5-athena-reproducible.patch
 
-      - name: Set up Go for pinned TECHO5 camera helper
+      - name: Set up Go for pinned Tater Echo Linux helpers
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version: '1.26.0'
@@ -546,7 +547,7 @@ jobs:
             --version '${{ steps.version.outputs.version }}' \
             --target athena \
             --base-rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz \
-            --platform /tmp/tater-echo-linux-show \
+            --platform /tmp/tater-echo-linux-show/platforms/show \
             --ffmpeg device/build/tater-ffmpeg \
             --ffmpeg-license device/build/FFMPEG-LGPL-2.1.txt \
             --output device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
@@ -559,11 +560,13 @@ jobs:
             -e APK=/opt/tater/bin/apk.static \
             -e E2FSPROGS_FAKE_TIME="$source_date_epoch" \
             -e SOURCE_DATE_EPOCH="$source_date_epoch" \
-            -v "$PWD:/src" -v /tmp/tater-echo-linux-show:/tater-platform:ro -w /src \
+            -v "$PWD:/src" -v /tmp/tater-echo-linux-show/platforms/show:/tater-platform:ro -w /src \
             "$builder" bash /tater-platform/tools/linux/athena/mkstore.sh \
               --inner \
               -r device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz \
               -k none \
+              -f device/build/tater-rescue-fbprobe \
+              -l /tater-platform/logo/tater-boot-315.png \
               -o device/build/tater-athena-system-${{ steps.version.outputs.version }}.img \
               -i /opt/tater/athena-inputs \
               -w /tmp/tater-athena-store
@@ -581,7 +584,7 @@ jobs:
 
       - name: Package and verify Athena firmware
         env:
-          TATER_ATHENA_PLATFORM_SOURCE: /tmp/tater-echo-linux-show
+          TATER_ATHENA_PLATFORM_SOURCE: /tmp/tater-echo-linux-show/platforms/show
           TATER_ATHENA_ROOTFS: device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
           TATER_ATHENA_SYSTEM_IMAGE: device/build/tater-athena-system-${{ steps.version.outputs.version }}.img.gz
           TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/tater-echo-athena-baseline-boot.img

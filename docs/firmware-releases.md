@@ -9,7 +9,7 @@ Only tags in that format trigger a firmware release.
 ## Build provenance
 
 [`platforms/tater-echo-linux-lock.json`](../platforms/tater-echo-linux-lock.json) is the single
-source of truth for TECHO5 family commits, platform downloads and hashes, the
+source of truth for Tater Echo Linux commits, platform downloads and hashes, the
 Go/Alpine base, exact build packages, and the immutable multi-architecture
 builder index and per-platform digests. Firmware build scripts disable Go's automatic toolchain
 download and do not install packages from live repositories. Athena's rescue
@@ -35,11 +35,11 @@ upstream licenses and notices.
 Biscuit and Radar installers run in TWRP. They build the Linux recovery image
 locally from the unit's TWRP header and the pinned board kernel, preserve
 verified boot-critical backups and a restorable TWRP image, then install the
-A/B rootfs under cache. Checkers, Crown, and Rook use hash-pinned TECHO5
+A/B rootfs under cache. Checkers, Crown, and Rook use hash-pinned Tater Echo Linux
 platform images and retain TWRP. Their USB installations use target-matched
 LineageOS packages only as the source of each unit's vendor driver tree, then
 replace Android's system partition with the A/B store. Athena instead uses
-TECHO5's pinned 64-bit mainline kernel and system-partition store. Its
+Tater Echo Linux's pinned 64-bit mainline kernel and system-partition store. Its
 installer extracts the unit-specific speaker tuning from the private Fire OS
 boot backup, inserts it into the release boot image, and writes only `system`
 and `boot`.
@@ -83,8 +83,10 @@ also never writes bootloader branding. The monochrome Tater boot logo is a
 guarded USB-factory step on Checkers, Crown, and Rook: the installer changes only a known
 logo slot in the verified `expdb` backup, reads the partition back, and
 restores the complete backup if verification fails. Unknown bootloader layouts
-keep Amazon's logo. Athena also keeps Amazon's logo until its exact bootloader
-layout has been independently verified; Biscuit and Radar have no screen.
+keep Amazon's logo. Athena deliberately never patches its protected `lk_real`
+unlock chain. Its factory-built system store paints the Tater mark at the first
+safe Linux framebuffer stage, so a brief Amazon frame can remain immediately
+after power-on. Biscuit and Radar have no screen.
 
 Each target also publishes target-specific `wake-runtime.so` and
 `onnxruntime.so` sidecars. Every target receives the reduced Linux/musl ARMv7
