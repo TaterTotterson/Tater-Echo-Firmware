@@ -57,6 +57,10 @@ The installer verifies the target, downloads and verifies the pinned vendor
 image before any device write, backs up small partitions, asks before
 destructive changes, installs slot A, and waits for Tater Linux over USB. Keep
 `backups/<serial>/` private and retain it for device-specific recovery.
+On a recognized amonet-crown bootloader it replaces only the verified Amazon
+wordmark slot in `expdb` with the monochrome Tater logo, then reads the
+partition back. Unknown bootloader revisions keep Amazon's logo, and a failed
+readback restores the complete saved partition.
 
 When the Tater setup screen appears, join its open `Tater-Setup-XXXX` Wi-Fi
 network, browse to `http://192.168.4.1`, and enter home Wi-Fi plus an **Add

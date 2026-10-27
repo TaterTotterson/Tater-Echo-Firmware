@@ -278,7 +278,10 @@ Biscuit and Radar then stage their daemon in A/B application slots; Checkers,
 Crown, Athena, and Rook stage the daemon and native display together. Tater can
 then stage a verified rootfs in the inactive Linux slot. Failed application or
 rootfs health checks roll back to their preceding working slots. Kernel, boot,
-rescue, and partition-layout updates still use the factory/recovery archive.
+rescue, partition-layout, and bootloader-logo updates still use the
+factory/recovery archive. The monochrome Tater boot logo is currently applied
+only by the guarded Crown and Rook USB factory installers; unsupported or
+unknown bootloader layouts retain Amazon's logo.
 
 | Release file | Use |
 |---|---|

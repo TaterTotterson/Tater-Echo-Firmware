@@ -14,7 +14,10 @@ verified backups of the device's boot, recovery, system, lk, and expdb
 partitions. It asks for `ERASE` before formatting userdata. It installs
 LineageOS without starting Android, keeps the device's own vendor drivers,
 flashes Tater's Rook boot image, and converts **system partition 11** into the
-Tater Linux A/B store. It never writes TWRP, lk, expdb, or a boot logo.
+Tater Linux A/B store. It never writes TWRP or `lk`. After verifying the full
+`expdb` backup and Rook's exact embedded-logo layout, it replaces only the
+12,096-byte Amazon logo slot with the monochrome Tater mark. An unknown layout
+is left alone, and a failed readback restores the complete `expdb` backup.
 
 The pinned LineageOS ZIP is downloaded on demand or can be supplied with
 `--lineage-zip PATH`. Its SHA-256 is
@@ -49,8 +52,9 @@ installation missing that platform fix needs this `--reinstall-existing-tater`
 path because routine application OTA does not replace the Linux root
 filesystem.
 
-During factory installation, the rescue stage shows an upright, round-safe
-`INSTALLING TATER` screen. This screen is part of the boot image, so an
+During factory installation, the bootloader and rescue stage show the same
+round-safe monochrome Tater mark, followed by `INSTALLING TATER`. The rescue
+screen is part of the boot image, so an
 application OTA cannot change it on an already-installed Spot. The first boot
 is expected to show Tater setup. The root slot stays in trial
 state until it connects to Tater and passes its health check. On OTA-capable

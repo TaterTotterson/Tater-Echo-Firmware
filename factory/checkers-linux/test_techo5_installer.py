@@ -1,9 +1,11 @@
 import hashlib
 import importlib.util
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest import mock
+import zlib
 
 
 SOURCE = Path(__file__).parent / "tools/techo5/install-show.py"
@@ -60,6 +62,20 @@ class LineageInstallTests(unittest.TestCase):
             self.assertLess(adb.actions.index("reboot recovery"),
                             adb.actions.index("push /data/lineage.zip"))
             self.assertIn("twrp install /data/lineage.zip", adb.actions)
+
+
+class BootLogoTests(unittest.TestCase):
+    def test_monochrome_tater_logo_matches_show_slot(self):
+        logo = Path(installer.LOGO_FILE).read_bytes()
+        self.assertEqual(installer.LOGO_SIZE, len(logo))
+        self.assertEqual(installer.LOGO_SHA, hashlib.sha256(logo).hexdigest())
+        count, total, offset = struct.unpack_from("<III", logo)
+        self.assertEqual((1, 12), (count, offset))
+        raw = zlib.decompress(logo[12:total])
+        self.assertEqual(315 * 170 * 4, len(raw))
+        self.assertEqual({b"\x00\x00\x00\xff", b"\xff\xff\xff\xff"},
+                         {raw[index:index + 4] for index in range(0, len(raw), 4)})
+        self.assertEqual(bytes(installer.LOGO_SIZE - total), logo[total:])
 
 
 if __name__ == "__main__":

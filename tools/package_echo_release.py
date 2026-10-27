@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import gzip
 import hashlib
 import io
@@ -32,8 +31,10 @@ ELFCLASS32 = 1
 ELFCLASS64 = 2
 EM_ARM = 40
 EM_AARCH64 = 183
-SHOW_BOOT_LOGO_SHA256 = "1354914c8a2498a7f69a8ebc4a23782ff3369f9e4f980de04f7b9b77734c3403"
+SHOW_BOOT_LOGO_SHA256 = "9cfa08b845406dea4e1aa6b3878126afce16aa05a2a9afe5058c8c84d034c7d6"
 SHOW_BOOT_LOGO_SIZE = 6105
+ROOK_BOOT_LOGO_SHA256 = "2c8d54f6987cef2e0877360e873191bfc48a35a13e8d7f42e0ecb987f2df860d"
+ROOK_BOOT_LOGO_SIZE = 12096
 PLATFORM_LOCK = platform_lock.load()
 DOT_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["dot"]["commit"]
 ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
@@ -107,26 +108,18 @@ def metadata(path: Path) -> dict:
     return {"sha256": digest(path), "size": path.stat().st_size}
 
 
+def require_asset(path: Path, expected_sha256: str, expected_size: int) -> None:
+    if (not path.is_file() or path.stat().st_size != expected_size
+            or digest(path) != expected_sha256):
+        raise SystemExit(f"required release asset failed verification: {path}")
+
+
 def copy(source: Path, destination: Path, mode: int) -> None:
     if not source.is_file():
         raise SystemExit(f"required release input is missing: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(mode)
-
-
-def decode_verified_asset(source: Path, destination: Path, expected_sha256: str,
-                          expected_size: int) -> None:
-    try:
-        encoded = "".join(source.read_text(encoding="ascii").split())
-        payload = base64.b64decode(encoded, validate=True)
-    except (OSError, UnicodeError, ValueError) as exc:
-        raise SystemExit(f"required encoded release asset is invalid: {source}") from exc
-    if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
-        raise SystemExit(f"required encoded release asset failed verification: {source}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(payload)
-    destination.chmod(0o644)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -422,6 +415,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
                 "tools/techo5/LICENSE": (
                     REPO / "factory/checkers-linux/tools/techo5/LICENSE", 0o644),
+                "tools/techo5/boot-logo/tater-wordmark.bin": (
+                    REPO / "factory/checkers-linux/tools/techo5/boot-logo/tater-wordmark.bin", 0o644),
             }
         elif target == "athena":
             platform_source_value = os.getenv("TATER_ATHENA_PLATFORM_SOURCE", "").strip()
@@ -476,6 +471,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
                 "tools/techo5/LICENSE": (
                     REPO / "factory/checkers-linux/tools/techo5/LICENSE", 0o644),
+                "boot-logo/tater-boot-480.bin": (
+                    REPO / "factory/rook-linux/boot-logo/tater-boot-480.bin", 0o644),
             }
 
         inputs["licenses/ECHOLOCAL-MIT.txt"] = (
@@ -491,6 +488,18 @@ def build(version: str, target: str, output: Path) -> list[Path]:
 
         for relative, (source, mode) in inputs.items():
             copy(source, factory / relative, mode)
+        if target in LINUX_SHOW_TARGETS:
+            require_asset(
+                factory / "tools/techo5/boot-logo/tater-wordmark.bin",
+                SHOW_BOOT_LOGO_SHA256,
+                SHOW_BOOT_LOGO_SIZE,
+            )
+        if target == "rook":
+            require_asset(
+                factory / "boot-logo/tater-boot-480.bin",
+                ROOK_BOOT_LOGO_SHA256,
+                ROOK_BOOT_LOGO_SIZE,
+            )
         if target in LINUX_DOT_TARGETS:
             init = factory / "tools/linux/init"
             init_text = init.read_text()
@@ -507,12 +516,6 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             slotctl.write_text(slotctl.read_text().replace(
                 "usr/local/bin/echod", "usr/local/bin/tater-echo"))
         if target in LINUX_SHOW_TARGETS:
-            decode_verified_asset(
-                REPO / "factory/checkers-linux/tools/techo5/boot-logo/cronos-wordmark.bin.b64",
-                factory / "tools/techo5/boot-logo/cronos-wordmark.bin",
-                SHOW_BOOT_LOGO_SHA256,
-                SHOW_BOOT_LOGO_SIZE,
-            )
             branded_boot = factory / "payload/boot.img"
             subprocess.run([
                 sys.executable,

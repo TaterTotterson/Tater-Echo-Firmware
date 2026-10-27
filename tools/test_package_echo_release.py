@@ -276,7 +276,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 "factory/checkers-linux/tools/techo5/install-show.py",
                 "factory/checkers-linux/tools/techo5/techo5lib.py",
                 "factory/checkers-linux/tools/techo5/LICENSE",
-                "factory/checkers-linux/tools/techo5/boot-logo/cronos-wordmark.bin.b64",
+                "factory/checkers-linux/tools/techo5/boot-logo/tater-wordmark.bin",
                 "factory/crown-linux/README.md",
                 "linux/checkers/provision_console.py",
                 "linux/checkers/brand_boot.py",
@@ -367,7 +367,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 self.assertIn(f"{prefix}/to_recovery.py", archive.getnames())
                 self.assertIn(f"{prefix}/recovery_install.py", archive.getnames())
                 logo = archive.extractfile(
-                    f"{prefix}/tools/techo5/boot-logo/cronos-wordmark.bin"
+                    f"{prefix}/tools/techo5/boot-logo/tater-wordmark.bin"
                 ).read()
                 self.assertEqual(package_echo_release.SHOW_BOOT_LOGO_SIZE, len(logo))
                 self.assertEqual(
@@ -414,6 +414,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 "factory/rook-linux/README.md",
                 "factory/checkers-linux/tools/techo5/techo5lib.py",
                 "factory/checkers-linux/tools/techo5/LICENSE",
+                "factory/rook-linux/boot-logo/tater-boot-480.bin",
                 "LICENSE",
                 "LICENSES/ECHOLOCAL-MIT.txt",
                 "LICENSES/SENDSPIN-MIT.txt",
@@ -471,6 +472,14 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 self.assertEqual(recovery.mode & 0o777, 0o755)
                 repair = archive.getmember(f"tater-echo-rook-{version}-factory/recovery_install.py")
                 self.assertEqual(repair.mode & 0o777, 0o755)
+                logo = archive.extractfile(
+                    f"tater-echo-rook-{version}-factory/boot-logo/tater-boot-480.bin"
+                ).read()
+                self.assertEqual(package_echo_release.ROOK_BOOT_LOGO_SIZE, len(logo))
+                self.assertEqual(
+                    package_echo_release.ROOK_BOOT_LOGO_SHA256,
+                    hashlib.sha256(logo).hexdigest(),
+                )
                 archive.extractall(extract)
             factory = extract / f"tater-echo-rook-{version}-factory"
             result = subprocess.run(

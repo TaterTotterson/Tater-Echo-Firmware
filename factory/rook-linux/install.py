@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Factory-install Tater Linux on an unlocked Echo Spot 2017 (rook) in TWRP.
 
-This installer never writes lk, expdb, recovery, or any bootloader partition.
-It verifies and saves the original partitions before formatting userdata.
+The installer saves and verifies the original partitions before any write. It
+never writes lk or recovery; it replaces only the verified boot-logo bundle in
+expdb and restores the complete backup immediately if readback fails.
 """
 
 from __future__ import annotations
@@ -15,12 +16,14 @@ import os
 from pathlib import Path
 import re
 import shlex
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 from urllib import request as urlrequest
 import zipfile
+import zlib
 
 
 ROOT = Path(__file__).resolve().parent
@@ -48,6 +51,12 @@ KNOWN_PREVIOUS_TATER_BOOTS = (
     (13012992, "2496456df296db59349ce8cdc43778fbdb670d92279bb169d76907d8ca7719c7"),
     (13121536, "5c2da30a18b4b3cc6b670bec9d2f08f7ab985453c7179aae4e8d4c9f14f38c6a"),
 )
+ROOK_LOGO_OFFSET = 431416
+ROOK_LOGO_SIZE = 12096
+ROOK_LOGO_DIMENSIONS = (480, 480)
+ROOK_LOGO_SHA256 = "2c8d54f6987cef2e0877360e873191bfc48a35a13e8d7f42e0ecb987f2df860d"
+LK_LOGO_BASE = 0x4BD00000
+LK_HEADER_SIZE = 512
 
 
 def sha256(path: Path) -> str:
@@ -209,6 +218,75 @@ def push_checked(adb: Adb, source: Path, remote: str) -> None:
     require(actual == sha256(source), f"{source.name} changed in transfer to the device")
 
 
+def valid_rook_logo_slot(image: bytes) -> bool:
+    """Recognize Rook's exact in-place LK logo bundle before touching expdb."""
+    end = ROOK_LOGO_OFFSET + ROOK_LOGO_SIZE
+    if len(image) < end:
+        return False
+    count, total, offset = struct.unpack_from("<III", image, ROOK_LOGO_OFFSET)
+    if count != 1 or offset != 12 or not 16 < total <= ROOK_LOGO_SIZE:
+        return False
+    try:
+        raw = zlib.decompress(image[ROOK_LOGO_OFFSET + 12:ROOK_LOGO_OFFSET + total])
+    except zlib.error:
+        return False
+    if len(raw) != ROOK_LOGO_DIMENSIONS[0] * ROOK_LOGO_DIMENSIONS[1] * 4:
+        return False
+    pointer = struct.pack("<I", LK_LOGO_BASE + ROOK_LOGO_OFFSET - LK_HEADER_SIZE)
+    return sum(
+        image[index:index + 4] == pointer
+        for index in range(LK_HEADER_SIZE, len(image) - 3, 4)
+    ) == 1
+
+
+def install_tater_boot_logo(adb: Adb, backup: Path, logo: Path) -> str:
+    """Replace only Rook's verified expdb logo slot, with full readback and restore."""
+    require(logo.is_file() and logo.stat().st_size == ROOK_LOGO_SIZE
+            and sha256(logo) == ROOK_LOGO_SHA256,
+            "the bundled monochrome Tater boot logo failed verification")
+    expdb_backup = backup / "expdb.img"
+    original = expdb_backup.read_bytes()
+    payload = logo.read_bytes()
+    slot = original[ROOK_LOGO_OFFSET:ROOK_LOGO_OFFSET + ROOK_LOGO_SIZE]
+    if slot == payload:
+        return "the Tater boot logo is already installed"
+    if not valid_rook_logo_slot(original):
+        return "kept Amazon's boot logo: Rook expdb does not contain the verified logo slot"
+
+    partition = device_partition(adb, "expdb", PARTITIONS["expdb"])
+    original_sha = hashlib.sha256(original).hexdigest()
+    expected = original[:ROOK_LOGO_OFFSET] + payload + original[ROOK_LOGO_OFFSET + ROOK_LOGO_SIZE:]
+    expected_sha = hashlib.sha256(expected).hexdigest()
+    fields = adb.sh(f"sha256sum {partition}").split()
+    if not fields or fields[0] != original_sha:
+        return "kept Amazon's boot logo: expdb changed after its verified backup"
+
+    remote_logo = "/tmp/tater-boot-logo.bin"
+    adb.push(str(logo), remote_logo)
+    fields = adb.sh(f"sha256sum {remote_logo}").split()
+    require(fields and fields[0] == ROOK_LOGO_SHA256,
+            "the Tater boot logo changed while transferring to Rook")
+    adb.sh(
+        f"dd if={remote_logo} of={partition} bs=1 seek={ROOK_LOGO_OFFSET} "
+        f"count={ROOK_LOGO_SIZE} conv=notrunc 2>/dev/null; sync; rm -f {remote_logo}"
+    )
+    fields = adb.sh(f"echo 3 > /proc/sys/vm/drop_caches; sha256sum {partition}").split()
+    if fields and fields[0] == expected_sha:
+        return "the monochrome Tater boot logo was written and read back successfully"
+
+    remote_backup = "/tmp/tater-expdb-backup.img"
+    adb.push(str(expdb_backup), remote_backup)
+    restore_fields = adb.sh(f"sha256sum {remote_backup}").split()
+    require(restore_fields and restore_fields[0] == original_sha,
+            "boot-logo readback failed and the expdb backup changed during transfer")
+    adb.sh(f"dd if={remote_backup} of={partition} bs=4096 conv=notrunc 2>/dev/null; "
+           f"sync; rm -f {remote_backup}")
+    restored = adb.sh(f"echo 3 > /proc/sys/vm/drop_caches; sha256sum {partition}").split()
+    require(restored and restored[0] == original_sha,
+            f"boot-logo readback and automatic expdb restoration failed; preserve {expdb_backup}")
+    raise Fail("Tater boot-logo readback failed; the verified original expdb was restored")
+
+
 def install_lineage(adb: Adb, zip_path: Path) -> None:
     output = adb.sh("twrp format data")
     require("Done" in output, f"TWRP could not format userdata: {output}")
@@ -249,7 +327,7 @@ def confirm(serial: str, version: str, reinstall: bool) -> None:
     if reinstall:
         print("REINSTALL: the current Tater setup, A/B slots, and local settings will be erased.",
               flush=True)
-    print("Recovery/TWRP and bootloader partitions are not written.", flush=True)
+    print("Recovery and lk are not written. Only expdb's verified boot-logo slot is replaced.", flush=True)
     require(input("Type ERASE to continue: ").strip() == "ERASE", "installation cancelled")
 
 
@@ -305,6 +383,7 @@ def install(args: argparse.Namespace) -> None:
                 md5(str(lineage_boot)) == fields[0],
                 "existing LineageOS boot backup differs from the boot just installed")
     note(f"LineageOS boot backup: {lineage_boot}")
+    note(install_tater_boot_logo(adb, backup, ROOT / "boot-logo" / "tater-boot-480.bin"))
     adb.sh("mkdir -p /data/techo5-linux /data/misc/techo5")
     push_checked(adb, rootfs, "/data/techo5-linux/tater-rootfs.tar.gz")
     key_file = backup / "home-assistant.key"
