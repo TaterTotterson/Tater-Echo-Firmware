@@ -85,7 +85,7 @@ SMALL_PARTITIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15)
 
 # The Tater logo in place of Amazon's at boot. What the bootloader paints is compiled into kaeru, the
 # unlock's bootloader, which lives in the expdb partition: the wordmark is a zlib bundle, and the Show 5
-# 2nd gen's and the Show 8's hold the same Amazon picture in the same 6105-byte slot, at different
+# and Show 8 bootloaders hold the same Amazon picture in the same 6105-byte slot, at different
 # places. boot-logo/tater-wordmark.bin is that slot with the monochrome Tater mark in it. It is only ever
 # written over the kaeru it was made for (stock), in place, so the header, the size and every pointer
 # stay as they are; anything else keeps Amazon's logo. Never into lk (the stock bootloader): changed,
@@ -93,10 +93,13 @@ SMALL_PARTITIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15)
 LOGO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'boot-logo', 'tater-wordmark.bin')
 LOGO_SHA = '9cfa08b845406dea4e1aa6b3878126afce16aa05a2a9afe5058c8c84d034c7d6'
 LOGO_SIZE = 6105
+TWRP_DD = '/sbin/toybox dd'
 # Per board: where the slot is in kaeru, kaeru's length, and kaeru's sha256 before branding.
 LOGO_KAERU = {
     'cronos': dict(offset=335736, length=399440,  # amonet-cronos v2.0.1
                    stock='a9fb5acb08ee99ab5562da612b329249157f96dabc5702fad6e14ec6cf5a415b'),
+    'checkers': dict(offset=335308, length=379309,  # Checkers kaeru, verified 2026-10-26
+                     stock='d578c12a2023cd41c3b158f1a74622fd17202aee061a188fa4df0c1384e149fc'),
     'crown': dict(offset=288716, length=481792,  # amonet-crown
                   stock='6a717f0f8bd3502df2e2a811f1a90a2ec83e58f151874e11c2920a9a63dc4fa1'),
 }
@@ -191,6 +194,8 @@ def put_logo(adb, parts, board):
         return 'the Tater boot logo is already there'
     if sha256(kaeru) != k['stock']:
         return "kept Amazon's boot logo: this unit's bootloader (kaeru, in expdb) is not the one the logo was made for"
+    if adb.sh('test -x /sbin/toybox && echo TATER_TOYBOX_DD') != 'TATER_TOYBOX_DD':
+        return "kept Amazon's boot logo: TWRP has no verified in-place dd implementation"
     branded = kaeru[:at] + logo + kaeru[at + LOGO_SIZE:]
     branded_sha = sha256(branded)
     # The copy on this computer is the one that goes back if anything reads back wrong: it has to be
@@ -212,14 +217,16 @@ def put_logo(adb, parts, board):
     if adb.sh('sha256sum /tmp/techo5-logo.bin').split(' ')[0] != LOGO_SHA:
         adb.sh('rm -f /tmp/techo5-logo.bin')
         return "kept Amazon's boot logo: the logo changed on its way to the unit"
-    adb.sh('dd if=/tmp/techo5-logo.bin of=%s bs=1 seek=%d count=%d conv=notrunc 2>/dev/null; sync; '
-           'rm -f /tmp/techo5-logo.bin' % (part, at, LOGO_SIZE))
+    adb.sh('%s if=/tmp/techo5-logo.bin of=%s bs=1 seek=%d count=%d '
+           'conv=notrunc,fsync status=none 2>/dev/null; sync; '
+           'rm -f /tmp/techo5-logo.bin' % (TWRP_DD, part, at, LOGO_SIZE))
     if flash_kaeru() == branded_sha:
         return 'the Tater boot logo written into expdb (p%d) and read back from the flash' % n
 
     # Wrong on the flash: the saved copy goes back whole, now, while TWRP still runs from RAM.
     adb.push(expdb_backup, '/tmp/expdb.img')
-    adb.sh('dd if=/tmp/expdb.img of=%s bs=4096 2>/dev/null; sync; rm -f /tmp/expdb.img' % part)
+    adb.sh('%s if=/tmp/expdb.img of=%s bs=4096 conv=notrunc,fsync status=none '
+           '2>/dev/null; sync; rm -f /tmp/expdb.img' % (TWRP_DD, part))
     if flash_kaeru() == k['stock']:
         return "kept Amazon's boot logo: writing the logo did not read back right, so the saved expdb was put back"
     fail('expdb (p%d) did not read back right after the boot logo, nor after putting the saved copy back.\n'
@@ -348,7 +355,7 @@ def main():
     ap.add_argument('--wifi', help="a Wi-Fi network to join (its passphrase is asked for); otherwise LineageOS's saved one, or the Show's screen")
     ap.add_argument('--wifi-passphrase-file', help='a file holding the --wifi passphrase, for running from a script')
     ap.add_argument('--amazon-logo', action='store_true',
-                    help="from TWRP on a Show 5 2nd gen or a Show 8: keep Amazon's logo at boot rather than put Tater's in")
+                    help="from TWRP on a supported Show 5 or Show 8: keep Amazon's logo at boot rather than put Tater's in")
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
     ap.add_argument('--backups', default=default_dir('TECHO5_BACKUPS', 'backups'))
@@ -494,7 +501,7 @@ def main():
             os.replace(los_boot + '.partial', los_boot)
             note('LineageOS boot image: %s' % los_boot)
         if dev not in LOGO_KAERU:
-            note("boot logo: Amazon's is kept (Tater's is made for the Show 5 2nd gen and the Show 8)")
+            note("boot logo: Amazon's is kept (this bootloader layout has not been verified for Tater's logo)")
         elif a.amazon_logo:
             note("boot logo: Amazon's is kept (--amazon-logo)")
         else:

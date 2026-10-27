@@ -280,7 +280,7 @@ then stage a verified rootfs in the inactive Linux slot. Failed application or
 rootfs health checks roll back to their preceding working slots. Kernel, boot,
 rescue, partition-layout, and bootloader-logo updates still use the
 factory/recovery archive. The monochrome Tater boot logo is currently applied
-only by the guarded Crown and Rook USB factory installers; unsupported or
+only by the guarded Checkers, Crown, and Rook USB factory installers; unsupported or
 unknown bootloader layouts retain Amazon's logo.
 
 | Release file | Use |

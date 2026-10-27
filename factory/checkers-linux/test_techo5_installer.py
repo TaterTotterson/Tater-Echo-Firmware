@@ -65,6 +65,16 @@ class LineageInstallTests(unittest.TestCase):
 
 
 class BootLogoTests(unittest.TestCase):
+    def test_boot_logo_uses_twrps_notrunc_capable_toybox(self):
+        self.assertEqual("/sbin/toybox dd", installer.TWRP_DD)
+
+    def test_checkers_bootloader_fingerprint_is_pinned(self):
+        self.assertEqual({
+            "offset": 335308,
+            "length": 379309,
+            "stock": "d578c12a2023cd41c3b158f1a74622fd17202aee061a188fa4df0c1384e149fc",
+        }, installer.LOGO_KAERU["checkers"])
+
     def test_monochrome_tater_logo_matches_show_slot(self):
         logo = Path(installer.LOGO_FILE).read_bytes()
         self.assertEqual(installer.LOGO_SIZE, len(logo))

@@ -76,7 +76,11 @@ The printed hash must match exactly. The installer independently checks it.
 
 The installer verifies the connected device, backs up its small partitions,
 asks before destructive writes, installs slot A, and waits for Tater Linux over
-USB. The temporary
+USB. On the verified Checkers bootloader it replaces only the 6,105-byte
+Amazon wordmark slot in `expdb` with the monochrome Tater logo, then reads the
+partition back. Any other bootloader hash keeps Amazon's logo, and a failed
+readback restores the complete saved partition before the device restarts.
+The temporary
 "INSTALLING TATER" screen during USB installation is normal; it changes to
 the Tater setup screen when slot A boots. For a new device, join the open
 `Tater-Setup-XXXX` Wi-Fi network shown on Checkers, then open

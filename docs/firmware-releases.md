@@ -80,12 +80,11 @@ The established trial-boot health check commits the new slot or automatically
 returns to the previous one. System OTA never replaces the kernel, boot image,
 rescue environment, partition table, or device-specific vendor storage. It
 also never writes bootloader branding. The monochrome Tater boot logo is a
-guarded USB-factory step on Crown and Rook: the installer changes only a known
+guarded USB-factory step on Checkers, Crown, and Rook: the installer changes only a known
 logo slot in the verified `expdb` backup, reads the partition back, and
 restores the complete backup if verification fails. Unknown bootloader layouts
-keep Amazon's logo. Checkers and Athena also keep Amazon's logo until their
-exact bootloader layouts have been independently verified; Biscuit and Radar
-have no screen.
+keep Amazon's logo. Athena also keeps Amazon's logo until its exact bootloader
+layout has been independently verified; Biscuit and Radar have no screen.
 
 Each target also publishes target-specific `wake-runtime.so` and
 `onnxruntime.so` sidecars. Every target receives the reduced Linux/musl ARMv7
