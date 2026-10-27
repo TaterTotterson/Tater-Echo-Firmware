@@ -134,8 +134,10 @@ def probe_recovery(console_library, port: str, expected_target: str) -> str:
 if [ ! -s /run/techo5/slot ] && [ -x /usr/local/sbin/slotctl ] &&
    grep -q ' /data ' /proc/mounts; then
     touch /tmp/stay
+    store=/store
+    [ -e /.techo5-store ] && store=/
     release=
-    for f in /store/techo5/slots/*/etc/tater-release /store/slots/*/etc/tater-release; do
+    for f in "$store"/techo5/slots/*/etc/tater-release "$store"/slots/*/etc/tater-release; do
         [ -s "$f" ] || continue
         release=$(cat "$f")
         break
@@ -143,7 +145,7 @@ if [ ! -s /run/techo5/slot ] && [ -x /usr/local/sbin/slotctl ] &&
     if [ -n "$release" ]; then
         echo TATER_RECOVERY_READY
         echo "TATER_RELEASE=$release"
-        slotctl status
+        STORE="$store" slotctl status
     fi
 fi
 '''.strip()
@@ -259,12 +261,13 @@ def install_rootfs(console_library, port: str, target: str, factory_reset: bool)
             "/data/tater-linux/wpa_supplicant.conf; "
         )
     command = (
-        f"if slotctl install {shlex.quote(REMOTE_ROOTFS)} "
+        "store=/store; [ -e /.techo5-store ] && store=/; "
+        f"if STORE=\"$store\" slotctl install {shlex.quote(REMOTE_ROOTFS)} "
         ">/tmp/tater-recovery-install.log 2>&1; then "
         "rm -rf /data/tater-linux/app /data/tater-linux/app.new; "
         f"{reset}"
         f"rm -f {shlex.quote(REMOTE_ROOTFS)}; sync; "
-        "echo TATER_RECOVERY_INSTALL_OK; slotctl status; "
+        "echo TATER_RECOVERY_INSTALL_OK; STORE=\"$store\" slotctl status; "
         "else echo TATER_RECOVERY_INSTALL_FAILED; tail -20 /tmp/tater-recovery-install.log; fi"
     )
     answer = exchange(console_library, port, command, 900)

@@ -9,6 +9,7 @@ scratchpad/
 /build/
 /device/build/
 /release/
+/linux/athena/inputs/
 /linux/checkers/inputs/
 /factory/checkers-linux/backups/
 /factory/checkers-linux/build/
