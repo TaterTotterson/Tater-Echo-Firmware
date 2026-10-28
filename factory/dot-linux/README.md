@@ -17,6 +17,11 @@ is intentionally a reset, not a migration from pre-v3 firmware.
 4. Type `ERASE` when prompted.
 5. Join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair the satellite.
 
+The factory installer and a future System OTA reboot Biscuit or Radar into a
+trial root-system slot. A healthy root slot commits in place on these two
+targets, without the additional five-minute confirmation restart used by
+Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
+
 The installer checksum-verifies every bundled file and every partition backup,
 builds the Linux boot image from that unit's own TWRP header, checks the
 board-specific kernel, writes only recovery/cache plus Tater-owned userdata,

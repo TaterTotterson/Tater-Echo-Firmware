@@ -67,6 +67,14 @@ network, browse to `http://192.168.4.1`, and enter home Wi-Fi plus an **Add
 Satellite** pairing code. Alternatively run the installer with `--usb-pair`.
 Do not disconnect USB or power while flashing.
 
+After pairing, the new root-system slot remains on trial until Crown has stayed
+connected and healthy for five minutes. It then commits and deliberately
+restarts one additional time so the shared root/store filesystem returns
+read-only. The same confirmation restart follows a successful System OTA;
+ordinary boots and application-only OTA do not trigger it. A System OTA first
+reboots into the trial slot, so two reboots during that complete update are
+expected: activation, then confirmation.
+
 Crown's audio, display, touch, camera, reboot, OTA, and Tater Recovery paths
 have been validated on physical hardware.
 

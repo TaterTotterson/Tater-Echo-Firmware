@@ -113,6 +113,13 @@ the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v3.0.0
 or newer is running, reconnect USB and run `python3 to_recovery.py` from an
 extracted Biscuit or Radar factory archive to enter Tater Recovery.
 
+> [!NOTE]
+> A factory install or System OTA reboots Biscuit into a trial root-system
+> slot. After the health check passes, Biscuit commits that slot in place; it
+> does not perform the additional five-minute confirmation restart used by
+> Checkers, Crown, and Rook. Routine application OTA and ordinary boots do not
+> trigger that root-slot confirmation behavior.
+
 ## Install Radar — Echo 2
 
 Start with the 2017 full-size Echo 2 (`radar`, model **XC56PY**) after completing
@@ -143,6 +150,13 @@ USB and run `python3 to_recovery.py` from the extracted factory archive to
 enter Tater Recovery. See the shared
 [`factory/dot-linux` guide](factory/dot-linux/README.md).
 
+> [!NOTE]
+> A factory install or System OTA reboots Radar into a trial root-system slot.
+> After the health check passes, Radar commits that slot in place; it does not
+> perform the additional five-minute confirmation restart used by Checkers,
+> Crown, and Rook. Routine application OTA and ordinary boots do not trigger
+> that root-slot confirmation behavior.
+
 ## Install Checkers — Echo Show 5
 
 Start with an unlocked Echo Show 5 **1st Generation** (`checkers`, model
@@ -170,6 +184,14 @@ source, and never boots LineageOS. Routine updates are OTA afterward. See the
 [`factory/checkers-linux` guide](factory/checkers-linux/README.md) for Windows,
 USB provisioning, checksum, and recovery instructions.
 
+> [!NOTE]
+> After pairing, a newly installed Checkers root-system slot must stay
+> connected and healthy for five minutes. It then commits and deliberately
+> restarts one additional time so the shared root/store filesystem returns
+> read-only. A System OTA therefore has its activation reboot followed by this
+> one confirmation restart. Ordinary boots and application-only OTA do not
+> trigger the delayed root-slot restart.
+
 ## Install Crown — Echo Show 8 (1st Gen)
 
 Crown support is hardware-tested on model **C7H6N3**, codename `crown`.
@@ -194,6 +216,14 @@ recovery and backups, and uses checksum-pinned Crown boot and vendor-driver
 inputs. It reformats userdata and the former system partition. See the
 [`factory/crown-linux` guide](factory/crown-linux/README.md) for exact model,
 checksum, provisioning, and recovery requirements.
+
+> [!NOTE]
+> After pairing, a newly installed Crown root-system slot must stay connected
+> and healthy for five minutes. It then commits and deliberately restarts one
+> additional time so the shared root/store filesystem returns read-only. A
+> System OTA therefore has its activation reboot followed by this one
+> confirmation restart. Ordinary boots and application-only OTA do not trigger
+> the delayed root-slot restart.
 
 ## Install Athena — Echo Show 8 (2nd Gen)
 
@@ -223,6 +253,13 @@ unless you are prepared to recover a dark display. See
 [`factory/athena-linux/README.md`](factory/athena-linux/README.md) and
 [`docs/athena.md`](docs/athena.md).
 
+> [!NOTE]
+> A factory install or System OTA reboots Athena into a trial root-system slot.
+> After the connected health check passes, Athena commits that slot in place;
+> it does not perform the additional five-minute confirmation restart used by
+> Checkers, Crown, and Rook. Routine application OTA and ordinary boots do not
+> trigger that root-slot confirmation behavior.
+
 ## Install Rook — Echo Spot
 
 Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`, model
@@ -248,6 +285,14 @@ private recovery backups. It uses only the pinned and checksum-verified Rook
 LineageOS package as a source for hardware drivers; LineageOS is not booted.
 See the [`factory/rook-linux` guide](factory/rook-linux/README.md) for complete
 prerequisites, Windows commands, reinstall rules, and recovery steps.
+
+> [!NOTE]
+> After pairing, a newly installed Rook root-system slot must stay connected
+> and healthy for five minutes. It then commits and deliberately restarts one
+> additional time so the shared root/store filesystem returns read-only. A
+> System OTA therefore has its activation reboot followed by this one
+> confirmation restart. Ordinary boots and application-only OTA do not trigger
+> the delayed root-slot restart.
 
 Every factory archive contains `to_recovery.py` and the repair payload. From a
 normally booted Tater Linux satellite, connect USB and run

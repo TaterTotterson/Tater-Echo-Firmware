@@ -57,7 +57,12 @@ round-safe monochrome Tater mark, followed by `INSTALLING TATER`. The rescue
 screen is part of the boot image, so an
 application OTA cannot change it on an already-installed Spot. The first boot
 is expected to show Tater setup. The root slot stays in trial
-state until it connects to Tater and passes its health check. On OTA-capable
+state until it connects to Tater and passes its five-minute health check. It
+then commits and deliberately restarts one additional time so the shared
+root/store filesystem returns read-only. The same confirmation restart follows
+a successful System OTA; ordinary boots and application-only OTA do not trigger
+it. A System OTA first reboots into its trial slot, so two reboots during that
+complete update are expected: activation, then confirmation. On OTA-capable
 builds, Tater can update the daemon and screen together in application A/B
 slots, then stage a verified rootfs in the inactive Linux slot with automatic
 rollback. The boot and rescue images still require USB recovery. The direct-`wlan0` setup hotspot and application

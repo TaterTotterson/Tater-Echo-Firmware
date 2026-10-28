@@ -37,6 +37,11 @@ panel may remain dark. Routine Tater OTA updates the application A/B slots and
 can stage a verified rootfs in the inactive System slot. Use `./install.sh
 --repair` from Tater Recovery when the device cannot boot far enough for OTA.
 
+A factory install or System OTA reboots Athena into a trial root-system slot.
+After its connected health check passes, Athena commits that slot in place and
+does not make the additional five-minute confirmation restart used by Checkers,
+Crown, and Rook. Routine application OTA does not use the root-system slot.
+
 The Athena kernel, installer, store layout, and hardware enablement are maintained
 in [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux), based
 on MIT-licensed [TECHO5](https://github.com/HuskerMinion/techo5) platform work.

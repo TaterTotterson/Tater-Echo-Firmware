@@ -136,6 +136,26 @@ been requested. Tater verifies the rootfs `system_version` after reconnect;
 the device's existing slot health policy remains responsible for commit or
 rollback.
 
+### Expected root-system reboots
+
+Factory installation and System OTA both activate a newly written root-system
+slot as a trial. This behavior is separate from routine application OTA and
+does not occur on an ordinary boot.
+
+| Target | Root-slot activation | After the health trial passes |
+|---|---|---|
+| Biscuit | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Radar | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Checkers | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+| Crown | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+| Athena | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Rook | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+
+Consequently, a successful Checkers, Crown, or Rook System OTA normally shows
+two reboots across the complete operation: one to activate the trial slot and
+one after the health commit. The second reboot is intentional and should not
+repeat after the slot is marked good.
+
 ## Manifest
 
 `firmware-manifest.json` is the API consumed by Tater. For every target it
