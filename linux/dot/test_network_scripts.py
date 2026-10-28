@@ -392,10 +392,15 @@ exit 0
             self.fail(f"Setup Ethernet never became active: {stdout=} {stderr=}")
 
         self.assertFalse(self.net_log.exists(), "Ethernet stopped the setup hotspot")
-        self.assertIn(
-            "keeping the setup hotspot available",
-            (self.data / "eth.log").read_text(),
-        )
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            if "keeping the setup hotspot available" in (
+                self.data / "eth.log"
+            ).read_text():
+                break
+            time.sleep(0.01)
+        else:
+            self.fail("Ethernet did not confirm that the setup hotspot stayed available")
 
         (interface / "carrier").write_text("0\n", encoding="utf-8")
         stdout, stderr = process.communicate(timeout=5)
