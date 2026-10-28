@@ -180,6 +180,7 @@ tater_rook_wifi_mac wlan0
         self.assertIn("tools/fetch_platform_input.py", decoder_job)
         self.assertIn("platforms.athena.video_decoder device/build/tater-ffmpeg", decoder_job)
         self.assertIn("platforms.athena.video_decoder.license", decoder_job)
+        self.assertIn("--enable-protocol=.*srtp", decoder_job)
         self.assertIn("name: tater-ffmpeg-linux-armv7", decoder_job)
 
         for target, following in (

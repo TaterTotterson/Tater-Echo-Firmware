@@ -103,7 +103,7 @@ jobs:
           test "$(stat -c %s device/build/tater-ffmpeg)" = \
             "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.size)"
           grep -aq 'Two slices reporting being the first in the same frame' device/build/tater-ffmpeg
-          strings device/build/tater-ffmpeg | grep -qx 'srtp'
+          strings device/build/tater-ffmpeg | grep -Eq -- '--enable-protocol=.*srtp'
           test "$(sha256sum device/build/FFMPEG-LGPL-2.1.txt | awk '{print $1}')" = \
             "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.license.sha256)"
           test "$(stat -c %s device/build/FFMPEG-LGPL-2.1.txt)" = \
