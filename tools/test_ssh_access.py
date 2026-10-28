@@ -91,11 +91,16 @@ class SSHSupervisorTests(unittest.TestCase):
             "TATER_BUSYBOX": str(root / "bin/busybox"),
             "TATER_SSH_RUN_ONCE": "1",
             "TATER_TEST_ARGS": str(root / "dropbear.args"),
+            "TATER_SSH_SHADOW_SOURCE": str(root / "run/tater-sshd.shadow"),
+            "TATER_SSH_SHADOW_TARGET": str(root / "etc/shadow"),
+            "TATER_SSH_SHADOW_MARKER": str(root / "run/tater-sshd.shadow-mounted"),
         })
         return environment
 
     def make_stubs(self, root: Path) -> None:
         (root / "bin").mkdir(parents=True)
+        (root / "etc").mkdir()
+        (root / "etc/shadow").write_text("root:*:0:0:99999:7:::\n")
         self.write_executable(
             root / "bin/dropbearkey",
             """#!/bin/sh
@@ -122,7 +127,9 @@ printf '%s\n' "$@" > "$TATER_TEST_ARGS"
             root / "bin/busybox",
             """#!/bin/sh
 case "$1" in
-chpasswd) cat > "$TATER_TEST_CHPASSWD" ;;
+awk) shift; exec /usr/bin/awk "$@" ;;
+mount) shift; cp "$3" "$4" ;;
+umount) exit 0 ;;
 *) exit 2 ;;
 esac
 """,
@@ -173,7 +180,6 @@ esac
             (ssh_dir / "password_hash").write_text("$6$testsalt$testhash\n")
             (ssh_dir / "dropbear_ed25519_host_key").write_text("not-a-key\n")
             environment = self.environment(root)
-            environment["TATER_TEST_CHPASSWD"] = str(root / "chpasswd.input")
             result = subprocess.run(
                 ["sh", str(SUPERVISOR)],
                 env=environment,
@@ -194,7 +200,6 @@ esac
             (ssh_dir / "mode").write_text("password\n")
             (ssh_dir / "password_hash").write_text("$6$testsalt$testhash\n")
             environment = self.environment(root)
-            environment["TATER_TEST_CHPASSWD"] = str(root / "chpasswd.input")
 
             result = subprocess.run(
                 ["sh", str(SUPERVISOR)], env=environment, capture_output=True, text=True, check=False
@@ -206,7 +211,10 @@ esac
             self.assertNotIn("-g", arguments)
             for flag in ("-F", "-E", "-j", "-k"):
                 self.assertIn(flag, arguments)
-            self.assertEqual("root:$6$testsalt$testhash\n", (root / "chpasswd.input").read_text())
+            self.assertEqual(
+                "root:$6$testsalt$testhash:0:0:99999:7:::\n",
+                (root / "etc/shadow").read_text(),
+            )
             self.assertIn("authentication=password", (root / "run/tater-sshd.state").read_text())
             self.assertEqual("test-ed25519-host-key\n", (ssh_dir / "dropbear_ed25519_host_key").read_text())
             self.assertEqual(0o600, stat.S_IMODE((ssh_dir / "dropbear_ed25519_host_key").stat().st_mode))
@@ -286,21 +294,28 @@ esac
             check=False,
         )
 
-    def test_configure_persists_only_hash_and_skips_an_unchanged_restart(self) -> None:
+    def test_configure_persists_only_hash_and_skips_restart_once_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             password = "tater-k7pm-4xq2"
 
             first = self.run_control(root, f"true\n{password}\n")
             second = self.run_control(root, f"true\n{password}\n")
+            (root / "run").mkdir()
+            (root / "run/tater-sshd.state").write_text(
+                "active port=22 authentication=password\n"
+            )
+            third = self.run_control(root, f"true\n{password}\n")
 
             self.assertEqual(0, first.returncode, first.stderr)
             self.assertEqual(0, second.returncode, second.stderr)
-            self.assertIn("unchanged enabled", second.stdout)
+            self.assertIn("restarted enabled", second.stdout)
+            self.assertEqual(0, third.returncode, third.stderr)
+            self.assertIn("unchanged enabled", third.stdout)
             self.assertEqual("password\n", (root / "ssh/mode").read_text())
             self.assertEqual("$6$testsalt$fixed-hash\n", (root / "ssh/password_hash").read_text())
             self.assertNotIn(password, "".join(path.read_text() for path in (root / "ssh").iterdir()))
-            self.assertEqual("root:$6$testsalt$fixed-hash\n", (root / "chpasswd.input").read_text())
+            self.assertFalse((root / "chpasswd.input").exists())
 
             disabled = self.run_control(root, "false\n\n")
             self.assertEqual(0, disabled.returncode, disabled.stderr)
