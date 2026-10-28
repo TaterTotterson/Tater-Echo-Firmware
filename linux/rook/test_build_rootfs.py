@@ -147,6 +147,10 @@ tater_rook_wifi_mac wlan0
             "020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea",
             rook_job,
         )
+        self.assertEqual(
+            2,
+            rook_job.count("--spot-source /tmp/tater-echo-linux-spot/platforms/spot"),
+        )
 
     def test_workflows_build_and_cache_onnx_runtime_once(self):
         repo = Path(__file__).resolve().parents[2]

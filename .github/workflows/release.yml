@@ -741,13 +741,13 @@ jobs:
             --kernel linux/rook/inputs/tater-echo-rook-baseline-kernel.Image.gz-dtb \
             --rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar \
             --alpine-rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz \
-            --spot-source /tmp/tater-echo-linux-spot \
+            --spot-source /tmp/tater-echo-linux-spot/platforms/spot \
             --show-source /tmp/tater-echo-linux-show \
             --output device/build/rook/tater-rook-boot.img
           sh linux/rook/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --base-rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz \
-            --spot-source /tmp/tater-echo-linux-spot --show-source /tmp/tater-echo-linux-show \
+            --spot-source /tmp/tater-echo-linux-spot/platforms/spot --show-source /tmp/tater-echo-linux-show \
             --ffmpeg device/build/rook/tater-ffmpeg \
             --ffmpeg-license device/build/rook/FFMPEG-LGPL-2.1.txt \
             --output device/build/rook/tater-rook-rootfs-${{ steps.version.outputs.version }}.tar.gz
