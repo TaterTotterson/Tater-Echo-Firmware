@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -329,6 +330,36 @@ func TestSpotPhotoHomeAlwaysUsesAssignedRoom(t *testing.T) {
 	r.render(gameRoom, now)
 	if bytes.Equal(livingRoom.Pix, gameRoom.Pix) {
 		t.Fatal("assigned room name did not change the Rook photo home")
+	}
+}
+
+func TestSpotPhotoMetricsFollowBottomArc(t *testing.T) {
+	tops := make([]int, 6)
+	previousRight := 0
+	for index := range tops {
+		cell, top := spotPhotoMetricArcCell(6, index)
+		if cell.Empty() {
+			t.Fatalf("metric %d has empty cell", index)
+		}
+		if index > 0 && cell.Min.X != previousRight {
+			t.Fatalf("metric %d starts at %d, want previous right %d", index, cell.Min.X, previousRight)
+		}
+		previousRight = cell.Max.X
+		tops[index] = top
+	}
+	if tops[0] != tops[5] || tops[1] != tops[4] || tops[2] != tops[3] {
+		t.Fatalf("metric arc is not symmetric: %v", tops)
+	}
+	if !(tops[0] < tops[1] && tops[1] < tops[2]) {
+		t.Fatalf("metric arc does not rise toward the sides: %v", tops)
+	}
+	for index := range tops {
+		cell, top := spotPhotoMetricArcCell(6, index)
+		outerX := max(int(math.Abs(float64(cell.Min.X-2-240))), int(math.Abs(float64(cell.Max.X+2-240))))
+		circleBottom := 240 + int(math.Sqrt(float64(236*236-outerX*outerX)))
+		if top+28 > circleBottom {
+			t.Fatalf("metric %d extends below circular safe area: top=%d bottom=%d", index, top, circleBottom)
+		}
 	}
 }
 

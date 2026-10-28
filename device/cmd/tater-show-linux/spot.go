@@ -153,7 +153,7 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 	metrics := make([]metric, 0, 6)
 	if weather != nil {
 		if weather.HumidityText != "" {
-			metrics = append(metrics, metric{"humidity", "HUMIDITY", weather.HumidityText, color.RGBA{83, 178, 255, 255}})
+			metrics = append(metrics, metric{"humidity", "HUMID", weather.HumidityText, color.RGBA{83, 178, 255, 255}})
 		}
 		if weather.WindText != "" {
 			metrics = append(metrics, metric{"wind", "WIND", weather.WindText, color.RGBA{83, 211, 216, 255}})
@@ -162,35 +162,47 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 			metrics = append(metrics, metric{"rain", "RAIN", weather.RainText, color.RGBA{64, 190, 239, 255}})
 		}
 		if weather.LightningText != "" {
-			metrics = append(metrics, metric{"lightning", "LIGHTNING", weather.LightningText, color.RGBA{255, 208, 30, 255}})
+			metrics = append(metrics, metric{"lightning", "LIGHT", weather.LightningText, color.RGBA{255, 208, 30, 255}})
 		}
 		if weather.IndoorTemperatureText != "" {
-			metrics = append(metrics, metric{"temperature", "ROOM TEMP", weather.IndoorTemperatureText, color.RGBA{255, 147, 66, 255}})
+			metrics = append(metrics, metric{"temperature", "ROOM T", weather.IndoorTemperatureText, color.RGBA{255, 147, 66, 255}})
 		}
 		if weather.IndoorHumidityText != "" {
 			metrics = append(metrics, metric{"humidity", "ROOM RH", weather.IndoorHumidityText, color.RGBA{114, 92, 255, 255}})
 		}
 	}
 	if len(metrics) > 0 {
-		const metricsPerRow = 3
-		rows := (len(metrics) + metricsPerRow - 1) / metricsPerRow
-		firstIconY := 367
-		if rows == 1 {
-			firstIconY = 413
-		}
 		for index, item := range metrics {
-			row := index / metricsPerRow
-			rowStart := row * metricsPerRow
-			itemsInRow := min(metricsPerRow, len(metrics)-rowStart)
-			cell := centeredMetricCell(123, 234, metricsPerRow, itemsInRow, index-rowStart)
-			centerX, cellWidth := (cell.Min.X+cell.Max.X)/2, cell.Dx()
-			iconY := firstIconY + row*46
-			r.drawWeatherMetricGlyph(canvas, centerX, iconY, 9, item.kind, item.ink)
-			r.centeredText(canvas, centerX, iconY+17, fitTextToWidth(item.label, r.faces.bold[9], max(32, cellWidth-4)), 9, true, color.RGBA{224, 230, 238, 230})
-			r.centeredText(canvas, centerX, iconY+33, fitTextToWidth(item.value, r.faces.regular[14], max(32, cellWidth-4)), 14, false, color.White)
+			cell, rowTop := spotPhotoMetricArcCell(len(metrics), index)
+			iconX, iconY := cell.Min.X+12, rowTop+12
+			textLeft := iconX + 16
+			// Adjacent metrics sit at different heights along the arc, so their
+			// labels can use the diagonal space beyond the nominal slot edge.
+			const textWidth = 42
+			r.drawWeatherMetricGlyph(canvas, iconX, iconY, 7, item.kind, item.ink)
+			r.text(canvas, textLeft, rowTop+7, fitTextToWidth(item.label, r.faces.bold[8], textWidth), 8, true, color.RGBA{224, 230, 238, 230})
+			valueSize := 11
+			if item.kind == "lightning" {
+				valueSize = 10
+			}
+			r.text(canvas, textLeft, rowTop+24, fitTextToWidth(item.value, r.faces.regular[valueSize], textWidth), valueSize, false, color.White)
 		}
 	}
 	maskOutsideSpotCircle(canvas, 236)
+}
+
+func spotPhotoMetricArcCell(visibleCount, visibleIndex int) (image.Rectangle, int) {
+	cell := centeredMetricCell(54, 372, 6, visibleCount, visibleIndex)
+	if cell.Empty() {
+		return cell, 0
+	}
+	// Follow the lower edge of the 236-pixel safe circle. Using the cell's
+	// outermost edge keeps the glyph and both text baselines clear of the mask
+	// while naturally lifting the metrics toward the sides of the display.
+	outerX := max(int(math.Abs(float64(cell.Min.X-2-240))), int(math.Abs(float64(cell.Max.X+2-240))))
+	inside := max(0, 236*236-outerX*outerX)
+	arcBottom := 240 + int(math.Sqrt(float64(inside)))
+	return cell, arcBottom - 32
 }
 
 func drawSpotPhotoShade(canvas *image.RGBA) {
