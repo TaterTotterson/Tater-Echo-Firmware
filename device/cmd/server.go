@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -589,6 +590,8 @@ func main() {
 	deviceName := sendspinName
 	room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
 	var screenDiagnostics atomic.Pointer[show.ScreenDiagnostics]
+	var videoAudioMu sync.Mutex
+	videoAudioStream := ""
 	if isScreenTarget(client.FirmwareTarget) {
 		screen := show.New(show.DefaultAddress, show.Snapshot{
 			Phase: "offline", DeviceName: deviceName, Room: room,
@@ -658,9 +661,84 @@ func main() {
 				if nativeClient != nil {
 					nativeClient.StopCapture(false)
 				}
+			case "video.pause", "video.resume", "video.stop", "video.progress", "video.ended", "video.error":
+				action := strings.TrimPrefix(command.Action, "video.")
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					if snapshot.Video == nil || snapshot.Video.SessionID != command.SessionID {
+						return
+					}
+					switch action {
+					case "pause":
+						next := *snapshot.Video
+						next.State = "paused"
+						next.PositionMS = max(command.PositionMS, 0)
+						snapshot.Video = &next
+					case "resume":
+						next := *snapshot.Video
+						next.State = "playing"
+						next.PositionMS = max(command.PositionMS, 0)
+						next.Error = ""
+						snapshot.Video = &next
+					case "progress":
+						// The renderer already owns the live clock. Updating the
+						// snapshot here would change its decoder identity and restart
+						// playback every time progress is reported upstream.
+						return
+					default:
+						snapshot.Video = nil
+					}
+				})
+				if nativeClient != nil {
+					nativeClient.VideoAction(action, command.SessionID, command.PositionMS, command.Error)
+				}
 			case "timer.stop":
 				if nativeClient != nil {
 					nativeClient.StopDisplayedTimer("screen")
+				}
+			}
+		})
+		screen.SetVideoAudioHandler(func(audioCtx context.Context, sessionID, streamID string, input io.Reader) error {
+			const periodBytes = 4096 // mono S16LE, 2048 frames at 48 kHz
+			videoAudioMu.Lock()
+			pcmSpeaker.FlushMusic()
+			pcmSpeaker.EndMusicStream()
+			pcmSpeaker.SetMusicLive(true)
+			videoAudioStream = streamID
+			videoAudioMu.Unlock()
+			defer func() {
+				videoAudioMu.Lock()
+				if videoAudioStream == streamID {
+					if audioCtx.Err() != nil {
+						pcmSpeaker.FlushMusic()
+					}
+					pcmSpeaker.EndMusicStream()
+					pcmSpeaker.SetMusicLive(false)
+					videoAudioStream = ""
+				}
+				videoAudioMu.Unlock()
+			}()
+
+			period := make([]byte, periodBytes)
+			for {
+				n, readErr := io.ReadFull(input, period)
+				videoAudioMu.Lock()
+				if videoAudioStream != streamID {
+					videoAudioMu.Unlock()
+					return context.Canceled
+				}
+				if n > 0 && audioCtx.Err() == nil {
+					clear(period[n:])
+					if pumpErr := pcmSpeaker.PumpMusic(period); pumpErr != nil {
+						videoAudioMu.Unlock()
+						return pumpErr
+					}
+				}
+				videoAudioMu.Unlock()
+				if readErr != nil {
+					if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+						return nil
+					}
+					return readErr
 				}
 			}
 		})
@@ -812,6 +890,22 @@ func main() {
 					SelectedTalkback: cameras.SelectedTalkback, Loading: cameras.Loading,
 					Error: cameras.Error, FrameURL: frameURL, StreamURL: cameras.StreamURL,
 					StreamActive: cameras.StreamActive,
+				}
+			})
+		},
+		DisplayVideo: func(video taternative.DisplayVideo) {
+			if !video.Active || video.SessionID == "" || video.URL == "" {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Video = nil })
+				pcmSpeaker.FlushMusic()
+				pcmSpeaker.EndMusicStream()
+				return
+			}
+			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+				snapshot.Video = &show.Video{
+					Active: true, SessionID: video.SessionID, URL: video.URL,
+					Title: video.Title, Subtitle: video.Subtitle, State: video.State,
+					PositionMS: video.PositionMS, DurationMS: video.DurationMS, FPS: video.FPS,
+					Loop: video.Loop, Live: video.Live, ServerSeek: video.ServerSeek, Error: video.Error,
 				}
 			})
 		},

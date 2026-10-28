@@ -32,10 +32,36 @@ var (
 	menuMutedInk    = color.RGBA{30, 32, 38, 220}
 	menuOutlineInk  = color.RGBA{87, 131, 160, 172}
 	menuSubtitleInk = color.RGBA{205, 222, 239, 255}
-	menuCyanInk     = color.RGBA{27, 205, 255, 255}
-	menuOrangeInk   = color.RGBA{255, 132, 24, 255}
 	menuMaskCache   sync.Map
 )
+
+type menuThemePalette struct {
+	primary, secondary color.RGBA
+}
+
+func menuPaletteForTheme(theme string) menuThemePalette {
+	primary := paletteForTheme(theme).primary
+	secondary := color.RGBA{174, 189, 209, 255}
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "ocean":
+		secondary = color.RGBA{73, 230, 194, 255}
+	case "violet":
+		secondary = color.RGBA{239, 141, 255, 255}
+	case "forest":
+		secondary = color.RGBA{212, 185, 95, 255}
+	case "sunset":
+		secondary = color.RGBA{255, 208, 106, 255}
+	}
+	return menuThemePalette{primary: primary, secondary: secondary}
+}
+
+func (r *renderer) menuPalette() menuThemePalette {
+	return menuPaletteForTheme(r.state.DisplayTheme)
+}
+
+func menuAlpha(ink color.RGBA, alpha uint8) color.RGBA {
+	return color.RGBA{ink.R, ink.G, ink.B, alpha}
+}
 
 type menuMaskKey struct {
 	width, height, radius, thickness int
@@ -229,6 +255,19 @@ func (r *renderer) actionMenuTemperature() string {
 	return "--°"
 }
 
+func (r *renderer) menuName(value string, preferredSize, minimumSize, maxWidth int) (string, int) {
+	value = strings.TrimSpace(value)
+	if value == "" || maxWidth <= 0 {
+		return value, preferredSize
+	}
+	size := fittingTextSize(value, r.faces.bold, preferredSize, min(preferredSize, minimumSize), maxWidth)
+	face := r.faces.bold[size]
+	if face == nil {
+		return value, preferredSize
+	}
+	return fitTextToWidth(value, face, maxWidth), size
+}
+
 func (r *renderer) drawActionMenuBackground(canvas *image.RGBA, now time.Time, accent color.RGBA, alpha uint8) {
 	if wallpaper := r.activeWallpaper(now); wallpaper != nil {
 		drawPreparedCover(canvas, canvas.Bounds(), wallpaper)
@@ -240,6 +279,7 @@ func (r *renderer) drawActionMenuBackground(canvas *image.RGBA, now time.Time, a
 
 func (r *renderer) drawActionMenu(canvas *image.RGBA, now time.Time, accent color.RGBA) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
+	palette := r.menuPalette()
 	r.drawActionMenuBackground(canvas, now, accent, 86)
 	panel := actionMenuPanelBounds(width, height, false)
 	large := height >= 600
@@ -249,7 +289,7 @@ func (r *renderer) drawActionMenu(canvas *image.RGBA, now time.Time, accent colo
 	}
 	drawMenuShadow(canvas, panel, radius, 12)
 	drawMenuRoundedRect(canvas, panel, radius, menuBackdropInk)
-	drawMenuRoundedOutline(canvas, panel, radius, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 232})
+	drawMenuRoundedOutline(canvas, panel, radius, 2, menuAlpha(palette.primary, 232))
 	drawMenuRoundedOutline(canvas, panel.Inset(3), max(1, radius-3), 1, color.RGBA{255, 255, 255, 30})
 
 	titleSize, onlineSize := 28, 13
@@ -300,6 +340,7 @@ func (r *renderer) drawActionMenu(canvas *image.RGBA, now time.Time, accent colo
 }
 
 func (r *renderer) drawWideActionCard(canvas *image.RGBA, bounds image.Rectangle, kind actionMenuItem, title, subtitle string, large, spot bool) {
+	palette := r.menuPalette()
 	radius := max(17, bounds.Dy()/3)
 	if spot {
 		radius = bounds.Dy() / 2
@@ -321,8 +362,8 @@ func (r *renderer) drawWideActionCard(canvas *image.RGBA, bounds image.Rectangle
 	iconX, iconY := bounds.Min.X+iconInset+iconDiameter/2, bounds.Min.Y+bounds.Dy()/2
 	iconBounds := image.Rect(iconX-iconDiameter/2, iconY-iconDiameter/2, iconX+iconDiameter/2, iconY+iconDiameter/2)
 	drawMenuRoundedRect(canvas, iconBounds, iconDiameter/2, color.RGBA{4, 25, 39, 224})
-	drawMenuRoundedOutline(canvas, iconBounds, iconDiameter/2, max(2, iconDiameter/28), color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 245})
-	r.drawActionMenuGlyph(canvas, kind, iconX, iconY, max(14, iconDiameter*34/100), menuCyanInk)
+	drawMenuRoundedOutline(canvas, iconBounds, iconDiameter/2, max(2, iconDiameter/28), menuAlpha(palette.primary, 245))
+	r.drawActionMenuGlyph(canvas, kind, iconX, iconY, max(14, iconDiameter*34/100), palette.primary)
 
 	textX := iconBounds.Max.X + max(13, iconDiameter/3)
 	titleY := iconY - 3
@@ -350,12 +391,13 @@ func (r *renderer) drawWideActionCard(canvas *image.RGBA, bounds image.Rectangle
 }
 
 func (r *renderer) drawSpotActionMenu(canvas *image.RGBA, now time.Time, accent color.RGBA) {
+	palette := r.menuPalette()
 	r.drawActionMenuBackground(canvas, now, accent, 82)
 	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{R: 2, G: 9, B: 17, A: 34}), image.Point{}, draw.Over)
 	panel := actionMenuPanelBounds(480, 480, true)
 	drawMenuSuperellipseShadow(canvas, panel, 9)
 	drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-	drawMenuSuperellipseOutline(canvas, panel, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 226})
+	drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 226))
 	name := assistantFirstName(r.state.AssistantName)
 	r.centeredText(canvas, 240, 113, strings.ToUpper(name)+" MENU", 28, true, color.White)
 	online := fitTextToWidth(name+" Online", r.faces.regular[13], 150)
@@ -385,24 +427,26 @@ func (r *renderer) drawSpotActionMenu(canvas *image.RGBA, now time.Time, accent 
 }
 
 func (r *renderer) drawActionMenuGlyph(canvas *image.RGBA, kind actionMenuItem, cx, cy, size int, ink color.RGBA) {
+	palette := r.menuPalette()
 	switch kind {
 	case actionMenuSatChat:
-		drawMenuSatelliteGlyph(canvas, cx, cy, size)
+		drawMenuSatelliteGlyph(canvas, cx, cy, size, palette.primary, palette.secondary)
 	case actionMenuCameras:
 		drawMenuCameraGlyph(canvas, cx, cy, size, ink)
 	case actionMenuClimate:
-		drawMenuThermometerGlyph(canvas, cx, cy, size)
+		drawMenuThermometerGlyph(canvas, cx, cy, size, palette.primary, palette.secondary)
 	}
 }
 
 func (r *renderer) drawActionMenuBroadcast(canvas *image.RGBA, bounds image.Rectangle, large, spot bool) {
+	palette := r.menuPalette()
 	radius := bounds.Dy() / 2
 	for spread := 7; spread >= 2; spread -= 2 {
 		glow := bounds.Inset(-spread)
-		drawMenuRoundedOutline(canvas, glow, radius+spread, 1, color.RGBA{menuOrangeInk.R, menuOrangeInk.G, menuOrangeInk.B, uint8(8 + spread*2)})
+		drawMenuRoundedOutline(canvas, glow, radius+spread, 1, menuAlpha(palette.secondary, uint8(8+spread*2)))
 	}
 	drawMenuRoundedRect(canvas, bounds, radius, color.RGBA{20, 28, 36, 225})
-	drawMenuRoundedOutline(canvas, bounds, radius, 2, menuOrangeInk)
+	drawMenuRoundedOutline(canvas, bounds, radius, 2, palette.secondary)
 	fontSize := 14
 	if large {
 		fontSize = 20
@@ -415,7 +459,7 @@ func (r *renderer) drawActionMenuBroadcast(canvas *image.RGBA, bounds image.Rect
 	totalWidth := iconSize*2 + 13 + labelWidth
 	iconX := bounds.Min.X + (bounds.Dx()-totalWidth)/2 + iconSize
 	centerY := bounds.Min.Y + bounds.Dy()/2
-	drawMenuBroadcastGlyph(canvas, iconX, centerY, iconSize, menuOrangeInk)
+	drawMenuBroadcastGlyph(canvas, iconX, centerY, iconSize, palette.secondary)
 	r.text(canvas, iconX+iconSize+13, centerY+fontSize/3, label, fontSize, false, color.RGBA{244, 248, 252, 255})
 }
 
@@ -434,7 +478,7 @@ func drawMenuCameraGlyph(canvas *image.RGBA, cx, cy, size int, ink color.RGBA) {
 	draw.DrawMask(canvas, image.Rect(body.Max.X, cy-size, body.Max.X+size, cy+size), image.NewUniform(ink), image.Point{}, wing, image.Point{}, draw.Over)
 }
 
-func drawMenuSatelliteGlyph(canvas *image.RGBA, cx, cy, size int) {
+func drawMenuSatelliteGlyph(canvas *image.RGBA, cx, cy, size int, primary, secondary color.RGBA) {
 	side := max(18, size*2+4)
 	icon := image.NewRGBA(image.Rect(0, 0, side, side))
 	path := vector.NewRasterizer(side, side)
@@ -447,25 +491,25 @@ func drawMenuSatelliteGlyph(canvas *image.RGBA, cx, cy, size int) {
 	path.Draw(icon, icon.Bounds(), image.White, image.Point{})
 	destination := image.Rect(cx-side/2, cy-side/2, cx-side/2+side, cy-side/2+side)
 	draw.DrawMask(canvas, destination, image.NewUniform(color.RGBA{244, 250, 255, 255}), image.Point{}, icon, image.Point{}, draw.Over)
-	line(canvas, cx, cy+size/4, cx-size/3, cy+size*3/4, max(2, size/7), menuCyanInk)
-	line(canvas, cx-size*2/3, cy+size*3/4, cx+size/3, cy+size*3/4, max(2, size/7), menuCyanInk)
-	circle(canvas, cx+size/3, cy-size/3, max(2, size/8), menuOrangeInk)
-	arc(canvas, cx+size/3, cy-size/3, max(5, size/2), 270, 85, max(2, size/8), menuOrangeInk)
-	arc(canvas, cx+size/3, cy-size/3, max(8, size*4/5), 270, 85, max(2, size/9), menuOrangeInk)
+	line(canvas, cx, cy+size/4, cx-size/3, cy+size*3/4, max(2, size/7), primary)
+	line(canvas, cx-size*2/3, cy+size*3/4, cx+size/3, cy+size*3/4, max(2, size/7), primary)
+	circle(canvas, cx+size/3, cy-size/3, max(2, size/8), secondary)
+	arc(canvas, cx+size/3, cy-size/3, max(5, size/2), 270, 85, max(2, size/8), secondary)
+	arc(canvas, cx+size/3, cy-size/3, max(8, size*4/5), 270, 85, max(2, size/9), secondary)
 }
 
-func drawMenuThermometerGlyph(canvas *image.RGBA, cx, cy, size int) {
+func drawMenuThermometerGlyph(canvas *image.RGBA, cx, cy, size int, primary, secondary color.RGBA) {
 	stemWidth := max(7, size/3)
 	stem := image.Rect(cx-stemWidth/2, cy-size, cx+(stemWidth+1)/2, cy+size/3)
-	drawMenuRoundedOutline(canvas, stem, stemWidth/2, max(2, size/8), menuCyanInk)
+	drawMenuRoundedOutline(canvas, stem, stemWidth/2, max(2, size/8), primary)
 	bulbRadius := max(6, size*2/5)
 	bulb := image.Rect(cx-bulbRadius, cy+size/4-bulbRadius, cx+bulbRadius, cy+size/4+bulbRadius)
 	drawMenuRoundedRect(canvas, bulb, bulbRadius, color.RGBA{7, 27, 40, 255})
-	drawMenuRoundedOutline(canvas, bulb, bulbRadius, max(2, size/8), menuCyanInk)
+	drawMenuRoundedOutline(canvas, bulb, bulbRadius, max(2, size/8), primary)
 	fillWidth := max(3, stemWidth/3)
-	drawMenuRoundedRect(canvas, image.Rect(cx-fillWidth/2, cy-size/2, cx+(fillWidth+1)/2, cy+size/3), fillWidth/2, menuOrangeInk)
+	drawMenuRoundedRect(canvas, image.Rect(cx-fillWidth/2, cy-size/2, cx+(fillWidth+1)/2, cy+size/3), fillWidth/2, secondary)
 	innerBulb := bulb.Inset(max(3, size/6))
-	drawMenuRoundedRect(canvas, innerBulb, innerBulb.Dx()/2, menuOrangeInk)
+	drawMenuRoundedRect(canvas, innerBulb, innerBulb.Dx()/2, secondary)
 }
 
 func drawMenuBroadcastGlyph(canvas *image.RGBA, cx, cy, size int, ink color.RGBA) {
@@ -684,10 +728,10 @@ func drawMenuChevron(canvas *image.RGBA, cx, cy, size int, ink color.RGBA) {
 	line(canvas, cx+size/2, cy, cx-size/2, cy+size, 2, ink)
 }
 
-func drawMenuGlassPanel(canvas *image.RGBA, bounds image.Rectangle, radius int) {
+func drawMenuGlassPanel(canvas *image.RGBA, bounds image.Rectangle, radius int, primary color.RGBA) {
 	drawMenuShadow(canvas, bounds, radius, max(5, radius/3))
 	drawMenuRoundedRect(canvas, bounds, radius, menuBackdropInk)
-	drawMenuRoundedOutline(canvas, bounds, radius, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 230})
+	drawMenuRoundedOutline(canvas, bounds, radius, 2, menuAlpha(primary, 230))
 	if bounds.Dx() > 8 && bounds.Dy() > 8 {
 		drawMenuRoundedOutline(canvas, bounds.Inset(3), max(1, radius-3), 1, color.RGBA{255, 255, 255, 28})
 	}
@@ -699,8 +743,8 @@ func drawMenuCloseButton(canvas *image.RGBA, bounds image.Rectangle) {
 	drawClimateCloseGlyph(canvas, bounds, color.RGBA{255, 255, 255, 255})
 }
 
-func drawMenuCard(canvas *image.RGBA, bounds image.Rectangle, radius int, muted bool) {
-	fill, outline := menuCardInk, menuOutlineInk
+func drawMenuCard(canvas *image.RGBA, bounds image.Rectangle, radius int, muted bool, primary color.RGBA) {
+	fill, outline := menuCardInk, menuAlpha(primary, 82)
 	if muted {
 		fill, outline = menuMutedInk, color.RGBA{100, 111, 127, 95}
 	}
@@ -712,9 +756,9 @@ func drawMenuCard(canvas *image.RGBA, bounds image.Rectangle, radius int, muted 
 	}
 }
 
-func drawMenuIconMedallion(canvas *image.RGBA, bounds image.Rectangle) {
+func drawMenuIconMedallion(canvas *image.RGBA, bounds image.Rectangle, primary color.RGBA) {
 	drawMenuRoundedRect(canvas, bounds, bounds.Dx()/2, color.RGBA{4, 25, 39, 224})
-	drawMenuRoundedOutline(canvas, bounds, bounds.Dx()/2, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 245})
+	drawMenuRoundedOutline(canvas, bounds, bounds.Dx()/2, 2, menuAlpha(primary, 245))
 }
 
 // drawMenuRoundedImage keeps live camera repainting on the fast Src path and
@@ -874,36 +918,40 @@ func (r *renderer) cameraVideoRenderKey(accent color.RGBA) string {
 }
 
 func (r *renderer) drawCameraVideoFrame(canvas *image.RGBA) image.Rectangle {
+	palette := r.menuPalette()
 	bounds := r.cameraVideoBounds().Intersect(canvas.Rect)
 	radius := max(14, min(28, bounds.Dy()/12))
 	drawMenuRoundedRect(canvas, bounds, radius, color.RGBA{0, 0, 0, 255})
 	if r.cameraFrameImage != nil {
 		drawMenuRoundedImage(canvas, bounds, r.cameraFrameImage, radius, menuBackdropInk)
 	}
-	drawMenuRoundedOutline(canvas, bounds, radius, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 220})
+	drawMenuRoundedOutline(canvas, bounds, radius, 2, menuAlpha(palette.primary, 220))
 	return bounds
 }
 
 func (r *renderer) drawCameraScreen(canvas *image.RGBA, now time.Time, accent color.RGBA) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
+	palette := r.menuPalette()
 	r.drawActionMenuBackground(canvas, now, accent, 88)
 	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	drawMenuGlassPanel(canvas, panel, max(24, height/22))
+	drawMenuGlassPanel(canvas, panel, max(24, height/22), palette.primary)
 	r.drawCameraContents(canvas, false)
 }
 
 func (r *renderer) drawSpotCameraScreen(canvas *image.RGBA, now time.Time, accent color.RGBA) {
+	palette := r.menuPalette()
 	r.drawActionMenuBackground(canvas, now, accent, 84)
 	panel := cameraDirectoryLayoutFor(480, 480, true).panel
 	drawMenuSuperellipseShadow(canvas, panel, 8)
 	drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-	drawMenuSuperellipseOutline(canvas, panel, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 230})
+	drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 230))
 	r.drawCameraContents(canvas, true)
 	maskOutsideSpotCircle(canvas, 236)
 }
 
 func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
+	palette := r.menuPalette()
 	selected := r.state.Cameras != nil && r.state.Cameras.SelectedID != ""
 	close := r.cameraCloseBounds(width, height, spot, selected)
 	drawMenuCloseButton(canvas, close)
@@ -922,7 +970,7 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 		} else {
 			drawMenuRoundedImage(canvas, bounds, r.cameraFrameImage, radius, menuBackdropInk)
 		}
-		drawMenuRoundedOutline(canvas, bounds, radius, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 225})
+		drawMenuRoundedOutline(canvas, bounds, radius, 2, menuAlpha(palette.primary, 225))
 		back := cameraBackBounds(width, height, spot)
 		drawMenuRoundedRect(canvas, back, back.Dy()/2, menuControlInk)
 		drawMenuRoundedOutline(canvas, back, back.Dy()/2, 1, menuOutlineInk)
@@ -950,14 +998,14 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 		}(), fitTextToWidth(label, r.faces.bold[nameSize], width/2), nameSize, true, color.White)
 		if cameras.SelectedTalkback {
 			talk := r.cameraTalkBounds(width, height, spot)
-			ink, outline := color.RGBA{20, 28, 36, 235}, menuOrangeInk
+			ink, outline := color.RGBA{20, 28, 36, 235}, palette.secondary
 			if r.cameraTalkPressed {
 				ink = color.RGBA{94, 48, 14, 245}
 			}
 			drawMenuRoundedRect(canvas, talk, talk.Dy()/2, ink)
 			drawMenuRoundedOutline(canvas, talk, talk.Dy()/2, 2, outline)
 			micX := talk.Min.X + max(28, talk.Dy()*3/4)
-			drawSatChatMicGlyph(canvas, micX, (talk.Min.Y+talk.Max.Y)/2-2, max(8, talk.Dy()/5), menuOrangeInk)
+			drawSatChatMicGlyph(canvas, micX, (talk.Min.Y+talk.Max.Y)/2-2, max(8, talk.Dy()/5), palette.secondary)
 			r.centeredText(canvas, (talk.Min.X+talk.Max.X)/2+12, talk.Min.Y+talk.Dy()*2/3, "HOLD TO TALK", func() int {
 				if spot {
 					return 13
@@ -985,8 +1033,8 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 			iconSize = 68
 		}
 		iconBounds := image.Rect(layout.panel.Min.X+22, layout.panel.Min.Y+20, layout.panel.Min.X+22+iconSize, layout.panel.Min.Y+20+iconSize)
-		drawMenuIconMedallion(canvas, iconBounds)
-		r.drawActionMenuGlyph(canvas, actionMenuCameras, (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2, iconSize*28/100, menuCyanInk)
+		drawMenuIconMedallion(canvas, iconBounds, palette.primary)
+		r.drawActionMenuGlyph(canvas, actionMenuCameras, (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2, iconSize*28/100, palette.primary)
 		textX := iconBounds.Max.X + 16
 		r.text(canvas, textX, layout.panel.Min.Y+46, "CAMERAS", titleSize, true, color.White)
 		r.text(canvas, textX, layout.panel.Min.Y+72, "Choose a camera to open live view", 15, false, menuSubtitleInk)
@@ -1024,7 +1072,7 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 		item := items[start+index]
 		bounds := cameraCardBounds(width, height, index, spot)
 		radius := max(12, bounds.Dy()/4)
-		drawMenuCard(canvas, bounds, radius, !item.Available)
+		drawMenuCard(canvas, bounds, radius, !item.Available, palette.primary)
 		avatarLimit := 26
 		if !spot && height >= 700 {
 			avatarLimit = 42
@@ -1032,8 +1080,8 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 		avatarRadius := min(avatarLimit, bounds.Dy()/2-7)
 		avatarX, centerY := bounds.Min.X+avatarRadius+18, (bounds.Min.Y+bounds.Max.Y)/2
 		avatar := image.Rect(avatarX-avatarRadius, centerY-avatarRadius, avatarX+avatarRadius, centerY+avatarRadius)
-		drawMenuIconMedallion(canvas, avatar)
-		r.drawActionMenuGlyph(canvas, actionMenuCameras, avatarX, centerY, max(8, avatarRadius/2), menuCyanInk)
+		drawMenuIconMedallion(canvas, avatar, palette.primary)
+		r.drawActionMenuGlyph(canvas, actionMenuCameras, avatarX, centerY, max(8, avatarRadius/2), palette.primary)
 		statusX := avatarX + avatarRadius + 20
 		circle(canvas, statusX, centerY-8, 6, func() color.RGBA {
 			if item.Available {
@@ -1048,7 +1096,15 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 			nameSize, subSize, capabilitySize = 24, 15, 14
 		}
 		nameLeft := statusX + 20
-		r.text(canvas, nameLeft, centerY-2, fitTextToWidth(item.Name, r.faces.bold[nameSize], max(90, bounds.Max.X-nameLeft-116)), nameSize, true, color.White)
+		nameWidth := max(72, bounds.Max.X-nameLeft-48)
+		minimumNameSize := 12
+		if spot {
+			minimumNameSize = 9
+		} else if height >= 700 {
+			minimumNameSize = 15
+		}
+		name, fittedNameSize := r.menuName(item.Name, nameSize, minimumNameSize, nameWidth)
+		r.text(canvas, nameLeft, centerY-2, name, fittedNameSize, true, color.White)
 		sub := "LIVE VIEW"
 		if item.Room != "" {
 			sub = strings.ToUpper(item.Room)
@@ -1057,16 +1113,17 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 			sub += "  ·  TWO-WAY AUDIO"
 		}
 		r.text(canvas, nameLeft, centerY+20, fitTextToWidth(sub, r.faces.bold[subSize], max(90, bounds.Max.X-nameLeft-95)), subSize, true, menuSubtitleInk)
-		iconInk := menuOrangeInk
+		iconInk := palette.secondary
+		capabilityY := centerY + max(12, subSize/2+6)
 		if item.Talkback {
-			drawSatChatMicGlyph(canvas, bounds.Max.X-max(54, bounds.Dy()/3), centerY-4, capabilitySize, iconInk)
+			drawSatChatMicGlyph(canvas, bounds.Max.X-max(54, bounds.Dy()/3), capabilityY, capabilitySize, iconInk)
 		}
 		drawMenuCameraGlyph(canvas, bounds.Max.X-func() int {
 			if item.Talkback {
 				return max(94, bounds.Dy()*2/3)
 			}
 			return max(54, bounds.Dy()/3)
-		}(), centerY-4, capabilitySize, iconInk)
+		}(), capabilityY, capabilitySize, iconInk)
 		drawMenuChevron(canvas, bounds.Max.X-24, (bounds.Min.Y+bounds.Max.Y)/2, 7, color.RGBA{219, 232, 244, 235})
 	}
 	if pages > 1 {
@@ -1074,7 +1131,7 @@ func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
 			bounds image.Rectangle
 			label  string
 		}{{cameraPreviousBounds(width, height, spot), "‹ PREV"}, {cameraNextBounds(width, height, spot), "NEXT ›"}} {
-			buttonInk := menuOrangeInk
+			buttonInk := palette.secondary
 			if (index == 0 && r.cameraPage == 0) || (index == 1 && r.cameraPage == pages-1) {
 				buttonInk = color.RGBA{92, 97, 106, 160}
 			}

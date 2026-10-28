@@ -41,6 +41,18 @@ type Request struct {
 	Width, Height int
 }
 
+// MediaRequest describes provider-neutral fullscreen playback. It uses the
+// same pinned decoder and resource limits as cameras, but emits audio and has
+// ordinary end-of-file semantics instead of the camera controller's retry
+// loop.
+type MediaRequest struct {
+	URL             string
+	Width, Height   int
+	FPS             int
+	StartPositionMS int64
+	VideoOnly       bool
+}
+
 // DecoderPath chooses the decoder installed beside an OTA renderer first,
 // except on Athena's 64-bit kernel where the platform's static ARM64 decoder
 // supports the broader codec set.
@@ -205,6 +217,74 @@ func Args(request Request) ([]string, error) {
 	return args, nil
 }
 
+// MediaArgs returns a bounded two-output command: RGBA video on stdout and
+// mono 48 kHz S16LE PCM on file descriptor 3. Mono PCM is the native music
+// plane wire format; the speaker duplicates it to the hardware's stereo I2S
+// path and applies normal Tater ducking and output processing.
+func MediaArgs(request MediaRequest) ([]string, error) {
+	parsed, err := CheckURL(request.URL)
+	if err != nil {
+		return nil, err
+	}
+	pixels := int64(request.Width) * int64(request.Height)
+	if request.Width <= 0 || request.Height <= 0 || request.Width&1 != 0 || request.Height&1 != 0 ||
+		pixels <= 0 || pixels > maximumPixels {
+		return nil, fmt.Errorf("invalid video frame size %dx%d", request.Width, request.Height)
+	}
+	if request.FPS != 24 && request.FPS != 30 {
+		request.FPS = 30
+	}
+	if request.StartPositionMS < 0 {
+		request.StartPositionMS = 0
+	}
+	filter := fmt.Sprintf(
+		"scale=%d:%d:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d",
+		request.Width, request.Height, request.Width, request.Height, request.FPS,
+	)
+	protocols := "http,https,tcp,tls,hls,crypto"
+	if parsed.Scheme == "rtsp" || parsed.Scheme == "rtsps" {
+		protocols = "tcp,tls,udp,rtp,srtp,crypto"
+	}
+	args := []string{
+		"-hide_banner", "-nostdin", "-loglevel", "error", "-max_pixels", strconv.Itoa(maximumPixels),
+		"-protocol_whitelist", protocols,
+	}
+	if parsed.Scheme == "rtsp" || parsed.Scheme == "rtsps" {
+		args = append(args, "-rtsp_transport", "tcp", "-timeout", "15000000")
+		if parsed.Scheme == "rtsps" {
+			args = append(args, "-tls_verify", "0")
+		}
+	} else {
+		args = append(args,
+			"-rw_timeout", "15000000",
+			"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "4",
+		)
+	}
+	if parsed.Scheme == "https" {
+		args = append(args, "-tls_verify", "1")
+		if fileExists("/etc/ssl/certs/ca-certificates.crt") {
+			args = append(args, "-ca_file", "/etc/ssl/certs/ca-certificates.crt")
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(parsed.Path), ".m3u8") {
+		args = append(args, "-live_start_index", "-1")
+	}
+	args = append(args, "-threads", strconv.Itoa(threads(request.Height)), "-re")
+	if request.StartPositionMS > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(float64(request.StartPositionMS)/1000, 'f', 3, 64))
+	}
+	args = append(args, "-i", parsed.String(),
+		"-map", "0:v:0", "-an", "-sn", "-dn", "-vf", filter, "-fps_mode", "passthrough",
+		"-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+	)
+	if !request.VideoOnly {
+		args = append(args,
+			"-map", "0:a:0?", "-vn", "-sn", "-dn", "-ac", "1", "-ar", "48000", "-f", "s16le", "pipe:3",
+		)
+	}
+	return args, nil
+}
+
 type lineTail struct {
 	mu       sync.Mutex
 	reported bool
@@ -310,6 +390,100 @@ func Read(ctx context.Context, request Request, receive func(*image.RGBA) error)
 		if err := receive(frame); err != nil {
 			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 			_ = command.Wait()
+			return err
+		}
+	}
+}
+
+// ReadMedia decodes one finite or live media session. Audio is drained in a
+// sibling goroutine so neither output can back-pressure the other and disturb
+// A/V timing. Cancelling ctx kills the complete FFmpeg process group.
+func ReadMedia(ctx context.Context, request MediaRequest, audio io.Writer, receive func(*image.RGBA) error) error {
+	args, err := MediaArgs(request)
+	if err != nil {
+		return err
+	}
+	decoder := DecoderPath()
+	if !fileExists(decoder) {
+		return fmt.Errorf("video decoder is not installed at %s", decoder)
+	}
+	credential, err := decoderCredential()
+	if err != nil {
+		return err
+	}
+	audioRead, audioWrite, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer audioRead.Close()
+	script := `echo 1000 > /proc/self/oom_score_adj; ulimit -v 655360 && ulimit -f 0 && ulimit -c 0 && ulimit -n 64 && exec nice -n 5 "$0" "$@"`
+	argv := append([]string{"-c", script, decoder}, args...)
+	command := exec.CommandContext(ctx, "/bin/sh", argv...)
+	command.Dir = "/"
+	command.Env = []string{"PATH=/usr/bin:/bin", "HOME=/"}
+	command.ExtraFiles = []*os.File{audioWrite}
+	command.SysProcAttr = &syscall.SysProcAttr{Credential: credential, Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	command.Cancel = func() error {
+		if command.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	}
+	command.WaitDelay = 2 * time.Second
+	output, err := command.StdoutPipe()
+	if err != nil {
+		audioWrite.Close()
+		return err
+	}
+	tail := &lineTail{}
+	command.Stderr = tail
+	if err := command.Start(); err != nil {
+		audioWrite.Close()
+		return err
+	}
+	_ = audioWrite.Close()
+	audioDone := make(chan error, 1)
+	go func() {
+		var copyErr error
+		if audio == nil {
+			_, copyErr = io.Copy(io.Discard, audioRead)
+		} else {
+			_, copyErr = io.Copy(audio, audioRead)
+		}
+		audioDone <- copyErr
+	}()
+	waitAudio := func() error {
+		select {
+		case copyErr := <-audioDone:
+			return copyErr
+		case <-time.After(2 * time.Second):
+			_ = audioRead.Close()
+			return errors.New("video audio pipe did not close")
+		}
+	}
+	frame := image.NewRGBA(image.Rect(0, 0, request.Width, request.Height))
+	for {
+		if _, err := io.ReadFull(output, frame.Pix); err != nil {
+			waitErr := command.Wait()
+			copyErr := waitAudio()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if detail := tail.Error(); detail != nil {
+				return detail
+			}
+			if waitErr != nil {
+				return waitErr
+			}
+			if copyErr != nil {
+				return copyErr
+			}
+			return err
+		}
+		if err := receive(frame); err != nil {
+			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+			_ = command.Wait()
+			_ = waitAudio()
 			return err
 		}
 	}

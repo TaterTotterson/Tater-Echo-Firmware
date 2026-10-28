@@ -114,6 +114,11 @@ type PcmSpeaker struct {
 	// the deep Wi-Fi jitter protection; live Sat Chat uses a few periods so a
 	// conversation does not inherit roughly one second of announcement delay.
 	voicePrime atomic.Int32
+	// musicPrime normally protects network media with the same deep startup
+	// buffer. Fullscreen video is decoded locally in realtime and needs a short
+	// gate so sound begins with the first displayed frames instead of a second
+	// later.
+	musicPrime atomic.Int32
 
 	// duckTarget is the gain applied to MUSIC while it plays under a voice
 	// turn, Q15. Written from the control plane (SetDuck) and read by the
@@ -270,6 +275,8 @@ func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(r
 	}
 	s.voice = newAudioStream(audioChanDepth, s.deadCh)
 	s.music = newAudioStream(audioChanDepth, s.deadCh)
+	s.voicePrime.Store(primePeriods)
+	s.musicPrime.Store(primePeriods)
 	s.duckTarget.Store(unityGain)
 	s.duckRampFrames.Store(periodSize)
 	s.duckRevision.Store(1)
@@ -635,7 +642,11 @@ func (p *PcmSpeaker) silenceLoop() {
 		} else if p.voice.playing {
 			p.report(p.voice.drained(), "voice")
 		}
-		if p.music.ready(primePeriods) {
+		musicPrime := int(p.musicPrime.Load())
+		if musicPrime <= 0 {
+			musicPrime = primePeriods
+		}
+		if p.music.ready(musicPrime) {
 			music = p.music.take()
 		} else if p.music.playing {
 			p.report(p.music.drained(), "music")
@@ -916,6 +927,17 @@ func (p *PcmSpeaker) SetVoiceLive(active bool) {
 		return
 	}
 	p.voicePrime.Store(primePeriods)
+}
+
+// SetMusicLive selects the short startup gate used by locally decoded video.
+// It changes buffering only; video audio remains on the normal music plane so
+// TTS ducking, AEC reference, volume, EQ, and limiting stay unchanged.
+func (p *PcmSpeaker) SetMusicLive(active bool) {
+	if active {
+		p.musicPrime.Store(1)
+		return
+	}
+	p.musicPrime.Store(primePeriods)
 }
 
 // EndMusicStream marks the in-flight music stream complete (0x05).

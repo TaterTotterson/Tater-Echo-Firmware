@@ -135,6 +135,7 @@ type Hooks struct {
 	DisplayWeather      func(payload map[string]any)
 	DisplayClimate      func(payload map[string]any)
 	DisplayCameras      func(DisplayCameras)
+	DisplayVideo        func(DisplayVideo)
 	DisplayNotification func(payload map[string]any)
 	DisplayLastEvent    func(payload map[string]any)
 	SatChatDirectory    func([]SatChatParticipant)
@@ -376,6 +377,22 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen_cameras"] = true
 		capabilities["screen_camera_stream"] = true
 		capabilities["screen_camera_stream_version"] = 1
+		capabilities["screen_video_playback"] = true
+		capabilities["screen_video_playback_version"] = 1
+		switch target {
+		case "rook":
+			capabilities["screen_video_transcode_profile"] = "echo_rook_480p"
+			capabilities["screen_video_width"] = 480
+			capabilities["screen_video_height"] = 480
+		case "checkers":
+			capabilities["screen_video_transcode_profile"] = "echo_checkers_480p"
+			capabilities["screen_video_width"] = 960
+			capabilities["screen_video_height"] = 480
+		default:
+			capabilities["screen_video_transcode_profile"] = "echo_show_720p"
+			capabilities["screen_video_width"] = 1280
+			capabilities["screen_video_height"] = 800
+		}
 		capabilities["screen_notifications"] = true
 		capabilities["screen_notifications_version"] = 2
 		capabilities["screen_power_management_version"] = 1

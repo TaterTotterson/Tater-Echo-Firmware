@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -155,6 +156,26 @@ type Cameras struct {
 	StreamActive     bool     `json:"stream_active"`
 }
 
+// Video is one provider-neutral fullscreen playback session. The stream URL
+// is short-lived and remains on the authenticated Tater -> satellite control
+// path; the renderer consumes it directly and returns decoded PCM over the
+// loopback-only audio endpoint below.
+type Video struct {
+	Active     bool   `json:"active"`
+	SessionID  string `json:"session_id,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Subtitle   string `json:"subtitle,omitempty"`
+	State      string `json:"state,omitempty"`
+	PositionMS int64  `json:"position_ms,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+	FPS        int    `json:"fps,omitempty"`
+	Loop       bool   `json:"loop"`
+	Live       bool   `json:"live"`
+	ServerSeek bool   `json:"server_seek"`
+	Error      string `json:"error,omitempty"`
+}
+
 type RoomTemperature struct {
 	RoomID          string  `json:"room_id,omitempty"`
 	RoomName        string  `json:"room_name,omitempty"`
@@ -219,6 +240,7 @@ type Snapshot struct {
 	LastEvent                   *Notification `json:"last_event,omitempty"`
 	SatChat                     *SatChat      `json:"sat_chat,omitempty"`
 	Cameras                     *Cameras      `json:"cameras,omitempty"`
+	Video                       *Video        `json:"video,omitempty"`
 	TaterTimeUnixMS             int64         `json:"tater_time_unix_ms,omitempty"`
 	TaterUTCOffset              int           `json:"tater_utc_offset_seconds,omitempty"`
 	TaterTimezone               string        `json:"tater_timezone,omitempty"`
@@ -236,6 +258,9 @@ type Command struct {
 	CallID      string             `json:"call_id,omitempty"`
 	Value       *float64           `json:"value,omitempty"`
 	Unit        string             `json:"unit,omitempty"`
+	SessionID   string             `json:"session_id,omitempty"`
+	PositionMS  int64              `json:"position_ms,omitempty"`
+	Error       string             `json:"error,omitempty"`
 	Diagnostics *ScreenDiagnostics `json:"diagnostics,omitempty"`
 }
 
@@ -283,6 +308,7 @@ type Server struct {
 	address      string
 	imageAddress string
 	onCommand    func(Command)
+	onVideoAudio func(context.Context, string, string, io.Reader) error
 
 	mu                       sync.RWMutex
 	state                    Snapshot
@@ -327,6 +353,15 @@ func New(address string, initial Snapshot, onCommand func(Command)) *Server {
 	}
 }
 
+// SetVideoAudioHandler installs the only path from decoded fullscreen-video
+// audio into the daemon. The HTTP listener is loopback-only, and the handler
+// additionally validates the active session before any bytes reach ALSA.
+func (s *Server) SetVideoAudioHandler(handler func(context.Context, string, string, io.Reader) error) {
+	s.mu.Lock()
+	s.onVideoAudio = handler
+	s.mu.Unlock()
+}
+
 // Run serves until ctx is cancelled. A failure to bind is returned so the
 // firmware logs it, but it never prevents the voice satellite from starting.
 func (s *Server) Run(ctx context.Context) error {
@@ -345,6 +380,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/media-image", s.serveMediaImage)
 	mux.HandleFunc("/sat-chat-video", s.serveSatChatVideo)
 	mux.HandleFunc("/camera-frame", s.serveCameraFrame)
+	mux.HandleFunc("/video-audio", s.serveVideoAudio)
 	imageServer := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second}
 	s.mu.Lock()
 	s.listener = listener
@@ -712,6 +748,37 @@ func (s *Server) serveCameraFrame(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(image)
+}
+
+func (s *Server) serveVideoAudio(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	streamID := strings.TrimSpace(r.URL.Query().Get("stream"))
+	if sessionID == "" || streamID == "" || len(sessionID) > 128 || len(streamID) > 128 {
+		http.Error(w, "invalid video audio session", http.StatusBadRequest)
+		return
+	}
+	s.mu.RLock()
+	video := s.state.Video
+	handler := s.onVideoAudio
+	valid := video != nil && video.Active && video.SessionID == sessionID &&
+		(strings.EqualFold(video.State, "playing") || strings.EqualFold(video.State, "loading"))
+	s.mu.RUnlock()
+	if !valid || handler == nil {
+		http.Error(w, "video session is not active", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if err := handler(r.Context(), sessionID, streamID, r.Body); err != nil && r.Context().Err() == nil {
+		log.Printf("[show] video audio stopped: %v", err)
+		http.Error(w, "video audio stopped", http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Update atomically changes the complete state and schedules a broadcast.

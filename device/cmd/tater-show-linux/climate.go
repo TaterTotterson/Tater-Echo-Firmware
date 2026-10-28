@@ -157,21 +157,15 @@ func climateModeAvailable(climate *show.Climate, mode string) bool {
 	return false
 }
 
-func climateTemperature(value *float64, unit string) string {
+func climateTemperature(value *float64, _ string) string {
 	if value == nil {
 		return "--°"
 	}
-	if math.Abs(*value-math.Round(*value)) < .05 {
-		return fmt.Sprintf("%.0f°", *value)
-	}
-	return fmt.Sprintf("%.1f°", *value)
+	return fmt.Sprintf("%.0f°", math.Round(*value))
 }
 
 func climateRoomTemperature(value float64) string {
-	if math.Abs(value-math.Round(value)) < .05 {
-		return fmt.Sprintf("%.0f°", value)
-	}
-	return fmt.Sprintf("%.1f°", value)
+	return fmt.Sprintf("%.0f°", math.Round(value))
 }
 
 func (r *renderer) climateBackground(canvas *image.RGBA, now time.Time, accent color.RGBA, alpha uint8) {
@@ -185,12 +179,13 @@ func (r *renderer) climateBackground(canvas *image.RGBA, now time.Time, accent c
 
 func (r *renderer) drawClimate(canvas *image.RGBA, now time.Time, accent color.RGBA) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
+	palette := r.menuPalette()
 	r.climateBackground(canvas, now, accent, 88)
 	panel := image.Rect(24, 20, width-24, height-20)
-	drawMenuGlassPanel(canvas, panel, max(24, height/22))
+	drawMenuGlassPanel(canvas, panel, max(24, height/22), palette.primary)
 	climate := r.state.Climate
 	enabled := climate != nil && climate.Available
-	ink := menuCyanInk
+	ink := palette.primary
 	if !enabled {
 		ink = color.RGBA{130, 143, 160, 255}
 	}
@@ -205,8 +200,8 @@ func (r *renderer) drawClimate(canvas *image.RGBA, now time.Time, accent color.R
 		iconSize = 68
 	}
 	iconBounds := image.Rect(panel.Min.X+22, panel.Min.Y+20, panel.Min.X+22+iconSize, panel.Min.Y+20+iconSize)
-	drawMenuIconMedallion(canvas, iconBounds)
-	r.drawActionMenuGlyph(canvas, actionMenuClimate, (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2, iconSize*32/100, menuCyanInk)
+	drawMenuIconMedallion(canvas, iconBounds, palette.primary)
+	r.drawActionMenuGlyph(canvas, actionMenuClimate, (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2, iconSize*32/100, palette.primary)
 	r.text(canvas, iconBounds.Max.X+16, panel.Min.Y+48, "CLIMATE", headerSize, true, color.White)
 	closeBounds := climateCloseBounds(width, height, false)
 	drawMenuCloseButton(canvas, closeBounds)
@@ -222,8 +217,8 @@ func (r *renderer) drawClimate(canvas *image.RGBA, now time.Time, accent color.R
 
 	cx, cy := leftWidth/2, height*52/100
 	radius := max(72, min(height*25/100, leftWidth*25/100))
-	cool := color.RGBA{40, 211, 255, 255}
-	warm := menuOrangeInk
+	cool := palette.primary
+	warm := palette.secondary
 	arc(canvas, cx, cy, radius, 135, 108, max(5, height/80), color.RGBA{cool.R, cool.G, cool.B, 220})
 	arc(canvas, cx, cy, radius, 297, 108, max(5, height/80), color.RGBA{warm.R, warm.G, warm.B, 225})
 	target := "--°"
@@ -286,7 +281,7 @@ func (r *renderer) drawClimate(canvas *image.RGBA, now time.Time, accent color.R
 		}
 		column, row := index%2, index/2
 		bounds := image.Rect(right.Min.X+column*(cardWidth+gap), cardsTop+row*(cardHeight+gap), right.Min.X+column*(cardWidth+gap)+cardWidth, cardsTop+row*(cardHeight+gap)+cardHeight)
-		drawMenuCard(canvas, bounds, max(10, height/55), false)
+		drawMenuCard(canvas, bounds, max(10, height/55), false, palette.primary)
 		iconX := bounds.Min.X + max(22, bounds.Dx()/10)
 		r.drawWeatherMetricGlyph(canvas, iconX, (bounds.Min.Y+bounds.Max.Y)/2, max(8, height/65), "temperature", ink)
 		textLeft := iconX + max(22, bounds.Dx()/9)
@@ -298,19 +293,20 @@ func (r *renderer) drawClimate(canvas *image.RGBA, now time.Time, accent color.R
 }
 
 func (r *renderer) drawSpotClimate(canvas *image.RGBA, now time.Time, accent color.RGBA) {
+	palette := r.menuPalette()
 	r.climateBackground(canvas, now, accent, 84)
 	panel := cameraDirectoryLayoutFor(480, 480, true).panel
 	drawMenuSuperellipseShadow(canvas, panel, 8)
 	drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-	drawMenuSuperellipseOutline(canvas, panel, 2, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 230})
+	drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 230))
 	climate := r.state.Climate
 	enabled := climate != nil && climate.Available
-	ink, warm := menuCyanInk, menuOrangeInk
+	ink, warm := palette.primary, palette.secondary
 	if !enabled {
 		ink, warm = color.RGBA{118, 132, 150, 255}, color.RGBA{118, 132, 150, 255}
 	}
 	iconBounds := image.Rect(218, 60, 262, 104)
-	drawMenuIconMedallion(canvas, iconBounds)
+	drawMenuIconMedallion(canvas, iconBounds, palette.primary)
 	r.drawActionMenuGlyph(canvas, actionMenuClimate, 240, 82, 15, ink)
 	r.centeredText(canvas, 240, 124, "CLIMATE", 28, true, color.White)
 	drawMenuCloseButton(canvas, climateCloseBounds(480, 480, true))
@@ -321,7 +317,7 @@ func (r *renderer) drawSpotClimate(canvas *image.RGBA, now time.Time, accent col
 	r.centeredText(canvas, 240, 150, fitTextToWidth(room, r.faces.bold[18], 270), 18, true, color.RGBA{237, 243, 250, 255})
 
 	cx, cy, radius := 240, 238, 83
-	arc(canvas, cx, cy, radius, 135, 108, 7, color.RGBA{40, 211, 255, 225})
+	arc(canvas, cx, cy, radius, 135, 108, 7, menuAlpha(palette.primary, 225))
 	arc(canvas, cx, cy, radius, 297, 108, 7, color.RGBA{warm.R, warm.G, warm.B, 230})
 	target := "--°"
 	if enabled {
@@ -380,7 +376,7 @@ func (r *renderer) drawSpotClimate(canvas *image.RGBA, now time.Time, accent col
 	for visibleIndex, row := range rooms[start:end] {
 		bounds := spotClimateRoomBounds(visibleIndex)
 		centerX := (bounds.Min.X + bounds.Max.X) / 2
-		drawMenuCard(canvas, bounds, bounds.Dy()/2, false)
+		drawMenuCard(canvas, bounds, bounds.Dy()/2, false, palette.primary)
 		r.centeredText(canvas, centerX, bounds.Min.Y+17, fitTextToWidth(row.RoomName, r.faces.regular[10], bounds.Dx()-10), 10, false, color.RGBA{228, 235, 245, 255})
 		r.centeredText(canvas, centerX, bounds.Min.Y+35, climateRoomTemperature(row.Temperature), 16, true, color.White)
 	}
@@ -389,7 +385,7 @@ func (r *renderer) drawSpotClimate(canvas *image.RGBA, now time.Time, accent col
 		for index := 0; index < pages; index++ {
 			dotInk := color.RGBA{130, 151, 171, 220}
 			if index == r.climatePage {
-				dotInk = menuOrangeInk
+				dotInk = palette.secondary
 			}
 			circle(canvas, dotStart+index*9, 438, 3, dotInk)
 		}

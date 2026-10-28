@@ -54,6 +54,10 @@ func (c *Client) handle(message Envelope) {
 		if hook := c.hooks.DisplayCameras; hook != nil {
 			hook(decodeDisplayCameras(payload))
 		}
+	case "display.video":
+		if hook := c.hooks.DisplayVideo; hook != nil {
+			hook(decodeDisplayVideo(payload))
+		}
 	case "display.notification":
 		if hook := c.hooks.DisplayNotification; hook != nil {
 			hook(copyMap(payload))

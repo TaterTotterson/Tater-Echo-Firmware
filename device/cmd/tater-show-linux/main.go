@@ -121,6 +121,13 @@ func (client *socketClient) sendCamera(action, target string) {
 	})
 }
 
+func (client *socketClient) sendVideo(action, sessionID string, positionMS int64, detail string) {
+	client.sendCommand(show.Command{
+		Protocol: show.ProtocolVersion, Type: "command", Action: action,
+		SessionID: sessionID, PositionMS: positionMS, Error: detail,
+	})
+}
+
 func (client *socketClient) sendDiagnostics(diagnostics show.ScreenDiagnostics) {
 	client.sendCommand(show.Command{
 		Protocol: show.ProtocolVersion, Type: "command", Action: "screen.diagnostics",
@@ -216,6 +223,12 @@ type renderer struct {
 	cameraFrameKey          string
 	cameraStreamImage       *image.RGBA
 	cameraStreamShown       bool
+	displayVideoImage       *image.RGBA
+	displayVideoFrame       string
+	displayVideoDrawn       string
+	displayVideoStateKey    string
+	displayVideoCanvas      *image.RGBA
+	displayVideoPositionMS  int64
 	satChatOpen             bool
 	climateOpen             bool
 	climatePage             int
@@ -407,6 +420,26 @@ func (r *renderer) render(canvas *image.RGBA, now time.Time) {
 func (r *renderer) renderBase(canvas *image.RGBA, now time.Time) {
 	r.presentRegions = []image.Rectangle{canvas.Rect}
 	r.transientPresent = false
+	if r.displayVideoVisible() {
+		video := r.state.Video
+		stateKey := fmt.Sprintf("%s|%s|%d|%s|%s", video.SessionID, video.State, video.PositionMS, video.Title, video.Error)
+		if r.displayVideoCanvas == canvas && r.displayVideoDrawn == r.displayVideoFrame && r.displayVideoStateKey == stateKey {
+			r.presentRegions = nil
+			return
+		}
+		r.renderDisplayVideo(canvas)
+		r.presentRegions = []image.Rectangle{canvas.Rect}
+		r.transientPresent = r.displayVideoImage != nil
+		r.displayVideoCanvas = canvas
+		r.displayVideoDrawn = r.displayVideoFrame
+		r.displayVideoStateKey = stateKey
+		return
+	}
+	if r.displayVideoCanvas != nil {
+		r.displayVideoCanvas = nil
+		r.displayVideoStateKey = ""
+		r.invalidateFrameCanvases()
+	}
 	if r.nightClockVisible(now) {
 		r.renderNightClock(canvas, now)
 		return
@@ -1133,14 +1166,17 @@ func (r *renderer) crownCacheKey(now time.Time, accent color.RGBA) string {
 		r.crownContextKind(now), r.state.Phase, r.state.Message, r.state.DeviceName, r.state.Room,
 		r.state.AssistantName,
 		fmt.Sprint(r.state.Connected), fmt.Sprint(r.state.Muted), fmt.Sprint(r.state.DisplayEdgeGlow), fmt.Sprint(accent),
-		stableCacheValue(r.state.Weather), stableCacheValue(r.state.Climate), stableCacheValue(r.state.Notification),
+		stableCacheValue(r.state.Weather), stableCacheValue(r.state.Climate), stableCacheValue(r.state.Cameras), stableCacheValue(r.state.Notification),
 		stableCacheValue(r.state.LastEvent), stableCacheValue(r.state.Timer),
 		mediaIdentity(r.state.Media), mediaPlaybackState(r.state.Media), mediaGroupName(r.state.Media),
 		fmt.Sprint(mediaPrimaryColor(r.state.Media)), fmt.Sprint(mediaAccentColor(r.state.Media)),
 		fmt.Sprint(timerSecond),
 		r.notificationID, r.lastEventID, fmt.Sprint(r.notificationImage != nil), fmt.Sprint(r.lastEventImage != nil),
 		r.localTime(now).Format("200601021504"), fmt.Sprint(r.mediaImage != nil), r.wallpaperID,
-		stableCacheValue(r.state.WallpaperURLs), fmt.Sprint(r.climateOpen), fmt.Sprint(r.cameraOpen), fmt.Sprint(r.menuOpen),
+		stableCacheValue(r.state.WallpaperURLs),
+		fmt.Sprint(r.climateOpen, "|", r.climatePage),
+		fmt.Sprint(r.cameraOpen, "|", r.cameraPage),
+		fmt.Sprint(r.menuOpen),
 	}, "|")
 }
 
@@ -1210,6 +1246,7 @@ func (r *renderer) checkersCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
 		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
+		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
 		stableCacheValue(r.state.Notification),
 		local.Format("200601021504"),
@@ -2770,6 +2807,8 @@ func main() {
 	go runLatestScreenImageLoader(ctx, satChatVideoRequests, imageResults)
 	cameraStream := newCameraStreamController()
 	defer cameraStream.Close()
+	displayVideo := newDisplayVideoController()
+	defer displayVideo.Close()
 	// Drive animation from wall time so dropped ticks slow the frame rate, not
 	// the motion itself. Each native layout reports its animated regions; the
 	// framebuffer path can therefore keep a steady cadence without repeatedly
@@ -2782,6 +2821,8 @@ func main() {
 	videoStatsAt := time.Now()
 	videoStatsSession := ""
 	videoLastPresented := ""
+	videoProgressSession := ""
+	videoProgressAt := time.Time{}
 	videoDecoded, videoPresented := 0, 0
 	var videoLoadTotal, videoScaleTotal, videoPresentTotal time.Duration
 	for {
@@ -2802,10 +2843,20 @@ func main() {
 			}
 			renderer.state = state
 			renderer.received = received
+			if state.Video == nil || state.Video.SessionID != videoProgressSession {
+				videoProgressSession = ""
+				videoProgressAt = time.Time{}
+				if state.Video != nil {
+					videoProgressSession = state.Video.SessionID
+				}
+			}
+			if displayVideo.Update(ctx, state.Video, image.Pt(screenWidth, screenHeight)) {
+				renderer.resetDisplayVideo(displayVideo)
+			}
 			if cameraStream.Update(ctx, state.Cameras, renderer.cameraVideoBounds().Size()) {
 				renderer.resetCameraStream(cameraStream)
 			}
-			setVideoCoreFloor(cameraStream.Active() || cameraVideoActive(state) || satChatVideoActive(state))
+			setVideoCoreFloor(displayVideo.Active() || cameraStream.Active() || cameraVideoActive(state) || satChatVideoActive(state))
 			renderer.queueNotificationImage(ctx, imageResults)
 			renderer.queueLastEventImage(ctx, imageResults)
 			renderer.queueMediaImage(ctx, imageResults)
@@ -2824,6 +2875,19 @@ func main() {
 			}
 		case result := <-cameraStream.frames:
 			renderer.applyCameraStream(cameraStream, result)
+		case result := <-displayVideo.frames:
+			if result.ended {
+				client.sendVideo("video.ended", result.sessionID, renderer.displayVideoPositionMS, "")
+			} else if result.err != nil {
+				client.sendVideo("video.error", result.sessionID, renderer.displayVideoPositionMS, result.err.Error())
+			} else {
+				renderer.applyDisplayVideo(displayVideo, result)
+				if renderer.state.Video != nil && strings.EqualFold(renderer.state.Video.State, "playing") &&
+					(time.Since(videoProgressAt) >= 15*time.Second || videoProgressAt.IsZero()) {
+					client.sendVideo("video.progress", result.sessionID, renderer.displayVideoPositionMS, "")
+					videoProgressAt = time.Now()
+				}
+			}
 		case event := <-touchEvents:
 			handleQueuedTouch(renderer, client, event)
 			// A single physical contact can enqueue several movement samples
@@ -3009,6 +3073,10 @@ func handleQueuedTouch(renderer *renderer, client *socketClient, event linuxinpu
 }
 
 func handleTouch(renderer *renderer, client *socketClient, event linuxinput.TouchEvent) {
+	if renderer.displayVideoVisible() {
+		renderer.handleDisplayVideoTouch(client, event)
+		return
+	}
 	if renderer.spotScreen {
 		renderer.handleSpotTouch(client, event)
 		return
@@ -3251,6 +3319,7 @@ func (r *renderer) satChatVideoOuterBounds(width, height int) image.Rectangle {
 }
 
 func (r *renderer) drawSatChatVideo(canvas *image.RGBA, width, height int) image.Rectangle {
+	palette := r.menuPalette()
 	videoBounds := r.satChatVideoOuterBounds(width, height)
 	drawMenuRoundedRect(canvas, videoBounds, 18, color.RGBA{4, 13, 22, 255})
 	if r.satChatVideoImage != nil {
@@ -3258,7 +3327,7 @@ func (r *renderer) drawSatChatVideo(canvas *image.RGBA, width, height int) image
 	} else {
 		r.centeredText(canvas, width/2, (videoBounds.Min.Y+videoBounds.Max.Y)/2, "WAITING FOR CAMERA", 18, true, color.RGBA{164, 179, 198, 255})
 	}
-	drawMenuRoundedOutline(canvas, videoBounds, 18, 3, color.RGBA{menuCyanInk.R, menuCyanInk.G, menuCyanInk.B, 230})
+	drawMenuRoundedOutline(canvas, videoBounds, 18, 3, menuAlpha(palette.primary, 230))
 	r.drawSatChatVideoOverlays(canvas, width, height)
 	return videoBounds
 }
@@ -3304,6 +3373,7 @@ func (r *renderer) drawSatChatVideoOverlays(canvas *image.RGBA, width, height in
 }
 
 func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height int, accent color.RGBA) {
+	palette := r.menuPalette()
 	chat := r.state.SatChat
 	if chat != nil && chat.Call != nil && strings.EqualFold(chat.Call.Mode, "video") {
 		// Compose the call backdrop once. Subsequent frames update only the
@@ -3326,7 +3396,7 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{A: 86}), image.Point{}, draw.Over)
 	layout := satChatDirectoryLayoutFor(width, height)
 	backdrop := layout.panel
-	drawMenuGlassPanel(canvas, backdrop, max(26, height/22))
+	drawMenuGlassPanel(canvas, backdrop, max(26, height/22), palette.primary)
 	headerSize := 28
 	if height >= 700 {
 		headerSize = 34
@@ -3336,9 +3406,9 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 		iconSize = 68
 	}
 	iconBounds := image.Rect(backdrop.Min.X+22, backdrop.Min.Y+20, backdrop.Min.X+22+iconSize, backdrop.Min.Y+20+iconSize)
-	drawMenuIconMedallion(canvas, iconBounds)
+	drawMenuIconMedallion(canvas, iconBounds, palette.primary)
 	headerIconX, headerIconY := (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2
-	drawSatChatNetworkGlyph(canvas, headerIconX, headerIconY, iconSize*28/100, menuCyanInk)
+	drawSatChatNetworkGlyph(canvas, headerIconX, headerIconY, iconSize*28/100, palette.primary)
 	textX := iconBounds.Max.X + 16
 	r.text(canvas, textX, backdrop.Min.Y+46, "SAT CHAT", headerSize, true, color.White)
 	r.text(canvas, textX, backdrop.Min.Y+72, "Choose a satellite to start a call", 15, false, menuSubtitleInk)
@@ -3385,7 +3455,7 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 	end := min(len(participants), start+pageSize)
 	if pageCount > 1 {
 		previous, next := satChatPreviousBounds(width), satChatNextBounds(width)
-		previousInk, nextInk := menuOrangeInk, menuOrangeInk
+		previousInk, nextInk := palette.secondary, palette.secondary
 		if page == 0 {
 			previousInk = color.RGBA{83, 93, 108, 150}
 		}
@@ -3411,7 +3481,7 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 			nameInk = color.RGBA{139, 148, 163, 255}
 			statusInk = color.RGBA{255, 83, 67, 255}
 		}
-		drawMenuCard(canvas, row, max(18, row.Dy()/4), participant.Busy)
+		drawMenuCard(canvas, row, max(18, row.Dy()/4), participant.Busy, palette.primary)
 		avatarLimit, nameSize, subSize, capabilitySize := 26, 19, 12, 10
 		if height >= 700 {
 			avatarLimit, nameSize, subSize, capabilitySize = 42, 24, 15, 14
@@ -3419,14 +3489,20 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 		avatarRadius := min(avatarLimit, row.Dy()/2-9)
 		avatarX, centerY := row.Min.X+avatarRadius+18, (row.Min.Y+row.Max.Y)/2
 		avatar := image.Rect(avatarX-avatarRadius, centerY-avatarRadius, avatarX+avatarRadius, centerY+avatarRadius)
-		drawMenuIconMedallion(canvas, avatar)
-		drawSatChatNetworkGlyph(canvas, avatarX, centerY, max(9, avatarRadius/2), menuCyanInk)
+		drawMenuIconMedallion(canvas, avatar, palette.primary)
+		drawSatChatNetworkGlyph(canvas, avatarX, centerY, max(9, avatarRadius/2), palette.primary)
 		statusX := avatarX + avatarRadius + 20
 		circle(canvas, statusX, centerY-8, 9, color.RGBA{statusInk.R, statusInk.G, statusInk.B, 40})
 		circle(canvas, statusX, centerY-8, 6, statusInk)
 		nameLeft := statusX + 20
 		capabilityRight := row.Max.X - 44
-		r.text(canvas, nameLeft, centerY-2, fitTextToWidth(firstNonEmpty(participant.Name, participant.Room), r.faces.bold[nameSize], max(100, capabilityRight-nameLeft-112)), nameSize, true, nameInk)
+		nameWidth := max(100, capabilityRight-nameLeft-48)
+		minimumNameSize := 12
+		if height >= 700 {
+			minimumNameSize = 16
+		}
+		name, fittedNameSize := r.menuName(firstNonEmpty(participant.Name, participant.Room), nameSize, minimumNameSize, nameWidth)
+		r.text(canvas, nameLeft, centerY-2, name, fittedNameSize, true, nameInk)
 		label := "AUDIO ONLY"
 		if participant.Video {
 			label = "VIDEO + AUDIO"
@@ -3436,7 +3512,7 @@ func (r *renderer) drawSatChat(canvas *image.RGBA, now time.Time, width, height 
 		}
 		r.text(canvas, nameLeft, centerY+subSize+8, label, subSize, true, color.RGBA{166, 190, 219, 255})
 		if !participant.Busy {
-			iconInk := menuCyanInk
+			iconInk := palette.primary
 			micX := row.Max.X - max(54, row.Dy()/3)
 			drawSatChatMicGlyph(canvas, micX, centerY-4, capabilitySize, iconInk)
 			if participant.Video {
