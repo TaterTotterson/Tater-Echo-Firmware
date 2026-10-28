@@ -63,7 +63,8 @@ def platform_provenance(target: str) -> dict:
         source = {
             "repository": PLATFORM_REPOSITORY,
             "commit": platforms["athena"]["commit"],
-            "release": platforms["athena"]["release"],
+            "release": platforms["athena"]["kernel_release"],
+            "base_release": platforms["athena"]["release"],
         }
     elif target == "rook":
         source = {

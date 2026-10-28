@@ -130,7 +130,7 @@ cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
 kernel_args=
 if [ "$target" = athena ]; then
-    kernel_image=$repo/linux/athena/inputs/tater-echo-athena-baseline-boot.img
+    kernel_image=$repo/linux/athena/inputs/tater-echo-athena-kernel-boot.img
     [ -f "$kernel_image" ] || { echo "pinned Athena boot image is missing: $kernel_image" >&2; exit 1; }
     (
         cd "$platform_source/echod"

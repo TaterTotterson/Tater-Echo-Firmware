@@ -348,7 +348,7 @@ class BuildScriptTests(unittest.TestCase):
         build_script = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
         rootfs_builder = (ROOT / "linux/checkers/build_rootfs.py").read_text(encoding="utf-8")
 
-        self.assertIn("tater-echo-athena-baseline-boot.img", build_script)
+        self.assertIn("tater-echo-athena-kernel-boot.img", build_script)
         self.assertIn("./cmd/echod", build_script)
         self.assertIn("--kernelctl=$device/build/tater-kernelctl", build_script)
         self.assertIn("--kernel-image=$kernel_image", build_script)

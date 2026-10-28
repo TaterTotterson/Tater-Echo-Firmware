@@ -91,9 +91,10 @@
       }
     },
     "athena": {
-      "commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
+      "commit": "a66d822903cf9a5fc9f05a7b344a14b4d6d6e617",
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
+      "kernel_release": "athena-kernel-v1.0.0",
       "rootfs": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-rootfs.tar.gz",
         "sha256": "cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5"
@@ -111,9 +112,10 @@
         }
       },
       "boot": {
-        "name": "tater-echo-athena-baseline-boot.img",
-        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-boot.img",
-        "sha256": "ccea79be61d8d3b99a9851f004b0f3974fee6e8028f8fbd1b4fab03eace65e68"
+        "name": "boot-athena.img",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/athena-kernel-v1.0.0/boot-athena.img",
+        "sha256": "5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191",
+        "size": 12951552
       }
     },
     "rook": {

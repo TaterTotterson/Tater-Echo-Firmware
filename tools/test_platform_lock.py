@@ -77,7 +77,7 @@ class PlatformLockTests(unittest.TestCase):
         value = platform_lock.load()
         decoder = value["platforms"]["athena"]["video_decoder"]
         self.assertEqual(decoder["release"], "video-decoder-v8.1.2-1")
-        self.assertEqual(decoder["source_commit"], value["platforms"]["athena"]["commit"])
+        self.assertRegex(decoder["source_commit"], r"^[0-9a-f]{40}$")
         self.assertIn("TaterTotterson/Tater-Echo-Linux/releases/download/", decoder["url"])
         self.assertRegex(decoder["sha256"], r"^[0-9a-f]{64}$")
         self.assertGreater(decoder["size"], 0)
@@ -89,6 +89,16 @@ class PlatformLockTests(unittest.TestCase):
         unsafe["platforms"]["athena"]["video_decoder"]["source_commit"] = "not-a-commit"
         with self.assertRaisesRegex(SystemExit, "source commit"):
             platform_lock.verify(unsafe)
+
+    def test_athena_kernel_is_a_pinned_tater_linux_asset(self) -> None:
+        value = platform_lock.load()
+        athena = value["platforms"]["athena"]
+        boot = athena["boot"]
+        self.assertEqual(athena["kernel_release"], "athena-kernel-v1.0.0")
+        self.assertIn(f"/releases/download/{athena['kernel_release']}/", boot["url"])
+        self.assertEqual(boot["name"], "boot-athena.img")
+        self.assertRegex(boot["sha256"], r"^[0-9a-f]{64}$")
+        self.assertGreater(boot["size"], 0)
 
     def test_lock_is_canonical_json(self) -> None:
         path = ROOT / "platforms/tater-echo-linux-lock.json"

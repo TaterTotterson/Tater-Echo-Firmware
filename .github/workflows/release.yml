@@ -523,7 +523,7 @@ jobs:
           python3 tools/fetch_platform_input.py \
             platforms.athena.rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            platforms.athena.boot linux/athena/inputs/tater-echo-athena-baseline-boot.img
+            platforms.athena.boot linux/athena/inputs/tater-echo-athena-kernel-boot.img
           git clone --filter=blob:none \
             "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
           git -C /tmp/tater-echo-linux-show checkout \
@@ -583,7 +583,7 @@ jobs:
           TATER_ATHENA_PLATFORM_SOURCE: /tmp/tater-echo-linux-show/platforms/show
           TATER_ATHENA_ROOTFS: device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
           TATER_ATHENA_SYSTEM_IMAGE: device/build/tater-athena-system-${{ steps.version.outputs.version }}.img.gz
-          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/tater-echo-athena-baseline-boot.img
+          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/tater-echo-athena-kernel-boot.img
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' --target athena --output release
