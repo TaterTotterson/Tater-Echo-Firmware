@@ -386,7 +386,7 @@ jobs:
             --version '${{ steps.version.outputs.version }}' \
             --target '${{ matrix.target }}' \
             --base-rootfs linux/checkers/inputs/tater-echo-show-baseline-rootfs.tar.gz \
-            --platform /tmp/tater-echo-linux-show \
+            --platform /tmp/tater-echo-linux-show/platforms/show \
             --ffmpeg device/build/tater-ffmpeg \
             --ffmpeg-license device/build/FFMPEG-LGPL-2.1.txt \
             --output device/build/tater-${{ matrix.target }}-rootfs-${{ steps.version.outputs.version }}.tar.gz
@@ -742,12 +742,12 @@ jobs:
             --rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar \
             --alpine-rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz \
             --spot-source /tmp/tater-echo-linux-spot/platforms/spot \
-            --show-source /tmp/tater-echo-linux-show \
+            --show-source /tmp/tater-echo-linux-show/platforms/show \
             --output device/build/rook/tater-rook-boot.img
           sh linux/rook/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --base-rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz \
-            --spot-source /tmp/tater-echo-linux-spot/platforms/spot --show-source /tmp/tater-echo-linux-show \
+            --spot-source /tmp/tater-echo-linux-spot/platforms/spot --show-source /tmp/tater-echo-linux-show/platforms/show \
             --ffmpeg device/build/rook/tater-ffmpeg \
             --ffmpeg-license device/build/rook/FFMPEG-LGPL-2.1.txt \
             --output device/build/rook/tater-rook-rootfs-${{ steps.version.outputs.version }}.tar.gz

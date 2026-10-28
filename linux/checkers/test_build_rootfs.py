@@ -15,6 +15,21 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class BootPatchTests(unittest.TestCase):
+    def test_release_workflow_uses_unified_show_platform_subdirectory(self):
+        workflow = (
+            Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
+        ).read_text()
+        checkers_job = workflow.split("\n  checkers:\n", 1)[1].split(
+            "\n  athena:\n", 1
+        )[0]
+
+        self.assertEqual(
+            1,
+            checkers_job.count(
+                "--platform /tmp/tater-echo-linux-show/platforms/show"
+            ),
+        )
+
     def test_ssh_group_is_root_only_idempotent_and_collision_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
