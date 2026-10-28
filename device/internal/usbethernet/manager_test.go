@@ -38,6 +38,14 @@ func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	if !manager.Prepared() || !manager.Supported() {
 		t.Fatal("qualified Crown hardware-OTG path should be prepared and supported")
 	}
+	manager.Target = "checkers"
+	if !manager.Prepared() || !manager.Supported() {
+		t.Fatal("qualified Checkers hardware-OTG path should be prepared and supported")
+	}
+	manager.Target = "rook"
+	if !manager.Prepared() || !manager.Supported() {
+		t.Fatal("qualified Rook MediaTek role path should be prepared and supported")
+	}
 	manager.Target = "radar"
 	if !manager.Prepared() || manager.Supported() {
 		t.Fatal("Radar should be prepared without inheriting Biscuit role qualification")
@@ -55,6 +63,20 @@ func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	}
 	if manager.Supported() {
 		t.Fatal("Crown must fail closed without its verified hardware role path")
+	}
+	manager = testManager(t, "checkers")
+	if err := os.Remove(manager.Paths.RoleMode); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Supported() {
+		t.Fatal("Checkers must fail closed without its verified hardware role path")
+	}
+	manager = testManager(t, "rook")
+	if err := os.Remove(manager.Paths.MChange); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Supported() {
+		t.Fatal("Rook must fail closed without MediaTek role control")
 	}
 }
 
@@ -89,7 +111,7 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 			capability.Recovery == "" || capability.Reason == "" {
 			t.Errorf("incomplete %s capability: %#v", target, capability)
 		}
-		qualified := target == "biscuit" || target == "crown"
+		qualified := target == "biscuit" || target == "checkers" || target == "crown" || target == "rook"
 		if qualified && !capability.qualified() {
 			t.Errorf("hardware-qualified target %s lost qualification: %#v", target, capability)
 		}
@@ -113,7 +135,7 @@ func TestTaterHostnameAliasUsesTheSameCapability(t *testing.T) {
 }
 
 func TestPreparedControllerStartsInPendingAutomaticState(t *testing.T) {
-	manager := testManager(t, "checkers")
+	manager := testManager(t, "radar")
 	got := manager.Diagnostics()
 	if got["prepared"] != true || got["automatic"] != true || got["supported"] != false ||
 		got["active"] != false || got["state"] != "pending" {
@@ -135,16 +157,32 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 	}
 }
 
-func TestCrownDiagnosticsReportQualifiedHardwareOTG(t *testing.T) {
-	manager := testManager(t, "crown")
+func TestShowDiagnosticsReportQualifiedHardwareOTG(t *testing.T) {
+	for _, target := range []string{"checkers", "crown"} {
+		t.Run(target, func(t *testing.T) {
+			manager := testManager(t, target)
+			if err := os.WriteFile(manager.Paths.State, []byte("active eth0 10.4.20.159\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := manager.Diagnostics()
+			if got["supported"] != true || got["active"] != true || got["qualification"] != "qualified" ||
+				got["backend"] != "mediatek-musb-hardware-otg" || got["detection"] != "hardware-id-passive" ||
+				got["interface"] != "eth0" || got["address"] != "10.4.20.159" {
+				t.Fatalf("unexpected %s diagnostics: %#v", target, got)
+			}
+		})
+	}
+}
+
+func TestRookDiagnosticsReportQualifiedMChange(t *testing.T) {
+	manager := testManager(t, "rook")
 	if err := os.WriteFile(manager.Paths.State, []byte("active eth0 10.4.20.159\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got := manager.Diagnostics()
 	if got["supported"] != true || got["active"] != true || got["qualification"] != "qualified" ||
-		got["backend"] != "mediatek-musb-hardware-otg" || got["detection"] != "hardware-id-passive" ||
-		got["interface"] != "eth0" || got["address"] != "10.4.20.159" {
-		t.Fatalf("unexpected Crown diagnostics: %#v", got)
+		got["backend"] != "mediatek-mchange" || got["detection"] != "bounded-active-probe" {
+		t.Fatalf("unexpected Rook diagnostics: %#v", got)
 	}
 }
 
@@ -155,7 +193,7 @@ func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 		detection string
 	}{
 		{target: "athena", backend: "mediatek-mtu3-gpio-otg", detection: "hardware-id-passive"},
-		{target: "rook", backend: "mediatek-mchange-candidate", detection: "bounded-active-probe"},
+		{target: "radar", backend: "mediatek-mchange-candidate", detection: "passive-until-role-qualified"},
 	}
 	for _, test := range tests {
 		t.Run(test.target, func(t *testing.T) {

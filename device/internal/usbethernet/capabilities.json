@@ -20,13 +20,13 @@
       "reason": "Radar has no external USB port; power, enumeration, and recovery must be qualified with the internal pads and a powered adapter."
     },
     "checkers": {
-      "backend": "mediatek-musb-candidate",
-      "detection": "passive-until-role-qualified",
-      "status": "baseline-validation",
+      "backend": "mediatek-musb-hardware-otg",
+      "detection": "hardware-id-passive",
+      "status": "qualified",
       "port": "external-micro-usb",
-      "power": "separate-device-power-vbus-unverified",
+      "power": "separate-device-power-vbus-verified",
       "recovery": "usb-serial",
-      "reason": "The Tater custody baseline is pinned; boot it, then qualify board-specific role control, VBUS, enumeration, and serial recovery."
+      "reason": "Real-hardware RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Checkers."
     },
     "crown": {
       "backend": "mediatek-musb-hardware-otg",
@@ -47,13 +47,13 @@
       "reason": "The Tater MTU3 dual-role kernel boots on Athena; normal-cable device mode, bounded host/device switching, USB serial/RNDIS restoration, reboot, and Wi-Fi fallback passed. An OTG Ethernet adapter is still required to validate VBUS, enumeration, DHCP, traffic, link loss, and unplug."
     },
     "rook": {
-      "backend": "mediatek-mchange-candidate",
+      "backend": "mediatek-mchange",
       "detection": "bounded-active-probe",
-      "status": "hardware-validation",
+      "status": "qualified",
       "port": "external-micro-usb",
       "power": "shared-micro-usb-powered-pass-through",
       "recovery": "usb-serial",
-      "reason": "The intended powered RTL8152 adapter does not assert Rook's physical ID path. The Tater candidate therefore uses MediaTek's bounded /proc/mchange probe while internal USB Wi-Fi remains on a separate host controller. The exact candidate still requires enumeration, DHCP, traffic, link-loss, unplug, reboot, and serial-recovery validation."
+      "reason": "Real-hardware forced host mode, RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Rook."
     }
   }
 }
