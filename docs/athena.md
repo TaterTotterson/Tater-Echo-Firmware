@@ -12,12 +12,12 @@ contract and ongoing regression checklist are recorded below.
 - Linux platform: [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux),
   based on the MIT-licensed TECHO5 Athena work.
 - Pinned Tater Echo Linux source commit:
-  `f90367a000f2ff831aeafeb1af3a92f172e3360e` (compatible platform release
+  `6c58d47c9398617e399cf49ce3b31fa9b8f396f9` (compatible platform release
   `v1.6.4`).
 - Base rootfs SHA-256:
   `cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5`.
 - Mainline boot SHA-256:
-  `ccea79be61d8d3b99a9851f004b0f3974fee6e8028f8fbd1b4fab03eace65e68`.
+  `5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191`.
 
 The release build layers Tater's ARMv7 daemon, renderer, camera adapter, wake
 runtimes, and setup flow onto that rootfs, then uses Tater Echo Linux's Athena
