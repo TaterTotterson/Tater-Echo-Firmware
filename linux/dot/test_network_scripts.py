@@ -28,6 +28,7 @@ class USBEthernetControllerTests(unittest.TestCase):
         self.mchange = self.root / "mchange"
         self.mchange.write_text("Active:1 host:0 force:2\n", encoding="utf-8")
         self.net_log = self.root / "net.log"
+        self.ifconfig_log = self.root / "ifconfig.log"
         self.net = self.root / "tater-net"
         self.net.write_text(
             '#!/bin/sh\nprintf "%s\\n" "${1:-start}" >> "$TATER_TEST_NET_LOG"\n',
@@ -81,6 +82,7 @@ class USBEthernetControllerTests(unittest.TestCase):
             "TATER_SETUP_SSID_FILE": str(self.setup_ssid),
             "TATER_PATH": f"{self.bin}:/usr/bin:/bin:/usr/sbin:/sbin",
             "TATER_TEST_NET_LOG": str(self.net_log),
+            "TATER_TEST_IFCONFIG_LOG": str(self.ifconfig_log),
             "TATER_RESOLV_CONF": str(self.root / "resolv.conf"),
             "TATER_ETH_ENUM_TIMEOUT": "0",
             "TATER_ETH_DHCP_TIMEOUT": "1",
@@ -248,6 +250,7 @@ class USBEthernetControllerTests(unittest.TestCase):
         self._command(
             "ifconfig",
             """#!/bin/sh
+printf '%s\n' "$*" >> "$TATER_TEST_IFCONFIG_LOG"
 if [ "$#" -eq 1 ] && [ "$1" = eth0 ]; then
     echo 'eth0 Link encap:Ethernet  HWaddr 00:11:22:33:44:55'
     echo '          inet addr:192.168.1.9  Bcast:192.168.1.255  Mask:255.255.255.0'
@@ -303,6 +306,38 @@ exit 0
             self.fail(f"Ethernet never became active: {stdout=} {stderr=}")
 
         return process, state, interface
+
+    def test_rook_ethernet_takes_wifi_interface_down_then_restores_it(self) -> None:
+        interface = self._usb_interface()
+        self.mchange.write_text("Active:1 host:1 force:1\n", encoding="utf-8")
+        self._install_usable_ethernet_commands()
+
+        process = subprocess.Popen(
+            ["sh", str(ETHERNET), "once"],
+            env=self._environment(TATER_TARGET="rook", TATER_ETH_ENUM_TIMEOUT="1"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        state = self.run / "tater-usb-ethernet.state"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if state.exists() and state.read_text().startswith("active eth0 192.168.1.9"):
+                calls = self.ifconfig_log.read_text().splitlines()
+                if "wlan0 0.0.0.0 down" in calls:
+                    break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Rook did not take Wi-Fi down after Ethernet became usable: {stdout=} {stderr=}")
+
+        self.assertFalse(self.net_log.exists(), "Wi-Fi restarted before wired link loss")
+        (interface / "carrier").write_text("0\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+        self.assertEqual("fallback link-lost", state.read_text().strip())
+        self.assertEqual(["fallback"], self.net_log.read_text().splitlines())
 
     def test_usable_ethernet_stops_wifi_then_disable_restores_it(self) -> None:
         process, state, _ = self._start_usable_ethernet()

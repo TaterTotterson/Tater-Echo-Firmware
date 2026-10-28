@@ -123,7 +123,8 @@ Complete these in order for each target:
    the runtime selector.
 
 Wi-Fi must remain connected until Ethernet has both an IPv4 address and a
-default route. On disable or sustained failure, Ethernet DHCP is stopped first,
+default route. Outside setup, a usable wired route stops Wi-Fi and puts its
+interface down. On disable or sustained failure, Ethernet DHCP is stopped first,
 the USB device/serial role is restored, and Wi-Fi is then restarted if it had
 been stopped. A daemon-only OTA can never qualify a platform whose immutable
 kernel or root filesystem lacks the required controller.
