@@ -189,11 +189,13 @@ class BuildScriptTests(unittest.TestCase):
         )
         self.assertEqual(1, capabilities["schema"])
         self.assertEqual(set(targets), set(capabilities["targets"]))
-        self.assertEqual("qualified", capabilities["targets"]["biscuit"]["status"])
+        qualified = {"biscuit", "crown"}
+        for target in qualified:
+            self.assertEqual("qualified", capabilities["targets"][target]["status"])
         for capability in capabilities["targets"].values():
             self.assertTrue(capability["power"])
             self.assertTrue(capability["detection"])
-        for target in set(targets) - {"biscuit"}:
+        for target in set(targets) - qualified:
             self.assertNotEqual("qualified", capabilities["targets"][target]["status"])
 
     def test_dot_setup_uses_mediatek_vendor_ap_interface(self) -> None:
