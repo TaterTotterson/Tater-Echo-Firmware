@@ -10,6 +10,9 @@ BUSYBOX=${TATER_BUSYBOX:-/bin/busybox}
 PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
 MODE_FILE=$SSH_DIR/mode
 PASSWORD_HASH=$SSH_DIR/password_hash
+SHADOW_SOURCE=${TATER_SSH_SHADOW_SOURCE:-/run/tater-sshd.shadow}
+SHADOW_TARGET=${TATER_SSH_SHADOW_TARGET:-/etc/shadow}
+SHADOW_MARKER=${TATER_SSH_SHADOW_MARKER:-/run/tater-sshd.shadow-mounted}
 
 usage() {
 	cat <<'EOF'
@@ -47,6 +50,27 @@ restart_supervisor() {
 	fi
 }
 
+shadow_is_mounted() {
+	"$BUSYBOX" awk -v target="$SHADOW_TARGET" '
+		$5 == target { found = 1 }
+		END { exit !found }
+	' /proc/self/mountinfo
+}
+
+remove_managed_shadow() {
+	[ -r "$SHADOW_MARKER" ] || return 0
+	managed_source=
+	IFS= read -r managed_source < "$SHADOW_MARKER"
+	[ "$managed_source" = "$SHADOW_SOURCE" ] || \
+		fail "managed shadow marker does not match $SHADOW_SOURCE"
+	if shadow_is_mounted; then
+		"$BUSYBOX" umount "$SHADOW_TARGET" || \
+			fail "cannot remove managed shadow mount"
+	fi
+	rm -f "$SHADOW_MARKER" "$SHADOW_SOURCE" || \
+		fail "cannot clear managed shadow files"
+}
+
 command=${1:-status}
 case "$command" in
 configure)
@@ -63,11 +87,13 @@ configure)
 		current=
 		[ ! -r "$MODE_FILE" ] || IFS= read -r current < "$MODE_FILE"
 		if [ "$current" = disabled ]; then
+			remove_managed_shadow
 			printf 'unchanged disabled\n'
 			exit 0
 		fi
 		write_private "$MODE_FILE" disabled
 		restart_supervisor
+		remove_managed_shadow
 		printf 'disabled\n'
 		exit 0
 	fi
@@ -89,7 +115,16 @@ configure)
 				candidate=$(printf '%s\n' "$password" | "$BUSYBOX" mkpasswd -P 0 -m sha512 -S "$salt") || \
 					fail "cannot verify password"
 				if [ "$candidate" = "$current_hash" ]; then
-					printf 'unchanged enabled username=root\n'
+					current_state=
+					[ ! -r "$STATE" ] || IFS= read -r current_state < "$STATE"
+					case "$current_state" in
+					active\ *)
+						printf 'unchanged enabled username=root\n'
+						exit 0
+						;;
+					esac
+					restart_supervisor
+					printf 'restarted enabled username=root\n'
 					exit 0
 				fi
 				;;
@@ -103,8 +138,6 @@ configure)
 	esac
 	write_private "$PASSWORD_HASH" "$password_hash"
 	write_private "$MODE_FILE" password
-	printf 'root:%s\n' "$password_hash" | "$BUSYBOX" chpasswd -e || \
-		fail "cannot apply root password"
 	restart_supervisor
 	printf 'enabled username=root\n'
 	;;

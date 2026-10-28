@@ -19,6 +19,9 @@ HOST_KEY=$SSH_DIR/dropbear_ed25519_host_key
 MODE_FILE=$SSH_DIR/mode
 PASSWORD_HASH=$SSH_DIR/password_hash
 PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
+SHADOW_SOURCE=${TATER_SSH_SHADOW_SOURCE:-/run/tater-sshd.shadow}
+SHADOW_TARGET=${TATER_SSH_SHADOW_TARGET:-/etc/shadow}
+SHADOW_MARKER=${TATER_SSH_SHADOW_MARKER:-/run/tater-sshd.shadow-mounted}
 
 set_state() {
 	state_dir=${STATE%/*}
@@ -32,6 +35,59 @@ fail() {
 	set_state "error $*"
 	printf 'tater-sshd: %s\n' "$*" >&2
 	exit 1
+}
+
+shadow_is_mounted() {
+	"$BUSYBOX" awk -v target="$SHADOW_TARGET" '
+		$5 == target { found = 1 }
+		END { exit !found }
+	' /proc/self/mountinfo
+}
+
+remove_managed_shadow() {
+	if [ -r "$SHADOW_MARKER" ]; then
+		managed_source=
+		IFS= read -r managed_source < "$SHADOW_MARKER"
+		[ "$managed_source" = "$SHADOW_SOURCE" ] || \
+			fail "managed shadow marker does not match $SHADOW_SOURCE"
+		if shadow_is_mounted; then
+			"$BUSYBOX" umount "$SHADOW_TARGET" || \
+				fail "cannot remove managed shadow mount"
+		fi
+		rm -f "$SHADOW_MARKER" || fail "cannot clear managed shadow marker"
+	elif shadow_is_mounted; then
+		fail "$SHADOW_TARGET is already a mount point"
+	fi
+	rm -f "$SHADOW_SOURCE" 2>/dev/null || true
+}
+
+install_managed_shadow() {
+	[ -r "$SHADOW_TARGET" ] || fail "$SHADOW_TARGET is missing or unreadable"
+	remove_managed_shadow
+	shadow_dir=${SHADOW_SOURCE%/*}
+	[ "$shadow_dir" = "$SHADOW_SOURCE" ] && shadow_dir=.
+	mkdir -p "$shadow_dir" || fail "cannot create $shadow_dir"
+	shadow_temporary=$SHADOW_SOURCE.tmp.$$
+	"$BUSYBOX" awk -F: -v OFS=: -v password_hash="$password_hash" '
+		$1 == "root" { $2 = password_hash; found = 1 }
+		{ print }
+		END { if (!found) exit 1 }
+	' "$SHADOW_TARGET" > "$shadow_temporary" || {
+		rm -f "$shadow_temporary"
+		fail "cannot prepare managed shadow file"
+	}
+	chmod 600 "$shadow_temporary" || {
+		rm -f "$shadow_temporary"
+		fail "cannot protect managed shadow file"
+	}
+	mv -f "$shadow_temporary" "$SHADOW_SOURCE" || \
+		fail "cannot install managed shadow file"
+	"$BUSYBOX" mount -o bind "$SHADOW_SOURCE" "$SHADOW_TARGET" || \
+		fail "cannot mount managed shadow file"
+	printf '%s\n' "$SHADOW_SOURCE" > "$SHADOW_MARKER" || {
+		"$BUSYBOX" umount "$SHADOW_TARGET" 2>/dev/null || true
+		fail "cannot record managed shadow mount"
+	}
 }
 
 case "$PORT" in
@@ -77,8 +133,7 @@ case "$password_hash" in
 \$6\$*) ;;
 *) fail "managed password hash is not SHA-512 crypt" ;;
 esac
-printf 'root:%s\n' "$password_hash" | "$BUSYBOX" chpasswd -e || \
-	fail "cannot apply managed root password"
+install_managed_shadow
 
 log_dir=${LOG%/*}
 [ "$log_dir" = "$LOG" ] && log_dir=.

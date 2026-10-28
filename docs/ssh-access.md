@@ -12,6 +12,11 @@ over the satellite's authenticated native connection. The satellite stores only
 a salted SHA-512 password hash in `/data/tater-linux/ssh`, and the settings
 acknowledgement never sends the password back.
 
+The firmware root filesystem remains read-only. While SSH is enabled, the SSH
+supervisor builds an ephemeral shadow file under `/run` and bind-mounts it over
+`/etc/shadow`; disabling SSH or rebooting removes that runtime override. The
+managed password never modifies the immutable root image.
+
 SSH is independent of the network-selection policy. It listens on port 22 on
 the device's available network interfaces, so the same login works over Wi-Fi
 or USB Ethernet. If an active session uses Wi-Fi when Ethernet takes over, that
