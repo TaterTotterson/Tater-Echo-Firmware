@@ -638,8 +638,21 @@ func TestSpotClimateControlsStayInsideCircularScreen(t *testing.T) {
 			}
 		}
 	}
+	assertRoundControlInside := func(name string, bounds image.Rectangle) {
+		t.Helper()
+		cx, cy := (bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2
+		for _, point := range []image.Point{
+			{X: bounds.Min.X, Y: cy}, {X: bounds.Max.X - 1, Y: cy},
+			{X: cx, Y: bounds.Min.Y}, {X: cx, Y: bounds.Max.Y - 1},
+		} {
+			if !inside(point) {
+				t.Fatalf("%s painted edge %v lies outside Rook circle", name, point)
+			}
+		}
+	}
 
-	assertBoundsInside("close", climateCloseBounds(480, 480, true))
+	assertRoundControlInside("close", climateCloseBounds(480, 480, true))
+	assertRoundControlInside("next", spotClimateNextBounds())
 	for index := 0; index < 3; index++ {
 		assertBoundsInside(fmt.Sprintf("room %d", index+1), spotClimateRoomBounds(index))
 	}
@@ -660,13 +673,22 @@ func TestSpotClimatePreview(t *testing.T) {
 			CurrentTemperature: &current, TargetTemperature: &target, CurrentHumidity: &humidity,
 			TemperatureUnit: "F", HVACMode: "auto", HVACAction: "heating",
 			AvailableHVACModes: []string{"heat", "cool", "auto", "off"}, CanSetTemperature: true, CanSetMode: true,
-			RoomTemperatures: []show.RoomTemperature{{RoomName: "Kitchen", Temperature: 73}, {RoomName: "Bedroom", Temperature: 68}, {RoomName: "Office", Temperature: 72}},
+			RoomTemperatures: []show.RoomTemperature{
+				{RoomName: "Living Room", Temperature: 71}, {RoomName: "Kitchen", Temperature: 73}, {RoomName: "Office", Temperature: 72},
+				{RoomName: "Bedroom", Temperature: 68}, {RoomName: "Nursery", Temperature: 70}, {RoomName: "Garage", Temperature: 64},
+			},
 		}},
 	}
 	canvas := image.NewRGBA(image.Rect(0, 0, 480, 480))
 	r.render(canvas, now)
 	if previewDir := os.Getenv("SPOT_PREVIEW_DIR"); previewDir != "" {
 		writeSpotPreview(t, filepath.Join(previewDir, "spot-climate.png"), canvas)
+	}
+	client := &socketClient{writer: bufio.NewWriter(&bytes.Buffer{})}
+	next := spotClimateNextBounds()
+	r.handleClimateTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 480, 480)
+	if r.climatePage != 1 {
+		t.Fatalf("Rook climate next page = %d, want 1", r.climatePage)
 	}
 }
 

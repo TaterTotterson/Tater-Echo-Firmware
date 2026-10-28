@@ -456,8 +456,8 @@ func TestCameraDirectoryUsesTargetSpecificPageSizes(t *testing.T) {
 		spot          bool
 		want          int
 	}{
-		{name: "checkers", width: 960, height: 480, want: 8},
-		{name: "crown", width: 1280, height: 800, want: 12},
+		{name: "checkers", width: 960, height: 480, want: 5},
+		{name: "crown", width: 1280, height: 800, want: 5},
 		{name: "rook", width: 480, height: 480, spot: true, want: 4},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -468,23 +468,50 @@ func TestCameraDirectoryUsesTargetSpecificPageSizes(t *testing.T) {
 	}
 }
 
+func TestCameraDirectoryPagesAndSelectsVisibleFeed(t *testing.T) {
+	cameras := make([]show.Camera, 8)
+	for index := range cameras {
+		cameras[index] = show.Camera{ID: fmt.Sprintf("camera-%d", index), Name: fmt.Sprintf("Camera %d", index+1), Available: true}
+	}
+	var commands bytes.Buffer
+	client := &socketClient{writer: bufio.NewWriter(&commands)}
+	r := &renderer{
+		target: "checkers", screenWidth: 960, screenHeight: 480, cameraOpen: true,
+		state: show.Snapshot{Connected: true, Cameras: &show.Cameras{Available: true, Items: cameras}},
+	}
+	next := cameraNextBounds(960, 480, false)
+	r.handleCameraTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 960, 480, false)
+	if r.cameraPage != 1 {
+		t.Fatalf("next camera page = %d, want 1", r.cameraPage)
+	}
+	first := cameraCardBounds(960, 480, 0, false)
+	r.handleCameraTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (first.Min.X + first.Max.X) / 2, Y: (first.Min.Y + first.Max.Y) / 2}, 960, 480, false)
+	if !strings.Contains(commands.String(), `"target":"camera-5"`) {
+		t.Fatalf("first camera on page 2 = %q, want camera-5", commands.String())
+	}
+	r.handleCameraTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 960, 480, false)
+	if r.cameraPage != 1 {
+		t.Fatalf("disabled next wrapped to page %d", r.cameraPage)
+	}
+}
+
 func TestCrownCameraViewerCloseFitsAboveVideo(t *testing.T) {
 	r := renderer{target: "crown", screenWidth: 1280, screenHeight: 800}
 	closeBounds := r.cameraCloseBounds(1280, 800, false, true)
-	if got, want := closeBounds, image.Rect(1180, 28, 1228, 76); got != want {
+	if got, want := closeBounds, image.Rect(1172, 42, 1234, 104); got != want {
 		t.Fatalf("Crown close bounds = %v, want %v", got, want)
 	}
-	if got, want := closeBounds.Dx(), 48; got != want {
+	if got, want := closeBounds.Dx(), 62; got != want {
 		t.Fatalf("Crown close width = %d, want %d", got, want)
 	}
-	if got, want := closeBounds.Dy(), 48; got != want {
+	if got, want := closeBounds.Dy(), 62; got != want {
 		t.Fatalf("Crown close height = %d, want %d", got, want)
 	}
 	videoBounds := r.cameraVideoBounds()
 	if closeBounds.Max.Y > videoBounds.Min.Y {
 		t.Fatalf("Crown close bounds %v overlap video bounds %v", closeBounds, videoBounds)
 	}
-	panel := image.Rect(max(24, 1280/30), max(20, 800/28), 1280-max(24, 1280/30), 800-max(20, 800/28))
+	panel := cameraDirectoryLayoutFor(1280, 800, false).panel
 	if !closeBounds.In(panel) {
 		t.Fatalf("Crown close bounds %v extend beyond popup panel %v", closeBounds, panel)
 	}
@@ -497,7 +524,7 @@ func TestCrownCameraViewerCloseFitsAboveVideo(t *testing.T) {
 	}
 
 	checkers := renderer{target: "checkers", screenWidth: 960, screenHeight: 480}
-	if got, want := checkers.cameraCloseBounds(960, 480, false, true), actionMenuCloseBounds(960, 480, false); got != want {
+	if got, want := checkers.cameraCloseBounds(960, 480, false, true), image.Rect(878, 32, 924, 78); got != want {
 		t.Fatalf("Checkers close bounds changed: got %v, want %v", got, want)
 	}
 	if got, want := checkers.cameraTalkBounds(960, 480, false), cameraTalkBounds(960, 480, false); got != want {
@@ -736,6 +763,103 @@ func TestActionMenuOpensClimateAndControlsThermostat(t *testing.T) {
 	}
 }
 
+func TestActionMenuLayoutFitsEveryScreen(t *testing.T) {
+	targets := []struct {
+		name          string
+		width, height int
+		spot          bool
+	}{
+		{name: "checkers", width: 960, height: 480},
+		{name: "crown", width: 1280, height: 800},
+		{name: "athena", width: 1280, height: 800},
+		{name: "rook", width: 480, height: 480, spot: true},
+	}
+	items := []actionMenuItem{actionMenuSatChat, actionMenuCameras, actionMenuClimate}
+	for _, target := range targets {
+		t.Run(target.name, func(t *testing.T) {
+			screen := image.Rect(0, 0, target.width, target.height)
+			panel := actionMenuPanelBounds(target.width, target.height, target.spot)
+			if !panel.In(screen) {
+				t.Fatalf("panel %v outside screen %v", panel, screen)
+			}
+			previous := image.Rectangle{}
+			for index, item := range items {
+				bounds := actionMenuBounds(target.width, target.height, index, target.spot)
+				if !bounds.In(screen) || !bounds.In(panel) {
+					t.Fatalf("item %d bounds %v outside panel %v", index, bounds, panel)
+				}
+				if index > 0 && bounds.Min.Y <= previous.Max.Y {
+					t.Fatalf("item %d overlaps previous row: %v and %v", index, previous, bounds)
+				}
+				center := image.Pt((bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2)
+				if got := actionMenuItemAt(center, target.width, target.height, target.spot); got != item {
+					t.Fatalf("item %d center selected %v, want %v", index, got, item)
+				}
+				previous = bounds
+			}
+			broadcast := actionMenuBroadcastBounds(target.width, target.height, target.spot)
+			if !broadcast.In(screen) || !broadcast.In(panel) || broadcast.Min.Y <= previous.Max.Y {
+				t.Fatalf("broadcast bounds %v do not follow rows inside panel %v", broadcast, panel)
+			}
+			if target.spot {
+				panelMask := menuSuperellipseMask(panel.Size())
+				for y := 0; y < panelMask.Rect.Dy(); y++ {
+					for x := 0; x < panelMask.Rect.Dx(); x++ {
+						if panelMask.AlphaAt(x, y).A == 0 {
+							continue
+						}
+						dx := panel.Min.X + x - target.width/2
+						dy := panel.Min.Y + y - target.height/2
+						if dx*dx+dy*dy > 236*236 {
+							t.Fatalf("Rook oval paints outside the visible circle at (%d,%d)", panel.Min.X+x, panel.Min.Y+y)
+						}
+					}
+				}
+				assertPillInsideOval := func(label string, bounds image.Rectangle) {
+					radius := bounds.Dy() / 2
+					centerY := bounds.Min.Y + radius
+					// A pill's rectangular corners are transparent. Check the six
+					// cardinal/flat-edge points that its outline actually paints.
+					for _, point := range []image.Point{
+						{X: bounds.Min.X, Y: centerY},
+						{X: bounds.Max.X - 1, Y: centerY},
+						{X: bounds.Min.X + radius, Y: bounds.Min.Y},
+						{X: bounds.Max.X - radius - 1, Y: bounds.Min.Y},
+						{X: bounds.Min.X + radius, Y: bounds.Max.Y - 1},
+						{X: bounds.Max.X - radius - 1, Y: bounds.Max.Y - 1},
+					} {
+						dx, dy := point.X-target.width/2, point.Y-target.height/2
+						if dx*dx+dy*dy > 236*236 {
+							t.Fatalf("%s edge %v falls outside Rook's visible circle", label, point)
+						}
+						local := point.Sub(panel.Min)
+						if !local.In(panelMask.Bounds()) || panelMask.AlphaAt(local.X, local.Y).A == 0 {
+							t.Fatalf("%s edge %v falls outside Rook's oval menu surface", label, point)
+						}
+					}
+				}
+				for index := range items {
+					assertPillInsideOval(fmt.Sprintf("item %d", index), actionMenuBounds(target.width, target.height, index, true))
+				}
+				assertPillInsideOval("broadcast", broadcast)
+			}
+		})
+	}
+}
+
+func TestMenuRoundedMaskHasAntialiasedEdges(t *testing.T) {
+	mask := menuRoundedMask(image.Pt(80, 48), 16)
+	partial := 0
+	for _, alpha := range mask.Pix {
+		if alpha > 0 && alpha < 255 {
+			partial++
+		}
+	}
+	if partial == 0 {
+		t.Fatal("rounded menu mask has no antialiased edge pixels")
+	}
+}
+
 func TestUnavailableClimateIsVisibleButDoesNotSendControls(t *testing.T) {
 	var commands bytes.Buffer
 	client := &socketClient{writer: bufio.NewWriter(&commands)}
@@ -776,8 +900,10 @@ func TestCrownSatChatTapHoldAndControls(t *testing.T) {
 	r.satChatTouchDown = false
 	r.satChatOpen = true
 	r.state.SatChat = &show.SatChat{Participants: []show.SatChatParticipant{{ID: "native:kitchen", Name: "Kitchen", Audio: true}}}
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Down, X: 200, Y: 150})
-	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: 200, Y: 150})
+	firstParticipant := satChatDirectoryLayoutFor(1280, 800).participantBounds(0)
+	participantX, participantY := (firstParticipant.Min.X+firstParticipant.Max.X)/2, (firstParticipant.Min.Y+firstParticipant.Max.Y)/2
+	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Down, X: participantX, Y: participantY})
+	handleTouch(r, client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: participantX, Y: participantY})
 	if count := strings.Count(commands.String(), `"action":"sat_chat.start"`); count != 1 {
 		t.Fatalf("Crown participant press sent %d start commands, want one: %q", count, commands.String())
 	}
@@ -804,7 +930,7 @@ func TestRectangularSatChatDirectoryPagesAndSelectsVisibleTarget(t *testing.T) {
 		pageSize      int
 	}{
 		{name: "checkers", target: "checkers", width: 960, height: 480, pageSize: 8},
-		{name: "crown", target: "crown", width: 1280, height: 800, pageSize: 12},
+		{name: "crown", target: "crown", width: 1280, height: 800, pageSize: 8},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var commands bytes.Buffer
@@ -2231,7 +2357,10 @@ func TestRenderPreview(t *testing.T) {
 			{ID: "driveway", Name: "Driveway", Room: "Outside", Available: true},
 			{ID: "backyard", Name: "Backyard", Room: "Outside", Available: true},
 			{ID: "nursery", Name: "Nursery", Room: "Nursery", Talkback: true, Available: true},
-			{ID: "garage", Name: "Garage", Room: "Garage", Available: false},
+			{ID: "garage", Name: "Garage", Room: "Garage", Talkback: true, Available: true},
+			{ID: "patio", Name: "Patio", Room: "Outside", Available: true},
+			{ID: "office", Name: "Office", Room: "Office", Available: true},
+			{ID: "workshop", Name: "Workshop", Room: "Workshop", Talkback: true, Available: true},
 		}}
 	case "camera-view":
 		state.Phase = "idle"
@@ -2242,7 +2371,7 @@ func TestRenderPreview(t *testing.T) {
 		state.Climate = &show.Climate{
 			Available: true, RoomID: "living_room", RoomName: "Living Room",
 			CurrentTemperature: &current, TargetTemperature: &target, CurrentHumidity: &humidity,
-			TemperatureUnit: "F", HVACMode: "auto", HVACAction: "heating",
+			TemperatureUnit: "F", HVACMode: "heat", HVACAction: "heating",
 			AvailableHVACModes: []string{"heat", "cool", "auto", "off"},
 			CanSetTemperature:  true, CanSetMode: true, MinimumTemperature: 45, MaximumTemperature: 90, TemperatureStep: 1,
 			RoomTemperatures: []show.RoomTemperature{
