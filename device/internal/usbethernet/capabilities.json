@@ -47,13 +47,13 @@
       "reason": "The Tater MTU3 dual-role kernel boots on Athena; normal-cable device mode, bounded host/device switching, USB serial/RNDIS restoration, reboot, and Wi-Fi fallback passed. An OTG Ethernet adapter is still required to validate VBUS, enumeration, DHCP, traffic, link loss, and unplug."
     },
     "rook": {
-      "backend": "mediatek-musb-physical-iddig",
-      "detection": "hardware-id-passive",
+      "backend": "mediatek-mchange-candidate",
+      "detection": "bounded-active-probe",
       "status": "hardware-validation",
       "port": "external-micro-usb",
-      "power": "separate-device-power-vbus-unverified",
+      "power": "shared-micro-usb-powered-pass-through",
       "recovery": "usb-serial",
-      "reason": "The Tater candidate boots with USB serial and setup Wi-Fi; the kernel follows the external OTG ID pin while internal USB Wi-Fi remains on a separate host controller. A real adapter is still required to validate VBUS, enumeration, DHCP, traffic, link loss, and unplug."
+      "reason": "The intended powered RTL8152 adapter does not assert Rook's physical ID path. The Tater candidate therefore uses MediaTek's bounded /proc/mchange probe while internal USB Wi-Fi remains on a separate host controller. The exact candidate still requires enumeration, DHCP, traffic, link-loss, unplug, reboot, and serial-recovery validation."
     }
   }
 }

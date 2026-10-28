@@ -121,18 +121,19 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 
 func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 	tests := []struct {
-		target  string
-		backend string
+		target    string
+		backend   string
+		detection string
 	}{
-		{target: "athena", backend: "mediatek-mtu3-gpio-otg"},
-		{target: "rook", backend: "mediatek-musb-physical-iddig"},
+		{target: "athena", backend: "mediatek-mtu3-gpio-otg", detection: "hardware-id-passive"},
+		{target: "rook", backend: "mediatek-mchange-candidate", detection: "bounded-active-probe"},
 	}
 	for _, test := range tests {
 		t.Run(test.target, func(t *testing.T) {
 			manager := testManager(t, test.target)
 			got := manager.Diagnostics()
 			if got["prepared"] != true || got["supported"] != false || got["qualification"] != "hardware-validation" ||
-				got["backend"] != test.backend || got["detection"] != "hardware-id-passive" {
+				got["backend"] != test.backend || got["detection"] != test.detection {
 				t.Fatalf("unexpected %s diagnostics: %#v", test.target, got)
 			}
 			if reason, _ := got["qualification_reason"].(string); reason == "" {

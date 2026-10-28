@@ -1,8 +1,9 @@
 #!/bin/sh
 # Automatically prefer a usable USB Ethernet adapter without sacrificing the
-# device's Wi-Fi recovery path. Biscuit performs a bounded MediaTek role probe;
-# the other satellites passively watch for a USB-network interface until their
-# board-specific role/VBUS controls have been qualified on hardware.
+# device's Wi-Fi recovery path. Biscuit and the Rook candidate perform a
+# bounded MediaTek role probe; the other satellites passively watch for a
+# USB-network interface until their board-specific role/VBUS controls have
+# been qualified on hardware.
 set -u
 PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
 export PATH
@@ -185,7 +186,12 @@ radar)
 	wifi_backend=dot
 	active_probe=0
 	;;
-checkers|crown|athena|rook)
+rook)
+	role_backend=mchange
+	wifi_backend=techo5
+	active_probe=1
+	;;
+checkers|crown|athena)
 	role_backend=passive
 	wifi_backend=techo5
 	active_probe=0
@@ -202,7 +208,8 @@ case "$mode" in
 start|stop|once) ;;
 probe)
 	# A bounded qualification probe never starts DHCP or disables Wi-Fi. On
-	# Biscuit its independent watchdog restores USB serial after a role change.
+	# active MUSB targets its independent watchdog restores USB serial after a
+	# role change.
 	probe_only=1
 	;;
 *)

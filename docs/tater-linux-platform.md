@@ -33,20 +33,24 @@ Completed:
   network controllers while retaining required compatibility names.
 - Switched every firmware platform source checkout to the Tater repository.
   The Dot family uses a Tater-owned commit based directly on the pinned
-  `dot-v1.0.24` source; Show and Spot retain their exact imported baseline
-  commits until their replacement artifacts are reproduced.
+  `dot-v1.0.24` source; Show retains its exact imported baseline commits until
+  its replacement artifacts are reproduced.
 - Added a six-target manifest and validation workflow covering Biscuit, Radar,
   Checkers, Crown, Athena, and Rook.
 - Built and published separately hashed Biscuit and Radar kernels from the
   pinned Tater Dot source as the `dot-kernel-v1.0.0` prerelease. Firmware now
   consumes those Tater-named kernel artifacts.
+- Built and published Rook's `rook-kernel-v1.0.0` prerelease from its pinned
+  Amazon source and toolchain with RTL8152 and bounded MediaTek role switching.
+  Firmware now consumes that Tater kernel while rootfs and rescue remain on
+  their independently pinned custody inputs.
 
 Remaining release work:
 
-1. Reproduce the exact currently pinned Show, Athena, and Spot binary artifacts
-   before changing each target's download. Source now comes from Tater Echo
-   Linux; those existing binary URLs remain verified upstream baselines during
-   this gate.
+1. Reproduce the exact currently pinned Show, Athena, and remaining Spot binary
+   artifacts before changing each target's download. Source now comes from
+   Tater Echo Linux; existing rootfs, rescue, and other unchanged binary URLs
+   remain verified custody baselines during this gate.
 2. Build and publish separate, hash-pinned Tater artifacts for every board. A
    Biscuit kernel must never silently replace Radar or Show artifacts.
 3. Change each firmware artifact URL to its Tater Echo Linux release only

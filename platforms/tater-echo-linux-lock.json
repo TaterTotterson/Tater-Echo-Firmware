@@ -119,14 +119,15 @@
     "rook": {
       "release": "spot-v0.5.25",
       "custody_release": "satellite-baselines-v1.0.0",
-      "commit": "8253a4a1d52dd37dd152dd1d435b97e541e0a191",
+      "kernel_release": "rook-kernel-v1.0.0",
+      "commit": "a514109abeccb75c67593d3b1b9f614f181436f3",
       "rootfs": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rootfs.tar.gz",
         "sha256": "c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2"
       },
       "kernel": {
-        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-kernel.Image.gz-dtb",
-        "sha256": "368738ee20b86dc3dc0268d3b4b145e67cca9666379ac26b2379abd6c9136298"
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/rook-kernel-v1.0.0/tater-echo-rook-kernel.Image.gz-dtb",
+        "sha256": "57e6d7401e091f26d0efeadc86170144195f54b50105f98ea311cf0523c31a00"
       },
       "rescue": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rescue.tar",

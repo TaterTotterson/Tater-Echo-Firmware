@@ -414,6 +414,24 @@ exit 0
         self.assertEqual(original, self.mchange.read_text())
         self.assertFalse(self.net_log.exists(), "passive detection changed Wi-Fi")
 
+    def test_rook_candidate_probes_host_then_restores_serial_without_wifi_flap(self) -> None:
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "once"],
+            env=self._environment(TATER_TARGET="rook"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual(
+            "fallback no-adapter",
+            (self.run / "tater-usb-ethernet.state").read_text().strip(),
+        )
+        self.assertEqual("device", self.mchange.read_text().strip())
+        self.assertFalse(self.net_log.exists(), "Rook's failed host probe changed Wi-Fi")
+
     def test_supported_usb_network_drivers_are_detected(self) -> None:
         drivers = (
             "cdc_ether",
@@ -436,7 +454,7 @@ exit 0
                 self._usb_interface(f"eth{index}", driver)
                 result = subprocess.run(
                     ["sh", str(ETHERNET), "probe"],
-                    env=self._environment(TATER_TARGET="rook"),
+                    env=self._environment(TATER_TARGET="athena"),
                     capture_output=True,
                     text=True,
                     check=False,

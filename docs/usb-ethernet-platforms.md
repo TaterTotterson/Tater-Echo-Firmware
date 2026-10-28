@@ -23,17 +23,19 @@ enough to qualify active switching.
 | Checkers | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline, own boot image, device tree, VBUS behavior, and USB-serial recovery |
 | Crown | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; must be qualified separately from Checkers despite shared source |
 | Athena | `hardware-validation` | Mainline MediaTek MTU3 + GPIO OTG | Tater dual-role kernel booted; normal-cable serial/RNDIS, bounded host/device switching, reboot, and Wi-Fi fallback passed; real adapter/VBUS still pending |
-| Rook | `hardware-validation` | MediaTek MUSB physical IDDIG | External micro-USB OTG ID selects host mode; internal USB Wi-Fi remains on a separate controller; real adapter/VBUS test pending |
+| Rook | `hardware-validation` | MediaTek `/proc/mchange` candidate | Shared power/data micro-USB; powered UCTRONICS B0B9ZLVGJ4 (RTL8152) left the stock kernel in device mode; candidate adds RTL8152 and bounded forced-role support |
 
-All six images start the controller automatically. Radar, Checkers, Crown, and
-Rook are passive: if their kernel enumerates a supported USB NIC, the common
-policy can use it, but firmware performs no speculative role or VBUS write.
-Rook's stock dual-role sysfs files are intentionally read-only; its kernel
-instead follows the micro-USB OTG plug's physical ID pin (`USB_IDDIG`, IRQ 49).
-The candidate image has passed boot, USB-serial, setup-Wi-Fi, role-reporting,
-and recovery-baseline checks. An OTG Ethernet adapter is still required to
-prove external VBUS, host enumeration, DHCP, traffic, and unplug recovery.
-Athena's kernel now follows
+All six images start the controller automatically. Radar, Checkers, and Crown
+are passive: if their kernel enumerates a supported USB NIC, the common policy
+can use it, but firmware performs no speculative role or VBUS write. Rook's
+stock dual-role sysfs files are intentionally read-only and the intended
+powered pass-through adapter does not assert its physical ID pin. Its candidate
+kernel therefore enables the existing MediaTek `/proc/mchange` control and
+RTL8152 driver, while the common controller uses the same bounded host probe as
+Biscuit. Internal Wi-Fi remains on the separate USB1 controller during the
+probe. The exact candidate must still prove enumeration, DHCP, traffic, link
+loss, unplug recovery, reboot behavior, and restoration of USB serial before
+Rook is qualified. Athena's kernel now follows
 the connector's physical ID and VBUS-detect GPIOs: a normal cable remains in
 device mode, while an OTG plug selects host mode and enables GPIO150's modelled
 5 V supply. It remains unqualified until those host-side paths are exercised
@@ -41,12 +43,13 @@ with a real adapter.
 
 Wi-Fi stays connected while Ethernet DHCP runs. A usable Ethernet route
 disables Wi-Fi; link loss or unplug restores Wi-Fi and, where the controller
-claimed the port, the device/serial role. Biscuit has no non-disruptive way to
-see a host adapter while its shared controller is in gadget mode, so automatic
-detection briefly interrupts USB serial once per 60-second retry. There is no
-user enable flag. Before testing that transition, enable the per-satellite
-maintenance service described in [`ssh-access.md`](ssh-access.md); it provides
-the diagnostic shell over either Wi-Fi or Ethernet when USB serial is absent.
+claimed the port, the device/serial role. Biscuit and the Rook candidate have
+no non-disruptive way to see a host adapter while their shared controller is in
+gadget mode, so automatic detection briefly interrupts USB serial once per
+60-second retry. There is no user enable flag. Before testing that transition,
+enable the per-satellite maintenance service described in
+[`ssh-access.md`](ssh-access.md); it provides the diagnostic shell over either
+Wi-Fi or Ethernet when USB serial is absent.
 
 First-boot setup is the exception to the Wi-Fi shutdown rule. Ethernet may
 enumerate, obtain DHCP, and become the preferred uplink while
@@ -78,7 +81,8 @@ tater-usb-inventory --include-logs
 Review the output before building a role-changing test image. Preserve one
 inventory from the known-good baseline and one from the candidate image.
 
-Biscuit also supports an explicit bounded enumeration-only probe:
+Biscuit, and a Rook candidate whose kernel exposes `/proc/mchange`, support an
+explicit bounded enumeration-only probe:
 
 ```sh
 tater-usb-ethernet probe
@@ -86,8 +90,9 @@ tater-usb-ethernet probe
 
 That command may temporarily remove USB serial while the port is in host mode.
 It does not run DHCP or stop Wi-Fi, restores device mode after enumeration, and
-has an independent 60-second restoration watchdog. It is not available on an
-unqualified target. A new backend must provide an equivalent bounded probe
+has an independent 60-second restoration watchdog. On Rook it remains a
+hardware-validation candidate until the exact powered adapter passes the full
+release gate below. A new backend must provide an equivalent bounded probe
 before its target can be marked qualified.
 
 ## Per-target release gate
@@ -130,8 +135,8 @@ kernel or root filesystem lacks the required controller.
    Crown, then replace each one with a Tater-built artifact only after its
    separate boot and recovery gate passes. Athena and Rook have passed their
    current no-adapter baseline gates.
-3. Complete Rook's physical-ID/VBUS and real-adapter tests, then qualify
-   Checkers and Crown independently.
+3. Complete Rook's forced-role and real-adapter tests, then qualify Checkers
+   and Crown independently.
 4. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
    boot qualification with the intended OTG Ethernet adapter.
 5. Treat Radar as an experimental internal hardware modification, not a normal
