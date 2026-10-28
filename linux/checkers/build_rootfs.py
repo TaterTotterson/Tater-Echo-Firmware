@@ -603,6 +603,16 @@ def build(args: argparse.Namespace) -> None:
         copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
         copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
         copy(args.ffmpeg, root / "usr/local/bin/tater-ffmpeg", 0o755)
+        if args.target == "athena":
+            if args.kernelctl is None or args.kernel_image is None:
+                raise SystemExit("Athena rootfs requires its kernel updater and pinned boot image")
+            copy(args.kernelctl, root / "usr/local/bin/tater-kernelctl", 0o755)
+            kernel_dir = root / "usr/share/techo5/kernel"
+            copy(args.kernel_image, kernel_dir / "boot-athena.img", 0o644)
+            write(
+                kernel_dir / "boot-athena.img.sha256",
+                f"{sha256(args.kernel_image)}  boot-athena.img\n",
+            )
         copy(
             args.mww_runtime,
             root / "usr/share/tater/microwakeword/libtater_microwakeword.so",
@@ -678,10 +688,23 @@ def build(args: argparse.Namespace) -> None:
         if args.target != "athena":
             patch_slotctl(root)
         else:
-            # Tater application OTA does not replace Athena's kernel. The
-            # factory bundle pins and fills it with this unit's speaker tuning.
+            # Keep the application daemon and the low-level kernel updater as
+            # separate binaries. A system OTA installs this rootfs into the
+            # inactive slot; only after that slot settles does boot.sh stage
+            # its pinned kernel with the unit's existing speaker tuning and
+            # the platform updater's three-boot rollback state.
+            boot_script = root / "etc/techo5/boot.sh"
+            boot_contents = boot_script.read_text()
+            old_kernel_command = "/usr/local/bin/techo5 tools kernel"
+            if old_kernel_command not in boot_contents:
+                raise SystemExit("Athena base rootfs has no kernel updater hooks")
+            boot_script.write_text(boot_contents.replace(
+                old_kernel_command,
+                "/usr/local/bin/tater-kernelctl tools kernel",
+            ))
             device_conf = root / "etc/techo5/device.conf"
-            device_conf.write_text(device_conf.read_text().replace("\tKERNEL_UPDATE=1", "\tKERNEL_UPDATE="))
+            if "\tKERNEL_UPDATE=1" not in device_conf.read_text():
+                raise SystemExit("Athena base rootfs does not enable kernel updates")
         deterministic_tar(root, args.output)
 
     print(f"built {args.output} ({args.output.stat().st_size} bytes, sha256 {sha256(args.output)})")
@@ -880,6 +903,8 @@ def main() -> int:
     parser.add_argument("--reboot", type=Path, required=True)
     parser.add_argument("--camera", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
+    parser.add_argument("--kernelctl", type=Path)
+    parser.add_argument("--kernel-image", type=Path)
     parser.add_argument("--mww-runtime", type=Path, required=True)
     parser.add_argument("--onnx-runtime", type=Path, required=True)
     parser.add_argument("--hey-tater-model", type=Path, required=True)

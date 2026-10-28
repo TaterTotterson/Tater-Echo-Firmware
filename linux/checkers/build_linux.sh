@@ -128,6 +128,19 @@ cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 
 "$script_dir/build_camera_helper.sh" "$platform_source" "$device/build/tater-camera"
 python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
+kernel_args=
+if [ "$target" = athena ]; then
+    kernel_image=$repo/linux/athena/inputs/tater-echo-athena-baseline-boot.img
+    [ -f "$kernel_image" ] || { echo "pinned Athena boot image is missing: $kernel_image" >&2; exit 1; }
+    (
+        cd "$platform_source/echod"
+        GOTOOLCHAIN=local GOFLAGS=-buildvcs=false \
+            GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build \
+            -trimpath -ldflags '-s -w' \
+            -o "$device/build/tater-kernelctl" ./cmd/echod
+    )
+    kernel_args="--kernelctl=$device/build/tater-kernelctl --kernel-image=$kernel_image"
+fi
 
 for required in \
     "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
@@ -150,6 +163,7 @@ python3 "$script_dir/build_rootfs.py" \
     --reboot "$device/build/tater-reboot-now" \
     --camera "$device/build/tater-camera" \
     --ffmpeg "$packaged_ffmpeg" \
+    $kernel_args \
     --mww-runtime "$device/build/microwakeword-linux/libtater_microwakeword.so" \
     --onnx-runtime "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" \
     --hey-tater-model "$device/internal/wakeword/microwakeword/models/hey_tater.tflite" \
@@ -190,6 +204,17 @@ grep -qx './usr/local/bin/tater-ffmpeg' "$listing" || {
     echo "built $target rootfs is missing the video decoder" >&2
     exit 1
 }
+if [ "$target" = athena ]; then
+    for required in \
+        ./usr/local/bin/tater-kernelctl \
+        ./usr/share/techo5/kernel/boot-athena.img \
+        ./usr/share/techo5/kernel/boot-athena.img.sha256; do
+        grep -qx "$required" "$listing" || {
+            echo "built Athena rootfs is missing $required" >&2
+            exit 1
+        }
+    done
+fi
 
 file "$device/build/tater-echo" "$device/build/tater-show-linux" "$device/build/tater-reboot-now" \
     "$device/build/tater-camera" "$device/build/tater-rescue-fbprobe" \
@@ -201,6 +226,7 @@ file "$device/build/tater-show-linux" | grep -q '32-bit.*ARM'
 file "$device/build/tater-reboot-now" | grep -q '32-bit.*ARM'
 file "$device/build/tater-camera" | grep -q '32-bit.*ARM'
 file "$device/build/tater-rescue-fbprobe" | grep -q '32-bit.*ARM'
+[ "$target" != athena ] || file "$device/build/tater-kernelctl" | grep -q '32-bit.*ARM'
 file "$packaged_ffmpeg" | grep -q '32-bit.*ARM'
 file "$device/build/onnxruntime-linux-armv7/libonnxruntime.so" | grep -q '32-bit.*ARM'
 strings "$device/build/tater-echo" | grep -qF "$version"

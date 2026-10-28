@@ -344,6 +344,20 @@ class BuildScriptTests(unittest.TestCase):
         self.assertNotIn("fetch-inputs.py", athena_job)
         self.assertNotIn("uidmap", store_step)
 
+    def test_athena_system_ota_retains_guarded_kernel_updates(self) -> None:
+        build_script = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
+        rootfs_builder = (ROOT / "linux/checkers/build_rootfs.py").read_text(encoding="utf-8")
+
+        self.assertIn("tater-echo-athena-baseline-boot.img", build_script)
+        self.assertIn("./cmd/echod", build_script)
+        self.assertIn("--kernelctl=$device/build/tater-kernelctl", build_script)
+        self.assertIn("--kernel-image=$kernel_image", build_script)
+        self.assertIn('file "$device/build/tater-kernelctl"', build_script)
+        self.assertIn('root / "usr/local/bin/tater-kernelctl"', rootfs_builder)
+        self.assertIn('kernel_dir / "boot-athena.img"', rootfs_builder)
+        self.assertIn('/usr/local/bin/tater-kernelctl tools kernel', rootfs_builder)
+        self.assertNotIn('replace("\\tKERNEL_UPDATE=1", "\\tKERNEL_UPDATE=")', rootfs_builder)
+
     def test_release_toolchain_is_digest_locked_and_offline(self) -> None:
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in (
             ORT_BUILD_SCRIPT,
