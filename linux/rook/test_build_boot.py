@@ -10,6 +10,12 @@ import build_rescue_fbprobe
 
 
 class RookBootScreenTests(unittest.TestCase):
+    def test_fbprobe_hash_matches_pinned_tater_linux_source(self):
+        self.assertEqual(
+            "16d565a0fb0f1f03a43c2c48a9d7fbb37fb4b8e5350e40b21c69aef228f78699",
+            build_rescue_fbprobe.SOURCE_SHA256,
+        )
+
     def test_rescue_init_starts_usb_before_upright_install_screen(self):
         original = b"#!/bin/sh\nMODE=android\n" + build_boot.OLD_SCREEN + b"\n" + build_boot.OLD_CONSOLE
         with patch.object(build_boot, "SPOT_INIT_SHA256", hashlib.sha256(original).hexdigest()):
