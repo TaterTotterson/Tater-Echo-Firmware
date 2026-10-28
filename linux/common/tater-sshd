@@ -14,6 +14,7 @@ DROPBEARKEY=${TATER_DROPBEARKEY:-/usr/bin/dropbearkey}
 BUSYBOX=${TATER_BUSYBOX:-/bin/busybox}
 PORT=${TATER_SSH_PORT:-22}
 WAIT_SECONDS=${TATER_SSH_WAIT_SECONDS:-2}
+FAIL_SECONDS=${TATER_SSH_FAIL_SECONDS:-5}
 AUTHORIZED_KEYS=$SSH_DIR/authorized_keys
 HOST_KEY=$SSH_DIR/dropbear_ed25519_host_key
 MODE_FILE=$SSH_DIR/mode
@@ -22,6 +23,10 @@ PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
 SHADOW_SOURCE=${TATER_SSH_SHADOW_SOURCE:-/run/tater-sshd.shadow}
 SHADOW_TARGET=${TATER_SSH_SHADOW_TARGET:-/etc/shadow}
 SHADOW_MARKER=${TATER_SSH_SHADOW_MARKER:-/run/tater-sshd.shadow-mounted}
+
+case "$FAIL_SECONDS" in
+	''|*[!0-9]*) FAIL_SECONDS=5 ;;
+esac
 
 set_state() {
 	state_dir=${STATE%/*}
@@ -34,6 +39,9 @@ set_state() {
 fail() {
 	set_state "error $*"
 	printf 'tater-sshd: %s\n' "$*" >&2
+	# BusyBox init respawns this service. Back off on configuration or runtime
+	# errors so a broken SSH setting cannot become a watchdog-triggering loop.
+	[ "$FAIL_SECONDS" -eq 0 ] 2>/dev/null || sleep "$FAIL_SECONDS"
 	exit 1
 }
 

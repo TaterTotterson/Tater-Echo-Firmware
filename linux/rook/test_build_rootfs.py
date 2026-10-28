@@ -339,6 +339,7 @@ log "boot script done"
             self.assertIn("-F -E -j -k", sshd)
             self.assertIn("/proc/self/mountinfo", sshd)
             self.assertIn('mount -o bind "$SHADOW_SOURCE" "$SHADOW_TARGET"', sshd)
+            self.assertIn("TATER_SSH_FAIL_SECONDS", sshd)
             self.assertNotIn("chpasswd", sshd)
             self.assertIn("OpenSSH public key", authorize)
             self.assertIn("tater-ssh:x:900:root", groups)

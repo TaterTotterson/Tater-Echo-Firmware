@@ -81,6 +81,10 @@ group, whose only member is root. Local and remote port forwarding are disabled.
 Authentication failures and server diagnostics go to
 `/data/tater-linux/sshd.log`.
 
+If SSH cannot start, its supervisor records an `error` state and backs off
+before BusyBox init retries it. This prevents an invalid maintenance setting
+from creating a rapid respawn loop or tripping the hardware watchdog.
+
 SSH is part of the Linux root filesystem. Installing only an application OTA
 does not add it to an older image; use a factory or full Linux update that
 contains this rootfs first.
