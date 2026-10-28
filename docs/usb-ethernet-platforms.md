@@ -9,10 +9,10 @@ board changes USB role or drives VBUS.
 The runtime source of truth is
 [`device/internal/usbethernet/capabilities.json`](../device/internal/usbethernet/capabilities.json).
 `prepared` means the controller is installed and can use an interface the
-kernel has already enumerated. A target advertises board-controlled role
-switching as `supported` only when its record is `qualified` and the required
-kernel control exists. Sharing a SoC, kernel family, or root filesystem is not
-enough to qualify active switching.
+kernel has already enumerated. A target advertises `supported` only when its
+record is `qualified` and its required software role control or hardware-OTG
+path exists. Sharing a SoC, kernel family, or root filesystem is not enough to
+qualify a target.
 
 ## Current qualification state
 
@@ -21,13 +21,15 @@ enough to qualify active switching.
 | Biscuit | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered pass-through adapter required; CDC-ECM verified |
 | Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
 | Checkers | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline, own boot image, device tree, VBUS behavior, and USB-serial recovery |
-| Crown | `baseline-validation` | MediaTek MUSB candidate | Its pinned custody baseline; must be qualified separately from Checkers despite shared source |
+| Crown | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 8; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Athena | `hardware-validation` | Mainline MediaTek MTU3 + GPIO OTG | Tater dual-role kernel booted; normal-cable serial/RNDIS, bounded host/device switching, reboot, and Wi-Fi fallback passed; real adapter/VBUS still pending |
 | Rook | `hardware-validation` | MediaTek `/proc/mchange` candidate | Shared power/data micro-USB; powered UCTRONICS B0B9ZLVGJ4 (RTL8152) left the stock kernel in device mode; candidate adds RTL8152 and bounded forced-role support |
 
-All six images start the controller automatically. Radar, Checkers, and Crown
-are passive: if their kernel enumerates a supported USB NIC, the common policy
-can use it, but firmware performs no speculative role or VBUS write. Rook's
+All six images start the controller automatically. Radar and Checkers remain
+unqualified passive candidates: if their kernel enumerates a supported USB NIC,
+the common policy can use it, but firmware performs no speculative role or VBUS
+write. Crown is also passive in userspace, but its physical MUSB OTG signaling
+and automatic device-mode restoration are qualified on real hardware. Rook's
 stock dual-role sysfs files are intentionally read-only and the intended
 powered pass-through adapter does not assert its physical ID pin. Its candidate
 kernel therefore enables the existing MediaTek `/proc/mchange` control and
@@ -40,6 +42,25 @@ the connector's physical ID and VBUS-detect GPIOs: a normal cable remains in
 device mode, while an OTG plug selects host mode and enables GPIO150's modelled
 5 V supply. It remains unqualified until those host-side paths are exercised
 with a real adapter.
+
+### Crown qualification record — 2026-10-27
+
+- Hardware: Amazon Echo Show 8 first generation, model C7H6N3 (`crown`), with
+  separate device power.
+- Adapter: [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4),
+  Realtek RTL8152 (`r8152`).
+- Tested firmware: commit `e43f9688c13dc6820a1d683d7d808a0311a53048`,
+  `v3.2.0-ethernet-test`; Tater Linux platform v0.9.26, kernel
+  `4.9.337-g8d928c5176cc`.
+- Pinned rescue boot SHA-256:
+  `e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7`.
+- Passed: RTL8152 enumeration, DHCP, Ethernet-only default route, Wi-Fi
+  shutdown, link-loss/unplug fallback to Wi-Fi without reboot, USB serial
+  restoration, SSH on Ethernet, application OTA, A/B System OTA activation and
+  confirmation reboots, boot with the adapter attached, and volume-up TWRP.
+- Sanitized post-test inventory confirmed `CONFIG_USB_MTK_OTG=y`,
+  `CONFIG_USB_RTL8152=y`, the MUSB dual-role node, device-mode USB serial after
+  unplug, and the exact Tater release above.
 
 Wi-Fi stays connected while Ethernet DHCP runs. A usable Ethernet route
 disables Wi-Fi; link loss or unplug restores Wi-Fi and, where the controller
@@ -137,7 +158,7 @@ kernel or root filesystem lacks the required controller.
    separate boot and recovery gate passes. Athena and Rook have passed their
    current no-adapter baseline gates.
 3. Complete Rook's forced-role and real-adapter tests, then qualify Checkers
-   and Crown independently.
+   independently. Crown completed its separate hardware gate on 2026-10-27.
 4. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
    boot qualification with the intended OTG Ethernet adapter.
 5. Treat Radar as an experimental internal hardware modification, not a normal

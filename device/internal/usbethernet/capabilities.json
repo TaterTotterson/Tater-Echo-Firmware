@@ -29,13 +29,13 @@
       "reason": "The Tater custody baseline is pinned; boot it, then qualify board-specific role control, VBUS, enumeration, and serial recovery."
     },
     "crown": {
-      "backend": "mediatek-musb-candidate",
-      "detection": "passive-until-role-qualified",
-      "status": "baseline-validation",
+      "backend": "mediatek-musb-hardware-otg",
+      "detection": "hardware-id-passive",
+      "status": "qualified",
       "port": "external-micro-usb",
-      "power": "separate-device-power-vbus-unverified",
+      "power": "separate-device-power-vbus-verified",
       "recovery": "usb-serial",
-      "reason": "Crown's Tater custody baseline is pinned; its connector, role control, VBUS, and recovery still require independent qualification."
+      "reason": "Real-hardware RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Crown."
     },
     "athena": {
       "backend": "mediatek-mtu3-gpio-otg",

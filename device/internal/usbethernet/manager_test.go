@@ -12,9 +12,10 @@ func testManager(t *testing.T, target string) *Manager {
 	t.Helper()
 	dir := t.TempDir()
 	paths := Paths{
-		Script:  filepath.Join(dir, "tater-usb-ethernet"),
-		MChange: filepath.Join(dir, "mchange"),
-		State:   filepath.Join(dir, "state"),
+		Script:   filepath.Join(dir, "tater-usb-ethernet"),
+		MChange:  filepath.Join(dir, "mchange"),
+		RoleMode: filepath.Join(dir, "role-mode"),
+		State:    filepath.Join(dir, "state"),
 	}
 	if err := os.WriteFile(paths.Script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -22,13 +23,20 @@ func testManager(t *testing.T, target string) *Manager {
 	if err := os.WriteFile(paths.MChange, []byte("Active:1 host:0 force:2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(paths.RoleMode, []byte("ufp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return &Manager{Target: target, Paths: paths}
 }
 
-func TestSupportIsBiscuitAndPlatformGated(t *testing.T) {
+func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	manager := testManager(t, "biscuit")
 	if !manager.Prepared() || !manager.Supported() {
 		t.Fatal("complete Biscuit platform should be prepared and supported")
+	}
+	manager.Target = "crown"
+	if !manager.Prepared() || !manager.Supported() {
+		t.Fatal("qualified Crown hardware-OTG path should be prepared and supported")
 	}
 	manager.Target = "radar"
 	if !manager.Prepared() || manager.Supported() {
@@ -40,6 +48,13 @@ func TestSupportIsBiscuitAndPlatformGated(t *testing.T) {
 	}
 	if manager.Supported() {
 		t.Fatal("daemon-only OTA without kernel support must be unavailable")
+	}
+	manager = testManager(t, "crown")
+	if err := os.Remove(manager.Paths.RoleMode); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Supported() {
+		t.Fatal("Crown must fail closed without its verified hardware role path")
 	}
 }
 
@@ -74,10 +89,11 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 			capability.Recovery == "" || capability.Reason == "" {
 			t.Errorf("incomplete %s capability: %#v", target, capability)
 		}
-		if target == "biscuit" && !capability.qualified() {
-			t.Errorf("Biscuit must remain the qualified baseline: %#v", capability)
+		qualified := target == "biscuit" || target == "crown"
+		if qualified && !capability.qualified() {
+			t.Errorf("hardware-qualified target %s lost qualification: %#v", target, capability)
 		}
-		if target != "biscuit" && capability.qualified() {
+		if !qualified && capability.qualified() {
 			t.Errorf("unvalidated target %s became qualified: %#v", target, capability)
 		}
 	}
@@ -116,6 +132,19 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 		got["target"] != "biscuit" || got["backend"] != "mediatek-mchange" ||
 		got["detection"] != "bounded-active-probe" || got["qualification"] != "qualified" {
 		t.Fatalf("unexpected diagnostics: %#v", got)
+	}
+}
+
+func TestCrownDiagnosticsReportQualifiedHardwareOTG(t *testing.T) {
+	manager := testManager(t, "crown")
+	if err := os.WriteFile(manager.Paths.State, []byte("active eth0 10.4.20.159\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Diagnostics()
+	if got["supported"] != true || got["active"] != true || got["qualification"] != "qualified" ||
+		got["backend"] != "mediatek-musb-hardware-otg" || got["detection"] != "hardware-id-passive" ||
+		got["interface"] != "eth0" || got["address"] != "10.4.20.159" {
+		t.Fatalf("unexpected Crown diagnostics: %#v", got)
 	}
 }
 

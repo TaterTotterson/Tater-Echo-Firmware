@@ -49,7 +49,8 @@ The daemon exposes detection separately from qualification and live state:
 
 - `usb_ethernet_prepared`: the automatic controller is installed.
 - `usb_ethernet_automatic`: hardware detection is running under init.
-- `usb_ethernet_supported`: board-controlled role switching is qualified.
+- `usb_ethernet_supported`: the target's software role backend or hardware-OTG
+  path is qualified.
 - `usb_ethernet_active`: Ethernet currently owns network traffic.
 - `usb_ethernet_state`: `pending`, `waiting`, `probing`, `active`,
   `probe-complete`, `fallback`, `stopped`, `unsupported`, or `unavailable`.
@@ -63,18 +64,20 @@ are `/usr/local/sbin/tater-net` and
 
 The same controller is installed and supervised on Biscuit, Radar, Checkers,
 Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
-already enumerated, after DHCP and route validation. Only Biscuit currently
-performs an active role switch: the other boards passively detect interfaces so
+already enumerated, after DHCP and route validation. Biscuit performs an active
+userspace role switch; Crown's qualified physical OTG path switches without a
+firmware role write. The remaining boards passively detect interfaces so
 untested role or VBUS writes cannot break power, serial, recovery, or internal
 USB Wi-Fi. Their next hardware qualification step is documented in
 [`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
 
 Radar shares the Dot userspace but has no external USB port. Its barrel jack
 powers the device, while its internal USB pads expose D+/D-/GND; the adapter
-therefore needs external power. Checkers, Crown, and Rook already have the
-static kernel USB-network prerequisites but still need connector/role/VBUS
-qualification. Athena remains peripheral-only until its kernel and device tree
-gain a tested MTU3 host path.
+therefore needs external power. Checkers and Rook already have the static
+kernel USB-network prerequisites but still need connector/role/VBUS
+qualification. Crown completed that gate with the RTL8152 adapter. Athena
+remains a hardware-validation target until its MTU3 host path passes a real
+adapter test.
 
 ## Platform dependency
 

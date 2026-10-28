@@ -19,6 +19,18 @@ type unavailableBackend struct{}
 func (unavailableBackend) available(Paths) bool          { return false }
 func (unavailableBackend) restoreDeviceMode(Paths) error { return nil }
 
+// hardwareOTGBackend represents a connector whose physical ID signaling owns
+// the role transition. Userspace never writes the role node; availability only
+// confirms that the qualified kernel path is present.
+type hardwareOTGBackend struct{}
+
+func (hardwareOTGBackend) available(paths Paths) bool {
+	_, err := os.Stat(paths.RoleMode)
+	return err == nil
+}
+
+func (hardwareOTGBackend) restoreDeviceMode(Paths) error { return nil }
+
 type mchangeBackend struct{}
 
 func (mchangeBackend) available(paths Paths) bool {
@@ -53,6 +65,8 @@ func backendFor(capability Capability) roleBackend {
 	switch capability.Backend {
 	case "mediatek-mchange":
 		return mchangeBackend{}
+	case "mediatek-musb-hardware-otg":
+		return hardwareOTGBackend{}
 	default:
 		return unavailableBackend{}
 	}

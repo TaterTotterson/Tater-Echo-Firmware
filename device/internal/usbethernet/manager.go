@@ -8,9 +8,10 @@ import (
 // Paths are the installed automatic controller, MediaTek USB role control,
 // and runtime state written by the controller.
 type Paths struct {
-	Script  string
-	MChange string
-	State   string
+	Script   string
+	MChange  string
+	RoleMode string
+	State    string
 }
 
 // State describes the detected link rather than a user preference. Phase is
@@ -34,9 +35,10 @@ func New(target string) *Manager {
 	return &Manager{
 		Target: target,
 		Paths: Paths{
-			Script:  "/usr/local/sbin/tater-usb-ethernet",
-			MChange: "/proc/mchange",
-			State:   "/run/tater-usb-ethernet.state",
+			Script:   "/usr/local/sbin/tater-usb-ethernet",
+			MChange:  "/proc/mchange",
+			RoleMode: "/sys/class/dual_role_usb/dual-role-usb20/mode",
+			State:    "/run/tater-usb-ethernet.state",
 		},
 	}
 }
@@ -53,8 +55,8 @@ func (m *Manager) Prepared() bool {
 }
 
 // Supported remains the strict hardware qualification gate. All targets can
-// passively detect an already-enumerated adapter, but only qualified backends
-// may advertise board-controlled role switching.
+// passively detect an already-enumerated adapter, but only qualified software
+// role backends or verified hardware-OTG paths may advertise support.
 func (m *Manager) Supported() bool {
 	if !m.Prepared() {
 		return false
