@@ -19,6 +19,23 @@ def archive_bytes(files: dict[str, bytes]) -> bytes:
     return output.getvalue()
 
 
+def archive_with_localtime(target: str, nested: bool = False) -> bytes:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as archive:
+        timezone = tarfile.TarInfo("data/local/etc/tater/timezone")
+        timezone.size = 4
+        archive.addfile(timezone, io.BytesIO(b"UTC\n"))
+        localtime = tarfile.TarInfo(settings.LOCALTIME_PATH)
+        localtime.type = tarfile.SYMTYPE
+        localtime.linkname = target
+        archive.addfile(localtime)
+        if nested:
+            child = tarfile.TarInfo(settings.LOCALTIME_PATH + "/escape")
+            child.size = 3
+            archive.addfile(child, io.BytesIO(b"bad"))
+    return output.getvalue()
+
+
 class FakeAdb:
     def __init__(self, archive: bytes | None = None) -> None:
         self.archive = archive
@@ -77,6 +94,12 @@ class TaterSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(settings.capture(FakeAdb(), Path(directory) / "settings.tar"))
 
+    def test_archive_allows_zoneinfo_localtime_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.tar"
+            path.write_bytes(archive_with_localtime("/usr/share/zoneinfo/America/Chicago"))
+            self.assertFalse(settings.inspect_archive(path))
+
     def test_archive_rejects_escape_symlink_and_app_slot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bad.tar"
@@ -93,6 +116,13 @@ class TaterSettingsTests(unittest.TestCase):
             path.write_bytes(output.getvalue())
             with self.assertRaises(settings.SettingsError):
                 settings.inspect_archive(path)
+            for contents in (
+                    archive_with_localtime("/etc/shadow"),
+                    archive_with_localtime("/usr/share/zoneinfo/../../etc/shadow"),
+                    archive_with_localtime("/usr/share/zoneinfo/UTC", nested=True)):
+                path.write_bytes(contents)
+                with self.assertRaises(settings.SettingsError):
+                    settings.inspect_archive(path)
 
     def test_restore_rejects_archive_changed_after_capture(self) -> None:
         data = archive_bytes({"data/local/etc/tater/native.json": b"native"})

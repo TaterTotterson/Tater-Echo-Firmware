@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from pathlib import PurePosixPath
 import shlex
 import tarfile
 
 
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 REMOTE_ARCHIVE = "/tmp/tater-settings-preserve.tar"
+LOCALTIME_PATH = "data/local/etc/tater/localtime"
+ZONEINFO_PARTS = ("/", "usr", "share", "zoneinfo")
 
 # Relative to /. Directories are kept deliberately narrow: update slots,
 # binaries, logs, caches, and captured media must never survive a factory
@@ -69,6 +72,20 @@ def _allowed(name: str) -> bool:
     return any(name == root or name.startswith(root + "/") for root in PRESERVED_PATHS)
 
 
+def _supported_member(member: tarfile.TarInfo, name: str) -> bool:
+    if member.isdir() or member.isfile():
+        return not name.startswith(LOCALTIME_PATH + "/")
+    if not member.issym() or name != LOCALTIME_PATH:
+        return False
+    target = PurePosixPath(member.linkname)
+    return (
+        target.is_absolute()
+        and target.parts[:len(ZONEINFO_PARTS)] == ZONEINFO_PARTS
+        and len(target.parts) > len(ZONEINFO_PARTS)
+        and ".." not in target.parts
+    )
+
+
 def inspect_archive(path: Path) -> bool:
     """Validate a settings archive and return whether it has complete pairing state."""
     if not path.is_file() or not 0 < path.stat().st_size <= MAX_ARCHIVE_BYTES:
@@ -87,7 +104,7 @@ def inspect_archive(path: Path) -> bool:
                 if (not name or member.name.startswith("/") or ".." in parts or
                         not _allowed(name) or name in seen):
                     raise SettingsError(f"unsafe or unexpected Tater settings path: {member.name}")
-                if not (member.isdir() or member.isfile()):
+                if not _supported_member(member, name):
                     raise SettingsError(f"unsupported Tater settings entry: {member.name}")
                 seen.add(name)
                 if member.isfile():
