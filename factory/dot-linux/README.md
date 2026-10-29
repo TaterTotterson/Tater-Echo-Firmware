@@ -1,21 +1,25 @@
 # Biscuit and Radar Tater Linux factory installer
 
-This factory bundle installs Alpine-based Tater Linux on Biscuit or Radar. It
-is intentionally a reset, not a migration from pre-v3 firmware.
+This factory bundle installs Alpine-based Tater Linux on Biscuit or Radar.
+Existing Tater pairing, Wi-Fi, SSH, and satellite settings are preserved by
+default; add `--factory-reset` when you deliberately want a clean setup.
 
 > [!IMPORTANT]
 > Biscuit and Radar running firmware older than v3.0.0 must use this USB/TWRP
 > factory installer once. The pre-v3 base system cannot install the v3 OTA
-> format. The reset clears the satellite's Tater settings; later releases use
-> the normal Tater OTA flow.
+> format. The installer keeps any Tater setup it can verify, but replaces the
+> old firmware and application slots; later releases use the normal Tater OTA
+> flow.
 
 1. Complete the matching amonet unlock and boot the unit into TWRP.
 2. Connect USB and extract the matching factory archive.
 3. Run `./install.sh --verify-bundle`, then `./install.sh` (macOS/Linux), or
    run `python3 install.py --verify-bundle`, then `python3 install.py`
    (Windows).
-4. Type `ERASE` when prompted.
-5. Join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair the satellite.
+4. Type `ERASE` when prompted. Add `--factory-reset` to the install command to
+   erase Wi-Fi, pairing, SSH, and satellite settings.
+5. A previously paired satellite reconnects automatically. On a new or reset
+   satellite, join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair it.
 
 The factory installer and a future System OTA reboot Biscuit or Radar into a
 trial root-system slot. A healthy root slot commits in place on these two
@@ -25,8 +29,10 @@ Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
 The installer checksum-verifies every bundled file and every partition backup,
 builds the Linux boot image from that unit's own TWRP header, checks the
 board-specific kernel, writes only recovery/cache plus Tater-owned userdata,
-and preserves the stock system slots. TWRP is copied into the Linux slot store
-as a lower-level fallback; normal repairs use Tater Recovery.
+and preserves the stock system slots. Before replacing Tater-owned userdata it
+saves and verifies the small settings-only archive in `backups/<serial>/`; old
+OTA application slots are intentionally not restored. TWRP is copied into the
+Linux slot store as a lower-level fallback; normal repairs use Tater Recovery.
 
 An empty or previously erased cache partition is supported. Preflight leaves it
 untouched; after backups are verified and the user types `ERASE`, the installer

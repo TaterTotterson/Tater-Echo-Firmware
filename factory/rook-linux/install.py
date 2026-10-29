@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,19 @@ ROOK_LOGO_DIMENSIONS = (480, 480)
 ROOK_LOGO_SHA256 = "2c8d54f6987cef2e0877360e873191bfc48a35a13e8d7f42e0ecb987f2df860d"
 LK_LOGO_BASE = 0x4BD00000
 LK_HEADER_SIZE = 512
+
+
+def load_tater_settings():
+    candidates = (ROOT / "tater_settings.py", ROOT.parent / "tater_settings.py")
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        raise Fail("the factory bundle is missing tater_settings.py")
+    spec = importlib.util.spec_from_file_location("tater_factory_settings", path)
+    if spec is None or spec.loader is None:
+        raise Fail(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def sha256(path: Path) -> str:
@@ -333,13 +347,21 @@ def install_lineage(adb: Adb, zip_path: Path) -> None:
     note(f"Rook Wi-Fi module matches kernel: {version}")
 
 
-def confirm(serial: str, version: str, reinstall: bool) -> None:
+def confirm(serial: str, version: str, reinstall: bool, factory_reset: bool,
+            saved_settings) -> None:
     print(f"\nAbout to install Tater Linux {version} on Rook {serial}.", flush=True)
     print("This formats userdata, installs pinned LineageOS only for vendor drivers,", flush=True)
     print("flashes boot, and erases system (mmcblk0p11) for Tater's A/B slot store.", flush=True)
     if reinstall:
-        print("REINSTALL: the current Tater setup, A/B slots, and local settings will be erased.",
+        print("REINSTALL: the current A/B root-system slots will be erased.", flush=True)
+    if factory_reset:
+        print("Wi-Fi, pairing, SSH, and satellite settings will be erased (--factory-reset).",
               flush=True)
+    elif saved_settings:
+        print("Tater pairing, Wi-Fi, SSH, and satellite settings will be restored afterward.",
+              flush=True)
+    else:
+        print("No existing Tater setup was found; the satellite will enter setup mode.", flush=True)
     print("Recovery and lk are not written. Only expdb's verified boot-logo slot is replaced.", flush=True)
     require(input("Type ERASE to continue: ").strip() == "ERASE", "installation cancelled")
 
@@ -376,9 +398,26 @@ def install(args: argparse.Namespace) -> None:
     if args.preflight_only:
         print("Rook preflight complete. No device writes were made.")
         return
+    settings = load_tater_settings()
+    saved_settings = None
+    if not args.factory_reset:
+        try:
+            saved_settings = settings.capture(adb, backup / "tater-settings.tar")
+        except settings.SettingsError as error:
+            raise Fail(str(error)) from error
+        if saved_settings:
+            note(f"Tater setup saved and verified: {saved_settings.archive}")
+        else:
+            note("no existing Tater setup was found; this unit will start clean")
     check_serial_access()
-    confirm(serial, info["version"], existing_store)
+    confirm(serial, info["version"], existing_store, args.factory_reset, saved_settings)
     install_lineage(adb, zip_path)
+    if saved_settings:
+        try:
+            settings.restore(adb, saved_settings)
+        except settings.SettingsError as error:
+            raise Fail(str(error)) from error
+        note("pairing, Wi-Fi, SSH, and satellite settings restored")
     lineage_boot = backup / "boot-lineage.img"
     partial = lineage_boot.with_suffix(".img.partial")
     if not lineage_boot.exists():
@@ -462,10 +501,16 @@ def install(args: argparse.Namespace) -> None:
             f"Rook slot A or its vendor tree is incomplete: {output}")
     # The vendor archive stays on userdata for recovery until a healthy first boot.
     name = args.name.strip() if args.name else "Tater Spot"
-    provision = ("mkdir -p /data/misc/techo5; "
-                 f"printf '%s\\n' {shlex.quote(name)} > /data/misc/techo5/name; "
-                 f"(umask 077; printf '%s\\n' {shlex.quote(psk)} > /data/misc/techo5/psk); "
-                 "sync; echo PROVISIONED")
+    if saved_settings:
+        provision = ("mkdir -p /data/misc/techo5; "
+                     f"[ -s /data/misc/techo5/name ] || printf '%s\\n' {shlex.quote(name)} > /data/misc/techo5/name; "
+                     f"[ -s /data/misc/techo5/psk ] || (umask 077; printf '%s\\n' {shlex.quote(psk)} > /data/misc/techo5/psk); "
+                     "sync; echo PROVISIONED")
+    else:
+        provision = ("mkdir -p /data/misc/techo5; "
+                     f"printf '%s\\n' {shlex.quote(name)} > /data/misc/techo5/name; "
+                     f"(umask 077; printf '%s\\n' {shlex.quote(psk)} > /data/misc/techo5/psk); "
+                     "sync; echo PROVISIONED")
     require("PROVISIONED" in (console.run(provision, 15) or ""),
             "slot A installed, but local provisioning failed")
     console.run("sync; (sleep 2; /bin/busybox.static reboot -f) >/dev/null 2>&1 &", 3)
@@ -479,7 +524,10 @@ def install(args: argparse.Namespace) -> None:
     status = console.run("STORE=/store slotctl status; ip -4 addr show wlan0; tail -8 /data/tater-linux/tater-echo.log", 12)
     if status:
         print(status)
-    print("\nFactory boot complete. Pair the Spot through its Tater setup screen/network.")
+    if saved_settings and saved_settings.paired:
+        print("\nFactory boot complete. The Spot kept its Tater pairing, Wi-Fi, SSH, and settings.")
+    else:
+        print("\nFactory boot complete. Pair the Spot through its Tater setup screen/network.")
     print("The root slot stays on trial until it connects to Tater and passes its health window.")
 
 
@@ -488,6 +536,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verify-bundle", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--reinstall-existing-tater", action="store_true")
+    parser.add_argument("--factory-reset", action="store_true",
+                        help="erase Wi-Fi, pairing, SSH, and satellite settings instead of preserving them")
     parser.add_argument("--serial")
     parser.add_argument("--lineage-zip", type=Path)
     parser.add_argument("--name")

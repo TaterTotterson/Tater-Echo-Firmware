@@ -37,8 +37,9 @@ Target metadata used by Tater and the release builds lives in
 > [!IMPORTANT]
 > Biscuit and Radar running firmware older than **v3.0.0** require one USB/TWRP
 > factory install to move to Tater Linux. They cannot install v3.0.0 through
-> OTA. The factory install is a clean reset and clears the satellite's Tater
-> settings; normal OTA updates resume after v3.0.0 is installed.
+> OTA. The factory installer preserves verified Tater pairing, Wi-Fi, SSH, and
+> satellite settings by default; pass `--factory-reset` for a clean start.
+> Normal OTA updates resume after v3.0.0 is installed.
 
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
@@ -102,13 +103,14 @@ running Tater firmware older than v3.0.0.
    ./install.sh
    ```
 
-4. After reboot, join `Tater-Setup-XXXX` and complete the setup page.
+4. A previously paired Biscuit reconnects automatically. On a new/reset unit,
+   join `Tater-Setup-XXXX` and complete the setup page.
 
-The computer needs Python 3 and `adb`. This is a clean reset rather than a
-migration: the installer verifies the device and bundle, backs up every
+The computer needs Python 3 and `adb`. The installer verifies the device and bundle, backs up every
 boot-critical partition, builds the Linux recovery image from that unit's own
-TWRP header, installs an A/B Alpine rootfs on cache, and clears prior satellite
-settings. Stock system partitions and a verified TWRP copy are retained. See
+TWRP header, installs an A/B Alpine rootfs on cache, and restores verified
+Tater setup while discarding old OTA application slots. Add `--factory-reset`
+for a clean start. Stock system partitions and a verified TWRP copy are retained. See
 the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v3.0.0
 or newer is running, reconnect USB and run `python3 to_recovery.py` from an
 extracted Biscuit or Radar factory archive to enter Tater Recovery.
@@ -140,7 +142,8 @@ firmware older than v3.0.0.
    ./install.sh
    ```
 
-4. After reboot, join `Tater-Setup-XXXX` and complete setup.
+4. A previously paired Radar reconnects automatically. On a new/reset unit,
+   join `Tater-Setup-XXXX` and complete setup.
 
 The installer uses the pinned Radar-specific Linux kernel, builds the recovery
 image from the unit's own TWRP header, verifies every partition backup and
@@ -175,11 +178,13 @@ covers those prerequisites.
    ./install.sh
    ```
 
-4. On first boot, join `Tater-Setup-XXXX` and complete the setup page.
+4. An already paired Checkers reconnects automatically. On a new/reset unit,
+   join `Tater-Setup-XXXX` and complete the setup page.
 
 This factory conversion reformats userdata and turns the former system
 partition into an A/B Tater Linux store. It preserves TWRP and recovery
-backups, downloads only the pinned and checksum-verified LineageOS driver
+backups plus verified Tater setup, downloads only the pinned and
+checksum-verified LineageOS driver
 source, and never boots LineageOS. Routine updates are OTA afterward. See the
 [`factory/checkers-linux` guide](factory/checkers-linux/README.md) for Windows,
 USB provisioning, checksum, and recovery instructions.
@@ -209,11 +214,13 @@ Do not use this on the second-generation Echo Show 8 (model A8H3N2).
    ./install.sh
    ```
 
-4. Join `Tater-Setup-XXXX` on first boot and complete the setup page.
+4. An already paired Crown reconnects automatically. On a new/reset unit, join
+   `Tater-Setup-XXXX` and complete the setup page.
 
 The installer requires TWRP to report `ro.product.device=crown`, preserves
-recovery and backups, and uses checksum-pinned Crown boot and vendor-driver
-inputs. It reformats userdata and the former system partition. See the
+recovery, backups, and verified Tater setup, and uses checksum-pinned Crown
+boot and vendor-driver inputs. It reformats userdata and the former system
+partition but does not restore old OTA application slots. See the
 [`factory/crown-linux` guide](factory/crown-linux/README.md) for exact model,
 checksum, provisioning, and recovery requirements.
 
@@ -242,14 +249,16 @@ Crown. Begin with Fire OS 7080 / PS7574.1.7080N and complete the
 
 4. Read the reported panel, partition, and TAS5805M tuning results. If all are
    recognized, run `./install.sh` and keep the resulting private backup.
-5. After restart, join `Tater-Setup-XXXX` and complete Tater pairing.
+5. An already paired Athena reconnects automatically. On a new/reset unit,
+   join `Tater-Setup-XXXX` and complete Tater pairing.
 
 The installer uses TECHO5's pinned 64-bit mainline kernel and Athena store
 layout while Tater runs as an ARMv7 userspace. It writes only `system` p21 and
 `boot` p20, preserves TWRP and the unlock partitions, and injects the speaker
 tuning from that unit's own Fire OS boot image. Do not use another unit's
 filled boot image, and do not bypass an unknown panel with `--force-panel`
-unless you are prepared to recover a dark display. See
+unless you are prepared to recover a dark display. Existing Tater setup is
+preserved by default; `--factory-reset` starts clean. See
 [`factory/athena-linux/README.md`](factory/athena-linux/README.md) and
 [`docs/athena.md`](docs/athena.md).
 
@@ -278,10 +287,11 @@ Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`, model
 4. Run `./install.sh` and type `ERASE` only after checking the displayed model
    and partition information. Keep both cables connected until first-boot
    checks finish.
-5. Join the `Tater-Setup-XXXX` network shown on the Spot and complete setup.
+5. An already paired Rook reconnects automatically. On a new/reset unit, join
+   the `Tater-Setup-XXXX` network shown on the Spot and complete setup.
 
 The conversion creates an A/B Tater Linux store, preserves TWRP, and saves
-private recovery backups. It uses only the pinned and checksum-verified Rook
+private recovery backups plus verified Tater setup. It uses only the pinned and checksum-verified Rook
 LineageOS package as a source for hardware drivers; LineageOS is not booted.
 See the [`factory/rook-linux` guide](factory/rook-linux/README.md) for complete
 prerequisites, Windows commands, reinstall rules, and recovery steps.

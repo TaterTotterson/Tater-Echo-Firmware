@@ -39,6 +39,31 @@ class InstallerTests(unittest.TestCase):
         prompt.assert_not_called()
         code.assert_not_called()
 
+    def test_preserved_pairing_skips_fresh_setup(self):
+        args = SimpleNamespace(usb_pair=False, tater_url=None, pairing_code=None,
+                               target="crown")
+        with mock.patch.object(install, "load_module") as module, \
+             mock.patch("builtins.input") as prompt, \
+             mock.patch.object(install.getpass, "getpass") as code:
+            install.finish_tater_provisioning(args, "SERIAL", preserved_pairing=True)
+        module.assert_not_called()
+        prompt.assert_not_called()
+        code.assert_not_called()
+
+    def test_factory_reset_is_forwarded_to_platform_installer(self):
+        args = SimpleNamespace(
+            lineage_zip=Path("lineage.zip"), name="Kitchen", wifi=None,
+            wifi_passphrase_file=None, force=True, factory_reset=True,
+            backups=Path("backups"), work=Path("work"), adb="adb", fastboot="fastboot",
+        )
+        seen = []
+        platform = SimpleNamespace(main=lambda: seen.extend(install.sys.argv) or False)
+        library = SimpleNamespace(Fail=RuntimeError)
+        with mock.patch.object(install.importlib, "import_module", return_value=library), \
+             mock.patch.object(install, "load_module", return_value=platform):
+            self.assertFalse(install.run_platform_installer(args, {"version": "v1.2.3"}, "SERIAL"))
+        self.assertIn("--factory-reset", seen)
+
     def test_partial_usb_pairing_parameters_are_rejected(self):
         args = SimpleNamespace(usb_pair=False, tater_url="http://tater.local:8501", pairing_code=None)
         with mock.patch.object(install, "load_module"):

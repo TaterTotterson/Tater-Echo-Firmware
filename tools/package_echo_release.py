@@ -482,6 +482,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             REPO / "LICENSES/SENDSPIN-MIT.txt", 0o644)
         inputs["to_recovery.py"] = (REPO / "factory/to_recovery.py", 0o755)
         inputs["recovery_install.py"] = (REPO / "factory/recovery_install.py", 0o755)
+        inputs["tater_settings.py"] = (REPO / "factory/tater_settings.py", 0o644)
         # TWRP remains the lower-level escape hatch.  Tater Recovery is the
         # normal user path, but do not remove the tool needed when the Linux
         # rescue image itself is what needs repair.

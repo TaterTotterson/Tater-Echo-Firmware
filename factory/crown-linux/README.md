@@ -3,14 +3,16 @@
 This USB factory bundle installs Tater Linux on an unlocked **2019
 first-generation Echo Show 8**, model **C7H6N3**, codename `crown`. It
 preserves TWRP, flashes the pinned Crown Linux boot image, and creates the A/B
-rootfs store. It pairs as a new Tater satellite.
+rootfs store. It preserves an existing Tater pairing by default.
 
 > **Do not use this bundle on an Echo Show 8 2nd Gen (`A8H3N2`) or any other
 > model.** The installer also reads `ro.product.device` in TWRP and refuses to
 > proceed unless it reports `crown`.
 
-The conversion **erases userdata and the former system partition**. It must be
-done over USB and is not an OTA update. Routine updates after conversion use
+The conversion reformats userdata and the former system partition, but first
+saves and verifies existing Tater pairing, Wi-Fi, SSH, and satellite settings
+and restores them afterward. Old OTA application slots are not restored. It
+must be done over USB and is not an OTA update. Routine updates after conversion use
 Tater's A/B application updater on `/data`.
 
 ## Before you start
@@ -36,7 +38,8 @@ a01359a5e13dad8ac24c5507e8a747163b992012410b14d2ca9a8711ec4a1491
 
 1. Download and extract `tater-echo-crown-vX.Y.Z-factory.tar.gz` from a Tater
    Echo Firmware release, then run commands inside the extracted directory.
-2. Boot the Show into TWRP. Existing userdata and pairing are erased.
+2. Boot the Show into TWRP. Existing Tater setup is preserved by default; add
+   `--factory-reset` to the install command for a clean setup.
 3. Check `adb devices` shows the intended device as `recovery`, then verify the
    bundle:
 
@@ -50,6 +53,9 @@ a01359a5e13dad8ac24c5507e8a747163b992012410b14d2ca9a8711ec4a1491
    ./install.sh
    ```
 
+   Use `./install.sh --factory-reset` when you intentionally want to clear
+   Wi-Fi, pairing, SSH, and satellite settings.
+
    On Windows use `py -3 install.py`. For an offline install, pass
    `--lineage-zip /path/to/lineage-18.1-20260904-UNOFFICIAL-crown.zip`.
 
@@ -62,7 +68,8 @@ wordmark slot in `expdb` with the monochrome Tater logo, then reads the
 partition back. Unknown bootloader revisions keep Amazon's logo, and a failed
 readback restores the complete saved partition.
 
-When the Tater setup screen appears, join its open `Tater-Setup-XXXX` Wi-Fi
+An already paired Crown reconnects automatically. When a new or reset unit
+shows the Tater setup screen, join its open `Tater-Setup-XXXX` Wi-Fi
 network, browse to `http://192.168.4.1`, and enter home Wi-Fi plus an **Add
 Satellite** pairing code. Alternatively run the installer with `--usb-pair`.
 Do not disconnect USB or power while flashing.

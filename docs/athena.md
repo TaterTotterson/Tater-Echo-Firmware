@@ -12,7 +12,7 @@ contract and ongoing regression checklist are recorded below.
 - Linux platform: [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux),
   based on the MIT-licensed TECHO5 Athena work.
 - Pinned Tater Echo Linux source commit:
-  `6c58d47c9398617e399cf49ce3b31fa9b8f396f9` (compatible platform release
+  `57f27fc568caa4390345137b52ebe6932ce57515` (compatible platform release
   `v1.6.4`).
 - Base rootfs SHA-256:
   `cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5`.
@@ -52,7 +52,10 @@ Athena's mainline kernel mounts `system` p21 as a store containing its rescue
 root plus A/B rootfs slots. `userdata` p23 remains the persistent state volume.
 The installer also writes `boot` p20 after filling its reserved amp-tuning
 slot. It validates the GPT layout, panel, boot header, tuning hash, and image
-checksums before the first write, then reads each written partition back.
+checksums before the first write, then reads each written partition back. A
+factory reinstall preserves Tater pairing, Wi-Fi, SSH, and satellite settings
+by default while removing stale application OTA slots; `--factory-reset`
+clears Tater setup instead.
 
 The installer never writes TWRP (`recovery`), `vendor`, the bootloader, TEE,
 preloader, or saiyaku's real partitions. Keep `backups/<serial>` private and

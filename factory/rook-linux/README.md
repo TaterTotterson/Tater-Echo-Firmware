@@ -18,6 +18,10 @@ Tater Linux A/B store. It never writes TWRP or `lk`. After verifying the full
 `expdb` backup and Rook's exact embedded-logo layout, it replaces only the
 12,096-byte Amazon logo slot with the monochrome Tater mark. An unknown layout
 is left alone, and a failed readback restores the complete `expdb` backup.
+Before userdata is formatted, any existing Tater pairing, Wi-Fi, SSH, and
+satellite settings are saved and verified on the computer, then restored. Add
+`--factory-reset` when a clean setup is wanted. Old OTA application slots are
+never restored.
 
 The pinned LineageOS ZIP is downloaded on demand or can be supplied with
 `--lineage-zip PATH`. Its SHA-256 is
@@ -42,8 +46,9 @@ installer requires the existing Tater slot-store filesystem label and either
 the bundle's boot image or an exact hash-verified earlier Rook Tater boot image
 before allowing this path. It saves the installed system
 under `backups/<serial>/pre-reinstall/` and never overwrites the original
-factory backups. Reinstallation erases the existing Tater setup, settings,
-and A/B slots; pair the Spot again afterward. Do not use this option on a
+factory backups. Reinstallation formats userdata and erases the A/B slots;
+the saved Tater setup and settings are then restored unless
+`--factory-reset` is also supplied. Do not use this option on a
 newly unlocked device.
 
 The current factory bundle corrects the Broadcom driver's shared
@@ -55,8 +60,9 @@ filesystem.
 During factory installation, the bootloader and rescue stage show the same
 round-safe monochrome Tater mark, followed by `INSTALLING TATER`. The rescue
 screen is part of the boot image, so an
-application OTA cannot change it on an already-installed Spot. The first boot
-is expected to show Tater setup. The root slot stays in trial
+application OTA cannot change it on an already-installed Spot. A previously
+paired Spot reconnects automatically; a new or reset Spot shows Tater setup.
+The root slot stays in trial
 state until it connects to Tater and passes its five-minute health check. It
 then commits and deliberately restarts one additional time so the shared
 root/store filesystem returns read-only. The same confirmation restart follows

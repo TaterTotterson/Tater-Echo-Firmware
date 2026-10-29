@@ -2,11 +2,13 @@
 
 This USB factory bundle installs Tater Linux on an unlocked Echo Show 5
 **1st generation** (`checkers`). It preserves TWRP, flashes the pinned Checkers
-Linux boot image, and creates the A/B rootfs store. It does not migrate an old
-Tater identity; the device is paired as a fresh satellite.
+Linux boot image, and creates the A/B rootfs store. Existing Tater identity and
+setup are preserved by default; a new device or `--factory-reset` starts fresh.
 
-The conversion **erases userdata and the former system partition**. It must
-be done over USB; it is not an OTA update. After installation, routine updates
+The conversion reformats userdata and the former system partition, but first
+saves and verifies existing Tater pairing, Wi-Fi, SSH, and satellite settings
+and restores them afterward. Old OTA application slots are not restored. It
+must be done over USB; it is not an OTA update. After installation, routine updates
 use Tater's A/B application updater on `/data` and its verified System OTA for
 the inactive Linux rootfs slot. Kernel, boot, rescue, and layout changes remain
 USB recovery operations.
@@ -47,9 +49,9 @@ The printed hash must match exactly. The installer independently checks it.
 1. Download and extract `tater-echo-checkers-vX.Y.Z-factory.tar.gz` from a
    [Tater Echo Linux release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases).
    Run commands below **inside its extracted directory**.
-2. Boot the device into TWRP and plan to enter a new Tater pairing code.
-   Existing userdata and pairing are erased. The installer will not run from
-   a normal OS boot.
+2. Boot the device into TWRP. Existing Tater setup is preserved by default;
+   add `--factory-reset` to the install command when you want to erase it and
+   enter a new pairing code. The installer will not run from a normal OS boot.
 3. Check `adb devices` shows only the intended device in `recovery`, and verify the factory
    bundle. Use `--serial DEVICE_SERIAL` if more than one device is connected.
 
@@ -64,6 +66,8 @@ The printed hash must match exactly. The installer independently checks it.
    ```sh
    ./install.sh
    ```
+
+   Use `./install.sh --factory-reset` for a deliberately clean setup.
 
    On Windows, run `py -3 install.py --verify-bundle`, then
    `py -3 install.py` instead. `--wifi "Your network"` is optional; without it,
@@ -82,7 +86,8 @@ partition back. Any other bootloader hash keeps Amazon's logo, and a failed
 readback restores the complete saved partition before the device restarts.
 The temporary
 "INSTALLING TATER" screen during USB installation is normal; it changes to
-the Tater setup screen when slot A boots. For a new device, join the open
+the Tater setup screen when slot A boots. A previously paired device reconnects
+automatically. For a new or reset device, join the open
 `Tater-Setup-XXXX` Wi-Fi network shown on Checkers, then open
 `http://192.168.4.1`. Enter your home Wi-Fi, Tater server URL, and an
 **Add Satellite** pairing code from Tater. If you prefer to provision over USB,

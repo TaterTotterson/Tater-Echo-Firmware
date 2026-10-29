@@ -45,7 +45,9 @@ recovery; flash the LineageOS zip and the LineageOS boot image.
 """
 import argparse
 import hashlib
+import importlib.util
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -76,6 +78,20 @@ BOARDS = {
 
 def quote(s):
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+def load_tater_settings():
+    here = Path(__file__).resolve()
+    candidates = (here.parents[2] / 'tater_settings.py', here.parents[3] / 'tater_settings.py')
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        fail('the factory bundle is missing tater_settings.py')
+    spec = importlib.util.spec_from_file_location('tater_factory_settings', path)
+    if spec is None or spec.loader is None:
+        fail('cannot load %s' % path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # The partitions saved from a unit in TWRP before anything is written: the bootloader chain, the logo,
@@ -357,6 +373,8 @@ def main():
     ap.add_argument('--amazon-logo', action='store_true',
                     help="from TWRP on a supported Show 5 or Show 8: keep Amazon's logo at boot rather than put Tater's in")
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
+    ap.add_argument('--factory-reset', action='store_true',
+                    help='erase Wi-Fi, pairing, SSH, and satellite settings instead of preserving them')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
     ap.add_argument('--backups', default=default_dir('TECHO5_BACKUPS', 'backups'))
     ap.add_argument('--work', default=default_dir('TECHO5_WORK', 'build'))
@@ -478,17 +496,43 @@ def main():
         note('boot image %s checked' % os.path.basename(boot))
     if a.dry_run:
         print('\nDry run: TECHO5 %s downloaded and checked in %s; nothing written to the unit.' % (version, rel.dir))
-        return
+        return False
+
+    settings = load_tater_settings() if twrp else None
+    saved_settings = None
+    if twrp and not a.factory_reset:
+        try:
+            saved_settings = settings.capture(adb, Path(backup) / 'tater-settings.tar')
+        except settings.SettingsError as error:
+            fail(str(error))
+        if saved_settings:
+            note('Tater setup saved and verified: %s' % saved_settings.archive)
+        else:
+            note('no existing Tater setup was found; this unit will start clean')
 
     if twrp:
         # From TWRP the first thing written is userdata, so the one question comes before it.
+        setup_action = (
+            'Wi-Fi, pairing, SSH, and satellite settings will be erased (--factory-reset).'
+            if a.factory_reset else
+            'Existing Tater setup will be restored afterward.' if saved_settings else
+            'No existing Tater setup was found; the satellite will enter setup mode.'
+        )
         confirm(a.force, [
             "About to install Tater Linux %s on %s (%s) as '%s', from TWRP." % (version, a.serial, BOARDS[dev], a.name),
             "This formats userdata, installs LineageOS for its drivers without starting it,",
             "flashes the Tater Linux boot image, then erases the system partition (mmcblk0p12) to make the slot store.",
+            setup_action,
         ])
         step('LineageOS, for its drivers')
         install_lineage(adb, a.lineage_zip)
+        if saved_settings:
+            step('restore Tater setup')
+            try:
+                settings.restore(adb, saved_settings)
+            except settings.SettingsError as error:
+                fail(str(error))
+            note('pairing, Wi-Fi, SSH, and satellite settings restored')
         check_lineage_driver(adb)
         if not os.path.exists(los_boot):
             # Through a .partial kept only when whole, as on the LineageOS path: this is the image the way
@@ -602,8 +646,14 @@ def main():
     for line in o.split('\n'):
         if line.startswith('slot a'):
             note(line)
-    prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
-            "(umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk)" % (quote(a.name), quote(psk)))
+    if saved_settings:
+        prov = ("mkdir -p /data/misc/techo5 && "
+                "{ [ -s /data/misc/techo5/name ] || printf '%%s\\n' %s > /data/misc/techo5/name; } && "
+                "{ [ -s /data/misc/techo5/psk ] || (umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk); }"
+                % (quote(a.name), quote(psk)))
+    else:
+        prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
+                "(umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk)" % (quote(a.name), quote(psk)))
     if pub:
         prov += (" && mkdir -p -m 700 /data/misc/techo5/ssh && (umask 077; printf '%%s\\n' %s > /data/misc/techo5/ssh/authorized_keys)"
                  " && { [ -e /data/misc/techo5/state.json ] || printf '{\"security\":{\"ssh\":true}}\\n' > /data/misc/techo5/state.json; }"
@@ -635,9 +685,10 @@ def main():
 
     print("\nDone. '%s' runs Tater Linux %s from slot a; the slot commits itself after five healthy minutes." % (a.name, version))
     print('The unused low-level platform key remains private in %s.' % key_file)
-    if twrp and not wifi:
+    if twrp and not wifi and not saved_settings:
         print('It has no home Wi-Fi yet: join the Tater-Setup network shown on the screen to finish setup.')
     print("Later versions arrive through Tater's normal satellite OTA flow.")
+    return bool(saved_settings and saved_settings.paired)
 
 
 if __name__ == '__main__':

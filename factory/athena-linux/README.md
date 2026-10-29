@@ -16,7 +16,11 @@ The dry run identifies the device, validates its GPT partition names and sizes,
 checks the panel, verifies both images, reads the stock boot image, and validates
 the unit-specific TAS5805M speaker tuning without writing anything. Review its
 output, then install with `./install.sh`; add `--force` only to skip the final
-prompt. On Windows use `py -3 install.py` for the same commands.
+prompt. Existing Tater pairing, Wi-Fi, SSH, and satellite settings are
+preserved by default, while old OTA application slots are removed so the
+factory bundle boots its matching application. Use `./install.sh
+--factory-reset` for a clean setup. On Windows use `py -3 install.py` for the
+same commands.
 
 The installer writes only boot partition 20 and system partition 21. It preserves
 TWRP, bootloader, TEE, vendor, and the other protected partitions; makes private,

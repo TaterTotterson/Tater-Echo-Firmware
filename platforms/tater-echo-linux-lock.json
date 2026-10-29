@@ -91,7 +91,7 @@
       }
     },
     "athena": {
-      "commit": "6c58d47c9398617e399cf49ce3b31fa9b8f396f9",
+      "commit": "57f27fc568caa4390345137b52ebe6932ce57515",
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
       "kernel_release": "athena-kernel-v1.0.0",
