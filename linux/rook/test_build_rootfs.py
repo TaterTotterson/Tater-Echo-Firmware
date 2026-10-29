@@ -311,6 +311,7 @@ log "boot script done"
                 hey_tater_nww_gru=payload, hey_tater_bundle=payload, stop_model=payload,
                 stop_manifest=payload, oww_melspectrogram_onnx=payload,
                 oww_embedding_onnx=payload, tinyalsa=payload,
+                techo5_lib=payload,
                 techo5_spot_license=license_file, techo5_license=license_file,
                 ffmpeg_license=license_file,
                 apk_cache=root, version="v0.0.1", output=output,
@@ -339,8 +340,10 @@ log "boot script done"
                 wake_bundle = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.wake-bundle.json").read()
                 onnx_runtime = archive.extractfile("./usr/share/tater/microwakeword/libonnxruntime.so").read()
                 onnx_classifier = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.oww.onnx").read()
+                techo5_lib = archive.extractfile("./lib/techo5-lib.sh").read()
             self.assertEqual(camera, b"trial-binary")
             self.assertEqual(ffmpeg, b"trial-binary")
+            self.assertEqual(techo5_lib, b"trial-binary")
             self.assertIn("::respawn:/usr/local/sbin/tater-camera-run", inittab)
             self.assertIn("::respawn:/usr/local/sbin/tater-usb-ethernet", inittab)
             self.assertIn("::respawn:/usr/local/sbin/tater-sshd", inittab)

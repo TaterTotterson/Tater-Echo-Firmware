@@ -129,6 +129,21 @@ class BuildScriptTests(unittest.TestCase):
         ):
             self.assertIn("tater-usb-inventory", builder.read_text(encoding="utf-8"), builder)
 
+    def test_screen_rootfs_uses_pinned_current_hardware_library(self) -> None:
+        for script in (
+            ROOT / "linux/checkers/build_linux.sh",
+            ROOT / "linux/rook/build_linux.sh",
+        ):
+            self.assertIn("--techo5-lib", script.read_text(encoding="utf-8"), script)
+        self.assertIn(
+            'copy(args.techo5_lib, root / "lib/techo5-lib.sh", 0o644)',
+            (ROOT / "linux/checkers/build_rootfs.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'common.copy(args.techo5_lib, root / "lib/techo5-lib.sh", 0o644)',
+            (ROOT / "linux/rook/build_rootfs.py").read_text(encoding="utf-8"),
+        )
+
     def test_every_linux_rootfs_installs_and_supervises_automatic_usb_ethernet(self) -> None:
         for builder in (
             DOT_ROOTFS_BUILDER,

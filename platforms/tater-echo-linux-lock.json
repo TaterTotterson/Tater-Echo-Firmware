@@ -66,7 +66,7 @@
       }
     },
     "show": {
-      "checkers_commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
+      "checkers_commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
       "release": "v0.9.26",
       "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
@@ -91,7 +91,7 @@
       }
     },
     "athena": {
-      "commit": "57f27fc568caa4390345137b52ebe6932ce57515",
+      "commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
       "kernel_release": "athena-kernel-v1.0.0",

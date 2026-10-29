@@ -46,6 +46,9 @@ def build(args: argparse.Namespace) -> None:
             if assignment not in board:
                 raise SystemExit(f"Rook base has an unexpected device map: {assignment}")
 
+        # Rook shares the hardware library with the Show platform. Overlay the
+        # exact pinned copy instead of retaining the older baseline's policy.
+        common.copy(args.techo5_lib, root / "lib/techo5-lib.sh", 0o644)
         common.copy(args.server, root / "usr/local/bin/tater-echo", 0o755)
         common.copy(args.show, root / "usr/local/bin/tater-show", 0o755)
         common.copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
@@ -137,7 +140,7 @@ def main() -> int:
                  "hey-tater-nww-cnn", "hey-tater-nww-gru", "hey-tater-bundle",
                  "stop-model", "stop-manifest", "tinyalsa",
                  "oww-melspectrogram-onnx", "oww-embedding-onnx",
-                 "techo5-spot-license", "techo5-license", "ffmpeg-license", "apk-cache", "output"):
+                 "techo5-lib", "techo5-spot-license", "techo5-license", "ffmpeg-license", "apk-cache", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--version", required=True)
     build(parser.parse_args())

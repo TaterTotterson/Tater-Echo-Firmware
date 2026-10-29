@@ -12,7 +12,7 @@ contract and ongoing regression checklist are recorded below.
 - Linux platform: [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux),
   based on the MIT-licensed TECHO5 Athena work.
 - Pinned Tater Echo Linux source commit:
-  `57f27fc568caa4390345137b52ebe6932ce57515` (compatible platform release
+  `3a0c2d480e281226d28c831730abc3301d605ba4` (compatible platform release
   `v1.6.4`).
 - Base rootfs SHA-256:
   `cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5`.

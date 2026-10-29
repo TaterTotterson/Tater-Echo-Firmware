@@ -598,6 +598,9 @@ def build(args: argparse.Namespace) -> None:
         with tarfile.open(args.base_rootfs, "r:gz") as archive:
             safe_extract(archive, root)
 
+        # The signed baseline supplies the filesystem, while the exact pinned
+        # platform checkout supplies the current shared hardware policy.
+        copy(args.techo5_lib, root / "lib/techo5-lib.sh", 0o644)
         copy(args.server, root / "usr/local/bin/tater-echo", 0o755)
         copy(args.show, root / "usr/local/bin/tater-show", 0o755)
         copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
@@ -919,6 +922,7 @@ def main() -> int:
     parser.add_argument("--oww-melspectrogram-onnx", type=Path, required=True)
     parser.add_argument("--oww-embedding-onnx", type=Path, required=True)
     parser.add_argument("--tinyalsa", type=Path, required=True)
+    parser.add_argument("--techo5-lib", type=Path, required=True)
     parser.add_argument("--techo5-license", type=Path, required=True)
     parser.add_argument("--ffmpeg-license", type=Path, required=True)
     parser.add_argument("--apk-cache", type=Path, required=True)

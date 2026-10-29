@@ -158,6 +158,7 @@ python3 "$script_dir/build_rootfs.py" \
     --oww-melspectrogram-onnx "$device/build/microwakeword-testdata/melspectrogram.onnx" \
     --oww-embedding-onnx "$device/build/microwakeword-testdata/embedding_model.onnx" \
     --tinyalsa "$device/build/rook/libtinyalsa.so.2.0.0" \
+    --techo5-lib "$show_source/tools/linux/techo5-lib.sh" \
     --techo5-spot-license "$spot_source/LICENSE" \
     --techo5-license "$show_source/LICENSE" \
     --ffmpeg-license "$ffmpeg_license" \
