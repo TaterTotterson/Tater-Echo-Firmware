@@ -224,11 +224,11 @@ jobs:
             --version '${{ steps.version.outputs.version }}' \
             --target '${{ matrix.target }}' \
             --base-rootfs /tmp/techo5-dot-rootfs.tar.gz \
-            --platform /tmp/tater-echo-linux-dot
+            --platform /tmp/tater-echo-linux-dot/platforms/dot
 
       - name: Package factory and OTA firmware
         env:
-          TATER_DOT_PLATFORM_SOURCE: /tmp/tater-echo-linux-dot
+          TATER_DOT_PLATFORM_SOURCE: /tmp/tater-echo-linux-dot/platforms/dot
           TATER_DOT_RESCUE_APKS: /tmp/techo5-dot-rescue-apks.tar
           TATER_DOT_ALPINE_ROOTFS: /tmp/alpine-minirootfs.tar.gz
           TATER_BISCUIT_KERNEL: /tmp/tater-echo-biscuit-kernel.zImage-dtb

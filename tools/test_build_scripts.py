@@ -244,6 +244,11 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("tater-echo-biscuit-kernel.zImage-dtb", dot_job)
         self.assertIn("tater-echo-radar-kernel.zImage-dtb", dot_job)
         self.assertIn("TATER_DOT_PLATFORM_SOURCE", dot_job)
+        self.assertIn("--platform /tmp/tater-echo-linux-dot/platforms/dot", dot_job)
+        self.assertIn(
+            "TATER_DOT_PLATFORM_SOURCE: /tmp/tater-echo-linux-dot/platforms/dot",
+            dot_job,
+        )
         self.assertNotIn("Android compiler", dot_job)
         self.assertIn("staging/radar/firmware-manifest.json", workflow)
 
