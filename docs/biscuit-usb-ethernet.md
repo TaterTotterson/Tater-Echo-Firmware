@@ -2,8 +2,10 @@
 
 USB Ethernet is automatic on Biscuit's micro-USB port. It was verified on an
 Echo Dot 2nd Gen with a powered UCTRONICS U6113 adapter (`0bda:8152`) using its
-CDC-ECM configuration. The device obtained `192.168.1.9` by DHCP and installed
-a default route through `eth0` on 2026-10-25.
+Realtek RTL8152 driver. Release-candidate testing on 2026-10-29 found that the
+adapter's advertised CDC-ECM interface enumerated and received frames but could
+not transmit on Biscuit's 3.18 MUSB path. The pinned kernel therefore retains
+generic CDC-ECM while binding this adapter to the built-in vendor driver.
 
 ## Automatic runtime behavior
 
@@ -80,14 +82,15 @@ target until its MTU3 host path passes a real adapter test.
 
 ## Platform dependency
 
-The branch pins the Tater Echo Linux `dot-kernel-v1.0.0` prerelease. Its
+The branch pins the Tater Echo Linux `dot-kernel-v1.0.1` prerelease. Its
 Biscuit kernel is
-`dd2cb1cc375c396b08720b3248330fcb70ae5b9113a689c6fad7a78f39bacffa`;
+`1d3d7e6ade694c60ef29fe49683497b885afcea8c2ea3b23b6e47b077d953729`;
 Radar has a separate target image and hash. Source is maintained under
 [`Tater-Echo-Linux/platforms/dot`](https://github.com/TaterTotterson/Tater-Echo-Linux/tree/main/platforms/dot).
-The functional kernel change is `0052-cdcether-rtl8152-no-blacklist.patch`,
-which lets `cdc_ether` bind the verified adapter. The kernel fragment enables
-MediaTek forced role control, MII, usbnet, and CDC-ECM.
+The kernel fragment enables MediaTek forced role control, MII, usbnet,
+CDC-ECM, and built-in RTL8152. The compatibility patch supplies the EEE
+helpers missing from Amazon's 3.18 tree while retaining upstream's driver
+ownership rule for `0bda:8152`.
 
 Before release promotion, boot the exact published Biscuit kernel and repeat
 enumeration, DHCP/default-route, unplug, link-loss, reboot, Wi-Fi fallback, and
@@ -95,6 +98,7 @@ USB-serial restoration. `tater-usb-inventory` collects read-only evidence, and
 `tater-usb-ethernet probe` performs a bounded enumeration-only check without
 DHCP or a Wi-Fi change.
 
-Do not distribute `r8152.ko` as a loose binary. CDC-ECM is the verified path,
-and kernel outputs must be built from the pinned Tater Linux source and
+Do not distribute `r8152.ko` as a loose binary. RTL8152 is built into the pinned
+kernel so it is available before rootfs selection and cannot drift from the
+kernel ABI. Kernel outputs must be built from pinned Tater Linux source and
 published with hashes.

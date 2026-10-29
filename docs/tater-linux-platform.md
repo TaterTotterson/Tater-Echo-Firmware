@@ -38,8 +38,9 @@ Completed:
 - Added a six-target manifest and validation workflow covering Biscuit, Radar,
   Checkers, Crown, Athena, and Rook.
 - Built and published separately hashed Biscuit and Radar kernels from the
-  pinned Tater Dot source as the `dot-kernel-v1.0.0` prerelease. Firmware now
-  consumes those Tater-named kernel artifacts.
+  pinned Tater Dot source as the `dot-kernel-v1.0.1` prerelease. The kernels
+  retain generic CDC-ECM and add the built-in RTL8152 driver required by the
+  qualified powered adapter. Firmware consumes those Tater-named artifacts.
 - Built and published Rook's `rook-kernel-v1.0.0` prerelease from its pinned
   Amazon source and toolchain with RTL8152 and bounded MediaTek role switching.
   Firmware now consumes that Tater kernel while rootfs and rescue remain on

@@ -26,6 +26,13 @@
   older Linux-side Volume Up route to Tater Recovery on every target; explicit
   USB recovery remains available through `to_recovery.py`.
 
+#### USB Ethernet
+
+- Replaced Biscuit and Radar's incomplete generic binding for the intended
+  `0bda:8152` adapter with the reproducibly built, in-kernel Realtek RTL8152
+  driver. The controller still requires a DHCP address and default route before
+  disabling Wi-Fi and restores Wi-Fi plus USB serial on failure or unplug.
+
 ## v3.1.1
 
 ### What's Changed
