@@ -35,7 +35,7 @@
     "dot": {
       "release": "dot-v1.0.24",
       "kernel_release": "dot-kernel-v1.0.0",
-      "commit": "057a8abb9002b086422f569f902320f3b3dd6b89",
+      "commit": "bf45fc24bf1dd4e2c45eba122120b03ce075957e",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",
         "sha256": "7b78889fd2d7df25cc5816b4fe29190980fda6ff1c880f287017d0d6e98604ac"
