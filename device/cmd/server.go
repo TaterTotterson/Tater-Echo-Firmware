@@ -80,11 +80,13 @@ func satChatVideoCaptureDelay(elapsed time.Duration, succeeded bool) time.Durati
 
 func main() {
 	log.SetOutput(os.Stdout)
-	// A held key predates the daemon's normal evdev subscription, so inspect
-	// the kernel's current key bitmap before either the normal runtime or the
-	// unpaired setup runtime takes ownership of the buttons.
+	// Biscuit and Radar have no dependable bootloader-level Volume Up route.
+	// Inspect their held-key bitmap before either runtime takes the buttons so
+	// the current factory image can perform its automatic-return TWRP handoff.
+	// Screen satellites enter TWRP in their boot chain and intentionally skip
+	// this Linux-side check.
 	if len(os.Args) == 1 || (len(os.Args) == 2 && os.Args[1] == "setup-mode") {
-		attemptStartupRecoveryGesture()
+		attemptStartupTWRPGesture()
 	}
 
 	// Only a bare invocation runs the daemon. `server --version` used to
@@ -1724,8 +1726,12 @@ func rebootTaterLinux() error {
 	return nil
 }
 
-func attemptStartupRecoveryGesture() {
+func attemptStartupTWRPGesture() {
 	if platform.Base() != platform.TaterLinux {
+		return
+	}
+	command, err := recovery.StartupTWRPCommand(client.FirmwareTarget)
+	if err != nil {
 		return
 	}
 	inside, err := recovery.InStartupGestureWindow("/proc/uptime")
@@ -1749,23 +1755,18 @@ func attemptStartupRecoveryGesture() {
 	if !held {
 		return
 	}
-	command, err := recovery.StartupRecoveryCommand(client.FirmwareTarget)
-	if err != nil {
-		log.Printf("[recovery] %v", err)
-		return
-	}
-	log.Printf("[recovery] Volume Up held for %s during startup; entering the platform recovery route", recovery.StartupGestureHold)
+	log.Printf("[recovery] Volume Up held for %s during startup; entering TWRP", recovery.StartupGestureHold)
 	output, runErr := exec.Command(command.Path, command.Args...).CombinedOutput()
 	if message := strings.TrimSpace(string(output)); message != "" {
 		log.Printf("[recovery] %s", message)
 	}
 	if runErr != nil {
-		log.Printf("[recovery] Tater Recovery request failed; continuing normal startup: %v", runErr)
+		log.Printf("[recovery] TWRP request failed; continuing normal startup: %v", runErr)
 		return
 	}
 	// The reboot helper performs a synchronized restart and should not return
 	// on success. Fail open to the normal runtime if it unexpectedly does.
-	log.Printf("[recovery] recovery command returned without rebooting; continuing normal startup")
+	log.Printf("[recovery] TWRP command returned without rebooting; continuing normal startup")
 }
 
 // A setup form submission or physical reset is an intentional reboot, not a

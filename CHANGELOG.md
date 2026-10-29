@@ -22,8 +22,9 @@
 - Added a verified automatic-return TWRP handoff for Biscuit and Radar factory
   installs. Holding Volume Up during startup now enters TWRP like the screen
   satellites; TWRP restores Linux to the shared recovery partition while
-  continuing to run from RAM, so its next reboot returns to Linux. Older
-  OTA-only installs safely retain the existing Tater Recovery fallback.
+  continuing to run from RAM, so its next reboot returns to Linux. Removed the
+  older Linux-side Volume Up route to Tater Recovery on every target; explicit
+  USB recovery remains available through `to_recovery.py`.
 
 ## v3.1.1
 

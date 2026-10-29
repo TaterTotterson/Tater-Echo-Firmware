@@ -115,11 +115,9 @@ read-only.
 Normal repair uses Tater Recovery. From a normally booted Checkers, connect USB
 and run `python3 to_recovery.py` from this extracted factory archive. On
 Windows use `py -3 to_recovery.py`; on Linux, use
-`sudo python3 to_recovery.py` if the serial port reports permission denied. You
-can instead begin holding **Volume Up** before powering on or restarting and
-keep it held until Checkers restarts into Tater Recovery. The gesture is
-accepted only during the first 90 seconds of Linux startup and requires an
-uninterrupted five-second hold.
+`sudo python3 to_recovery.py` if the serial port reports permission denied.
+Holding **Volume Up** while Checkers powers on enters its retained TWRP through
+the native boot chain; it no longer requests Tater Recovery after Linux starts.
 
 Once recovery appears, run `./install.sh --repair`
 (`py -3 install.py --repair` on Windows) to repair the inactive root slot while

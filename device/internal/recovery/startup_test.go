@@ -3,7 +3,6 @@ package recovery
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -36,31 +35,23 @@ func TestStartupGestureWindow(t *testing.T) {
 	}
 }
 
-func TestStartupRecoveryCommandForScreenTargets(t *testing.T) {
+func TestScreenTargetsDoNotRetainLinuxSideRecoveryGesture(t *testing.T) {
 	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
-		command, err := StartupRecoveryCommand(target)
-		if err != nil || command.Path != "/bin/sh" || len(command.Args) != 2 ||
-			command.Args[0] != "-c" ||
-			command.Args[1] != "/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now" {
-			t.Fatalf("%s command=%+v err=%v", target, command, err)
+		if _, err := StartupTWRPCommand(target); err == nil {
+			t.Fatalf("%s unexpectedly retained a Linux-side recovery gesture", target)
 		}
 	}
-	if _, err := StartupRecoveryCommand("unknown"); err == nil {
+	if _, err := StartupTWRPCommand("unknown"); err == nil {
 		t.Fatal("expected unsupported target error")
 	}
 }
 
-func TestStartupRecoveryCommandForDotTargetsUsesSafeTWRPHandoff(t *testing.T) {
+func TestStartupTWRPCommandForDotTargetsUsesSafeHandoff(t *testing.T) {
 	for _, target := range []string{"biscuit", "radar"} {
-		command, err := StartupRecoveryCommand(target)
-		if err != nil || command.Path != "/bin/sh" || len(command.Args) != 2 ||
-			command.Args[0] != "-c" {
+		command, err := StartupTWRPCommand(target)
+		if err != nil || command.Path != "/usr/local/sbin/to-twrp" ||
+			len(command.Args) != 1 || command.Args[0] != "--handoff" {
 			t.Fatalf("%s command=%+v err=%v", target, command, err)
-		}
-		if !strings.Contains(command.Args[1], "/store/techo5/twrp-handoff.img") ||
-			!strings.Contains(command.Args[1], "/usr/local/sbin/to-twrp --handoff") ||
-			!strings.Contains(command.Args[1], "/usr/local/sbin/slotctl rescue") {
-			t.Fatalf("%s command lacks handoff or safe fallback: %q", target, command.Args[1])
 		}
 	}
 }

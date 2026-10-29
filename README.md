@@ -312,16 +312,15 @@ enters Tater Recovery, repair its inactive root slot with
 preserves Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
 only when those settings should also be cleared.
 
-All six Echo targets also support a local startup recovery gesture. Begin
-holding **Volume Up** before powering on or restarting the satellite and keep
-it held for five uninterrupted seconds during the first 90 seconds of Linux
-startup. Checkers, Crown, Athena, and Rook enter their retained TWRP recovery.
-A Biscuit or Radar installed with the current factory archive enters its
-device-specific TWRP handoff; Linux is restored to the shared recovery
-partition while TWRP runs from RAM, so the next reboot returns to Linux. An
-older Biscuit/Radar installation without that handoff safely enters Tater
-Recovery. This requires Tater Linux to start far enough to read the button;
-use the USB helper when it cannot.
+All six Echo targets support entering TWRP with **Volume Up**. Checkers, Crown,
+Athena, and Rook handle the button in their native boot chain before Linux
+starts. Biscuit and Radar have no dependable bootloader shortcut, so a current
+factory install detects an uninterrupted five-second hold during the first 90
+seconds of Linux startup and enters its device-specific TWRP handoff. Linux is
+restored to their shared recovery partition while TWRP runs from RAM, so the
+next reboot returns to Linux. There is no longer a Volume Up route to Tater
+Recovery: `to_recovery.py` is its explicit USB entry path. A Biscuit or Radar
+without the current handoff image continues its normal boot instead.
 
 TWRP remains available as the lower-level, device-specific fallback. Run
 `python3 to_twrp.py` from a normally booted satellite only when Tater Recovery

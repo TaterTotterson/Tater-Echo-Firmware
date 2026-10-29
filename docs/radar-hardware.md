@@ -76,10 +76,11 @@ Radar has no dependable bootloader-level hold-button shortcut. Once the current
 factory archive is installed, holding Volume Up for five seconds during the
 first 90 seconds of startup enters a device-specific TWRP handoff. It restores
 Linux to the shared recovery partition while TWRP remains active in RAM, so the
-next reboot returns to Linux. An older install without the handoff image enters
-Tater Recovery instead. The routine recovery request remains available over
-USB with `python3 to_recovery.py`; run `install.sh --repair` there to repair the
-inactive root slot. `to_twrp.py` remains the explicit lower-level TWRP route.
+next reboot returns to Linux. An install without the handoff image continues
+normal startup instead of entering Tater Recovery. The routine recovery request
+remains available explicitly over USB with `python3 to_recovery.py`; run
+`install.sh --repair` there to repair the inactive root slot. `to_twrp.py`
+remains the explicit lower-level TWRP route.
 
 The station interface `wlan0` does not accept an nl80211 change to AP type.
 The vendor `/dev/wmtWifi` command `A` starts its dedicated AP-capable wiphy and

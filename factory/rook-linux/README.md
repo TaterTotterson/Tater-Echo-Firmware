@@ -82,10 +82,9 @@ device-specific Amazon data and a local platform key.
 To enter Tater Recovery from a normally booted Rook, connect USB and run
 `python3 to_recovery.py` from this extracted factory archive. On Windows use
 `py -3 to_recovery.py`; on Linux, use `sudo python3 to_recovery.py` if the
-serial port reports permission denied. You can instead begin holding **Volume
-Up** before powering on or restarting and keep it held until Rook restarts
-into Tater Recovery. The gesture is accepted only during the first 90 seconds
-of Linux startup and requires an uninterrupted five-second hold.
+serial port reports permission denied. Holding **Volume Up** while Rook powers
+on enters its retained TWRP through the native boot chain; it no longer
+requests Tater Recovery after Linux starts.
 
 Run `./install.sh --repair` (`py -3 install.py --repair` on Windows) to repair
 the inactive root slot while preserving settings. Add `--factory-reset` only

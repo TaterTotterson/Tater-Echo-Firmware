@@ -66,8 +66,8 @@ seconds of Tater Linux startup. A current factory install then enters TWRP.
 Because Biscuit and Radar normally run Linux from the same recovery partition,
 the device-specific handoff image verifies and restores Linux to that partition
 while TWRP remains active in RAM. Leaving TWRP therefore returns to Linux on
-the next boot. An older OTA-only installation without the handoff image safely
-enters Tater Recovery instead.
+the next boot. An installation without the current handoff image continues its
+normal boot; Volume Up no longer falls back to Tater Recovery.
 
 Once the USB recovery console appears, repair the inactive root slot with:
 
@@ -79,7 +79,7 @@ On Windows use `py -3 install.py --repair`. This keeps Wi-Fi, pairing, room,
 and satellite settings. Add `--factory-reset` only to clear those settings and
 return to setup mode.
 
-The USB `to_recovery.py` route still enters Tater Recovery for routine root-slot
-repair. `to_twrp.py` remains the explicit lower-level TWRP route. If Linux
-cannot start far enough to accept either helper or the button gesture, use the
-matching amonet/TWRP entry procedure.
+The USB `to_recovery.py` route is the explicit way to enter Tater Recovery for
+routine root-slot repair. `to_twrp.py` remains the explicit lower-level TWRP
+route. If Linux cannot start far enough to accept either helper or the button
+gesture, use the matching amonet/TWRP entry procedure.

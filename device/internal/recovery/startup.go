@@ -42,36 +42,27 @@ func InStartupGestureWindow(path string) (bool, error) {
 	return uptime <= StartupGestureWindow, nil
 }
 
-// StartupRecoveryCommand selects the safe physical recovery route for each
-// target. Checkers, Crown, Athena, and Rook retain TWRP in a separate recovery
-// partition, so their normal Tater Recovery marker remains independent of it.
+// StartupTWRPCommand selects the Linux-side Volume Up route used only by
+// Biscuit and Radar. The screen satellites enter their retained TWRP directly
+// in the boot chain, before Linux starts, so they must not retain the older
+// Linux-side gesture that requested Tater Recovery.
 //
 // Biscuit and Radar run Linux from the recovery partition itself. A current
 // factory install keeps a verified handoff TWRP image that restores Linux to
-// that partition while TWRP continues running from RAM. Use it when present so
-// Volume Up behaves like the other satellites; an older OTA-only installation
-// safely falls back to Tater Recovery instead of being stranded in TWRP.
-func StartupRecoveryCommand(target string) (Command, error) {
+// that partition while TWRP continues running from RAM. Do not fall back to
+// Tater Recovery when that image is absent: the physical gesture now has one
+// unambiguous meaning on every satellite, while to_recovery.py remains the
+// explicit route to Tater Recovery.
+func StartupTWRPCommand(target string) (Command, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "biscuit", "radar":
 		return Command{
-			Path: "/bin/sh",
+			Path: "/usr/local/sbin/to-twrp",
 			Args: []string{
-				"-c",
-				"if [ -s /store/techo5/twrp-handoff.img ]; then " +
-					"/usr/local/sbin/to-twrp --handoff && exit 0; fi; " +
-					"/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now",
-			},
-		}, nil
-	case "checkers", "crown", "athena", "rook":
-		return Command{
-			Path: "/bin/sh",
-			Args: []string{
-				"-c",
-				"/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now",
+				"--handoff",
 			},
 		}, nil
 	default:
-		return Command{}, fmt.Errorf("unsupported recovery target %q", target)
+		return Command{}, fmt.Errorf("no Linux-side TWRP gesture for target %q", target)
 	}
 }
