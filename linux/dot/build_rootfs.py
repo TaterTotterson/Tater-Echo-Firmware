@@ -524,6 +524,10 @@ def build(args: argparse.Namespace) -> None:
             compatibility.unlink(missing_ok=True)
             compatibility.symlink_to(tater_name)
         copy(args.wifi_set, root / "usr/local/sbin/wifi-set", 0o755)
+        # The release rootfs predates Tater's checked automatic-return TWRP
+        # route. Always overlay the script from the exact pinned platform
+        # source revision used to build the factory archive.
+        copy(args.to_twrp, root / "usr/local/sbin/to-twrp", 0o755)
         for name, digest, member in SETUP_PACKAGES:
             alpine_file(args.apk_cache, name, digest, member, root / member)
         name, digest, member = CXX_RUNTIME_PACKAGE
@@ -579,6 +583,7 @@ def main() -> int:
     parser.add_argument("--network", type=Path, required=True)
     parser.add_argument("--eth", type=Path, required=True)
     parser.add_argument("--wifi-set", type=Path, required=True)
+    parser.add_argument("--to-twrp", type=Path, required=True)
     parser.add_argument("--apk-cache", type=Path, required=True)
     parser.add_argument("--platform-license", type=Path, required=True)
     parser.add_argument("--platform-notice", type=Path, required=True)

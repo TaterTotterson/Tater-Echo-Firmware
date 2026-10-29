@@ -144,6 +144,18 @@ class BuildScriptTests(unittest.TestCase):
             (ROOT / "linux/rook/build_rootfs.py").read_text(encoding="utf-8"),
         )
 
+    def test_dot_rootfs_uses_pinned_current_twrp_handoff(self) -> None:
+        script = DOT_BUILD_SCRIPT.read_text(encoding="utf-8")
+        builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")
+        self.assertIn(
+            '--to-twrp "$platform_source/tools/linux/rootfs/usr/local/sbin/to-twrp"',
+            script,
+        )
+        self.assertIn(
+            'copy(args.to_twrp, root / "usr/local/sbin/to-twrp", 0o755)',
+            builder,
+        )
+
     def test_every_linux_rootfs_installs_and_supervises_automatic_usb_ethernet(self) -> None:
         for builder in (
             DOT_ROOTFS_BUILDER,

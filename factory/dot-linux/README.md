@@ -27,7 +27,8 @@ targets, without the additional five-minute confirmation restart used by
 Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
 
 The installer checksum-verifies every bundled file and every partition backup,
-builds the Linux boot image from that unit's own TWRP header, checks the
+builds the Linux boot image and an automatic-return TWRP handoff from that
+unit's own TWRP backup, checks the
 board-specific kernel, writes only recovery/cache plus Tater-owned userdata,
 and preserves the stock system slots. Before replacing Tater-owned userdata it
 saves and verifies the small settings-only archive in `backups/<serial>/`; old
@@ -60,8 +61,13 @@ several compatible devices are connected, select one explicitly, for example
 denied, close any serial terminal and run `sudo python3 to_recovery.py`.
 
 Without a computer command, begin holding **Volume Up** before powering on or
-restarting and keep it held until the satellite restarts into Tater Recovery.
-Tater Linux requires a continuous five-second hold during its first 90 seconds.
+restarting and keep it held for five continuous seconds during the first 90
+seconds of Tater Linux startup. A current factory install then enters TWRP.
+Because Biscuit and Radar normally run Linux from the same recovery partition,
+the device-specific handoff image verifies and restores Linux to that partition
+while TWRP remains active in RAM. Leaving TWRP therefore returns to Linux on
+the next boot. An older OTA-only installation without the handoff image safely
+enters Tater Recovery instead.
 
 Once the USB recovery console appears, repair the inactive root slot with:
 
@@ -73,7 +79,7 @@ On Windows use `py -3 install.py --repair`. This keeps Wi-Fi, pairing, room,
 and satellite settings. Add `--factory-reset` only to clear those settings and
 return to setup mode.
 
-TWRP is still retained for a lower-level escape hatch. From a normally booted
-satellite, run `python3 to_twrp.py` only when Tater Recovery cannot perform the
-repair. If Linux cannot start far enough to accept either helper or the button
-gesture, use the matching amonet/TWRP entry procedure.
+The USB `to_recovery.py` route still enters Tater Recovery for routine root-slot
+repair. `to_twrp.py` remains the explicit lower-level TWRP route. If Linux
+cannot start far enough to accept either helper or the button gesture, use the
+matching amonet/TWRP entry procedure.

@@ -107,8 +107,8 @@ running Tater firmware older than v3.0.0.
    join `Tater-Setup-XXXX` and complete the setup page.
 
 The computer needs Python 3 and `adb`. The installer verifies the device and bundle, backs up every
-boot-critical partition, builds the Linux recovery image from that unit's own
-TWRP header, installs an A/B Alpine rootfs on cache, and restores verified
+boot-critical partition, builds the Linux recovery image and automatic-return
+TWRP handoff from that unit's own backup, installs an A/B Alpine rootfs on cache, and restores verified
 Tater setup while discarding old OTA application slots. Add `--factory-reset`
 for a clean start. Stock system partitions and a verified TWRP copy are retained. See
 the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v3.0.0
@@ -312,12 +312,16 @@ enters Tater Recovery, repair its inactive root slot with
 preserves Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
 only when those settings should also be cleared.
 
-All six Echo targets also support a local Tater Recovery gesture. Begin
+All six Echo targets also support a local startup recovery gesture. Begin
 holding **Volume Up** before powering on or restarting the satellite and keep
-it held until the unit restarts into Tater Recovery. The firmware accepts the
-gesture only during the first 90 seconds of Linux startup and only after an
-uninterrupted five-second hold. This requires Tater Linux to start far enough
-to read the button; use the USB helper when it cannot.
+it held for five uninterrupted seconds during the first 90 seconds of Linux
+startup. Checkers, Crown, Athena, and Rook enter their retained TWRP recovery.
+A Biscuit or Radar installed with the current factory archive enters its
+device-specific TWRP handoff; Linux is restored to the shared recovery
+partition while TWRP runs from RAM, so the next reboot returns to Linux. An
+older Biscuit/Radar installation without that handoff safely enters Tater
+Recovery. This requires Tater Linux to start far enough to read the button;
+use the USB helper when it cannot.
 
 TWRP remains available as the lower-level, device-specific fallback. Run
 `python3 to_twrp.py` from a normally booted satellite only when Tater Recovery

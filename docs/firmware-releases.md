@@ -56,12 +56,15 @@ enters Tater Recovery over USB, then runs `install.sh --repair` to install the
 bundle into the inactive A/B root slot without clearing the satellite's
 settings. An explicit `--factory-reset` clears Wi-Fi and pairing too.
 
-The same one-boot Tater Recovery request powers the local startup gesture on
-all six targets: hold Volume Up continuously for five seconds during the first
-90 seconds of Tater Linux startup. It is deliberately an early-userspace
-fallback, not a bootloader replacement. Every archive therefore retains
-`to_twrp.py` as a lower-level escape hatch, and a unit that cannot start Tater
-Linux still needs its target-specific unlock/TWRP recovery procedure.
+The local startup gesture is available on all six targets: hold Volume Up
+continuously for five seconds during the first 90 seconds of Tater Linux
+startup. Checkers, Crown, Athena, and Rook enter retained TWRP. A current
+Biscuit/Radar factory install enters a device-specific TWRP handoff that
+restores Linux to their shared recovery partition while TWRP runs from RAM; an
+older installation without that image falls back to one-boot Tater Recovery.
+The gesture remains an early-userspace fallback, not a bootloader replacement.
+Every archive retains both USB recovery helpers, and a unit that cannot start
+Tater Linux still needs its target-specific unlock/TWRP recovery procedure.
 
 ## OTA artifacts
 

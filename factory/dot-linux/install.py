@@ -28,6 +28,7 @@ class Fail(Exception):
 Adb = None
 BOARD_TYPE_IDS = {}
 build_boot_image = None
+build_twrp_handoff_image = None
 kernel_board = None
 
 
@@ -253,7 +254,7 @@ def initialize_cache(adb: Adb, cache: str) -> None:
 
 
 def install(args: argparse.Namespace) -> None:
-    global Adb, BOARD_TYPE_IDS, Fail, build_boot_image, head_is_android
+    global Adb, BOARD_TYPE_IDS, Fail, build_boot_image, build_twrp_handoff_image, head_is_android
     global kernel_board, md5, note, step
     info = manifest()
     if args.verify_bundle:
@@ -265,7 +266,9 @@ def install(args: argparse.Namespace) -> None:
     head_is_android, md5 = techo5lib.head_is_android, techo5lib.md5
     note, step = techo5lib.note, techo5lib.step
     BOARD_TYPE_IDS = dotimage.BOARD_TYPE_IDS
-    build_boot_image, kernel_board = dotimage.build_boot_image, dotimage.kernel_board
+    build_boot_image = dotimage.build_boot_image
+    build_twrp_handoff_image = dotimage.build_twrp_handoff_image
+    kernel_board = dotimage.kernel_board
     serial = select_serial(args.serial, args.adb)
     adb = Adb(serial, args.adb)
     require(adb.state() == "recovery", f"{serial} is not in TWRP")
@@ -309,8 +312,14 @@ def install(args: argparse.Namespace) -> None:
                      str(busybox), str(wmtup), str(apks), str(kernel))
     require(image.stat().st_size <= 16 * 1024 * 1024, "built Linux recovery image exceeds the partition")
     note(f"built this unit's {image.stat().st_size}-byte Linux boot image")
+    handoff = backup_root / "tater-twrp-handoff.img"
+    build_twrp_handoff_image(str(recovery), str(handoff))
+    require(handoff.stat().st_size <= 16 * 1024 * 1024,
+            "built TWRP handoff image exceeds the recovery partition")
+    note(f"built this unit's {handoff.stat().st_size}-byte automatic-return TWRP image")
     if args.dry_run:
-        print(f"Dry run complete; nothing was written to {serial}.\nBoot image: {image}\nRootfs: {rootfs}")
+        print(f"Dry run complete; nothing was written to {serial}.\n"
+              f"Boot image: {image}\nTWRP handoff image: {handoff}\nRootfs: {rootfs}")
         return
     settings = load_tater_settings()
     saved_settings = None
@@ -346,6 +355,7 @@ def install(args: argparse.Namespace) -> None:
     # If a later rootfs extraction fails, this verified TWRP image is already
     # available to the rescue console instead of existing only on the host.
     push_checked(adb, recovery, "/cache/techo5/twrp.img")
+    push_checked(adb, handoff, "/cache/techo5/twrp-handoff.img")
     push_checked(adb, TOOLS / "linux/back-to-linux.sh", "/cache/techo5/back-to-linux.sh")
     push_checked(adb, image, "/cache/techo5/linux.img")
     push_checked(adb, busybox, stage + "/busybox")

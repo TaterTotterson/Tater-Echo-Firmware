@@ -131,6 +131,7 @@ python3 "$script_dir/build_rootfs.py" \
     --network "$script_dir/tater-net" \
     --eth "$repo/linux/common/tater-usb-ethernet" \
     --wifi-set "$script_dir/wifi-set" \
+    --to-twrp "$platform_source/tools/linux/rootfs/usr/local/sbin/to-twrp" \
     --apk-cache "$device/build" \
     --platform-license "$platform_source/LICENSE" \
     --platform-notice "$platform_source/NOTICE" \
@@ -159,6 +160,7 @@ for required in \
     ./usr/local/sbin/techo5-net \
     ./usr/local/sbin/techo5-eth \
     ./usr/local/sbin/wifi-set \
+    ./usr/local/sbin/to-twrp \
     ./usr/local/sbin/tater-setup-ap \
     ./usr/sbin/hostapd \
     ./usr/sbin/dnsmasq \

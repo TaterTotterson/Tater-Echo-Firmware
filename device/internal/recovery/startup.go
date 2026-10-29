@@ -42,19 +42,28 @@ func InStartupGestureWindow(path string) (bool, error) {
 	return uptime <= StartupGestureWindow, nil
 }
 
-// TaterRecoveryCommand arms the platform's one-boot initramfs rescue marker
-// and performs the normal synchronized Tater Linux restart. All six Echo
-// targets use slotctl even though Biscuit/Radar keep their store under
-// /store/techo5 while the screen targets use /store directly; slotctl owns
-// that platform-specific path.
+// StartupRecoveryCommand selects the safe physical recovery route for each
+// target. Checkers, Crown, Athena, and Rook retain TWRP in a separate recovery
+// partition, so their normal Tater Recovery marker remains independent of it.
 //
-// This deliberately does not use the bootloader's Android "recovery" target.
-// On Biscuit/Radar that would replace or bypass the Linux image, and on the
-// screen targets it would enter TWRP.  TWRP remains the lower-level fallback;
-// the physical gesture enters the safer Tater rescue environment.
-func TaterRecoveryCommand(target string) (Command, error) {
+// Biscuit and Radar run Linux from the recovery partition itself. A current
+// factory install keeps a verified handoff TWRP image that restores Linux to
+// that partition while TWRP continues running from RAM. Use it when present so
+// Volume Up behaves like the other satellites; an older OTA-only installation
+// safely falls back to Tater Recovery instead of being stranded in TWRP.
+func StartupRecoveryCommand(target string) (Command, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "biscuit", "radar", "checkers", "crown", "athena", "rook":
+	case "biscuit", "radar":
+		return Command{
+			Path: "/bin/sh",
+			Args: []string{
+				"-c",
+				"if [ -s /store/techo5/twrp-handoff.img ]; then " +
+					"/usr/local/sbin/to-twrp --handoff && exit 0; fi; " +
+					"/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now",
+			},
+		}, nil
+	case "checkers", "crown", "athena", "rook":
 		return Command{
 			Path: "/bin/sh",
 			Args: []string{

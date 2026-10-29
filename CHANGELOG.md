@@ -17,6 +17,14 @@
   guarded verified bootloader-logo flow; Athena may show a brief protected
   Amazon frame before Linux safely paints the Tater mark.
 
+#### Recovery
+
+- Added a verified automatic-return TWRP handoff for Biscuit and Radar factory
+  installs. Holding Volume Up during startup now enters TWRP like the screen
+  satellites; TWRP restores Linux to the shared recovery partition while
+  continuing to run from RAM, so its next reboot returns to Linux. Older
+  OTA-only installs safely retain the existing Tater Recovery fallback.
+
 ## v3.1.1
 
 ### What's Changed

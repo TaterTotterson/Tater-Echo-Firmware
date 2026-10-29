@@ -1749,12 +1749,12 @@ func attemptStartupRecoveryGesture() {
 	if !held {
 		return
 	}
-	command, err := recovery.TaterRecoveryCommand(client.FirmwareTarget)
+	command, err := recovery.StartupRecoveryCommand(client.FirmwareTarget)
 	if err != nil {
 		log.Printf("[recovery] %v", err)
 		return
 	}
-	log.Printf("[recovery] Volume Up held for %s during startup; entering Tater Recovery", recovery.StartupGestureHold)
+	log.Printf("[recovery] Volume Up held for %s during startup; entering the platform recovery route", recovery.StartupGestureHold)
 	output, runErr := exec.Command(command.Path, command.Args...).CombinedOutput()
 	if message := strings.TrimSpace(string(output)); message != "" {
 		log.Printf("[recovery] %s", message)
