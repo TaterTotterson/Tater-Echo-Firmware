@@ -66,13 +66,31 @@ func DecoderPath() string {
 	if executable, err := os.Executable(); err == nil {
 		path := filepath.Join(filepath.Dir(executable), "tater-ffmpeg")
 		if fileExists(path) {
-			return path
+			if err := makeSlottedDecoderTraversable(path); err == nil {
+				return path
+			}
 		}
 	}
 	if fileExists(decoder32) {
 		return decoder32
 	}
 	return techo5Decoder32
+}
+
+func makeSlottedDecoderTraversable(decoder string) error {
+	directory := filepath.Clean(filepath.Dir(decoder))
+	slots := filepath.Clean("/data/tater-linux/app/slots")
+	if filepath.Dir(directory) != slots {
+		return nil
+	}
+	switch filepath.Base(directory) {
+	case "a", "b":
+		// The renderer is privileged, but FFmpeg is deliberately launched as
+		// techo5-video. Older OTA installers made the slot root-only, so repair
+		// that directory before dropping privileges for the decoder process.
+		return os.Chmod(directory, 0o755)
+	}
+	return nil
 }
 
 // Installed reports whether this image or the current OTA slot carries the

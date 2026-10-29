@@ -280,6 +280,10 @@ func TestLinuxAppBundleInstallsOptionalVideoDecoder(t *testing.T) {
 	if info, err := os.Stat(decoder); err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("video decoder executable mode: info=%v err=%v", info, err)
 	}
+	slot := filepath.Dir(decoder)
+	if info, err := os.Stat(slot); err != nil || info.Mode().Perm() != linuxAppDirectoryMode {
+		t.Fatalf("video decoder slot mode: info=%v err=%v", info, err)
+	}
 	license := filepath.Join(stateDir, "app", "slots", "a", "FFMPEG-LGPL-2.1.txt")
 	if info, err := os.Stat(license); err != nil || info.Mode()&0o111 != 0 {
 		t.Fatalf("video decoder license mode: info=%v err=%v", info, err)

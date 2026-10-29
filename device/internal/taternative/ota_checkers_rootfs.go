@@ -20,6 +20,7 @@ import (
 )
 
 const linuxAppState = "/data/tater-linux"
+const linuxAppDirectoryMode = 0o755
 
 type linuxAppFile struct {
 	SHA256 string `json:"sha256"`
@@ -58,8 +59,11 @@ func (i *OTAInstaller) installLinuxApp(ctx context.Context, req OTARequest, repo
 	if stateDir == "" {
 		stateDir = linuxAppState
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create Tater Linux OTA state: %w", err)
+	}
+	if err := os.Chmod(stateDir, linuxAppDirectoryMode); err != nil {
+		return fmt.Errorf("make Tater Linux OTA state traversable: %w", err)
 	}
 	bundle := filepath.Join(stateDir, "app.download")
 	defer os.Remove(bundle)
@@ -262,8 +266,25 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 func installLinuxAppBundle(bundle, stateDir string, manifest linuxAppManifest) error {
 	appDir := filepath.Join(stateDir, "app")
 	slotsDir := filepath.Join(appDir, "slots")
-	if err := os.MkdirAll(slotsDir, 0o700); err != nil {
-		return fmt.Errorf("create Linux application slots: %w", err)
+	for _, directory := range []string{stateDir, appDir, slotsDir} {
+		if err := os.MkdirAll(directory, linuxAppDirectoryMode); err != nil {
+			return fmt.Errorf("create Linux application directory %s: %w", directory, err)
+		}
+		if err := os.Chmod(directory, linuxAppDirectoryMode); err != nil {
+			return fmt.Errorf("make Linux application directory %s traversable: %w", directory, err)
+		}
+	}
+	// FFmpeg runs as techo5-video rather than root. Repair slots created by an
+	// older installer so the decoder can traverse the active A/B directory.
+	for _, slot := range []string{"a", "b"} {
+		directory := filepath.Join(slotsDir, slot)
+		if info, err := os.Stat(directory); err == nil && info.IsDir() {
+			if err := os.Chmod(directory, linuxAppDirectoryMode); err != nil {
+				return fmt.Errorf("make Linux application slot %s traversable: %w", slot, err)
+			}
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect Linux application slot %s: %w", slot, err)
+		}
 	}
 	pendingPath := filepath.Join(appDir, "pending.env")
 	currentPath := filepath.Join(appDir, "current")
@@ -291,7 +312,7 @@ func installLinuxAppBundle(bundle, stateDir string, manifest linuxAppManifest) e
 	target := filepath.Join(slotsDir, inactive)
 	backup := filepath.Join(slotsDir, "."+inactive+".old")
 	_ = os.RemoveAll(stage)
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := os.MkdirAll(stage, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create inactive Linux application slot: %w", err)
 	}
 	defer os.RemoveAll(stage)
@@ -384,7 +405,7 @@ func continueLinuxAppTrial(bundle, slotsDir, currentPath, pendingPath string, pe
 	target := filepath.Join(slotsDir, pending.New)
 	backup := filepath.Join(slotsDir, "."+pending.New+".old")
 	_ = os.RemoveAll(stage)
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := os.MkdirAll(stage, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create Linux application continuation slot: %w", err)
 	}
 	defer os.RemoveAll(stage)
