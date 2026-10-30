@@ -8,7 +8,7 @@
       "port": "external-micro-usb",
       "power": "shared-micro-usb-powered-pass-through",
       "recovery": "usb-serial",
-      "reason": "Real-hardware host-mode, CDC-ECM, DHCP, link-loss, and USB-serial restoration are implemented."
+      "reason": "Real-hardware forced host mode, native RTL8152, DHCP, sole-route Ethernet, powered cold boot, sustained traffic, and power-cycle restoration to USB serial plus Wi-Fi passed."
     },
     "radar": {
       "backend": "mediatek-mchange-candidate",
