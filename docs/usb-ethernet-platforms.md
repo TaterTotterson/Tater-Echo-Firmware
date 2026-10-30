@@ -22,24 +22,24 @@ qualify a target.
 | Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
 | Checkers | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 5; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Crown | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 8; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
-| Athena | `hardware-validation` | Mainline MediaTek MTU3 + GPIO OTG | Tater dual-role kernel booted; normal-cable serial/RNDIS, bounded host/device switching, reboot, and Wi-Fi fallback passed; real adapter/VBUS still pending |
+| Athena | `qualified` | Mainline MediaTek MTU3 + GPIO OTG | Physical ID/VBUS path, RTL8152 Ethernet, Wi-Fi fallback, USB serial/RNDIS, OTA, factory reinstall, and recovery verified |
 | Rook | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered UCTRONICS B0B9ZLVGJ4, RTL8152, bounded forced-role switching, fallback, and serial verified |
 
 All six images start the controller automatically. Radar remains an
 unqualified passive candidate: if its kernel enumerates a supported USB NIC,
 the common policy can use it, but firmware performs no speculative role or VBUS
-write. Checkers and Crown are passive in userspace, but their physical MUSB OTG
-signaling and automatic device-mode restoration are qualified independently on
-real hardware. Rook's stock dual-role sysfs files are intentionally read-only
+write. Checkers, Crown, and Athena are passive in userspace, but their physical
+OTG signaling and automatic device-mode restoration are qualified independently
+on real hardware. Rook's stock dual-role sysfs files are intentionally read-only
 and the powered pass-through adapter does not assert its physical ID pin. Its
 Tater kernel therefore exposes MediaTek `/proc/mchange` control and includes
 the RTL8152 driver, while the common controller uses the same bounded host
 probe as Biscuit. Internal Wi-Fi remains on the separate USB1 controller during
 the probe. Rook passed the complete adapter and recovery gate. Athena's kernel
-now follows the connector's physical ID and VBUS-detect GPIOs: a normal cable
+follows the connector's physical ID and VBUS-detect GPIOs: a normal cable
 remains in device mode, while an OTG plug selects host mode and enables
-GPIO150's modelled 5 V supply. It remains unqualified until those host-side
-paths are exercised with a real adapter.
+GPIO150's modelled 5 V supply. That complete path passed its real-adapter,
+network, fallback, update, reinstall, and recovery gates.
 
 ### Biscuit qualification record — 2026-10-29
 
@@ -58,6 +58,21 @@ paths are exercised with a real adapter.
   DHCP, Ethernet-only default route, Wi-Fi shutdown, SSH, DNS and public
   internet, 24.1 MiB of sustained HTTPS traffic without interface errors, and
   power-cycle fallback to direct USB serial plus Wi-Fi without repair.
+
+### Athena qualification record — 2026-10-28
+
+- Hardware: Amazon Echo Show 8 second generation, model A8H3N2 (`athena`).
+- Adapter: powered UCTRONICS B0B9ZLVGJ4, Realtek RTL8152 (`r8152`).
+- Tested firmware: the v3.1.2 candidate line through commit
+  `81c1ca1e12b527b27d91f57a7540de42a8c495e8`; pinned Tater Echo Linux
+  platform commit `3a0c2d480e281226d28c831730abc3301d605ba4`.
+- Pinned Athena boot SHA-256:
+  `5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191`.
+- Passed: physical GPIO ID/VBUS detection, MTU3 host/device switching, GPIO150
+  host power, RTL8152 enumeration, DHCP, Ethernet-only default route, Wi-Fi
+  shutdown and fallback, SSH over Ethernet, cold boot and reboot, USB
+  serial/RNDIS restoration, OTA activation, preserve-settings factory
+  reinstall, Volume Up TWRP, and normal recovery return.
 
 ### Checkers qualification record — 2026-10-27
 
@@ -199,10 +214,9 @@ kernel or root filesystem lacks the required controller.
 
 ## Recommended order
 
-1. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
-   boot qualification with the intended OTG Ethernet adapter.
-2. Treat Radar as an experimental internal hardware modification, not a normal
+1. Treat Radar as an experimental internal hardware modification, not a normal
    external-port feature.
 
-Biscuit completed its exact-kernel real-hardware release gate on 2026-10-29.
-Checkers, Crown, and Rook completed their independent gates on 2026-10-27.
+Biscuit completed its exact-kernel real-hardware release gate on 2026-10-29;
+Athena completed its independent gate on 2026-10-28; Checkers, Crown, and Rook
+completed theirs on 2026-10-27.

@@ -37,6 +37,9 @@
   SSH, public traffic, and power-cycle fallback to USB serial and Wi-Fi all
   passed. Because Ethernet also powers Biscuit in this setup, link removal is
   correctly documented as a device power-cycle rather than a live-link event.
+- Promoted Athena's mainline MTU3/GPIO OTG path to qualified after its real
+  RTL8152 adapter, DHCP/routing, Wi-Fi fallback, SSH, OTA, factory reinstall,
+  USB serial/RNDIS restoration, reboot, and TWRP recovery gates passed.
 
 ## v3.1.1
 

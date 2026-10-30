@@ -3,6 +3,7 @@ package usbethernet
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -30,6 +31,18 @@ func (hardwareOTGBackend) available(paths Paths) bool {
 }
 
 func (hardwareOTGBackend) restoreDeviceMode(Paths) error { return nil }
+
+// usbRoleOTGBackend is the mainline equivalent used by Athena's GPIO-backed
+// MTU3 connector. Physical ID/VBUS signaling owns the transition; the status
+// path only proves that the qualified kernel role switch is present.
+type usbRoleOTGBackend struct{}
+
+func (usbRoleOTGBackend) available(paths Paths) bool {
+	roles, err := filepath.Glob(filepath.Join(paths.RoleClass, "*", "role"))
+	return err == nil && len(roles) > 0
+}
+
+func (usbRoleOTGBackend) restoreDeviceMode(Paths) error { return nil }
 
 type mchangeBackend struct{}
 
@@ -67,6 +80,8 @@ func backendFor(capability Capability) roleBackend {
 		return mchangeBackend{}
 	case "mediatek-musb-hardware-otg":
 		return hardwareOTGBackend{}
+	case "mediatek-mtu3-gpio-otg":
+		return usbRoleOTGBackend{}
 	default:
 		return unavailableBackend{}
 	}

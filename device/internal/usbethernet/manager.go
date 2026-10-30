@@ -8,10 +8,11 @@ import (
 // Paths are the installed automatic controller, MediaTek USB role control,
 // and runtime state written by the controller.
 type Paths struct {
-	Script   string
-	MChange  string
-	RoleMode string
-	State    string
+	Script    string
+	MChange   string
+	RoleMode  string
+	RoleClass string
+	State     string
 }
 
 // State describes the detected link rather than a user preference. Phase is
@@ -35,10 +36,11 @@ func New(target string) *Manager {
 	return &Manager{
 		Target: target,
 		Paths: Paths{
-			Script:   "/usr/local/sbin/tater-usb-ethernet",
-			MChange:  "/proc/mchange",
-			RoleMode: "/sys/class/dual_role_usb/dual-role-usb20/mode",
-			State:    "/run/tater-usb-ethernet.state",
+			Script:    "/usr/local/sbin/tater-usb-ethernet",
+			MChange:   "/proc/mchange",
+			RoleMode:  "/sys/class/dual_role_usb/dual-role-usb20/mode",
+			RoleClass: "/sys/class/usb_role",
+			State:     "/run/tater-usb-ethernet.state",
 		},
 	}
 }

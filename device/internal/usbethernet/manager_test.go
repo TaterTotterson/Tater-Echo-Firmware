@@ -12,10 +12,11 @@ func testManager(t *testing.T, target string) *Manager {
 	t.Helper()
 	dir := t.TempDir()
 	paths := Paths{
-		Script:   filepath.Join(dir, "tater-usb-ethernet"),
-		MChange:  filepath.Join(dir, "mchange"),
-		RoleMode: filepath.Join(dir, "role-mode"),
-		State:    filepath.Join(dir, "state"),
+		Script:    filepath.Join(dir, "tater-usb-ethernet"),
+		MChange:   filepath.Join(dir, "mchange"),
+		RoleMode:  filepath.Join(dir, "role-mode"),
+		RoleClass: filepath.Join(dir, "usb-role"),
+		State:     filepath.Join(dir, "state"),
 	}
 	if err := os.WriteFile(paths.Script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -24,6 +25,13 @@ func testManager(t *testing.T, target string) *Manager {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(paths.RoleMode, []byte("ufp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	role := filepath.Join(paths.RoleClass, "usb0")
+	if err := os.MkdirAll(role, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(role, "role"), []byte("device\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return &Manager{Target: target, Paths: paths}
@@ -45,6 +53,10 @@ func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	manager.Target = "rook"
 	if !manager.Prepared() || !manager.Supported() {
 		t.Fatal("qualified Rook MediaTek role path should be prepared and supported")
+	}
+	manager.Target = "athena"
+	if !manager.Prepared() || !manager.Supported() {
+		t.Fatal("qualified Athena MTU3 hardware-OTG path should be prepared and supported")
 	}
 	manager.Target = "radar"
 	if !manager.Prepared() || manager.Supported() {
@@ -77,6 +89,13 @@ func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	}
 	if manager.Supported() {
 		t.Fatal("Rook must fail closed without MediaTek role control")
+	}
+	manager = testManager(t, "athena")
+	if err := os.RemoveAll(manager.Paths.RoleClass); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Supported() {
+		t.Fatal("Athena must fail closed without its verified mainline USB role path")
 	}
 }
 
@@ -111,7 +130,7 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 			capability.Recovery == "" || capability.Reason == "" {
 			t.Errorf("incomplete %s capability: %#v", target, capability)
 		}
-		qualified := target == "biscuit" || target == "checkers" || target == "crown" || target == "rook"
+		qualified := target == "athena" || target == "biscuit" || target == "checkers" || target == "crown" || target == "rook"
 		if qualified && !capability.qualified() {
 			t.Errorf("hardware-qualified target %s lost qualification: %#v", target, capability)
 		}
@@ -186,13 +205,25 @@ func TestRookDiagnosticsReportQualifiedMChange(t *testing.T) {
 	}
 }
 
+func TestAthenaDiagnosticsReportQualifiedMainlineOTG(t *testing.T) {
+	manager := testManager(t, "athena")
+	if err := os.WriteFile(manager.Paths.State, []byte("active eth0 10.4.20.159\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Diagnostics()
+	if got["supported"] != true || got["active"] != true || got["qualification"] != "qualified" ||
+		got["backend"] != "mediatek-mtu3-gpio-otg" || got["detection"] != "hardware-id-passive" ||
+		got["interface"] != "eth0" || got["address"] != "10.4.20.159" {
+		t.Fatalf("unexpected Athena diagnostics: %#v", got)
+	}
+}
+
 func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 	tests := []struct {
 		target    string
 		backend   string
 		detection string
 	}{
-		{target: "athena", backend: "mediatek-mtu3-gpio-otg", detection: "hardware-id-passive"},
 		{target: "radar", backend: "mediatek-mchange-candidate", detection: "passive-until-role-qualified"},
 	}
 	for _, test := range tests {

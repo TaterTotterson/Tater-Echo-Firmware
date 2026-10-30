@@ -90,17 +90,16 @@ The same controller is installed and supervised on Biscuit, Radar, Checkers,
 Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
 already enumerated, after DHCP and route validation. Biscuit performs an active
 userspace role switch; Checkers and Crown use qualified physical OTG paths
-without a firmware role write; and Rook uses the qualified bounded MediaTek
-role backend. Radar remains passive so untested role or VBUS writes cannot
-break power, serial, recovery, or internal USB Wi-Fi. Athena's remaining
-real-adapter qualification step is documented in
-[`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
+without a firmware role write; Athena uses its qualified mainline MTU3/GPIO OTG
+path; and Rook uses the qualified bounded MediaTek role backend. Radar remains
+passive so untested role or VBUS writes cannot break power, serial, recovery,
+or internal USB Wi-Fi.
 
 Radar shares the Dot userspace but has no external USB port. Its barrel jack
 powers the device, while its internal USB pads expose D+/D-/GND; the adapter
-therefore needs external power. Checkers, Crown, and Rook completed their
-separate real-hardware RTL8152 gates. Athena remains a hardware-validation
-target until its MTU3 host path passes a real adapter test.
+therefore needs external power. Checkers, Crown, Athena, and Rook completed
+their separate real-hardware RTL8152 gates. The independent records are in
+[`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
 
 ## Platform dependency
 

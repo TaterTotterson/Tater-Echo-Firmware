@@ -24,6 +24,16 @@ runtimes, and setup flow onto that rootfs, then uses Tater Echo Linux's Athena
 store builder to produce the `system` image. The 64-bit mainline kernel is kept
 as a pinned platform input rather than copied into this repository.
 
+### USB Ethernet qualification
+
+Athena's physical GPIO ID/VBUS path, MTU3 host/device switching, GPIO150 host
+power, and pinned RTL8152 kernel path were qualified on model A8H3N2 with the
+powered UCTRONICS B0B9ZLVGJ4 adapter on 2026-10-28. DHCP, Ethernet-only routing,
+Wi-Fi shutdown and fallback, SSH, cold boot/reboot, USB serial/RNDIS return,
+OTA, preserve-settings factory reinstall, Volume Up TWRP, and recovery return
+all passed. The tested boot image SHA-256 is
+`5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191`.
+
 ## Hardware contract used by Tater
 
 | Function | Athena path |
@@ -106,6 +116,9 @@ installer, recovery, or OTA paths:
    and the TWRP fallback.
 9. Power-cycle repeatedly and confirm no dark-panel boot, rootfs trial loop,
    setup-mode reboot loop, or failure to return from recovery.
+10. Recheck USB Ethernet enumeration, DHCP/default route, Wi-Fi shutdown and
+    fallback, USB serial/RNDIS restoration, and SSH after any MTU3, GPIO,
+    kernel, installer, or network-controller change.
 
 The two panel variants tested by upstream are ILI9881C with BOE glass and
 JD9365 with KD/HSD glass. The factory installer refuses other variants unless
