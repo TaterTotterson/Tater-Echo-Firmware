@@ -92,6 +92,7 @@ func (c *Client) handle(message Envelope) {
 		c.stateMu.Lock()
 		c.settings = copyMap(applied)
 		c.stateMu.Unlock()
+		c.syncDNDState()
 		result["settings"] = applied
 		c.sendJSON("settings.changed", message.ID, result)
 	case "state":
@@ -143,6 +144,9 @@ func (c *Client) handle(message Envelope) {
 			c.setState("error", statePayload)
 		}
 	case "play.url":
+		if c.rejectDNDPlayback("playback.finished", message.ID, nil) {
+			return
+		}
 		req := PlayRequest{
 			URL: stringValue(payload["url"]), TTSKind: stringValue(payload["tts_kind"]),
 			StateAfter:           stringValue(payload["state_after"]),
@@ -172,6 +176,9 @@ func (c *Client) handle(message Envelope) {
 		c.stopVoiceCapture()
 		c.setState("idle", payload)
 	case "play.tone":
+		if c.rejectDNDPlayback("playback.finished", message.ID, nil) {
+			return
+		}
 		// Tone URLs use the same player when provided; otherwise acknowledge
 		// without inventing a built-in asset that the Echo image may not have.
 		if url := stringValue(payload["url"]); url != "" {
@@ -182,6 +189,12 @@ func (c *Client) handle(message Envelope) {
 			c.sendJSON("playback.finished", message.ID, map[string]any{"ok": true})
 		}
 	case "audio.overlay.start":
+		if c.rejectDNDPlayback("audio.overlay.finished", "", map[string]any{
+			"overlay_id": stringValue(payload["overlay_id"]),
+			"group_id":   stringValue(payload["group_id"]),
+		}) {
+			return
+		}
 		foreground, _ := payload["foreground"].(map[string]any)
 		ducking, _ := payload["ducking"].(map[string]any)
 		finish, _ := payload["finish"].(map[string]any)
@@ -217,6 +230,11 @@ func (c *Client) handle(message Envelope) {
 		c.applyReplyDirection(req.DirectionDegrees)
 		c.startOverlay(req)
 	case "audio.scene.start":
+		if c.rejectDNDPlayback("audio.scene.finished", "", map[string]any{
+			"scene_id": stringValue(payload["scene_id"]),
+		}) {
+			return
+		}
 		foreground, _ := payload["foreground"].(map[string]any)
 		background, _ := payload["background"].(map[string]any)
 		ducking, _ := payload["ducking"].(map[string]any)

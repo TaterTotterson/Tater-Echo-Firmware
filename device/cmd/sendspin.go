@@ -88,6 +88,12 @@ func sendspinVolumeChanged(level int) {
 	}
 }
 
+func sendspinSetBlocked(blocked bool) {
+	if player := sendspinPlayer(); player != nil {
+		player.SetBlocked(blocked)
+	}
+}
+
 func sendspinSetOutputChannel(mode string) error {
 	player := sendspinPlayer()
 	if player == nil {

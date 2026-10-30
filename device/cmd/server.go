@@ -835,7 +835,13 @@ func main() {
 		Room: room, Capabilities: nativeCapabilities,
 	}, taternative.Hooks{
 		ReplyDirection: s.SetReplyDirectionDegrees,
-		BLEGATT:        bleGATTBridge.Handle,
+		DNDChanged: func(active bool) {
+			sendspinSetBlocked(active)
+			if active {
+				satChatPlayer.Stop()
+			}
+		},
+		BLEGATT: bleGATTBridge.Handle,
 		CameraSnapshot: func(captureCtx context.Context) (taternative.CameraSnapshot, error) {
 			if s.IsMuted() {
 				return taternative.CameraSnapshot{}, fmt.Errorf("camera unavailable while muted")
@@ -2801,6 +2807,22 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 	}
 	if value, ok := values["screen_night_display"]; ok {
 		applied["screen_night_display"] = normalizeScreenNightDisplay(value)
+	}
+	if value, ok := values["dnd_enabled"]; ok {
+		applied["dnd_enabled"] = nativeBool(value, false)
+	}
+	if value, ok := values["dnd_schedule_enabled"]; ok {
+		applied["dnd_schedule_enabled"] = nativeBool(value, false)
+	}
+	if value, ok := values["dnd_start"]; ok {
+		applied["dnd_start"] = normalizeScreenClock(value, "22:00")
+	}
+	if value, ok := values["dnd_end"]; ok {
+		applied["dnd_end"] = normalizeScreenClock(value, "07:00")
+	}
+	if value, ok := values["utc_offset_seconds"]; ok {
+		offset := int(math.Round(nativeNumber(value, 0)))
+		applied["utc_offset_seconds"] = max(-18*60*60, min(18*60*60, offset))
 	}
 	if player != nil {
 		if err := player.ConfigureWakeSound(values); err != nil {

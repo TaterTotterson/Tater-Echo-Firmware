@@ -62,6 +62,9 @@ Target metadata used by Tater and the release builds lives in
   four on Crown, Athena, and Rook.
 - Continued conversation, playback barge-in, room intercom, announcements,
   wake sounds, mute, volume, and wake-audio training samples.
+- Per-satellite Do Not Disturb with an immediate toggle and daily local-time
+  schedule. DND stops music, announcements, wake sounds, and other remote
+  playback while leaving wake detection and safety-critical timers/alarms active.
 - Local timers and alarms with spoken `Stop`, physical action-button controls,
   and on-screen Stop controls on Checkers, Crown, Athena, and Rook.
 - Sendspin multi-room and stereo-pair playback with synchronized PCM/FLAC,

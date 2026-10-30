@@ -126,6 +126,7 @@ type Hooks struct {
 	Status              func() map[string]any
 	ReplyDirection      func(angleDegrees float64)
 	PlayWakeSound       func() bool
+	DNDChanged          func(active bool)
 	PlayVoice           func(context.Context, PlayRequest) error
 	PlayOverlay         func(context.Context, OverlayRequest, func()) error
 	PlayScene           func(context.Context, SceneRequest) error
@@ -184,6 +185,7 @@ type Client struct {
 	done   chan struct{}
 
 	connected atomic.Bool
+	dndState  atomic.Bool
 	started   time.Time
 	out       chan outbound
 	videoOut  chan outbound
@@ -301,8 +303,12 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 		started: time.Now(), out: make(chan outbound, outgoingCapacity),
 		videoOut: make(chan outbound, 1),
 		state:    "idle", settings: map[string]any{
-			"barge_in_enabled": false,
-			"continued_chat":   true,
+			"barge_in_enabled":     false,
+			"continued_chat":       true,
+			"dnd_enabled":          false,
+			"dnd_schedule_enabled": false,
+			"dnd_start":            "22:00",
+			"dnd_end":              "07:00",
 		},
 		preRoll:         make([][]byte, 0, preRollChunks),
 		captureRoll:     make([][]byte, 0, trainerCaptureChunks),
@@ -315,6 +321,7 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 	}
 	c.timers = NewTimerManager(c.sendJSON, hooks.TimerAlarm, hooks.TimerUpdate)
 	go c.voiceWorker()
+	go c.dndMonitor()
 	return c, nil
 }
 
@@ -335,6 +342,7 @@ func DefaultCapabilities() map[string]any {
 		"tts_overlays":                      true,
 		"audio_scenes":                      true, "audio_scene_version": 1,
 		"settings": true, "wake_verifier": true,
+		"do_not_disturb": true, "do_not_disturb_version": 1,
 		"wake_sound": true, "wake_audio_capture": true,
 		"openwakeword": true, "wake_detector_selection": true,
 		"nanowakeword": true, "nanowakeword_architectures": []string{"cnn", "gru"},
@@ -543,7 +551,7 @@ func (c *Client) runOnce(parent context.Context) error {
 				}
 				continue
 			}
-			if c.satChatActive.Load() {
+			if c.satChatActive.Load() && !c.DNDActive() {
 				if jpeg, video := decodeSatChatVideoFrame(data); video {
 					if hook := c.hooks.SatChatVideo; hook != nil {
 						hook(append([]byte(nil), jpeg...))
@@ -616,6 +624,7 @@ func (c *Client) heartbeat(ctx context.Context) error {
 		case <-c.ctx.Done():
 			return c.ctx.Err()
 		case <-ticker.C:
+			c.syncDNDState()
 			// Keep the connection alive even when Tater has no application
 			// messages to send. The server's WebSocket ping handler replies with
 			// a pong, which extends the read deadline installed in runOnce.
@@ -623,6 +632,7 @@ func (c *Client) heartbeat(ctx context.Context) error {
 			payload := map[string]any{
 				"state": c.State(), "uptime_s": int(time.Since(c.started).Seconds()),
 				"connected": true, "audio_tx_dropped": c.audioDropped.Load(),
+				"dnd_active": c.DNDActive(),
 			}
 			payload["wake_verifier"] = c.wakeVerifierStatus()
 			for key, value := range c.timers.Status() {
