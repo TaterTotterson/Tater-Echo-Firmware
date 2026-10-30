@@ -962,7 +962,8 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 			// sample-ordered, this prevents the hardware-reference targets from
 			// running a second filter and switching retained acoustic paths twice
 			// per mic batch — the measured cause of recurring ALSA xruns on Biscuit.
-			wakePCM = prepareWakeLanePCM(wakePCM, mono, aecEnabled && beamDiag.PlaybackActive)
+			wakePCM = prepareWakeLanePCM(wakePCM, mono,
+				aecEnabled && (beamDiag.PlaybackActive || musicActive))
 			wakePCM = d.wakeProc.HighPass(wakePCM)
 
 			// Remove DC and sub-speech rumble before either VAD or AGC sees it.

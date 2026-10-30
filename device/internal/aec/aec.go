@@ -455,12 +455,13 @@ func New() *Canceller {
 // NewForTarget returns a canceller sized for the acoustic paths exposed by
 // target. Checkers keeps its measured left/right beams plus centre/omni.
 // Crown and Rook keep one path for their unlocked four-mic omni mix plus one
-// for each of the four steering directions. Athena stays on one conservative
-// omni path until its physical geometry is measured. Biscuit and unknown
-// targets retain the seven-path bank.
+// for each of the four steering directions. Athena keeps separate adaptive
+// coherent and omni paths; its coherent path derives relative delays directly
+// and therefore does not claim an unmeasured physical bearing. Biscuit and
+// unknown targets retain the seven-path bank.
 func NewForTarget(target string) *Canceller {
 	if target == "athena" {
-		return newWithPaths(1, 0)
+		return newWithPaths(2, 1)
 	}
 	if target == "checkers" {
 		return newWithPaths(3, 2)

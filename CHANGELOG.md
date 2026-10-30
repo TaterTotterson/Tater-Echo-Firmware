@@ -4,6 +4,16 @@
 
 ### What's Changed
 
+#### Voice capture
+
+- Added Athena's hardware-measured adaptive four-microphone wake and locked
+  turn beam. Each 96 kHz channel is now filtered independently before a
+  speech-gated relative-delay estimate aligns healthy microphones at 16 kHz;
+  uncertain or idle audio and microphone failures retain the established omni
+  fallback. Coherent and omni output keep separate AEC state, and physical
+  bearing remains intentionally unreported until the remaining front/back
+  geometry is mapped.
+
 #### Voice playback
 
 - Preserved the Echo speaker's fixed 4,096-byte playback periods across

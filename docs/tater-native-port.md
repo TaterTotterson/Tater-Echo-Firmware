@@ -153,11 +153,16 @@ rootfs store, userdata holds persistent Tater and application slots, and TWRP
 remains available. The guarded factory installer preserves the unit's Fire OS
 boot backup and injects that unit's TAS5805M tuning into the pinned boot image.
 
-Four 96 kHz S32_LE microphone channels are normalized, low-pass filtered, and
-decimated 6:1 into the shared 16 kHz pipeline. Directional steering remains off
-until channel order and geometry are measured. Playback is band-limited from
-48 to 96 kHz for the amplifier's tuning, and the physical privacy latch is
-mirrored from the kernel's authoritative `SW_MUTE_DEVICE` state rather than
+Four 96 kHz S32_LE microphone channels are independently normalized, low-pass
+filtered, and decimated 6:1 into the shared 16 kHz pipeline. Hardware captures
+show channels 0/3 and 1/2 as opposing left/right groups with a roughly
+one-sample span. Athena therefore uses speech-gated relative-delay estimation
+to form one coherent adaptive wake beam without inventing an unmapped compass
+angle. The accepted vector is frozen for the voice turn; idle, uncertain, and
+failed-microphone cases retain the healthy-channel omni path, with independent
+AEC state for coherent and omni audio. Playback is band-limited from 48 to
+96 kHz for the amplifier's tuning, and the physical privacy latch is mirrored
+from the kernel's authoritative `SW_MUTE_DEVICE` state rather than
 double-toggled from `KEY_MICMUTE`.
 
 See [`athena.md`](athena.md) and

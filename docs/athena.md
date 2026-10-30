@@ -44,17 +44,30 @@ all passed. The tested boot image SHA-256 is
 | Ambient light | AMS TCS3400 at I²C `0x29`; mainline IIO clear/red/green/blue channels with adaptive gain and software lux conversion |
 | Touch | Mainline FocalTech `generic ft5x06` (`generic ft5x06 (3e)` on the tested unit); accepts either panel-transformed landscape or portrait coordinates |
 | Microphones | `hw:0,2`, 96 kHz S32_LE, four TLV320ADC5140 channels |
-| Mic conversion | Four-channel omni mix, measured +5.89 dB normalization, 192-tap Blackman low-pass, 6:1 decimation to Tater's 16 kHz S16 pipeline |
+| Mic conversion | Independent four-channel +5.89 dB normalization, 192-tap Blackman low-pass and 6:1 decimation; healthy-channel omni plus adaptive coherent wake/turn beam at 16 kHz S16 |
 | Playback | `hw:0,0`, stereo S16 at 96 kHz; Tater's 48 kHz output is upsampled 2:1 |
 | Speaker | TAS5805M with Amazon tuning extracted from this unit's stock boot image |
 | Buttons/privacy | Mainline `gpio-keys`; volume keys, `KEY_MICMUTE` (248), and authoritative `SW_MUTE_DEVICE` (14) latch state |
 | Camera | TECHO5 V4L2 support through Tater's on-demand Room Vision helper |
 | Bluetooth | Mainline Bluetooth/BlueZ path |
 
-Directional microphone steering is intentionally disabled until channel order
-and physical geometry are measured on Tater hardware. AEC initially uses the
-software speaker tap; that is safer than assuming an unverified capture
-loopback.
+Hardware captures on 2026-10-29 confirmed all four microphones healthy and
+within 0.4 dB. Left/right speech produced the repeatable opposing channel
+groups expected from the array: channels 0/3 lead from one side and channels
+1/2 lead from the other, with a measured 0.9-1.2 sample span at 16 kHz. The
+remaining front/back physical placement has not been mapped, so firmware does
+not report an invented compass angle.
+
+Athena instead estimates relative arrival time directly from each active
+speech batch and aligns every healthy channel into one coherent wake beam. The
+search is bounded to four samples, wider than the measured array but too narrow
+for the false long-lag peaks observed in diffuse room noise. Activity,
+correlation, and peak-margin gates acquire in one 32 ms production batch; an
+accepted wake freezes the same delay vector for the voice turn. Idle audio,
+uncertain correlation, or fewer than two healthy microphones expires to the
+established four-channel omni path. Coherent and omni output retain separate
+AEC state. AEC uses the software speaker tap; firmware does not assume an
+unverified Athena capture-loopback channel.
 
 ## Storage and installer safety
 
@@ -102,9 +115,11 @@ installer, recovery, or OTA paths:
    deliberate loss/recovery of the access point.
 4. Check every screen edge and corner, rotation, backlight levels, idle wake,
    dashboard surfaces, camera views, Sat Chat, and the on-screen controls.
-5. Record all four microphone channels at 96 kHz. Verify polarity, channel
-   order, gain, wake detection, STT quality, and clipping before enabling any
-   directional beamformer.
+5. Record all four microphone channels at 96 kHz. Verify polarity, gain,
+   clipping, the measured 0/3-versus-1/2 left/right delay signature, adaptive
+   wake acquisition, locked-turn STT quality, idle omni fallback, and
+   single-microphone degradation. Repeat a complete physical tap/angle map
+   before adding compass-bearing reporting.
 6. Exercise speaker startup, silence, full volume, long music playback,
    announcements, AEC/barge-in, and underrun recovery. Stop immediately for a
    pop, DC offset, overheating, or unexpected limiter behavior.
