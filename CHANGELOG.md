@@ -32,6 +32,11 @@
   `0bda:8152` adapter with the reproducibly built, in-kernel Realtek RTL8152
   driver. The controller still requires a DHCP address and default route before
   disabling Wi-Fi and restores Wi-Fi plus USB serial on failure or unplug.
+- Hardware-qualified Biscuit with the exact pinned kernel and powered RTL8152
+  adapter: factory preservation, cold boot, Ethernet routing, Wi-Fi shutdown,
+  SSH, public traffic, and power-cycle fallback to USB serial and Wi-Fi all
+  passed. Because Ethernet also powers Biscuit in this setup, link removal is
+  correctly documented as a device power-cycle rather than a live-link event.
 
 ## v3.1.1
 

@@ -7,6 +7,28 @@ adapter's advertised CDC-ECM interface enumerated and received frames but could
 not transmit on Biscuit's 3.18 MUSB path. The pinned kernel therefore retains
 generic CDC-ECM while binding this adapter to the built-in vendor driver.
 
+## Physical qualification — 2026-10-29
+
+- Hardware: Amazon Echo Dot 2nd Generation, model RS03QR (`biscuit`).
+- Adapter: powered UCTRONICS U6113 (`0bda:8152`), with Ethernet providing both
+  network and power to Biscuit.
+- Tested firmware: commit `841f3bd45d524c9abeb69d7093cddd805d5ed5e7`,
+  `v3.1.2-test8`; Tater Echo Linux commit
+  `f99397141e82a3f03b0b3b1000090c9e72ef3f28`.
+- Pinned Biscuit kernel SHA-256:
+  `1d3d7e6ade694c60ef29fe49683497b885afcea8c2ea3b23b6e47b077d953729`.
+- Passed: preserve-settings factory install, physical Volume Up TWRP and
+  automatic Linux restoration, cold boot with the adapter attached, native
+  `r8152` ownership, DHCP, Ethernet-only default route, Wi-Fi shutdown, SSH,
+  gateway/public-internet/DNS access, a 24.1 MiB HTTPS transfer with no
+  RX/TX/frame/carrier errors, and power-cycle fallback to direct USB serial,
+  Wi-Fi, SSH, and public internet.
+
+The adapter is effectively PoE for Biscuit: removing its Ethernet feed also
+removes device power. A powered, in-place cable-loss test is therefore not
+physically possible with this wiring. The applicable failure gate is a cold
+boot on the adapter followed by a power-cycle onto direct USB, which passed.
+
 ## Automatic runtime behavior
 
 There is no enable setting. The init-supervised controller continuously applies
@@ -92,9 +114,10 @@ CDC-ECM, and built-in RTL8152. The compatibility patch supplies the EEE
 helpers missing from Amazon's 3.18 tree while retaining upstream's driver
 ownership rule for `0bda:8152`.
 
-Before release promotion, boot the exact published Biscuit kernel and repeat
-enumeration, DHCP/default-route, unplug, link-loss, reboot, Wi-Fi fallback, and
-USB-serial restoration. `tater-usb-inventory` collects read-only evidence, and
+The exact published Biscuit kernel completed its physical release gate above.
+For a future kernel candidate, repeat enumeration, DHCP/default-route, cold
+boot, sustained traffic, power-cycle fallback, Wi-Fi recovery, and USB-serial
+restoration. `tater-usb-inventory` collects read-only evidence, and
 `tater-usb-ethernet probe` performs a bounded enumeration-only check without
 DHCP or a Wi-Fi change.
 

@@ -41,6 +41,24 @@ remains in device mode, while an OTG plug selects host mode and enables
 GPIO150's modelled 5 V supply. It remains unqualified until those host-side
 paths are exercised with a real adapter.
 
+### Biscuit qualification record — 2026-10-29
+
+- Hardware: Amazon Echo Dot 2nd Generation, model RS03QR (`biscuit`).
+- Adapter: powered UCTRONICS U6113, Realtek RTL8152 (`0bda:8152`, `r8152`).
+  Ethernet supplies both network and device power, so removing the live link
+  also power-cycles Biscuit; an in-place powered link-loss test is not
+  physically available with this wiring.
+- Tested firmware: commit `841f3bd45d524c9abeb69d7093cddd805d5ed5e7`,
+  `v3.1.2-test8`; Tater Echo Linux commit
+  `f99397141e82a3f03b0b3b1000090c9e72ef3f28`.
+- Pinned Biscuit kernel SHA-256:
+  `1d3d7e6ade694c60ef29fe49683497b885afcea8c2ea3b23b6e47b077d953729`.
+- Passed: preserve-settings factory install, Volume Up TWRP and automatic
+  Linux restoration, cold boot on powered Ethernet, native `r8152` binding,
+  DHCP, Ethernet-only default route, Wi-Fi shutdown, SSH, DNS and public
+  internet, 24.1 MiB of sustained HTTPS traffic without interface errors, and
+  power-cycle fallback to direct USB serial plus Wi-Fi without repair.
+
 ### Checkers qualification record — 2026-10-27
 
 - Hardware: Amazon Echo Show 5 first generation, model H23K37 (`checkers`),
@@ -181,11 +199,10 @@ kernel or root filesystem lacks the required controller.
 
 ## Recommended order
 
-1. Re-test Biscuit with the exact published Tater kernel artifact.
-2. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
+1. Complete Athena's VBUS, enumeration, DHCP, traffic, unplug/replug, and cold
    boot qualification with the intended OTG Ethernet adapter.
-3. Treat Radar as an experimental internal hardware modification, not a normal
+2. Treat Radar as an experimental internal hardware modification, not a normal
    external-port feature.
 
-Checkers, Crown, and Rook completed their independent real-hardware release
-gates on 2026-10-27.
+Biscuit completed its exact-kernel real-hardware release gate on 2026-10-29.
+Checkers, Crown, and Rook completed their independent gates on 2026-10-27.
