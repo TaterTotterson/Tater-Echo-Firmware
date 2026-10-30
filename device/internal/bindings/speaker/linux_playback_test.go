@@ -2,7 +2,10 @@
 
 package speaker
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 type recordingPlaybackSession struct {
 	writes []int
@@ -14,6 +17,17 @@ func (s *recordingPlaybackSession) Pump(data []byte) error {
 }
 
 func (*recordingPlaybackSession) Close() {}
+
+type recordingMusicSource struct {
+	frames int
+}
+
+func (*recordingMusicSource) Active() bool { return true }
+
+func (s *recordingMusicSource) Fill(out []byte, _ time.Time, _ time.Duration) bool {
+	s.frames = len(out) / 4
+	return true
+}
 
 func TestLinuxDotTargetsUseTheSharedDirectPlaybackPath(t *testing.T) {
 	for _, target := range []string{"biscuit", "radar", " BISCUIT ", "Radar"} {
@@ -70,6 +84,38 @@ func TestPumpUsesSelectedHardwarePeriod(t *testing.T) {
 				if session.writes[i] != test.wantWrites[i] {
 					t.Fatalf("writes = %v, want %v", session.writes, test.wantWrites)
 				}
+			}
+		})
+	}
+}
+
+func TestCorrectedPlaybackConsumesAFullSendspinTimeline(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		target     string
+		corrected  bool
+		wantFrames int
+	}{
+		{"corrected Biscuit", "biscuit", true, driftOutputFrames},
+		{"corrected Radar", "radar", true, driftOutputFrames},
+		{"corrected Rook", "rook", false, driftOutputFrames},
+		{"uncorrected fallback", "biscuit", false, periodSize},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := &recordingMusicSource{}
+			p := &PcmSpeaker{
+				target:             test.target,
+				alsaWriteFrames:    periodSize,
+				dotDriftCorrection: test.corrected,
+				srcBuf:             make([]byte, periodBytes),
+				srcTimelineBuf:     make([]byte, driftOutputFrames*4),
+			}
+			out := p.fillMusicSource(source, time.Now(), 0)
+			if source.frames != test.wantFrames {
+				t.Fatalf("source filled %d frames, want %d", source.frames, test.wantFrames)
+			}
+			if len(out) != periodBytes {
+				t.Fatalf("mixer bytes = %d, want %d", len(out), periodBytes)
 			}
 		})
 	}

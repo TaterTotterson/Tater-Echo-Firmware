@@ -167,8 +167,15 @@ type PcmSpeaker struct {
 	// only while the native local-scene music plane is empty. The ALSA writer
 	// owns the DAC timing measurement, so timestamped audio must be pulled
 	// here rather than pushed into the several-seconds-deep music queue.
-	src    atomic.Pointer[sourceBox]
-	srcBuf []byte
+	src atomic.Pointer[sourceBox]
+	// srcTimelineBuf is one corrected hardware-accounting period. Sendspin
+	// fills that full timeline on affected MediaTek paths; it is compressed
+	// into srcBuf for mixing and expanded back at the ALSA write. Without this
+	// bridge Sendspin consumed only 2048 timestamped frames while ALSA advanced
+	// 2064, forcing a sample drop every period and a hard resync about once a
+	// second (heard as a faint pop on Biscuit).
+	srcBuf         []byte
+	srcTimelineBuf []byte
 	// sourceLastFill records Sendspin audio actually handed to the ALSA pump.
 	// Active() can clear just before the last hardware-buffered period finishes;
 	// the hold in MusicAudible bridges that tail for microphone-side AEC.
@@ -193,6 +200,26 @@ func (p *PcmSpeaker) SetMusicSource(source MusicSource) {
 	p.src.Store(&sourceBox{source: source})
 }
 
+func (p *PcmSpeaker) playbackDriftCorrectionActive() bool {
+	if p.alsaWriteFrames != periodSize {
+		return false
+	}
+	return p.dotDriftCorrection || strings.EqualFold(strings.TrimSpace(p.target), "rook")
+}
+
+func (p *PcmSpeaker) fillMusicSource(source MusicSource, playAt time.Time, uncertain time.Duration) []byte {
+	if p.playbackDriftCorrectionActive() {
+		if !source.Fill(p.srcTimelineBuf, playAt, uncertain) {
+			return nil
+		}
+		return compressPlaybackDrift(p.srcBuf, p.srcTimelineBuf)
+	}
+	if !source.Fill(p.srcBuf, playAt, uncertain) {
+		return nil
+	}
+	return p.srcBuf
+}
+
 // pullSource measures when the next ALSA period reaches the DAC and asks
 // Sendspin for exactly the audio due at that instant.
 func (p *PcmSpeaker) pullSource() []byte {
@@ -212,11 +239,12 @@ func (p *PcmSpeaker) pullSource() []byte {
 	}
 	measuredAt := before.Add(readDuration / 2)
 	playAt := measuredAt.Add(time.Duration(queuedFrames) * time.Second / 48000)
-	if !box.source.Fill(p.srcBuf, playAt, readDuration/2) {
+	out := p.fillMusicSource(box.source, playAt, readDuration/2)
+	if out == nil {
 		return nil
 	}
 	p.sourceLastFill.Store(time.Now().UnixNano())
-	return p.srcBuf
+	return out
 }
 
 // MusicPlaneBusy gives direct controller audio priority over Sendspin.
@@ -264,14 +292,15 @@ func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeake
 // screen targets use their measured MediaTek DL1 paths.
 func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeaker, error) {
 	s := &PcmSpeaker{
-		stopCh:   make(chan struct{}),
-		deadCh:   make(chan struct{}),
-		target:   target,
-		echoTap:  echoTap,
-		levelTap: levelTap,
-		chain:    outchain.New(48000),
-		chainBuf: make([]byte, periodBytes),
-		srcBuf:   make([]byte, periodBytes),
+		stopCh:         make(chan struct{}),
+		deadCh:         make(chan struct{}),
+		target:         target,
+		echoTap:        echoTap,
+		levelTap:       levelTap,
+		chain:          outchain.New(48000),
+		chainBuf:       make([]byte, periodBytes),
+		srcBuf:         make([]byte, periodBytes),
+		srcTimelineBuf: make([]byte, driftOutputFrames*4),
 	}
 	s.voice = newAudioStream(audioChanDepth, s.deadCh)
 	s.music = newAudioStream(audioChanDepth, s.deadCh)
@@ -721,10 +750,7 @@ func (p *PcmSpeaker) pump(out []byte) error {
 	if strings.EqualFold(strings.TrimSpace(p.target), "athena") {
 		out = p.athenaUpsampler.expand(out)
 	}
-	if isLinuxDotPlaybackTarget(p.target) && p.dotDriftCorrection && p.alsaWriteFrames == periodSize {
-		return p.session.Pump(p.playbackDrift.expand(out))
-	}
-	if strings.EqualFold(strings.TrimSpace(p.target), "rook") && p.alsaWriteFrames == periodSize {
+	if p.playbackDriftCorrectionActive() {
 		return p.session.Pump(p.playbackDrift.expand(out))
 	}
 	writeFrames := p.alsaWriteFrames
