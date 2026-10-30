@@ -24,8 +24,11 @@ ENUM_TIMEOUT=${TATER_ETH_ENUM_TIMEOUT:-15}
 DHCP_TIMEOUT=${TATER_ETH_DHCP_TIMEOUT:-45}
 MONITOR_INTERVAL=${TATER_ETH_MONITOR_INTERVAL:-2}
 FAILURE_LIMIT=${TATER_ETH_FAILURE_LIMIT:-3}
+HEALTH_INTERVAL=${TATER_ETH_HEALTH_INTERVAL:-15}
+HEALTH_TIMEOUT=${TATER_ETH_HEALTH_TIMEOUT:-2}
 PROBE_MAX_SECONDS=${TATER_ETH_PROBE_MAX_SECONDS:-60}
 RETRY_INTERVAL=${TATER_ETH_RETRY_INTERVAL:-60}
+RESCUE_RETRY_INTERVAL=${TATER_ETH_RESCUE_RETRY_INTERVAL:-20}
 PASSIVE_INTERVAL=${TATER_ETH_PASSIVE_INTERVAL:-2}
 LOG=$DATA/eth.log
 [ -d "$DATA" ] || LOG=/tmp/eth.log
@@ -77,6 +80,49 @@ stop_eth_dhcp() {
 
 has_eth_default() {
 	route -n | awk -v dev="$iface" '$1 == "0.0.0.0" && $8 == dev { found=1 } END { exit !found }'
+}
+
+eth_address() {
+	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+	[ -n "$address" ] || address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
+}
+
+controller_endpoint() {
+	url=$(sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$NATIVE_CONFIG" 2>/dev/null | head -1)
+	[ -n "$url" ] || return 1
+	scheme=${url%%://*}
+	authority=${url#*://}
+	authority=${authority%%/*}
+	case "$authority" in
+	\[*\]:*)
+		controller_host=${authority%%]*}
+		controller_host=${controller_host#\[}
+		controller_port=${authority##*:}
+		;;
+	*:*)
+		controller_host=${authority%:*}
+		controller_port=${authority##*:}
+		;;
+	*)
+		controller_host=$authority
+		case "$scheme" in wss|https) controller_port=443 ;; *) controller_port=80 ;; esac
+		;;
+	esac
+	[ -n "$controller_host" ] && [ -n "$controller_port" ]
+}
+
+# Carrier and a default route can stay present while a USB NIC has stopped
+# moving packets. Prove that traffic can leave this interface by reaching the
+# paired Tater controller or the DHCP gateway. The source binding prevents a
+# concurrently active Wi-Fi rescue route from making Ethernet look healthy.
+eth_path_healthy() {
+	eth_address
+	[ -n "$address" ] || return 1
+	if controller_endpoint; then
+		nc -z -w "$HEALTH_TIMEOUT" -s "$address" "$controller_host" "$controller_port" >/dev/null 2>&1 && return 0
+	fi
+	[ -n "${gateway:-}" ] || gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+	[ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1
 }
 
 restore_serial() {
@@ -145,6 +191,21 @@ fallback() {
 	else
 		say "$reason; Wi-Fi remained available"
 	fi
+}
+
+wifi_rescue() {
+	reason=${1:-wired-unhealthy}
+	last_address=${address:--}
+	stop_eth_dhcp
+	set_state rescue "$iface" "$last_address" "$reason"
+	if [ "${wifi_disabled:-0}" -eq 1 ]; then
+		say "$reason; Ethernet remains attached but unhealthy, starting visible Wi-Fi rescue"
+		wifi_start || say "Wi-Fi rescue did not obtain a lease"
+		wifi_disabled=0
+	else
+		say "$reason; Ethernet remains attached but unhealthy, Wi-Fi rescue was already available"
+	fi
+	needs_fallback=0
 }
 
 usb_network_iface() {
@@ -233,9 +294,17 @@ if [ "$mode" = stop ]; then
 	if [ -d "$LOCK" ]; then
 		set -- $(cat "$STATE" 2>/dev/null || true)
 		iface=${2:-}
-		[ "${1:-}" = active ] && wifi_disabled=1 || wifi_disabled=0
+		case "${1:-}" in active|recovering) wifi_disabled=1 ;; *) wifi_disabled=0 ;; esac
 		role_claimed=1
 		fallback service-stop
+	else
+		set -- $(cat "$STATE" 2>/dev/null || true)
+		if [ "${1:-}" = rescue ]; then
+			iface=${2:-}
+			wifi_disabled=0
+			role_claimed=1
+			fallback service-stop
+		fi
 	fi
 	set_state stopped
 	exit 0
@@ -254,8 +323,14 @@ if [ "$mode" = start ]; then
 		if find_usb_ethernet || [ "$active_probe" -eq 1 ]; then
 			"$0" once || true
 			set -- $(cat "$STATE" 2>/dev/null || true)
-			set_state waiting "${2:-retry}"
-			delay=$RETRY_INTERVAL
+			if [ "${1:-}" = rescue ]; then
+				# Keep the degraded state visible to device status and Tater while
+				# periodically retrying the still-attached Ethernet adapter.
+				delay=$RESCUE_RETRY_INTERVAL
+			else
+				set_state waiting "${2:-retry}"
+				delay=$RETRY_INTERVAL
+			fi
 		else
 			set_state waiting no-adapter
 			delay=$PASSIVE_INTERVAL
@@ -391,31 +466,59 @@ bound|renew)
 esac
 EOF
 chmod 0755 "$HOOK"
-ifconfig "$iface" up
-stop_eth_dhcp
-ifconfig "$iface" up
-export TATER_ETH_LEASE_FILE=$LEASE
-udhcpc -i "$iface" -s "$HOOK" -b -t 8 -p "$DHCP_PID" 2>&1
 
-address=
-gateway=
-i=0
-while [ "$i" -lt "$DHCP_TIMEOUT" ]; do
-	wanted || { fallback service-stop; needs_fallback=0; exit 0; }
-	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
-	[ -n "$address" ] || address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
-	gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
-	if [ -n "$address" ] && [ -n "$gateway" ]; then
-		if has_eth_default || route add default gw "$gateway" dev "$iface" metric 50 2>/dev/null; then
-			has_eth_default && break
+acquire_eth_lease() {
+	stop_eth_dhcp
+	ifconfig "$iface" up
+	export TATER_ETH_LEASE_FILE=$LEASE
+	udhcpc -i "$iface" -s "$HOOK" -b -t 8 -p "$DHCP_PID" 2>&1
+
+	address=
+	gateway=
+	i=0
+	while [ "$i" -lt "$DHCP_TIMEOUT" ]; do
+		wanted || return 1
+		eth_address
+		gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+		if [ -n "$address" ] && [ -n "$gateway" ]; then
+			if has_eth_default || route add default gw "$gateway" dev "$iface" metric 50 2>/dev/null; then
+				has_eth_default && return 0
+			fi
 		fi
-	fi
+		sleep 1
+		i=$((i + 1))
+	done
+	return 1
+}
+
+wired_basics_healthy() {
+	eth_address
+	carrier=$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo 0)
+	[ -n "$address" ] && [ "$carrier" != 0 ] && has_eth_default
+}
+
+recover_ethernet() {
+	old_address=${address:--}
+	set_state recovering "$iface" "$old_address" path-unreachable
+	say "$iface stopped moving traffic; renewing DHCP and resetting the interface before Wi-Fi rescue"
+	stop_eth_dhcp
+	ifconfig "$iface" down 2>/dev/null || true
 	sleep 1
-	i=$((i + 1))
-done
-if [ -z "$address" ] || [ -z "$gateway" ] || ! has_eth_default; then
-	fallback no-lease
-	needs_fallback=0
+	ifconfig "$iface" up 2>/dev/null || true
+	acquire_eth_lease && wired_basics_healthy && eth_path_healthy
+}
+
+if ! acquire_eth_lease; then
+	wanted || { fallback service-stop; needs_fallback=0; exit 0; }
+	wifi_rescue no-lease
+	exit 1
+fi
+if ! wired_basics_healthy; then
+	wifi_rescue link-lost
+	exit 1
+fi
+if ! eth_path_healthy && ! recover_ethernet; then
+	wifi_rescue path-unreachable
 	exit 1
 fi
 
@@ -434,24 +537,52 @@ fi
 ifconfig
 route -n
 
-failures=0
 while wanted; do
-	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
-	[ -n "$address" ] || address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
-	carrier=$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo 1)
-	if [ -n "$address" ] && [ "$carrier" != 0 ] && has_eth_default; then
-		failures=0
-	else
-		failures=$((failures + 1))
-		[ "$failures" -ge "$FAILURE_LIMIT" ] && break
+	link_failures=0
+	path_failures=0
+	next_health=0
+	failure_reason=
+	while wanted; do
+		if wired_basics_healthy; then
+			link_failures=0
+		else
+			link_failures=$((link_failures + 1))
+			if [ "$link_failures" -ge "$FAILURE_LIMIT" ]; then
+				failure_reason=link-lost
+				break
+			fi
+		fi
+		now=$(date +%s)
+		if [ "$now" -ge "$next_health" ]; then
+			if eth_path_healthy; then
+				path_failures=0
+			else
+				path_failures=$((path_failures + 1))
+				if [ "$path_failures" -ge "$FAILURE_LIMIT" ]; then
+					failure_reason=path-unreachable
+					break
+				fi
+			fi
+			next_health=$((now + HEALTH_INTERVAL))
+		fi
+		sleep "$MONITOR_INTERVAL"
+	done
+
+	wanted || break
+	if [ ! -e "$SYS_NET/$iface" ]; then
+		fallback adapter-removed
+		needs_fallback=0
+		exit 0
 	fi
-	sleep "$MONITOR_INTERVAL"
+	if [ "$failure_reason" = path-unreachable ] && recover_ethernet; then
+		set_state active "$iface" "$address"
+		say "$iface recovered without enabling Wi-Fi"
+		continue
+	fi
+	wifi_rescue "${failure_reason:-wired-unhealthy}"
+	exit 0
 done
 
-if wanted; then
-	fallback link-lost
-else
-	fallback service-stop
-fi
+fallback service-stop
 needs_fallback=0
 exit 0

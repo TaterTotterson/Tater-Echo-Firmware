@@ -77,7 +77,10 @@ The daemon exposes detection separately from qualification and live state:
   path is qualified.
 - `usb_ethernet_active`: Ethernet currently owns network traffic.
 - `usb_ethernet_state`: `pending`, `waiting`, `probing`, `active`,
-  `probe-complete`, `fallback`, `stopped`, `unsupported`, or `unavailable`.
+  `recovering`, `rescue`, `probe-complete`, `fallback`, `stopped`,
+  `unsupported`, or `unavailable`.
+- `usb_ethernet_wifi_rescue`: Wi-Fi is carrying traffic while an attached
+  Ethernet adapter remains unhealthy and is being retried.
 
 The old `usb_ethernet_enabled` setting is ignored. The installed Tater commands
 are `/usr/local/sbin/tater-net` and
@@ -88,7 +91,13 @@ are `/usr/local/sbin/tater-net` and
 
 The same controller is installed and supervised on Biscuit, Radar, Checkers,
 Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
-already enumerated, after DHCP and route validation. Biscuit performs an active
+already enumerated, after DHCP, route, and end-to-end path validation. A carrier,
+address, and default route are not enough: the controller also binds a TCP probe
+to the wired address and checks the paired Tater endpoint, with the DHCP gateway
+as an independent reachability check. If that path stalls, it renews DHCP and
+resets the interface before starting Wi-Fi rescue. The rescue state remains
+visible in device status while the attached adapter is retried, and a recovered
+wired path automatically takes ownership again. Biscuit performs an active
 userspace role switch; Checkers and Crown use qualified physical OTG paths
 without a firmware role write; Athena uses its qualified mainline MTU3/GPIO OTG
 path; and Rook uses the qualified bounded MediaTek role backend. Radar remains

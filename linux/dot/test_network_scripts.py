@@ -40,6 +40,8 @@ class USBEthernetControllerTests(unittest.TestCase):
         self._command("ifconfig", "#!/bin/sh\nexit 0\n")
         self._command("udhcpc", "#!/bin/sh\nexit 0\n")
         self._command("pidof", "#!/bin/sh\nexit 1\n")
+        self._command("ping", "#!/bin/sh\nexit 0\n")
+        self._command("nc", "#!/bin/sh\nexit 0\n")
         self.techo5_lib = self.root / "techo5-lib.sh"
         self.techo5_lib.write_text(
             "t5_wifi_conf() { :; }\n"
@@ -88,6 +90,8 @@ class USBEthernetControllerTests(unittest.TestCase):
             "TATER_ETH_DHCP_TIMEOUT": "1",
             "TATER_ETH_MONITOR_INTERVAL": "0.05",
             "TATER_ETH_FAILURE_LIMIT": "1",
+            "TATER_ETH_HEALTH_INTERVAL": "0",
+            "TATER_ETH_RESCUE_RETRY_INTERVAL": "1",
         })
         environment.update(extra)
         return environment
@@ -107,7 +111,7 @@ class USBEthernetControllerTests(unittest.TestCase):
         self.assertEqual("device", self.mchange.read_text().strip())
         self.assertFalse(self.net_log.exists(), "Wi-Fi was restarted during a non-disruptive probe")
 
-    def test_adapter_without_lease_restores_serial_and_keeps_wifi(self) -> None:
+    def test_adapter_without_lease_stays_visible_in_wifi_rescue(self) -> None:
         self._usb_interface()
         self.mchange.write_text("Active:1 host:1 force:1\n", encoding="utf-8")
         result = subprocess.run(
@@ -120,8 +124,8 @@ class USBEthernetControllerTests(unittest.TestCase):
         )
 
         self.assertEqual(1, result.returncode)
-        self.assertEqual("fallback no-lease", (self.run / "tater-usb-ethernet.state").read_text().strip())
-        self.assertEqual("device", self.mchange.read_text().strip())
+        self.assertEqual("rescue eth0 - no-lease", (self.run / "tater-usb-ethernet.state").read_text().strip())
+        self.assertIn("host:1", self.mchange.read_text())
         self.assertFalse(self.net_log.exists(), "failed Ethernet DHCP changed Wi-Fi")
 
     def test_supervisor_retries_hotplug_then_prefers_usable_ethernet(self) -> None:
@@ -165,14 +169,14 @@ class USBEthernetControllerTests(unittest.TestCase):
         (interface / "carrier").write_text("0\n", encoding="utf-8")
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if state.read_text().startswith("waiting link-lost"):
+            if state.read_text().startswith("rescue eth0 192.168.1.9 link-lost"):
                 if self.net_log.read_text().splitlines() == ["stop", "fallback"]:
                     break
             time.sleep(0.02)
         else:
             process.kill()
             stdout, stderr = process.communicate()
-            self.fail(f"Wired loss did not restore Wi-Fi and enter waiting: {stdout=} {stderr=}")
+            self.fail(f"Wired loss did not start visible Wi-Fi rescue: {stdout=} {stderr=}")
 
         subprocess.run(
             ["sh", str(ETHERNET), "stop"],
@@ -336,7 +340,7 @@ exit 0
         (interface / "carrier").write_text("0\n", encoding="utf-8")
         stdout, stderr = process.communicate(timeout=5)
         self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
-        self.assertEqual("fallback link-lost", state.read_text().strip())
+        self.assertEqual("rescue eth0 192.168.1.9 link-lost", state.read_text().strip())
         self.assertEqual(["fallback"], self.net_log.read_text().splitlines())
 
     def test_usable_ethernet_stops_wifi_then_disable_restores_it(self) -> None:
@@ -357,15 +361,70 @@ exit 0
         self.assertEqual("device", self.mchange.read_text().strip())
         self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
 
-    def test_link_loss_restores_serial_and_wifi(self) -> None:
+    def test_adapter_removal_restores_serial_and_wifi(self) -> None:
         process, state, interface = self._start_usable_ethernet()
 
-        (interface / "carrier").write_text("0\n", encoding="utf-8")
+        shutil.rmtree(interface)
         stdout, stderr = process.communicate(timeout=5)
         self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
-        self.assertEqual("fallback link-lost", state.read_text().strip())
+        self.assertEqual("fallback adapter-removed", state.read_text().strip())
         self.assertEqual("device", self.mchange.read_text().strip())
         self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
+
+    def test_blackholed_ethernet_is_repaired_before_visible_wifi_rescue(self) -> None:
+        self.native_config.write_text(
+            '{"url":"ws://10.4.20.210:8501/api/tater/satellite/v1/ws"}\n',
+            encoding="utf-8",
+        )
+        process, state, _ = self._start_usable_ethernet()
+        self._command("nc", "#!/bin/sh\nexit 1\n")
+        self._command("ping", "#!/bin/sh\nexit 1\n")
+
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+        self.assertEqual("rescue eth0 192.168.1.9 path-unreachable", state.read_text().strip())
+        self.assertIn("eth0 down", self.ifconfig_log.read_text().splitlines())
+        self.assertIn("host:1", self.mchange.read_text())
+        self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
+
+    def test_transient_path_failure_recovers_without_starting_wifi(self) -> None:
+        self.native_config.write_text(
+            '{"url":"ws://10.4.20.210:8501/api/tater/satellite/v1/ws"}\n',
+            encoding="utf-8",
+        )
+        process, state, _ = self._start_usable_ethernet()
+        self._command(
+            "nc",
+            """#!/bin/sh
+count_file="$TATER_TEST_NET_LOG.nc-count"
+count=$(cat "$count_file" 2>/dev/null || echo 0)
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+[ "$count" -gt 1 ]
+""",
+        )
+        self._command("ping", "#!/bin/sh\nexit 1\n")
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if "recovered without enabling Wi-Fi" in (self.data / "eth.log").read_text():
+                break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Transient path failure was not repaired: {stdout=} {stderr=}")
+
+        self.assertEqual("active eth0 192.168.1.9", state.read_text().strip())
+        self.assertIn("eth0 down", self.ifconfig_log.read_text().splitlines())
+        self.assertEqual(["stop"], self.net_log.read_text().splitlines())
+        subprocess.run(
+            ["sh", str(ETHERNET), "stop"],
+            env=self._environment(),
+            check=True,
+            timeout=5,
+        )
+        process.communicate(timeout=5)
 
     def test_setup_mode_keeps_hotspot_available_while_ethernet_is_active(self) -> None:
         self.native_config.unlink()
@@ -405,7 +464,7 @@ exit 0
         (interface / "carrier").write_text("0\n", encoding="utf-8")
         stdout, stderr = process.communicate(timeout=5)
         self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
-        self.assertEqual("fallback link-lost", state.read_text().strip())
+        self.assertEqual("rescue eth0 192.168.1.9 link-lost", state.read_text().strip())
         self.assertFalse(self.net_log.exists(), "setup fallback restarted or stopped Wi-Fi")
 
     def test_saved_setup_form_keeps_hotspot_until_reboot(self) -> None:
@@ -530,7 +589,7 @@ exit 0
         (interface / "carrier").write_text("0\n", encoding="utf-8")
         stdout, stderr = process.communicate(timeout=5)
         self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
-        self.assertEqual("fallback link-lost", state.read_text().strip())
+        self.assertEqual("rescue eth0 192.168.1.9 link-lost", state.read_text().strip())
         self.assertEqual(["fallback"], self.net_log.read_text().splitlines())
         self.assertEqual(original, self.mchange.read_text())
 

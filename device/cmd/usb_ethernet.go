@@ -26,7 +26,9 @@ func usbEthernetSettings() map[string]any {
 	}
 	if prepared, _ := diagnostics["prepared"].(bool); prepared {
 		settings["usb_ethernet_active"] = diagnostics["active"]
+		settings["usb_ethernet_wifi_rescue"] = diagnostics["wifi_rescue"]
 		settings["usb_ethernet_state"] = diagnostics["state"]
+		settings["usb_ethernet_transport"] = diagnostics["transport"]
 	}
 	return settings
 }

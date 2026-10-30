@@ -126,9 +126,13 @@ network, fallback, update, reinstall, and recovery gates.
   OTA, A/B System OTA activation and confirmation reboots, factory install,
   boot with the adapter attached, and volume-up TWRP.
 
-Wi-Fi stays connected while Ethernet DHCP runs. A usable Ethernet route
-disables Wi-Fi; link loss or unplug restores Wi-Fi and, where the controller
-claimed the port, the device/serial role. Biscuit and Rook have
+Wi-Fi stays connected while Ethernet DHCP and end-to-end reachability checks
+run. A usable Ethernet path disables Wi-Fi. If an attached adapter stops moving
+traffic, the common controller first renews DHCP and resets the wired interface.
+Only after that bounded repair fails does it start Wi-Fi rescue, report the
+degraded state to Tater, and keep retrying Ethernet. Removing the adapter
+restores normal Wi-Fi and, where the controller claimed the port, the
+device/serial role. Biscuit and Rook have
 no non-disruptive way to see a host adapter while their shared controller is in
 gadget mode, so automatic detection briefly interrupts USB serial once per
 60-second retry. There is no user enable flag. Before testing that transition,
@@ -205,12 +209,14 @@ Complete these in order for each target:
    Only then change the capability status to `qualified` and add the backend to
    the runtime selector.
 
-Wi-Fi must remain connected until Ethernet has both an IPv4 address and a
-default route. Outside setup, a usable wired route stops Wi-Fi and puts its
-interface down. On disable or sustained failure, Ethernet DHCP is stopped first,
-the USB device/serial role is restored, and Wi-Fi is then restarted if it had
-been stopped. A daemon-only OTA can never qualify a platform whose immutable
-kernel or root filesystem lacks the required controller.
+Wi-Fi must remain connected until Ethernet has an IPv4 address, a default route,
+and a working path to either the paired Tater controller or DHCP gateway.
+Outside setup, a usable wired path stops Wi-Fi and puts its interface down. On a
+sustained path failure, Ethernet is repaired first; Wi-Fi rescue is then started
+without hiding the still-attached failed adapter. On adapter removal or service
+disable, Ethernet DHCP is stopped first, the USB device/serial role is restored,
+and Wi-Fi is restarted if needed. A daemon-only OTA can never qualify a platform
+whose immutable kernel or root filesystem lacks the required controller.
 
 ## Recommended order
 

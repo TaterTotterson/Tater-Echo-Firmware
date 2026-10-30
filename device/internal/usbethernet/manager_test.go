@@ -169,10 +169,40 @@ func TestDiagnosticsSeparateQualificationAndActiveState(t *testing.T) {
 	}
 	got := manager.Diagnostics()
 	if got["supported"] != true || got["automatic"] != true || got["active"] != true ||
+		got["wifi_rescue"] != false || got["transport"] != "ethernet" ||
 		got["interface"] != "eth0" || got["address"] != "192.168.1.9" ||
 		got["target"] != "biscuit" || got["backend"] != "mediatek-mchange" ||
 		got["detection"] != "bounded-active-probe" || got["qualification"] != "qualified" {
 		t.Fatalf("unexpected diagnostics: %#v", got)
+	}
+}
+
+func TestRescueDiagnosticsExposeWifiWithoutHidingAttachedEthernet(t *testing.T) {
+	manager := testManager(t, "biscuit")
+	if err := os.WriteFile(manager.Paths.State, []byte("rescue eth0 192.168.1.9 path-unreachable\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Diagnostics()
+	if got["active"] != false || got["wifi_rescue"] != true || got["transport"] != "wifi" ||
+		got["state"] != "rescue" || got["interface"] != "eth0" ||
+		got["address"] != "192.168.1.9" || got["reason"] != "path-unreachable" {
+		t.Fatalf("unexpected rescue diagnostics: %#v", got)
+	}
+}
+
+func TestRecoveringDiagnosticsKeepFailureReason(t *testing.T) {
+	manager := testManager(t, "athena")
+	if err := os.WriteFile(manager.Paths.State, []byte("recovering eth0 - path-unreachable\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Diagnostics()
+	if got["active"] != false || got["wifi_rescue"] != false || got["transport"] != "ethernet" ||
+		got["state"] != "recovering" || got["interface"] != "eth0" ||
+		got["reason"] != "path-unreachable" {
+		t.Fatalf("unexpected recovering diagnostics: %#v", got)
+	}
+	if _, exists := got["address"]; exists {
+		t.Fatalf("placeholder address leaked into diagnostics: %#v", got)
 	}
 }
 

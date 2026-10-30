@@ -16,8 +16,8 @@ type Paths struct {
 }
 
 // State describes the detected link rather than a user preference. Phase is
-// one of pending, waiting, probing, active, probe-complete, fallback, stopped,
-// unsupported, or unavailable.
+// one of pending, waiting, probing, active, recovering, rescue, probe-complete,
+// fallback, stopped, unsupported, or unavailable.
 type State struct {
 	Phase     string
 	Interface string
@@ -87,6 +87,16 @@ func (m *Manager) State() State {
 		if len(fields) > 2 {
 			state.Address = fields[2]
 		}
+	case "recovering", "rescue":
+		if len(fields) > 1 {
+			state.Interface = fields[1]
+		}
+		if len(fields) > 2 && fields[2] != "-" {
+			state.Address = fields[2]
+		}
+		if len(fields) > 3 {
+			state.Reason = fields[3]
+		}
 	case "fallback", "unsupported", "waiting":
 		if len(fields) > 1 {
 			state.Reason = fields[1]
@@ -112,7 +122,15 @@ func (m *Manager) Diagnostics() map[string]any {
 		"automatic":     prepared,
 		"supported":     supported,
 		"active":        prepared && state.Phase == "active",
+		"wifi_rescue":   prepared && state.Phase == "rescue",
 		"state":         state.Phase,
+	}
+	if prepared {
+		if state.Phase == "active" || state.Phase == "recovering" {
+			diagnostics["transport"] = "ethernet"
+		} else {
+			diagnostics["transport"] = "wifi"
+		}
 	}
 	if capability.Reason != "" {
 		diagnostics["qualification_reason"] = capability.Reason
