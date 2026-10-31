@@ -98,8 +98,7 @@
 
 ### New Contributor
 
-Contributions from [@heapsoftware](https://github.com/heapsoftware) included in
-this release:
+Contributions from @heapsoftware included in this release:
 
 - [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
 
