@@ -91,6 +91,8 @@ above has been tested. See
 [`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for technical
 details and per-device test results.
 
+## Before you install
+
 > [!IMPORTANT]
 > **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
 > target.** Any existing installation earlier than v4.0.0 cannot cross this platform boundary
