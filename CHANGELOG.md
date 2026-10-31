@@ -94,12 +94,12 @@ screen, audio, recovery, and installation behavior.
   updates, still require USB/TWRP.
 - Use Tater v2.0.0 or newer to manage the new settings and system updates.
 
-### New Contributor
+### New Contributors
 
-Contributions from [@heapsoftware](https://github.com/heapsoftware) included in
-this release:
+- [@heapsoftware](https://github.com/heapsoftware) made their first contribution
+  in [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4).
 
-- [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
+**Full Changelog**: [v3.1.2...v4.0.0](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v3.1.2...v4.0.0)
 
 ## v3.1.2
 
