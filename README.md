@@ -47,12 +47,21 @@ Target metadata used by Tater and the release builds lives in
 > On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
 > starts to enter TWRP.
 >
-> On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
-> directly by USB. Run `python3 to_twrp.py` from the extracted v4 factory archive
-> (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
-> with the normal factory installer. You do not need to hold Volume Up or enter
-> Tater Recovery first. Do not use `--repair` for this upgrade; repair mode only
-> fixes an existing Tater system slot.
+> **Pre-v4 Biscuit and Radar:**
+>
+> 1. Boot the satellite normally.
+> 2. Extract the v4 factory archive for the device.
+> 3. Connect the satellite directly by USB.
+> 4. Open Terminal in the extracted archive folder and run:
+>
+>    ```bash
+>    python3 to_twrp.py
+>    ```
+>
+> 5. Wait for TWRP to start, then run the normal factory installer.
+>
+> You do not need to hold Volume Up or enter Tater Recovery. Do not use
+> `--repair`; it only repairs an existing Tater system slot.
 
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
@@ -134,12 +143,22 @@ Do not flash or boot Fire OS as part of the Tater installation.
 ### Install or upgrade
 
 1. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz`.
-2. Enter TWRP. The ring should be white:
+2. Enter TWRP.
 
-   - When upgrading a pre-v4 Biscuit, boot the satellite normally, connect it
-     directly by USB, and run `python3 to_twrp.py` from the extracted archive.
-     On Windows, run `py -3 to_twrp.py`.
-   - For a new installation, enter TWRP using the amonet-biscuit instructions.
+   When upgrading a pre-v4 Biscuit:
+
+   1. Boot the Biscuit normally.
+   2. Connect it directly to the computer by USB.
+   3. Open Terminal in the extracted factory archive folder.
+   4. Run:
+
+      ```bash
+      python3 to_twrp.py
+      ```
+
+   5. Wait for the ring to turn white.
+
+   For a new installation, enter TWRP using the amonet-biscuit instructions.
 
 3. Verify the archive before making changes:
 
@@ -147,15 +166,11 @@ Do not flash or boot Fire OS as part of the Tater installation.
    ./install.sh --verify-bundle
    ```
 
-   On Windows, run `py -3 install.py --verify-bundle`.
-
 4. Start the installation:
 
    ```bash
    ./install.sh
    ```
-
-   On Windows, run `py -3 install.py`.
 
 5. Keep USB connected and keep the Biscuit powered until installation finishes.
 6. A previously paired Biscuit reconnects automatically. On a new or reset
@@ -196,12 +211,22 @@ These steps are also the required upgrade path for every Radar running Tater
 firmware earlier than v4.0.0.
 
 1. Download and extract `tater-echo-radar-<version>-factory.tar.gz`.
-2. Enter TWRP:
+2. Enter TWRP.
 
-   - When upgrading a pre-v4 Radar, boot the satellite normally, connect its
-     internal USB pads, and run `python3 to_twrp.py` from the extracted archive.
-     On Windows, run `py -3 to_twrp.py`.
-   - For a new installation, enter TWRP using the amonet-radar instructions.
+   When upgrading a pre-v4 Radar:
+
+   1. Boot the Radar normally.
+   2. Connect its internal USB pads to the computer.
+   3. Open Terminal in the extracted factory archive folder.
+   4. Run:
+
+      ```bash
+      python3 to_twrp.py
+      ```
+
+   5. Wait for TWRP to start.
+
+   For a new installation, enter TWRP using the amonet-radar instructions.
 
 3. Verify, then install the bundle:
 

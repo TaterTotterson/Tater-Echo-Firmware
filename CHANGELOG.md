@@ -13,12 +13,21 @@ screen, audio, recovery, and installation behavior.
   exact Echo model and follow its included instructions.
 - On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
   starts to enter TWRP.
-- On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
-  directly by USB. Run `python3 to_twrp.py` from the extracted v4 factory archive
-  (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
-  with the normal factory installer. You do not need to hold Volume Up or enter
-  Tater Recovery first. Do not use `--repair` for this upgrade; repair mode only
-  fixes an existing Tater system slot.
+- **Pre-v4 Biscuit and Radar:**
+
+  1. Boot the satellite normally.
+  2. Extract the v4 factory archive for the device.
+  3. Connect the satellite directly by USB.
+  4. Open Terminal in the extracted archive folder and run:
+
+     ```bash
+     python3 to_twrp.py
+     ```
+
+  5. Wait for TWRP to start, then run the normal factory installer.
+
+  You do not need to hold Volume Up or enter Tater Recovery. Do not use
+  `--repair`; it only repairs an existing Tater system slot.
 - The installer keeps existing Tater pairing, Wi-Fi, SSH, and satellite
   settings by default. Use `--factory-reset` only when you want a clean setup.
   Existing Rook installations should follow the additional reinstall command
