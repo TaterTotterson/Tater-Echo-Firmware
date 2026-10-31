@@ -55,12 +55,6 @@ screen, audio, recovery, and installation behavior.
 - Added Tater boot branding to Checkers, Crown, and Rook, plus a safe Tater
   startup splash on Athena.
 
-### New Contributor
-
-Contributions from @heapsoftware included in this release:
-
-- [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
-
 ### Before you update
 
 - **A one-time USB/TWRP installation is required** for every satellite running
@@ -94,6 +88,13 @@ Contributions from @heapsoftware included in this release:
   to the previous working version. Some low-level changes, including boot-logo
   updates, still require USB/TWRP.
 - Use Tater v2.0.0 or newer to manage the new settings and system updates.
+
+### New Contributor
+
+Contributions from [@heapsoftware](https://github.com/heapsoftware) included in
+this release:
+
+- [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
 
 ## v3.1.2
 
