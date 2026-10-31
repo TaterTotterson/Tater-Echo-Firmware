@@ -18,6 +18,13 @@ import tarfile
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 REMOTE_ARCHIVE = "/tmp/tater-settings-preserve.tar"
 LOCALTIME_PATH = "data/local/etc/tater/localtime"
+LOCALTIME_PATHS = (
+    LOCALTIME_PATH,
+    # Pre-v4 Rook/Show installations stored the same checked timezone symlink
+    # under the inherited TECHO5 settings roots.
+    "data/misc/techo5/localtime",
+    "data/techo5/misc/techo5/localtime",
+)
 ZONEINFO_PARTS = ("/", "usr", "share", "zoneinfo")
 
 # Relative to /. Directories are kept deliberately narrow: update slots,
@@ -74,8 +81,8 @@ def _allowed(name: str) -> bool:
 
 def _supported_member(member: tarfile.TarInfo, name: str) -> bool:
     if member.isdir() or member.isfile():
-        return not name.startswith(LOCALTIME_PATH + "/")
-    if not member.issym() or name != LOCALTIME_PATH:
+        return not any(name.startswith(path + "/") for path in LOCALTIME_PATHS)
+    if not member.issym() or name not in LOCALTIME_PATHS:
         return False
     target = PurePosixPath(member.linkname)
     return (
