@@ -90,6 +90,7 @@ class USBEthernetControllerTests(unittest.TestCase):
             "TATER_ETH_DHCP_TIMEOUT": "1",
             "TATER_ETH_MONITOR_INTERVAL": "0.05",
             "TATER_ETH_FAILURE_LIMIT": "1",
+            "TATER_ETH_CONTROLLER_FAILURE_LIMIT": "3",
             "TATER_ETH_HEALTH_INTERVAL": "0",
             "TATER_ETH_RESCUE_RETRY_INTERVAL": "1",
         })
@@ -386,6 +387,69 @@ exit 0
         self.assertIn("eth0 down", self.ifconfig_log.read_text().splitlines())
         self.assertIn("host:1", self.mchange.read_text())
         self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
+
+    def test_controller_failure_is_not_masked_by_healthy_gateway(self) -> None:
+        self.native_config.write_text(
+            '{"url":"ws://10.4.20.210:8501/api/tater/satellite/v1/ws"}\n',
+            encoding="utf-8",
+        )
+        process, state, _ = self._start_usable_ethernet()
+        self._command("nc", "#!/bin/sh\nexit 1\n")
+        self._command("ping", "#!/bin/sh\nexit 0\n")
+
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+        self.assertEqual(
+            "rescue eth0 192.168.1.9 controller-unreachable",
+            state.read_text().strip(),
+        )
+        self.assertIn("eth0 down", self.ifconfig_log.read_text().splitlines())
+        self.assertEqual(["stop", "fallback"], self.net_log.read_text().splitlines())
+        log = (self.data / "eth.log").read_text()
+        self.assertIn("can reach the gateway but not paired Tater", log)
+        self.assertIn("health failure diagnostics (controller-unreachable)", log)
+
+    def test_controller_restart_grace_does_not_flap_wifi(self) -> None:
+        self.native_config.write_text(
+            '{"url":"ws://10.4.20.210:8501/api/tater/satellite/v1/ws"}\n',
+            encoding="utf-8",
+        )
+        process, state, _ = self._start_usable_ethernet()
+        self._command(
+            "nc",
+            """#!/bin/sh
+count_file="$TATER_TEST_NET_LOG.nc-count"
+count=$(cat "$count_file" 2>/dev/null || echo 0)
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+case "$count" in
+1|2) exit 1 ;;
+*) exit 0 ;;
+esac
+""",
+        )
+        self._command("ping", "#!/bin/sh\nexit 0\n")
+
+        count_file = Path(f"{self.net_log}.nc-count")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if count_file.exists() and int(count_file.read_text()) >= 3:
+                break
+            time.sleep(0.02)
+        else:
+            process.kill()
+            stdout, stderr = process.communicate()
+            self.fail(f"Controller health probe did not recover: {stdout=} {stderr=}")
+
+        self.assertEqual("active eth0 192.168.1.9", state.read_text().strip())
+        self.assertEqual(["stop"], self.net_log.read_text().splitlines())
+        subprocess.run(
+            ["sh", str(ETHERNET), "stop"],
+            env=self._environment(),
+            check=True,
+            timeout=5,
+        )
+        process.communicate(timeout=5)
 
     def test_transient_path_failure_recovers_without_starting_wifi(self) -> None:
         self.native_config.write_text(

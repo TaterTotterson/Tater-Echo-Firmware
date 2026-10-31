@@ -93,11 +93,14 @@ The same controller is installed and supervised on Biscuit, Radar, Checkers,
 Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
 already enumerated, after DHCP, route, and end-to-end path validation. A carrier,
 address, and default route are not enough: the controller also binds a TCP probe
-to the wired address and checks the paired Tater endpoint, with the DHCP gateway
-as an independent reachability check. If that path stalls, it renews DHCP and
-resets the interface before starting Wi-Fi rescue. The rescue state remains
-visible in device status while the attached adapter is retried, and a recovered
-wired path automatically takes ownership again. Biscuit performs an active
+to the wired address and checks the paired Tater endpoint. Once paired, that
+endpoint is authoritative; a responsive DHCP gateway cannot mask an unreachable
+Tater controller. A longer controller grace window permits an ordinary Tater
+restart without immediately flapping to Wi-Fi. If the wired path remains stalled,
+the controller records interface and kernel diagnostics, renews DHCP, and resets
+the interface before starting Wi-Fi rescue. The rescue state remains visible in
+device status while the attached adapter is retried, and a recovered wired path
+automatically takes ownership again. Biscuit performs an active
 userspace role switch; Checkers and Crown use qualified physical OTG paths
 without a firmware role write; Athena uses its qualified mainline MTU3/GPIO OTG
 path; and Rook uses the qualified bounded MediaTek role backend. Radar remains

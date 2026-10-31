@@ -210,7 +210,10 @@ Complete these in order for each target:
    the runtime selector.
 
 Wi-Fi must remain connected until Ethernet has an IPv4 address, a default route,
-and a working path to either the paired Tater controller or DHCP gateway.
+and, once paired, a working path to the configured Tater controller. The DHCP
+gateway is the health target only before pairing. A longer controller-specific
+grace window permits normal Tater restarts before wired recovery and visible
+Wi-Fi rescue begin.
 Outside setup, a usable wired path stops Wi-Fi and puts its interface down. On a
 sustained path failure, Ethernet is repaired first; Wi-Fi rescue is then started
 without hiding the still-attached failed adapter. On adapter removal or service

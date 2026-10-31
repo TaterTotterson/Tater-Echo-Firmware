@@ -24,6 +24,7 @@ ENUM_TIMEOUT=${TATER_ETH_ENUM_TIMEOUT:-15}
 DHCP_TIMEOUT=${TATER_ETH_DHCP_TIMEOUT:-45}
 MONITOR_INTERVAL=${TATER_ETH_MONITOR_INTERVAL:-2}
 FAILURE_LIMIT=${TATER_ETH_FAILURE_LIMIT:-3}
+CONTROLLER_FAILURE_LIMIT=${TATER_ETH_CONTROLLER_FAILURE_LIMIT:-8}
 HEALTH_INTERVAL=${TATER_ETH_HEALTH_INTERVAL:-15}
 HEALTH_TIMEOUT=${TATER_ETH_HEALTH_TIMEOUT:-2}
 PROBE_MAX_SECONDS=${TATER_ETH_PROBE_MAX_SECONDS:-60}
@@ -112,17 +113,61 @@ controller_endpoint() {
 }
 
 # Carrier and a default route can stay present while a USB NIC has stopped
-# moving packets. Prove that traffic can leave this interface by reaching the
-# paired Tater controller or the DHCP gateway. The source binding prevents a
-# concurrently active Wi-Fi rescue route from making Ethernet look healthy.
+# moving packets. Once paired, the configured Tater controller is the
+# authoritative health target; a gateway that still answers must not mask an
+# unreachable controller. Before pairing, the DHCP gateway remains the best
+# available target. Source binding prevents a concurrently active Wi-Fi rescue
+# route from making Ethernet look healthy.
+#
+# Return 2 when the gateway responds but the paired controller does not. The
+# monitor gives that state a longer grace window so a normal Tater restart does
+# not immediately flap every wired satellite to Wi-Fi.
 eth_path_healthy() {
 	eth_address
-	[ -n "$address" ] || return 1
+	if [ -z "$address" ]; then
+		path_status=no-address
+		return 1
+	fi
 	if controller_endpoint; then
-		nc -z -w "$HEALTH_TIMEOUT" -s "$address" "$controller_host" "$controller_port" >/dev/null 2>&1 && return 0
+		if nc -z -w "$HEALTH_TIMEOUT" -s "$address" "$controller_host" "$controller_port" >/dev/null 2>&1; then
+			path_status=controller
+			return 0
+		fi
+		[ -n "${gateway:-}" ] || gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+		if [ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1; then
+			path_status=controller-unreachable
+			return 2
+		fi
+		path_status=path-unreachable
+		return 1
 	fi
 	[ -n "${gateway:-}" ] || gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
-	[ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1
+	if [ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1; then
+		path_status=gateway
+		return 0
+	fi
+	path_status=path-unreachable
+	return 1
+}
+
+log_wired_diagnostics() {
+	reason=${1:-wired-unhealthy}
+	say "$iface health failure diagnostics ($reason)"
+	{
+		printf 'controller=%s:%s gateway=%s address=%s\n' \
+			"${controller_host:--}" "${controller_port:--}" "${gateway:--}" "${address:--}"
+		printf 'carrier=%s operstate=%s\n' \
+			"$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo -)" \
+			"$(cat "$SYS_NET/$iface/operstate" 2>/dev/null || echo -)"
+		for stat in rx_bytes rx_packets rx_errors rx_dropped tx_bytes tx_packets tx_errors tx_dropped; do
+			value=$(cat "$SYS_NET/$iface/statistics/$stat" 2>/dev/null || echo -)
+			printf '%s=%s ' "$stat" "$value"
+		done
+		printf '\n'
+		ifconfig "$iface" 2>/dev/null || true
+		route -n 2>/dev/null || true
+		dmesg 2>/dev/null | tail -80
+	} >> "$LOG" 2>&1
 }
 
 restore_serial() {
@@ -498,9 +543,18 @@ wired_basics_healthy() {
 }
 
 recover_ethernet() {
+	reason=${1:-path-unreachable}
 	old_address=${address:--}
-	set_state recovering "$iface" "$old_address" path-unreachable
-	say "$iface stopped moving traffic; renewing DHCP and resetting the interface before Wi-Fi rescue"
+	set_state recovering "$iface" "$old_address" "$reason"
+	case "$reason" in
+	controller-unreachable)
+		say "$iface can reach the gateway but not paired Tater at ${controller_host:--}:${controller_port:--}; resetting the interface before Wi-Fi rescue"
+		;;
+	*)
+		say "$iface stopped moving traffic; renewing DHCP and resetting the interface before Wi-Fi rescue"
+		;;
+	esac
+	log_wired_diagnostics "$reason"
 	stop_eth_dhcp
 	ifconfig "$iface" down 2>/dev/null || true
 	sleep 1
@@ -517,9 +571,14 @@ if ! wired_basics_healthy; then
 	wifi_rescue link-lost
 	exit 1
 fi
-if ! eth_path_healthy && ! recover_ethernet; then
-	wifi_rescue path-unreachable
-	exit 1
+eth_path_healthy
+initial_health=$?
+if [ "$initial_health" -ne 0 ]; then
+	initial_reason=$path_status
+	if ! recover_ethernet "$initial_reason"; then
+		wifi_rescue "$initial_reason"
+		exit 1
+	fi
 fi
 
 set_state active "$iface" "$address"
@@ -540,6 +599,7 @@ route -n
 while wanted; do
 	link_failures=0
 	path_failures=0
+	controller_failures=0
 	next_health=0
 	failure_reason=
 	while wanted; do
@@ -554,9 +614,20 @@ while wanted; do
 		fi
 		now=$(date +%s)
 		if [ "$now" -ge "$next_health" ]; then
-			if eth_path_healthy; then
+			eth_path_healthy
+			health_result=$?
+			if [ "$health_result" -eq 0 ]; then
 				path_failures=0
+				controller_failures=0
+			elif [ "$health_result" -eq 2 ]; then
+				path_failures=0
+				controller_failures=$((controller_failures + 1))
+				if [ "$controller_failures" -ge "$CONTROLLER_FAILURE_LIMIT" ]; then
+					failure_reason=controller-unreachable
+					break
+				fi
 			else
+				controller_failures=0
 				path_failures=$((path_failures + 1))
 				if [ "$path_failures" -ge "$FAILURE_LIMIT" ]; then
 					failure_reason=path-unreachable
@@ -574,11 +645,15 @@ while wanted; do
 		needs_fallback=0
 		exit 0
 	fi
-	if [ "$failure_reason" = path-unreachable ] && recover_ethernet; then
-		set_state active "$iface" "$address"
-		say "$iface recovered without enabling Wi-Fi"
-		continue
-	fi
+	case "$failure_reason" in
+	path-unreachable|controller-unreachable)
+		if recover_ethernet "$failure_reason"; then
+			set_state active "$iface" "$address"
+			say "$iface recovered without enabling Wi-Fi"
+			continue
+		fi
+		;;
+	esac
 	wifi_rescue "${failure_reason:-wired-unhealthy}"
 	exit 0
 done
