@@ -36,6 +36,9 @@ Target metadata used by Tater and the release builds lives in
 
 ## Features
 
+- Automatic USB Ethernet with Wi-Fi fallback on supported satellites. Biscuit
+  can use the tested powered adapter for a single-cable PoE-style power and
+  network connection.
 - Sat Chat audio and video calls from satellite to satellite and from Tater on
   a phone to a satellite. Checkers, Crown, Athena, and Rook support audio and video;
   Biscuit and Radar participate in audio calls.
