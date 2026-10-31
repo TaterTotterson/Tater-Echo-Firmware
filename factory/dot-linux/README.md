@@ -5,8 +5,8 @@ Existing Tater pairing, Wi-Fi, SSH, and satellite settings are preserved by
 default; add `--factory-reset` when you deliberately want a clean setup.
 
 > [!IMPORTANT]
-> Every Biscuit and Radar running Tater v3.x must use this USB/TWRP factory
-> installer once to upgrade to v4.0.0. The v3 updater cannot safely install the
+> Every Biscuit and Radar running Tater firmware earlier than v4.0.0 must use
+> this USB/TWRP factory installer once. A pre-v4 updater cannot safely install the
 > complete v4 platform transition. The installer keeps any Tater setup it can
 > verify, but replaces the old firmware and application slots. Compatible
 > releases after v4.0.0 use the normal verified application and System OTA flow.

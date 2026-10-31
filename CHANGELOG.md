@@ -7,10 +7,10 @@
 #### Upgrade and updates
 
 - **USB/TWRP update required:** every Biscuit, Radar, Checkers, Crown, Athena,
-  and Rook running Tater v3.x must install its matching v4.0.0 factory archive
-  once. v4.0.0 changes the pinned platform, recovery, kernel/boot inputs, system
-  updater, and guarded branding paths, so it is not offered as an
-  application-only OTA from v3.x.
+  and Rook running Tater firmware earlier than v4.0.0 must install its matching
+  factory archive once. v4.0.0 changes the pinned platform, recovery,
+  kernel/boot inputs, system updater, and guarded branding paths, so it is not
+  offered as an application-only OTA to pre-v4 installations.
 - Preserved verified pairing, Wi-Fi, SSH, and satellite settings during the v4
   factory installation by default; `--factory-reset` provides a clean setup.
   Rook reinstalls use the guarded `--reinstall-existing-tater` path.

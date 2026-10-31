@@ -45,11 +45,12 @@ boot backup, inserts it into the release boot image, and writes only `system`
 and `boot`.
 
 v4.0.0 is a new factory baseline for Biscuit, Radar, Checkers, Crown, Athena,
-and Rook. Every unit running Tater v3.x must install its matching v4.0.0 factory
-archive through USB/TWRP once; the v3 updater cannot safely apply the complete
-platform, recovery, kernel/boot, branding, and System OTA transition. The v4
-release must therefore never be offered as an application-only OTA substitute
-to a v3 satellite. Factory installers preserve verified Tater identity, Wi-Fi,
+and Rook. Every unit running Tater firmware earlier than v4.0.0 must install its
+matching v4.0.0 factory archive through USB/TWRP once; a pre-v4 updater cannot
+safely apply the complete platform, recovery, kernel/boot, branding, and System
+OTA transition. The v4 release must therefore never be offered as an
+application-only OTA substitute to a pre-v4 satellite. Factory installers
+preserve verified Tater identity, Wi-Fi,
 SSH, and satellite settings by default, while discarding prior OTA application
 slots so the bundled version boots. Pass `--factory-reset` for a clean setup.
 Routine verified application and root-system OTA begins after the v4.0.0
@@ -82,7 +83,7 @@ bundles retain a full Linux rootfs for recovery.
 Every target also publishes a `system-ota.tar.gz` wrapper containing a complete
 rootfs plus an internal target, version, size, and SHA-256 manifest. This path
 is available after the v4.0.0 factory baseline is installed; it does not make
-the v3-to-v4 transition OTA-compatible. For later compatible releases, Tater
+the pre-v4-to-v4 transition OTA-compatible. For later compatible releases, Tater
 first updates the application when the connected daemon lacks the required
 System OTA support, then sends `ota.system.url`. The daemon verifies the outer
 download and embedded rootfs independently before `slotctl install` writes the

@@ -5,8 +5,8 @@ This USB factory bundle installs Tater Linux on an unlocked Echo Show 5
 Linux boot image, and creates the A/B rootfs store. Existing Tater identity and
 setup are preserved by default; a new device or `--factory-reset` starts fresh.
 
-Every Checkers running Tater v3.x must use this USB/TWRP factory bundle once
-to upgrade to v4.0.0. The v4 transition itself is not an OTA update. Compatible
+Every Checkers running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+factory bundle once. The v4 transition itself is not an OTA update. Compatible
 releases after v4.0.0 can update both the application and inactive root-system
 slot through Tater's verified A/B updater.
 

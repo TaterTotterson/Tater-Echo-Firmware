@@ -36,7 +36,7 @@ Target metadata used by Tater and the release builds lives in
 
 > [!IMPORTANT]
 > **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
-> target.** An existing v3.x installation cannot cross this platform boundary
+> target.** Any existing installation earlier than v4.0.0 cannot cross this platform boundary
 > through OTA. Use the factory archive matching the exact device; the installer
 > preserves verified Tater pairing, Wi-Fi, SSH, and satellite settings by
 > default, or pass `--factory-reset` for a clean start. After v4.0.0 is installed,
@@ -94,7 +94,7 @@ Start with an Echo Dot 2nd Generation (`biscuit`, model **RS03QR**) that has
 completed the [amonet-biscuit v2.0.0 bootloader unlock](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
 and has working TWRP. Do not flash or boot Fire OS as part of the Tater
 installation. These steps are also the required upgrade path for every Biscuit
-running Tater v3.x firmware that is upgrading to v4.0.0.
+running Tater firmware earlier than v4.0.0.
 
 1. Boot the Echo into TWRP—the ring should be white—and connect USB.
 2. Download `tater-echo-biscuit-<version>-factory.tar.gz` from the
@@ -135,7 +135,7 @@ and confirming that TWRP works. Do not flash or boot Fire OS as part of the
 Tater installation. The device has no external USB socket; keep normal power
 connected and use the D+, D-, and GND pads documented in that guide.
 These steps are also the required upgrade path for every Radar running Tater
-v3.x firmware that is upgrading to v4.0.0.
+firmware earlier than v4.0.0.
 
 1. Boot TWRP using the method documented by the amonet-radar unlock guide.
    Radar does not provide a dependable hold-button shortcut for recovery.
@@ -172,9 +172,9 @@ Start with an unlocked Echo Show 5 **1st Generation** (`checkers`, model
 [Checkers unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-1st-gen-2019-checkers.4762900/)
 covers those prerequisites.
 
-Every Checkers running Tater v3.x must use these USB/TWRP factory steps once
-to upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
-selected.
+Every Checkers running Tater firmware earlier than v4.0.0 must use these
+USB/TWRP factory steps once. Existing setup is preserved unless
+`--factory-reset` is selected.
 
 1. Download and extract `tater-echo-checkers-<version>-factory.tar.gz` from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
@@ -214,8 +214,8 @@ able to boot TWRP. Follow the
 [Crown unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-1st-gen-2019-crown.4766687/).
 Do not use this on the second-generation Echo Show 8 (model A8H3N2).
 
-Every Crown running Tater v3.x must use these USB/TWRP factory steps once to
-upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
+Every Crown running Tater firmware earlier than v4.0.0 must use these USB/TWRP
+factory steps once. Existing setup is preserved unless `--factory-reset` is
 selected.
 
 1. Download and extract `tater-echo-crown-<version>-factory.tar.gz`.
@@ -251,8 +251,8 @@ Athena is the 2021 second-generation Echo Show 8, model **A8H3N2**. It is not
 Crown. Begin with Fire OS 7080 / PS7574.1.7080N and complete the
 [saiyaku-athena unlock and TWRP procedure](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/).
 
-Every Athena running Tater v3.x must use these USB/TWRP factory steps once to
-upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
+Every Athena running Tater firmware earlier than v4.0.0 must use these USB/TWRP
+factory steps once. Existing setup is preserved unless `--factory-reset` is
 selected.
 
 1. Download and extract `tater-echo-athena-<version>-factory.tar.gz`.
@@ -291,8 +291,8 @@ preserved by default; `--factory-reset` starts clean. See
 Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`, model
 **VN94DQ**), amonet-rook v2.0.0, and working TWRP.
 
-Every Rook running Tater v3.x must use this USB/TWRP factory path once to
-upgrade to v4.0.0. For that reinstall, add `--reinstall-existing-tater` to both
+Every Rook running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+factory path once. For that reinstall, add `--reinstall-existing-tater` to both
 the preflight and install commands. Existing setup is preserved unless
 `--factory-reset` is also selected.
 
@@ -306,14 +306,14 @@ the preflight and install commands. Existing setup is preserved unless
    ./install.sh --preflight-only
    ```
 
-   When upgrading an existing Tater v3.x installation to v4.0.0, use
+   When upgrading an existing Tater installation earlier than v4.0.0, use
    `./install.sh --preflight-only --reinstall-existing-tater` instead.
 
 4. Run `./install.sh` and type `ERASE` only after checking the displayed model
    and partition information. Keep both cables connected until first-boot
    checks finish.
 
-   When upgrading an existing Tater v3.x installation to v4.0.0, run
+   When upgrading an existing Tater installation earlier than v4.0.0, run
    `./install.sh --reinstall-existing-tater` instead.
 5. An already paired Rook reconnects automatically. On a new/reset unit, join
    the `Tater-Setup-XXXX` network shown on the Spot and complete setup.
@@ -358,10 +358,10 @@ amonet/TWRP recovery procedure.
 ## Updates and release files
 
 v4.0.0 itself is a one-time USB/TWRP update for every supported target. Do not
-offer or install its application OTA on a v3.x satellite as a substitute for
+offer or install its application OTA on a pre-v4 satellite as a substitute for
 the matching factory archive. This boundary installs the pinned Tater Echo
 Linux platform, system updater, recovery changes, and target-specific kernel or
-boot components that the v3 updater cannot safely replace as one transaction.
+boot components that a pre-v4 updater cannot safely replace as one transaction.
 The factory path is also the only path that applies the guarded boot-logo work.
 
 After the v4.0.0 factory installation, use Tater's normal satellite updater for

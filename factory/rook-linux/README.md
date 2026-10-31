@@ -5,8 +5,8 @@ Spot (`rook`). It is not for Show 5 (`checkers`), Show 8 (`crown`), newer Spot m
 Echo devices. The device must already be unlocked with amonet-rook v2.0.0 and
 booted into TWRP over USB.
 
-Every Rook running Tater v3.x must use this USB/TWRP factory bundle once to
-upgrade to v4.0.0. Add `--reinstall-existing-tater` to both the preflight and
+Every Rook running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+factory bundle once. Add `--reinstall-existing-tater` to both the preflight and
 install commands for that upgrade. The v4 transition itself is not an OTA
 update; compatible releases after v4.0.0 use verified application and System
 OTA.
@@ -57,7 +57,7 @@ the saved Tater setup and settings are then restored unless
 `--factory-reset` is also supplied. Do not use this option on a
 newly unlocked device.
 
-For a v3.x-to-v4.0.0 upgrade, the commands are:
+For an existing Tater installation earlier than v4.0.0, the commands are:
 
 ```sh
 ./install.sh --preflight-only --reinstall-existing-tater

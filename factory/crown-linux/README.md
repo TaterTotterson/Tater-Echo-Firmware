@@ -5,8 +5,8 @@ first-generation Echo Show 8**, model **C7H6N3**, codename `crown`. It
 preserves TWRP, flashes the pinned Crown Linux boot image, and creates the A/B
 rootfs store. It preserves an existing Tater pairing by default.
 
-Every Crown running Tater v3.x must use this USB/TWRP factory bundle once to
-upgrade to v4.0.0. The v4 transition itself is not an OTA update. Compatible
+Every Crown running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+factory bundle once. The v4 transition itself is not an OTA update. Compatible
 releases after v4.0.0 can update both the application and inactive root-system
 slot through Tater's verified A/B updater.
 
