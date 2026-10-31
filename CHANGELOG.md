@@ -11,18 +11,14 @@
   DHCP address, default route, and Tater reachability before disabling Wi-Fi,
   then restores Wi-Fi and USB serial/RNDIS when wired connectivity fails or the
   unit returns to a direct USB connection.
-- Hardware-qualified the powered
-  [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter using its
-  Realtek RTL8152 controller (`0bda:8152`, Linux `r8152`). Biscuit uses powered
-  pass-through on its shared power/data micro-USB port, allowing the Ethernet
-  arrangement to carry both network and device power. Rook remains on its
-  normal device power and uses the powered adapter on its micro-USB data/OTG
-  path. Checkers, Crown, and Athena use their target-specific host/OTG path.
-- Similar powered adapters using the Realtek RTL8152/RTL8153 family are expected
-  to work with the same driver but are not hardware-qualified. Power delivery,
-  connector wiring, and OTG/host signaling must match the target; generic
-  CDC-ECM adapters are not equivalent and the tested CDC-ECM path could not
-  transmit reliably on Biscuit.
+- Tested USB Ethernet with the powered
+  [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter on
+  Biscuit, Checkers, Crown, Athena, and Rook.
+- Biscuit can receive both power and Ethernet through the adapter, giving it a
+  simple PoE-style setup. Checkers, Crown, Athena, and Rook continue using their
+  normal power supplies.
+- Similar powered USB Ethernet adapters may also work, but only the adapter
+  linked above has been tested.
 - Added visible wired-recovery behavior so a satellite that loses Tater while
   Ethernet remains attached can restore Wi-Fi instead of remaining silently
   disconnected. Stable Wi-Fi links are otherwise left alone.
