@@ -88,6 +88,30 @@ Target metadata used by Tater and the release builds lives in
 - Captive-portal Wi-Fi and Tater pairing, followed by verified A/B OTA updates
   with automatic rollback.
 
+## USB Ethernet adapters
+
+The hardware-tested reference adapter is the powered
+[UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4), using a Realtek
+RTL8152 controller (`0bda:8152`, Linux `r8152`). This exact adapter passed the
+documented Ethernet, Wi-Fi fallback, SSH, update, reboot, and recovery gates on
+Biscuit, Checkers, Crown, Athena, and Rook. Radar remains a passive
+hardware-validation target because its USB connection uses internal pads.
+
+Similar powered pass-through adapters using the Realtek RTL8152/RTL8153 family
+are expected to work with the same `r8152` driver, but they are not
+hardware-qualified by Tater. The adapter must also provide the correct OTG/host
+signaling and power arrangement for the target. Biscuit and Rook share power
+and data on their micro-USB port and therefore require powered pass-through;
+Checkers, Crown, and Athena retain their normal separate device power.
+
+Do not assume every generic USB Ethernet adapter is equivalent. In particular,
+Biscuit's tested adapter could receive but not transmit through its advertised
+generic CDC-ECM interface, so the v4 kernel binds it to the native RTL8152
+driver instead. Prefer the verified adapter or confirm the adapter's chipset
+and USB ID before relying on an alternative. See
+[`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for the full
+per-device qualification and fallback behavior.
+
 ## Install Biscuit — Echo Dot 2
 
 Start with an Echo Dot 2nd Generation (`biscuit`, model **RS03QR**) that has
