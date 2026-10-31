@@ -46,8 +46,8 @@ The Linux generation keeps the existing satellite protocol and feature set:
   timer surfaces on the native UI;
 - framebuffer brightness, touchscreen controls, hardware buttons, camera
   snapshots, and privacy shutter state;
-- captive-portal or USB pairing into a fresh Tater satellite identity after
-  factory conversion.
+- preserved Tater pairing after a factory reinstall, or captive-portal/USB
+  pairing into a fresh identity on a new unit or with `--factory-reset`.
 
 The Checkers ALSA capture device exposes four packed 24-bit channels at 16 kHz.
 Channels 0 and 1 are the two microphones; channels 2 and 3 are the left and
@@ -81,20 +81,23 @@ The installer:
 
 1. verifies every bundled file and the connected `checkers` device, then
    downloads or verifies the pinned LineageOS ZIP before destructive writes;
-2. saves the device's small partitions from TWRP;
+2. saves the device's small partitions from TWRP and, when present, a checked
+   settings-only archive containing Tater identity, Wi-Fi, SSH, and controls;
 3. installs the supported LineageOS zip without booting Android, solely to
    obtain the matching vendor driver tree;
 4. flashes the pinned Linux boot image, creates the two-slot store, and installs
    the Tater rootfs into slot A;
-5. shows an open `Tater-Setup-XXXX` network
-   and serves its Wi-Fi and Tater pairing form at `http://192.168.4.1`;
+5. restores existing Tater setup, or on a new/reset unit shows an open
+   `Tater-Setup-XXXX` network and serves its Wi-Fi and pairing form at
+   `http://192.168.4.1`;
 6. reboots and leaves slot A on trial until the runtime health window commits
    it, followed by one automatic restart into the now-good slot with read-only
    mounts.
 
-This erases userdata and the former system partition. The installer keeps
-TWRP and writes recovery material under `backups/<serial>/`. Keep those backups
-with their matching unit. Full operator instructions are in
+This reformats userdata and the former system partition, but restores only the
+verified settings—not old OTA application slots. Add `--factory-reset` to
+discard those settings. The installer keeps TWRP and writes recovery material
+under `backups/<serial>/`. Keep those backups with their matching unit. Full operator instructions are in
 [`factory/checkers-linux/README.md`](../factory/checkers-linux/README.md).
 
 ## OTA and rollback
@@ -110,8 +113,10 @@ timeout switches the shared link back and reboots.
 Routine OTA therefore behaves like Biscuit and never remounts the live Linux
 rootfs. The application bundle updates the daemon and renderer together; the
 daemon embeds the built-in wake bundle and verifies any required wake-runtime
-sidecars. Camera, init scripts, kernel, rootfs, and vendor drivers change only
-when a release explicitly requires a USB/recovery platform migration.
+sidecars. A separate target-verified System OTA can update camera helpers, init
+scripts, and the rootfs through the inactive root slot. Kernel, boot, rescue,
+partition layout, and vendor storage still change only through an explicit
+USB/recovery platform migration.
 
 During such a platform migration, the root slot is marked good only after the
 same five-minute connected health window. Checkers then performs one direct
@@ -128,7 +133,7 @@ Fetch the pinned rootfs and TECHO5 checkout, then run:
 linux/checkers/build_linux.sh \
   --version v3.0.0-dev \
   --base-rootfs /path/to/rootfs-v0.9.26.tar.gz \
-  --techo5 /path/to/techo5
+  --platform /path/to/tater-echo-linux-show
 ```
 
 The build uses an ARMv7 Alpine container for the CGO daemon, native UI,

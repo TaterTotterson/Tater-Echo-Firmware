@@ -72,12 +72,15 @@ name, saves device-private boot-critical backups, verifies every write by
 reading it back, and stores a restorable TWRP image at
 `/cache/techo5/twrp.img` before Linux takes over recovery.
 
-Radar has no dependable bootloader-level hold-button shortcut. Once Tater Linux
-is installed, holding Volume Up for five seconds during the first 90 seconds of
-startup requests a one-boot Tater Recovery environment. The same request is
-available over USB with `python3 to_recovery.py`; run `install.sh --repair`
-there to repair the inactive root slot. The retained TWRP image and
-`to_twrp.py` remain the lower-level fallback.
+Radar has no dependable bootloader-level hold-button shortcut. Once the current
+factory archive is installed, holding Volume Up for five seconds during the
+first 90 seconds of startup enters a device-specific TWRP handoff. It restores
+Linux to the shared recovery partition while TWRP remains active in RAM, so the
+next reboot returns to Linux. An install without the handoff image continues
+normal startup instead of entering Tater Recovery. The routine recovery request
+remains available explicitly over USB with `python3 to_recovery.py`; run
+`install.sh --repair` there to repair the inactive root slot. `to_twrp.py`
+remains the explicit lower-level TWRP route.
 
 The station interface `wlan0` does not accept an nl80211 change to AP type.
 The vendor `/dev/wmtWifi` command `A` starts its dedicated AP-capable wiphy and

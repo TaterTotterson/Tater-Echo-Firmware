@@ -60,6 +60,12 @@ type queuedVisualizer struct {
 func (c *Client) NowPlaying() NowPlaying {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.blocked.Load() {
+		return NowPlaying{
+			InfoRevision:       c.presentation.InfoRevision,
+			VisualizerRevision: c.presentation.VisualizerRevision,
+		}
+	}
 	nowClient := nowUs()
 	c.advanceVisualizerLocked(nowClient)
 	now := c.presentation.NowPlaying
@@ -79,6 +85,9 @@ func (c *Client) NowPlaying() NowPlaying {
 func (c *Client) NowPlayingArtwork() ([]byte, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.blocked.Load() {
+		return nil, ""
+	}
 	return append([]byte(nil), c.presentation.artwork...), c.presentation.artworkContentType
 }
 

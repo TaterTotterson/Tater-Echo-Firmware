@@ -35,16 +35,23 @@ func TestStartupGestureWindow(t *testing.T) {
 	}
 }
 
-func TestTaterRecoveryCommandForEveryEchoTarget(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
-		command, err := TaterRecoveryCommand(target)
-		if err != nil || command.Path != "/bin/sh" || len(command.Args) != 2 ||
-			command.Args[0] != "-c" ||
-			command.Args[1] != "/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now" {
-			t.Fatalf("%s command=%+v err=%v", target, command, err)
+func TestScreenTargetsDoNotRetainLinuxSideRecoveryGesture(t *testing.T) {
+	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
+		if _, err := StartupTWRPCommand(target); err == nil {
+			t.Fatalf("%s unexpectedly retained a Linux-side recovery gesture", target)
 		}
 	}
-	if _, err := TaterRecoveryCommand("unknown"); err == nil {
+	if _, err := StartupTWRPCommand("unknown"); err == nil {
 		t.Fatal("expected unsupported target error")
+	}
+}
+
+func TestStartupTWRPCommandForDotTargetsUsesSafeHandoff(t *testing.T) {
+	for _, target := range []string{"biscuit", "radar"} {
+		command, err := StartupTWRPCommand(target)
+		if err != nil || command.Path != "/usr/local/sbin/to-twrp" ||
+			len(command.Args) != 1 || command.Args[0] != "--handoff" {
+			t.Fatalf("%s command=%+v err=%v", target, command, err)
+		}
 	}
 }

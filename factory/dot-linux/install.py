@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import glob
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shlex
@@ -27,7 +28,21 @@ class Fail(Exception):
 Adb = None
 BOARD_TYPE_IDS = {}
 build_boot_image = None
+build_twrp_handoff_image = None
 kernel_board = None
+
+
+def load_tater_settings():
+    candidates = (ROOT / "tater_settings.py", ROOT.parent / "tater_settings.py")
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        raise Fail("the factory bundle is missing tater_settings.py")
+    spec = importlib.util.spec_from_file_location("tater_factory_settings", path)
+    if spec is None or spec.loader is None:
+        raise Fail(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def md5(path: str | Path) -> str:
@@ -239,7 +254,7 @@ def initialize_cache(adb: Adb, cache: str) -> None:
 
 
 def install(args: argparse.Namespace) -> None:
-    global Adb, BOARD_TYPE_IDS, Fail, build_boot_image, head_is_android
+    global Adb, BOARD_TYPE_IDS, Fail, build_boot_image, build_twrp_handoff_image, head_is_android
     global kernel_board, md5, note, step
     info = manifest()
     if args.verify_bundle:
@@ -251,7 +266,9 @@ def install(args: argparse.Namespace) -> None:
     head_is_android, md5 = techo5lib.head_is_android, techo5lib.md5
     note, step = techo5lib.note, techo5lib.step
     BOARD_TYPE_IDS = dotimage.BOARD_TYPE_IDS
-    build_boot_image, kernel_board = dotimage.build_boot_image, dotimage.kernel_board
+    build_boot_image = dotimage.build_boot_image
+    build_twrp_handoff_image = dotimage.build_twrp_handoff_image
+    kernel_board = dotimage.kernel_board
     serial = select_serial(args.serial, args.adb)
     adb = Adb(serial, args.adb)
     require(adb.state() == "recovery", f"{serial} is not in TWRP")
@@ -295,12 +312,35 @@ def install(args: argparse.Namespace) -> None:
                      str(busybox), str(wmtup), str(apks), str(kernel))
     require(image.stat().st_size <= 16 * 1024 * 1024, "built Linux recovery image exceeds the partition")
     note(f"built this unit's {image.stat().st_size}-byte Linux boot image")
+    handoff = backup_root / "tater-twrp-handoff.img"
+    build_twrp_handoff_image(str(recovery), str(handoff))
+    require(handoff.stat().st_size <= 16 * 1024 * 1024,
+            "built TWRP handoff image exceeds the recovery partition")
+    note(f"built this unit's {handoff.stat().st_size}-byte automatic-return TWRP image")
     if args.dry_run:
-        print(f"Dry run complete; nothing was written to {serial}.\nBoot image: {image}\nRootfs: {rootfs}")
+        print(f"Dry run complete; nothing was written to {serial}.\n"
+              f"Boot image: {image}\nTWRP handoff image: {handoff}\nRootfs: {rootfs}")
         return
+    settings = load_tater_settings()
+    saved_settings = None
+    if not args.factory_reset:
+        try:
+            saved_settings = settings.capture(adb, backup_root / "tater-settings.tar")
+        except settings.SettingsError as error:
+            raise Fail(str(error)) from error
+        if saved_settings:
+            note(f"Tater setup saved and verified: {saved_settings.archive}")
+        else:
+            note("no existing Tater setup was found; this unit will start clean")
     if not args.yes:
         print(f"\nAbout to reset {board} {serial} to Tater Linux {info['version']}.")
-        print("Prior satellite settings are erased. Stock system partitions and verified backups are retained.")
+        if args.factory_reset:
+            print("Wi-Fi, pairing, SSH, and satellite settings will be erased (--factory-reset).")
+        elif saved_settings:
+            print("Tater pairing, Wi-Fi, SSH, and satellite settings will be restored afterward.")
+        else:
+            print("No existing Tater setup was found; the satellite will enter setup mode.")
+        print("Stock system partitions and verified backups are retained.")
         require(input("Type ERASE to continue: ").strip() == "ERASE", "installation cancelled")
 
     if not cache_ready:
@@ -315,6 +355,7 @@ def install(args: argparse.Namespace) -> None:
     # If a later rootfs extraction fails, this verified TWRP image is already
     # available to the rescue console instead of existing only on the host.
     push_checked(adb, recovery, "/cache/techo5/twrp.img")
+    push_checked(adb, handoff, "/cache/techo5/twrp-handoff.img")
     push_checked(adb, TOOLS / "linux/back-to-linux.sh", "/cache/techo5/back-to-linux.sh")
     push_checked(adb, image, "/cache/techo5/linux.img")
     push_checked(adb, busybox, stage + "/busybox")
@@ -334,17 +375,28 @@ def install(args: argparse.Namespace) -> None:
     require("slot a: " in output, f"installing rootfs failed: {output}")
     note(output)
 
-    step("clearing prior satellite state")
-    adb.sh("rm -rf /data/local/etc/tater /data/local/share/tater /data/tater-linux; "
-           "rm -f /data/local/bin/server /data/local/bin/server_a "
+    step("restoring Tater setup" if saved_settings else "starting with clean Tater setup")
+    try:
+        if saved_settings:
+            settings.restore(adb, saved_settings)
+            note("pairing, Wi-Fi, SSH, and satellite settings restored")
+        else:
+            settings.clear(adb)
+            note("prior Tater setup cleared")
+    except settings.SettingsError as error:
+        raise Fail(str(error)) from error
+    adb.sh("rm -f /data/local/bin/server /data/local/bin/server_a "
            "/data/local/bin/server_b /data/local/bin/start_server.sh; sync")
 
     step("arming Tater Linux")
     adb.sh(f"printf 'TECHO5-TRIES 0 installed\\n' | dd of={by_name}/misc bs=512 seek=14 count=1 "
            f"conv=notrunc 2>/dev/null; rm -rf {stage}; sync")
     adb.reboot("recovery")
-    print("\nTater Linux is installed. Wait for the ring to enter setup mode, join the")
-    print("Tater-Setup-XXXX Wi-Fi network, open http://192.168.4.1, and pair it with Tater.")
+    if saved_settings and saved_settings.paired:
+        print("\nTater Linux is installed with this satellite's existing Tater pairing and settings.")
+    else:
+        print("\nTater Linux is installed. Wait for the ring to enter setup mode, join the")
+        print("Tater-Setup-XXXX Wi-Fi network, open http://192.168.4.1, and pair it with Tater.")
     print(f"Verified recovery backups: {backup_root}")
 
 
@@ -356,6 +408,8 @@ def main() -> int:
     parser.add_argument("--work", default=str(ROOT / "build"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify-bundle", action="store_true")
+    parser.add_argument("--factory-reset", action="store_true",
+                        help="erase Wi-Fi, pairing, SSH, and satellite settings instead of preserving them")
     parser.add_argument("--yes", action="store_true", help="skip the ERASE prompt")
     args = parser.parse_args()
     try:

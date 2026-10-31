@@ -8,11 +8,14 @@ import (
 	"time"
 )
 
-func TestEchoStreamTargetsTwentyFramesPerSecond(t *testing.T) {
-	if got := cameraStreamPeriod(true); got != time.Second/20 {
+func TestEchoStreamUsesRookFrameRates(t *testing.T) {
+	if got := cameraStreamPeriod("echo-low"); got != time.Second/20 {
 		t.Fatalf("echo stream period = %v, want %v", got, time.Second/20)
 	}
-	if got := cameraStreamPeriod(false); got != time.Second/15 {
+	if got := cameraStreamPeriod("echo-balanced"); got != time.Second/20 {
+		t.Fatalf("balanced fallback stream period = %v, want %v", got, time.Second/20)
+	}
+	if got := cameraStreamPeriod("video"); got != time.Second/15 {
 		t.Fatalf("normal stream period = %v, want %v", got, time.Second/15)
 	}
 }

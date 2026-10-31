@@ -21,7 +21,7 @@ func onBase(t *testing.T, base, body string) {
 	baseOS = func() string { return base }
 	androidConfP = filepath.Join(dir, "android-wpa.conf")
 	linuxConfP = filepath.Join(dir, "linux-wpa.conf")
-	linuxNetP = filepath.Join(dir, "missing-techo5-net")
+	linuxNetP = filepath.Join(dir, "missing-tater-net")
 	path := androidConfP
 	if base == platform.TaterLinux {
 		path = linuxConfP

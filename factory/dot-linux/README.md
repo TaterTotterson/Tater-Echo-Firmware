@@ -1,27 +1,39 @@
 # Biscuit and Radar Tater Linux factory installer
 
-This factory bundle installs Alpine-based Tater Linux on Biscuit or Radar. It
-is intentionally a reset, not a migration from pre-v3 firmware.
+This factory bundle installs Alpine-based Tater Linux on Biscuit or Radar.
+Existing Tater pairing, Wi-Fi, SSH, and satellite settings are preserved by
+default; add `--factory-reset` when you deliberately want a clean setup.
 
 > [!IMPORTANT]
-> Biscuit and Radar running firmware older than v3.0.0 must use this USB/TWRP
-> factory installer once. The pre-v3 base system cannot install the v3 OTA
-> format. The reset clears the satellite's Tater settings; later releases use
-> the normal Tater OTA flow.
+> Every Biscuit and Radar running Tater firmware earlier than v4.0.0 must use
+> this USB/TWRP factory installer once. A pre-v4 updater cannot safely install the
+> complete v4 platform transition. The installer keeps any Tater setup it can
+> verify, but replaces the old firmware and application slots. Compatible
+> releases after v4.0.0 use the normal verified application and System OTA flow.
 
 1. Complete the matching amonet unlock and boot the unit into TWRP.
 2. Connect USB and extract the matching factory archive.
 3. Run `./install.sh --verify-bundle`, then `./install.sh` (macOS/Linux), or
    run `python3 install.py --verify-bundle`, then `python3 install.py`
    (Windows).
-4. Type `ERASE` when prompted.
-5. Join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair the satellite.
+4. Type `ERASE` when prompted. Add `--factory-reset` to the install command to
+   erase Wi-Fi, pairing, SSH, and satellite settings.
+5. A previously paired satellite reconnects automatically. On a new or reset
+   satellite, join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair it.
+
+The factory installer and a compatible post-v4 System OTA reboot Biscuit or
+Radar into a trial root-system slot. A healthy root slot commits in place on
+these two targets, without the additional five-minute confirmation restart used
+by Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
 
 The installer checksum-verifies every bundled file and every partition backup,
-builds the Linux boot image from that unit's own TWRP header, checks the
+builds the Linux boot image and an automatic-return TWRP handoff from that
+unit's own TWRP backup, checks the
 board-specific kernel, writes only recovery/cache plus Tater-owned userdata,
-and preserves the stock system slots. TWRP is copied into the Linux slot store
-as a lower-level fallback; normal repairs use Tater Recovery.
+and preserves the stock system slots. Before replacing Tater-owned userdata it
+saves and verifies the small settings-only archive in `backups/<serial>/`; old
+OTA application slots are intentionally not restored. TWRP is copied into the
+Linux slot store as a lower-level fallback; normal repairs use Tater Recovery.
 
 An empty or previously erased cache partition is supported. Preflight leaves it
 untouched; after backups are verified and the user types `ERASE`, the installer
@@ -49,8 +61,13 @@ several compatible devices are connected, select one explicitly, for example
 denied, close any serial terminal and run `sudo python3 to_recovery.py`.
 
 Without a computer command, begin holding **Volume Up** before powering on or
-restarting and keep it held until the satellite restarts into Tater Recovery.
-Tater Linux requires a continuous five-second hold during its first 90 seconds.
+restarting and keep it held for five continuous seconds during the first 90
+seconds of Tater Linux startup. A current factory install then enters TWRP.
+Because Biscuit and Radar normally run Linux from the same recovery partition,
+the device-specific handoff image verifies and restores Linux to that partition
+while TWRP remains active in RAM. Leaving TWRP therefore returns to Linux on
+the next boot. An installation without the current handoff image continues its
+normal boot; Volume Up no longer falls back to Tater Recovery.
 
 Once the USB recovery console appears, repair the inactive root slot with:
 
@@ -62,7 +79,7 @@ On Windows use `py -3 install.py --repair`. This keeps Wi-Fi, pairing, room,
 and satellite settings. Add `--factory-reset` only to clear those settings and
 return to setup mode.
 
-TWRP is still retained for a lower-level escape hatch. From a normally booted
-satellite, run `python3 to_twrp.py` only when Tater Recovery cannot perform the
-repair. If Linux cannot start far enough to accept either helper or the button
+The USB `to_recovery.py` route is the explicit way to enter Tater Recovery for
+routine root-slot repair. `to_twrp.py` remains the explicit lower-level TWRP
+route. If Linux cannot start far enough to accept either helper or the button
 gesture, use the matching amonet/TWRP entry procedure.

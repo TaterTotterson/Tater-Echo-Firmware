@@ -168,7 +168,7 @@ func (r *renderer) nightClockVisible(now time.Time) bool {
 
 func (r *renderer) renderNightClock(canvas *image.RGBA, now time.Time) {
 	local := r.localTime(now)
-	key := fmt.Sprintf("%dx%d|%s", canvas.Rect.Dx(), canvas.Rect.Dy(), local.Format("200601021504"))
+	key := fmt.Sprintf("%dx%d|%s", canvas.Rect.Dx(), canvas.Rect.Dy(), r.clockKey(now))
 	if r.nightClockCanvas == canvas && r.nightClockKey == key {
 		r.presentRegions = nil
 		return
@@ -183,7 +183,7 @@ func (r *renderer) renderNightClock(canvas *image.RGBA, now time.Time) {
 	}
 	red := color.RGBA{174, 12, 12, 255}
 	dimRed := color.RGBA{104, 8, 8, 255}
-	r.centeredText(canvas, width/2, height/2+timeSize/3, local.Format("3:04"), timeSize, false, red)
+	r.centeredClock(canvas, width/2, height/2+timeSize/3, local, timeSize, red)
 	r.centeredText(canvas, width/2, height/2+timeSize/3+42, local.Format("Monday · January 2"), 18, false, dimRed)
 	r.nightClockCanvas, r.nightClockKey = canvas, key
 	r.presentRegions = []image.Rectangle{canvas.Rect}

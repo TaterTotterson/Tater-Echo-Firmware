@@ -46,8 +46,10 @@ when IDME is missing or invalid.
 
 - TECHO5 Spot rootfs `spot-v0.5.25`:
   `c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2`
-- TECHO5 Spot Bluetooth kernel:
-  `368738ee20b86dc3dc0268d3b4b145e67cca9666379ac26b2379abd6c9136298`
+- Tater Echo Linux Rook Ethernet kernel `rook-kernel-v1.0.0`:
+  `57e6d7401e091f26d0efeadc86170144195f54b50105f98ea311cf0523c31a00`
+  (built-in RTL8152 plus bounded MediaTek `/proc/mchange` role control, while
+  preserving the `4.9.337-g4174e0b4d0e2` vendor-module ABI)
 - TECHO5 Spot rescue bundle:
   `a6f3860d0e3bd5b298ff310d8fe0d6a9a7885a2f6aa792e4134783df4cbf15bf`
 - [Rook LineageOS v0.3](https://github.com/amazon-oss/releases/releases/tag/lineage-18.1-rook-v0.3)

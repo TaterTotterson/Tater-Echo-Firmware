@@ -85,6 +85,19 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestReleaseReadsOnlyTaterLinuxVersion(t *testing.T) {
+	root := mkroot(t, map[string]string{"etc/os-release": taterLinuxRelease})
+	if got := Release(root); got != "2.0.0" {
+		t.Fatalf("Release() = %q, want 2.0.0", got)
+	}
+	other := mkroot(t, map[string]string{
+		"etc/os-release": "ID=debian\nVERSION_ID=12\n",
+	})
+	if got := Release(other); got != "" {
+		t.Fatalf("Release() for non-Tater Linux = %q, want empty", got)
+	}
+}
+
 // Base caches, and the value must be stable for the life of the process: a
 // field that flapped would read as a device changing platform underneath the
 // controller.

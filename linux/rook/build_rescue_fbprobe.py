@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the pinned TECHO5 rescue renderer for Rook's upright round panel.
+"""Build the pinned Tater rescue renderer for Rook's upright round panel.
 
-Only a Go source overlay is changed; the TECHO5 checkout stays untouched.
+Only a Go source overlay is changed; the Tater-Linux checkout stays untouched.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 
 
-SOURCE_SHA256 = "bf915b9f295e6c4fb5a402dc22709c464615b944f6ceea8f0825fdee8942ce72"
+SOURCE_SHA256 = "16d565a0fb0f1f03a43c2c48a9d7fbb37fb4b8e5350e40b21c69aef228f78699"
 PALETTE = {
     "bg := color.RGBA{0x1c, 0x15, 0x11, 0xff}":
         "bg := color.RGBA{0x11, 0x09, 0x05, 0xff}",
@@ -82,7 +82,7 @@ def replace_once(source: str, before: str, after: str) -> str:
 
 def rook_source(source: bytes) -> bytes:
     if hashlib.sha256(source).hexdigest() != SOURCE_SHA256:
-        raise ValueError("fbprobe source is not the pinned TECHO5 revision")
+        raise ValueError("fbprobe source is not the pinned Tater-Linux revision")
     result = source.decode()
     for before, after in PALETTE.items():
         result = replace_once(result, before, after)

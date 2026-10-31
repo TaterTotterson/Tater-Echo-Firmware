@@ -2,13 +2,21 @@
 
 This USB factory bundle installs Tater Linux on an unlocked Echo Show 5
 **1st generation** (`checkers`). It preserves TWRP, flashes the pinned Checkers
-Linux boot image, and creates the A/B rootfs store. It does not migrate an old
-Tater identity; the device is paired as a fresh satellite.
+Linux boot image, and creates the A/B rootfs store. Existing Tater identity and
+setup are preserved by default; a new device or `--factory-reset` starts fresh.
 
-The conversion **erases userdata and the former system partition**. It must
-be done over USB; it is not an OTA update. After installation, routine updates
-use Tater's A/B application updater on `/data`. The Linux rootfs slots remain
-available for platform recovery.
+Every Checkers running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+factory bundle once. The v4 transition itself is not an OTA update. Compatible
+releases after v4.0.0 can update both the application and inactive root-system
+slot through Tater's verified A/B updater.
+
+The conversion reformats userdata and the former system partition, but first
+saves and verifies existing Tater pairing, Wi-Fi, SSH, and satellite settings
+and restores them afterward. Old OTA application slots are not restored. It
+must be done over USB; it is not an OTA update. After installation, compatible
+updates use Tater's A/B application updater on `/data` and its verified System
+OTA for the inactive Linux rootfs slot. Kernel, boot, rescue, and layout changes
+remain USB recovery operations.
 
 ## Before you start
 
@@ -46,9 +54,9 @@ The printed hash must match exactly. The installer independently checks it.
 1. Download and extract `tater-echo-checkers-vX.Y.Z-factory.tar.gz` from a
    [Tater Echo Linux release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases).
    Run commands below **inside its extracted directory**.
-2. Boot the device into TWRP and plan to enter a new Tater pairing code.
-   Existing userdata and pairing are erased. The installer will not run from
-   a normal OS boot.
+2. Boot the device into TWRP. Existing Tater setup is preserved by default;
+   add `--factory-reset` to the install command when you want to erase it and
+   enter a new pairing code. The installer will not run from a normal OS boot.
 3. Check `adb devices` shows only the intended device in `recovery`, and verify the factory
    bundle. Use `--serial DEVICE_SERIAL` if more than one device is connected.
 
@@ -64,6 +72,8 @@ The printed hash must match exactly. The installer independently checks it.
    ./install.sh
    ```
 
+   Use `./install.sh --factory-reset` for a deliberately clean setup.
+
    On Windows, run `py -3 install.py --verify-bundle`, then
    `py -3 install.py` instead. `--wifi "Your network"` is optional; without it,
    Checkers asks for home Wi-Fi in its setup hotspot. For an offline install or
@@ -75,9 +85,14 @@ The printed hash must match exactly. The installer independently checks it.
 
 The installer verifies the connected device, backs up its small partitions,
 asks before destructive writes, installs slot A, and waits for Tater Linux over
-USB. The temporary
+USB. On the verified Checkers bootloader it replaces only the 6,105-byte
+Amazon wordmark slot in `expdb` with the monochrome Tater logo, then reads the
+partition back. Any other bootloader hash keeps Amazon's logo, and a failed
+readback restores the complete saved partition before the device restarts.
+The temporary
 "INSTALLING TATER" screen during USB installation is normal; it changes to
-the Tater setup screen when slot A boots. For a new device, join the open
+the Tater setup screen when slot A boots. A previously paired device reconnects
+automatically. For a new or reset device, join the open
 `Tater-Setup-XXXX` Wi-Fi network shown on Checkers, then open
 `http://192.168.4.1`. Enter your home Wi-Fi, Tater server URL, and an
 **Add Satellite** pairing code from Tater. If you prefer to provision over USB,
@@ -105,11 +120,9 @@ read-only.
 Normal repair uses Tater Recovery. From a normally booted Checkers, connect USB
 and run `python3 to_recovery.py` from this extracted factory archive. On
 Windows use `py -3 to_recovery.py`; on Linux, use
-`sudo python3 to_recovery.py` if the serial port reports permission denied. You
-can instead begin holding **Volume Up** before powering on or restarting and
-keep it held until Checkers restarts into Tater Recovery. The gesture is
-accepted only during the first 90 seconds of Linux startup and requires an
-uninterrupted five-second hold.
+`sudo python3 to_recovery.py` if the serial port reports permission denied.
+Holding **Volume Up** while Checkers powers on enters its retained TWRP through
+the native boot chain; it no longer requests Tater Recovery after Linux starts.
 
 Once recovery appears, run `./install.sh --repair`
 (`py -3 install.py --repair` on Windows) to repair the inactive root slot while

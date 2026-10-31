@@ -1,0 +1,663 @@
+#!/bin/sh
+# Automatically prefer a usable USB Ethernet adapter without sacrificing the
+# device's Wi-Fi recovery path. Biscuit and the Rook candidate perform a
+# bounded MediaTek role probe; the other satellites passively watch for a
+# USB-network interface until their board-specific role/VBUS controls have
+# been qualified on hardware.
+set -u
+PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+export PATH
+
+DATA=${TATER_DATA_DIR:-/data/tater-linux}
+RUN=${TATER_RUN_DIR:-/run}
+SYS_NET=${TATER_SYS_NET:-/sys/class/net}
+PROC=${TATER_PROC_DIR:-/proc}
+MCHANGE=${TATER_MCHANGE:-/proc/mchange}
+TARGET_FILE=${TATER_TARGET_FILE:-/etc/hostname}
+NET=${TATER_NET_SCRIPT:-/usr/local/sbin/tater-net}
+TECHO5_LIB=${TATER_TECHO5_LIB:-/lib/techo5-lib.sh}
+DEVICE_CONF=${TATER_DEVICE_CONF:-/etc/techo5/device.conf}
+WIFI_CONF=${TATER_WIFI_CONF:-/data/tater-linux/wpa_supplicant.conf}
+NATIVE_CONFIG=${TATER_NATIVE_CONFIG:-/data/local/etc/tater/native.json}
+SETUP_SSID_FILE=${TATER_SETUP_SSID_FILE:-$RUN/tater-setup-ssid}
+ENUM_TIMEOUT=${TATER_ETH_ENUM_TIMEOUT:-15}
+DHCP_TIMEOUT=${TATER_ETH_DHCP_TIMEOUT:-45}
+MONITOR_INTERVAL=${TATER_ETH_MONITOR_INTERVAL:-2}
+FAILURE_LIMIT=${TATER_ETH_FAILURE_LIMIT:-3}
+CONTROLLER_FAILURE_LIMIT=${TATER_ETH_CONTROLLER_FAILURE_LIMIT:-8}
+HEALTH_INTERVAL=${TATER_ETH_HEALTH_INTERVAL:-15}
+HEALTH_TIMEOUT=${TATER_ETH_HEALTH_TIMEOUT:-2}
+PROBE_MAX_SECONDS=${TATER_ETH_PROBE_MAX_SECONDS:-60}
+RETRY_INTERVAL=${TATER_ETH_RETRY_INTERVAL:-60}
+RESCUE_RETRY_INTERVAL=${TATER_ETH_RESCUE_RETRY_INTERVAL:-20}
+PASSIVE_INTERVAL=${TATER_ETH_PASSIVE_INTERVAL:-2}
+LOG=$DATA/eth.log
+[ -d "$DATA" ] || LOG=/tmp/eth.log
+STATE=$RUN/tater-usb-ethernet.state
+LOCK=$RUN/tater-usb-ethernet.lock
+SUPERVISOR_LOCK=$RUN/tater-usb-ethernet.supervisor
+STOP=$RUN/tater-usb-ethernet.stop
+DHCP_PID=$RUN/eth-dhcp.pid
+WIFI_DHCP_PID=${TATER_WIFI_DHCP_PID:-$RUN/udhcpc.pid}
+HOOK=$RUN/tater-udhcpc-ethernet.sh
+LEASE=$RUN/tater-usb-ethernet.lease
+RESOLV=${TATER_RESOLV_CONF:-/etc/resolv.conf}
+
+say() { echo "tater-eth: $*" >> "$LOG"; }
+desired() { [ ! -e "$STOP" ]; }
+wanted() { [ "${probe_only:-0}" -eq 1 ] || desired; }
+set_state() { printf '%s\n' "$*" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; }
+setup_in_progress() {
+	# A missing native configuration covers the boot race before the setup AP
+	# writes its runtime marker. Once the form is saved, that marker keeps the
+	# hotspot protected until the requested reboot completes.
+	[ ! -s "$NATIVE_CONFIG" ] || [ -s "$SETUP_SSID_FILE" ]
+}
+
+pid_is() {
+	pid=$1
+	want=$2
+	[ -n "$pid" ] && [ -r "$PROC/$pid/comm" ] && [ "$(cat "$PROC/$pid/comm" 2>/dev/null)" = "$want" ]
+}
+
+stop_pid_file() {
+	file=$1
+	comm=$2
+	pid=$(cat "$file" 2>/dev/null || true)
+	if pid_is "$pid" "$comm"; then
+		kill "$pid" 2>/dev/null || true
+	fi
+	rm -f "$file"
+}
+
+stop_eth_dhcp() {
+	stop_pid_file "$DHCP_PID" udhcpc
+	if [ -n "${iface:-}" ]; then
+		while route del default dev "$iface" 2>/dev/null; do :; done
+		ifconfig "$iface" 0.0.0.0 2>/dev/null || true
+	fi
+	rm -f "$LEASE"
+}
+
+has_eth_default() {
+	route -n | awk -v dev="$iface" '$1 == "0.0.0.0" && $8 == dev { found=1 } END { exit !found }'
+}
+
+eth_address() {
+	address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
+	[ -n "$address" ] || address=$(ifconfig "$iface" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
+}
+
+controller_endpoint() {
+	url=$(sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$NATIVE_CONFIG" 2>/dev/null | head -1)
+	[ -n "$url" ] || return 1
+	scheme=${url%%://*}
+	authority=${url#*://}
+	authority=${authority%%/*}
+	case "$authority" in
+	\[*\]:*)
+		controller_host=${authority%%]*}
+		controller_host=${controller_host#\[}
+		controller_port=${authority##*:}
+		;;
+	*:*)
+		controller_host=${authority%:*}
+		controller_port=${authority##*:}
+		;;
+	*)
+		controller_host=$authority
+		case "$scheme" in wss|https) controller_port=443 ;; *) controller_port=80 ;; esac
+		;;
+	esac
+	[ -n "$controller_host" ] && [ -n "$controller_port" ]
+}
+
+# Carrier and a default route can stay present while a USB NIC has stopped
+# moving packets. Once paired, the configured Tater controller is the
+# authoritative health target; a gateway that still answers must not mask an
+# unreachable controller. Before pairing, the DHCP gateway remains the best
+# available target. Source binding prevents a concurrently active Wi-Fi rescue
+# route from making Ethernet look healthy.
+#
+# Return 2 when the gateway responds but the paired controller does not. The
+# monitor gives that state a longer grace window so a normal Tater restart does
+# not immediately flap every wired satellite to Wi-Fi.
+eth_path_healthy() {
+	eth_address
+	if [ -z "$address" ]; then
+		path_status=no-address
+		return 1
+	fi
+	if controller_endpoint; then
+		if nc -z -w "$HEALTH_TIMEOUT" -s "$address" "$controller_host" "$controller_port" >/dev/null 2>&1; then
+			path_status=controller
+			return 0
+		fi
+		[ -n "${gateway:-}" ] || gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+		if [ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1; then
+			path_status=controller-unreachable
+			return 2
+		fi
+		path_status=path-unreachable
+		return 1
+	fi
+	[ -n "${gateway:-}" ] || gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+	if [ -n "$gateway" ] && ping -I "$iface" -c 1 -W "$HEALTH_TIMEOUT" "$gateway" >/dev/null 2>&1; then
+		path_status=gateway
+		return 0
+	fi
+	path_status=path-unreachable
+	return 1
+}
+
+log_wired_diagnostics() {
+	reason=${1:-wired-unhealthy}
+	say "$iface health failure diagnostics ($reason)"
+	{
+		printf 'controller=%s:%s gateway=%s address=%s\n' \
+			"${controller_host:--}" "${controller_port:--}" "${gateway:--}" "${address:--}"
+		printf 'carrier=%s operstate=%s\n' \
+			"$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo -)" \
+			"$(cat "$SYS_NET/$iface/operstate" 2>/dev/null || echo -)"
+		for stat in rx_bytes rx_packets rx_errors rx_dropped tx_bytes tx_packets tx_errors tx_dropped; do
+			value=$(cat "$SYS_NET/$iface/statistics/$stat" 2>/dev/null || echo -)
+			printf '%s=%s ' "$stat" "$value"
+		done
+		printf '\n'
+		ifconfig "$iface" 2>/dev/null || true
+		route -n 2>/dev/null || true
+		dmesg 2>/dev/null | tail -80
+	} >> "$LOG" 2>&1
+}
+
+restore_serial() {
+	[ "$role_backend" = mchange ] || return 0
+	[ -e "$MCHANGE" ] || return 1
+	echo device > "$MCHANGE" 2>/dev/null
+}
+
+wifi_stop() {
+	case "$wifi_backend" in
+	dot)
+		"$NET" stop >> "$LOG" 2>&1
+		;;
+	techo5)
+		stop_pid_file "$WIFI_DHCP_PID" udhcpc
+		for pid in $(pidof wpa_supplicant 2>/dev/null || true); do
+			kill "$pid" 2>/dev/null || true
+		done
+		n=0
+		while pidof wpa_supplicant >/dev/null 2>&1 && [ "$n" -lt 10 ]; do
+			sleep 1
+			n=$((n + 1))
+		done
+		if pidof wpa_supplicant >/dev/null 2>&1; then
+			for pid in $(pidof wpa_supplicant 2>/dev/null || true); do
+				kill -9 "$pid" 2>/dev/null || true
+			done
+		fi
+		while route del default dev wlan0 2>/dev/null; do :; done
+		# Stopping supplication and DHCP does not disassociate every vendor
+		# driver. Rook, for example, can retain its Wi-Fi link and IPv6 routes
+		# after both processes exit. Put the interface down only after Ethernet
+		# has a lease and default route; t5_wifi_up restores it on fallback.
+		ifconfig wlan0 0.0.0.0 down 2>/dev/null || true
+		;;
+	esac
+}
+
+wifi_start() {
+	case "$wifi_backend" in
+	dot)
+		"$NET" fallback >> "$LOG" 2>&1
+		;;
+	techo5)
+		[ -r "$TECHO5_LIB" ] || return 1
+		[ ! -r "$DEVICE_CONF" ] || . "$DEVICE_CONF"
+		. "$TECHO5_LIB"
+		export UDHCPC_SCRIPT=${UDHCPC_SCRIPT:-/etc/techo5/udhcpc.sh}
+		mkdir -p "$(dirname "$WIFI_CONF")"
+		t5_wifi_conf "$WIFI_CONF" >/dev/null 2>&1 || true
+		t5_wifi_up "${WIFI_MODULE:-builtin}" "$WIFI_CONF" >> "$LOG" 2>&1
+		;;
+	esac
+}
+
+fallback() {
+	reason=${1:-fallback}
+	stop_eth_dhcp
+	if [ "${role_claimed:-0}" -eq 1 ]; then
+		restore_serial || say "$reason; could not request USB device mode"
+	fi
+	set_state fallback "$reason"
+	if [ "${wifi_disabled:-0}" -eq 1 ]; then
+		say "$reason; restarting Wi-Fi"
+		wifi_start || say "Wi-Fi fallback did not obtain a lease"
+	else
+		say "$reason; Wi-Fi remained available"
+	fi
+}
+
+wifi_rescue() {
+	reason=${1:-wired-unhealthy}
+	last_address=${address:--}
+	stop_eth_dhcp
+	set_state rescue "$iface" "$last_address" "$reason"
+	if [ "${wifi_disabled:-0}" -eq 1 ]; then
+		say "$reason; Ethernet remains attached but unhealthy, starting visible Wi-Fi rescue"
+		wifi_start || say "Wi-Fi rescue did not obtain a lease"
+		wifi_disabled=0
+	else
+		say "$reason; Ethernet remains attached but unhealthy, Wi-Fi rescue was already available"
+	fi
+	needs_fallback=0
+}
+
+usb_network_iface() {
+	d=$1
+	n=${d##*/}
+	case "$n" in lo|wlan*|ap*|p2p*|sit*|tun*|tap*) return 1 ;; esac
+	driver=$(sed -n 's/^DRIVER=//p' "$d/device/uevent" 2>/dev/null | head -1)
+	if [ -z "$driver" ] && [ -L "$d/device/driver" ]; then
+		driver=$(readlink "$d/device/driver" 2>/dev/null || true)
+		driver=${driver##*/}
+	fi
+	case "$driver" in
+	cdc_ether|cdc_eem|cdc_ncm|cdc_mbim|rndis_host|r8152|asix|ax88179_178a|dm9601|lan78xx|smsc95xx|usbnet) return 0 ;;
+	esac
+	# Old vendor kernels do not always expose DRIVER in the class uevent. Their
+	# USB NIC still has a device link whose path includes a USB bus segment.
+	device=$(readlink "$d/device" 2>/dev/null || true)
+	case "$device" in *usb*) return 0 ;; esac
+	return 1
+}
+
+find_usb_ethernet() {
+	iface=
+	for d in "$SYS_NET"/*; do
+		[ -e "$d" ] || continue
+		if usb_network_iface "$d"; then
+			iface=${d##*/}
+			return 0
+		fi
+	done
+	return 1
+}
+
+target=${TATER_TARGET:-$(cat "$TARGET_FILE" 2>/dev/null || true)}
+target=${target#tater-}
+case "$target" in
+biscuit)
+	role_backend=mchange
+	wifi_backend=dot
+	active_probe=1
+	;;
+radar)
+	role_backend=passive
+	wifi_backend=dot
+	active_probe=0
+	;;
+rook)
+	role_backend=mchange
+	wifi_backend=techo5
+	active_probe=1
+	;;
+checkers|crown|athena)
+	role_backend=passive
+	wifi_backend=techo5
+	active_probe=0
+	;;
+*)
+	set_state unsupported unknown-target
+	exit 0
+	;;
+esac
+
+mode=${1:-start}
+probe_only=0
+case "$mode" in
+start|stop|once) ;;
+probe)
+	# A bounded qualification probe never starts DHCP or disables Wi-Fi. On
+	# active MUSB targets its independent watchdog restores USB serial after a
+	# role change.
+	probe_only=1
+	;;
+*)
+	set_state unsupported bad-command
+	exit 2
+	;;
+esac
+
+if [ "$mode" = stop ]; then
+	: > "$STOP"
+	i=0
+	while [ -d "$LOCK" ] && [ "$i" -lt 10 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	if [ -d "$LOCK" ]; then
+		set -- $(cat "$STATE" 2>/dev/null || true)
+		iface=${2:-}
+		case "${1:-}" in active|recovering) wifi_disabled=1 ;; *) wifi_disabled=0 ;; esac
+		role_claimed=1
+		fallback service-stop
+	else
+		set -- $(cat "$STATE" 2>/dev/null || true)
+		if [ "${1:-}" = rescue ]; then
+			iface=${2:-}
+			wifi_disabled=0
+			role_claimed=1
+			fallback service-stop
+		fi
+	fi
+	set_state stopped
+	exit 0
+fi
+
+if [ "$mode" = start ]; then
+	rm -f "$STOP"
+	if ! mkdir "$SUPERVISOR_LOCK" 2>/dev/null; then
+		say "automatic USB Ethernet supervisor is already running"
+		exit 0
+	fi
+	cleanup_supervisor() { rmdir "$SUPERVISOR_LOCK" 2>/dev/null || true; }
+	trap cleanup_supervisor EXIT
+	trap 'exit 0' HUP INT TERM
+	while desired; do
+		if find_usb_ethernet || [ "$active_probe" -eq 1 ]; then
+			"$0" once || true
+			set -- $(cat "$STATE" 2>/dev/null || true)
+			if [ "${1:-}" = rescue ]; then
+				# Keep the degraded state visible to device status and Tater while
+				# periodically retrying the still-attached Ethernet adapter.
+				delay=$RESCUE_RETRY_INTERVAL
+			else
+				set_state waiting "${2:-retry}"
+				delay=$RETRY_INTERVAL
+			fi
+		else
+			set_state waiting no-adapter
+			delay=$PASSIVE_INTERVAL
+		fi
+		i=0
+		while desired && [ "$i" -lt "$delay" ]; do
+			sleep 1
+			i=$((i + 1))
+		done
+	done
+	exit 0
+fi
+
+wanted || { set_state stopped; exit 0; }
+if [ "$role_backend" = mchange ] && [ ! -e "$MCHANGE" ]; then
+	set_state unsupported no-mchange
+	exit 0
+fi
+
+exec >> "$LOG" 2>&1
+echo "--- $0 $mode $(date)"
+if ! mkdir "$LOCK" 2>/dev/null; then
+	say "another controller is already probing or monitoring"
+	exit 0
+fi
+needs_fallback=0
+wifi_disabled=0
+role_claimed=0
+watchdog_pid=
+cleanup() {
+	if [ -n "$watchdog_pid" ]; then
+		kill "$watchdog_pid" 2>/dev/null || true
+		wait "$watchdog_pid" 2>/dev/null || true
+	fi
+	if [ "$needs_fallback" -eq 1 ]; then
+		fallback controller-exit
+	fi
+	rmdir "$LOCK" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+trap 'fallback probe-timeout; needs_fallback=0; exit 1' USR1
+
+if [ "$probe_only" -eq 1 ]; then
+	controller_pid=$$
+	(
+		sleep "$PROBE_MAX_SECONDS"
+		if [ -d "$LOCK" ]; then
+			[ "$role_backend" != mchange ] || restore_serial || true
+			set_state fallback probe-timeout
+			kill -USR1 "$controller_pid" 2>/dev/null || true
+		fi
+	) &
+	watchdog_pid=$!
+fi
+
+iface=
+find_usb_ethernet || true
+if [ "$role_backend" = mchange ]; then
+	force=$(sed -n 's/.*force:\([0-9]\).*/\1/p' "$MCHANGE" 2>/dev/null)
+	case "$force" in
+	2)
+		if [ -z "$iface" ]; then
+			echo host > "$MCHANGE"
+			role_claimed=1
+		else
+			# A synthetic test can expose an interface without updating
+			# mchange. An explicit probe still owns serial restoration.
+			[ "$probe_only" -eq 0 ] || role_claimed=1
+		fi
+		;;
+	"")
+		say "unexpected mchange state: $(cat "$MCHANGE" 2>/dev/null)"
+		set_state fallback bad-mchange
+		exit 1
+		;;
+	*)
+		say "adopting existing host mode (force=$force)"
+		role_claimed=1
+		;;
+	esac
+	if [ "$role_claimed" -eq 1 ]; then
+		needs_fallback=1
+		set_state probing
+		[ -n "$iface" ] || say "entered host mode; Wi-Fi remains available during adapter detection"
+	fi
+fi
+
+i=0
+while [ "$i" -lt "$ENUM_TIMEOUT" ] && [ -z "$iface" ]; do
+	wanted || { fallback service-stop; needs_fallback=0; exit 0; }
+	find_usb_ethernet || true
+	[ -n "$iface" ] && break
+	sleep 1
+	i=$((i + 1))
+done
+if [ -z "$iface" ]; then
+	{
+		ls /sys/bus/usb/devices 2>/dev/null
+		dmesg | tail -60
+	} >> "$LOG" 2>&1
+	fallback no-adapter
+	needs_fallback=0
+	exit 1
+fi
+say "$iface appeared as a USB network interface"
+set_state probing "$iface"
+
+if [ "$probe_only" -eq 1 ]; then
+	say "bounded probe found $iface; leaving Wi-Fi untouched"
+	if [ "$role_claimed" -eq 1 ] && ! restore_serial; then
+		set_state fallback restore-failed
+		exit 1
+	fi
+	needs_fallback=0
+	set_state probe-complete "$iface"
+	exit 0
+fi
+
+cat > "$HOOK" <<'EOF'
+#!/bin/sh
+LEASE=${TATER_ETH_LEASE_FILE:-/run/tater-usb-ethernet.lease}
+case "$1" in
+deconfig)
+	ifconfig "$interface" 0.0.0.0
+	rm -f "$LEASE"
+	;;
+bound|renew)
+	ifconfig "$interface" "$ip" netmask "$subnet"
+	gateway=${router%% *}
+	{ printf '%s\n' "$gateway"; printf '%s\n' "$dns"; } > "$LEASE.tmp.$$" && mv -f "$LEASE.tmp.$$" "$LEASE"
+	;;
+esac
+EOF
+chmod 0755 "$HOOK"
+
+acquire_eth_lease() {
+	stop_eth_dhcp
+	ifconfig "$iface" up
+	export TATER_ETH_LEASE_FILE=$LEASE
+	udhcpc -i "$iface" -s "$HOOK" -b -t 8 -p "$DHCP_PID" 2>&1
+
+	address=
+	gateway=
+	i=0
+	while [ "$i" -lt "$DHCP_TIMEOUT" ]; do
+		wanted || return 1
+		eth_address
+		gateway=$(sed -n '1p' "$LEASE" 2>/dev/null || true)
+		if [ -n "$address" ] && [ -n "$gateway" ]; then
+			if has_eth_default || route add default gw "$gateway" dev "$iface" metric 50 2>/dev/null; then
+				has_eth_default && return 0
+			fi
+		fi
+		sleep 1
+		i=$((i + 1))
+	done
+	return 1
+}
+
+wired_basics_healthy() {
+	eth_address
+	carrier=$(cat "$SYS_NET/$iface/carrier" 2>/dev/null || echo 0)
+	[ -n "$address" ] && [ "$carrier" != 0 ] && has_eth_default
+}
+
+recover_ethernet() {
+	reason=${1:-path-unreachable}
+	old_address=${address:--}
+	set_state recovering "$iface" "$old_address" "$reason"
+	case "$reason" in
+	controller-unreachable)
+		say "$iface can reach the gateway but not paired Tater at ${controller_host:--}:${controller_port:--}; resetting the interface before Wi-Fi rescue"
+		;;
+	*)
+		say "$iface stopped moving traffic; renewing DHCP and resetting the interface before Wi-Fi rescue"
+		;;
+	esac
+	log_wired_diagnostics "$reason"
+	stop_eth_dhcp
+	ifconfig "$iface" down 2>/dev/null || true
+	sleep 1
+	ifconfig "$iface" up 2>/dev/null || true
+	acquire_eth_lease && wired_basics_healthy && eth_path_healthy
+}
+
+if ! acquire_eth_lease; then
+	wanted || { fallback service-stop; needs_fallback=0; exit 0; }
+	wifi_rescue no-lease
+	exit 1
+fi
+if ! wired_basics_healthy; then
+	wifi_rescue link-lost
+	exit 1
+fi
+eth_path_healthy
+initial_health=$?
+if [ "$initial_health" -ne 0 ]; then
+	initial_reason=$path_status
+	if ! recover_ethernet "$initial_reason"; then
+		wifi_rescue "$initial_reason"
+		exit 1
+	fi
+fi
+
+set_state active "$iface" "$address"
+if setup_in_progress; then
+	say "$iface is usable at $address; keeping the setup hotspot available"
+else
+	say "$iface is usable at $address; disabling Wi-Fi"
+	wifi_disabled=1
+	wifi_stop || say "Wi-Fi stop reported a failure"
+fi
+dns=$(sed -n '2p' "$LEASE" 2>/dev/null || true)
+if [ -n "$dns" ]; then
+	{ for server in $dns; do echo "nameserver $server"; done; } > "$RESOLV"
+fi
+ifconfig
+route -n
+
+while wanted; do
+	link_failures=0
+	path_failures=0
+	controller_failures=0
+	next_health=0
+	failure_reason=
+	while wanted; do
+		if wired_basics_healthy; then
+			link_failures=0
+		else
+			link_failures=$((link_failures + 1))
+			if [ "$link_failures" -ge "$FAILURE_LIMIT" ]; then
+				failure_reason=link-lost
+				break
+			fi
+		fi
+		now=$(date +%s)
+		if [ "$now" -ge "$next_health" ]; then
+			eth_path_healthy
+			health_result=$?
+			if [ "$health_result" -eq 0 ]; then
+				path_failures=0
+				controller_failures=0
+			elif [ "$health_result" -eq 2 ]; then
+				path_failures=0
+				controller_failures=$((controller_failures + 1))
+				if [ "$controller_failures" -ge "$CONTROLLER_FAILURE_LIMIT" ]; then
+					failure_reason=controller-unreachable
+					break
+				fi
+			else
+				controller_failures=0
+				path_failures=$((path_failures + 1))
+				if [ "$path_failures" -ge "$FAILURE_LIMIT" ]; then
+					failure_reason=path-unreachable
+					break
+				fi
+			fi
+			next_health=$((now + HEALTH_INTERVAL))
+		fi
+		sleep "$MONITOR_INTERVAL"
+	done
+
+	wanted || break
+	if [ ! -e "$SYS_NET/$iface" ]; then
+		fallback adapter-removed
+		needs_fallback=0
+		exit 0
+	fi
+	case "$failure_reason" in
+	path-unreachable|controller-unreachable)
+		if recover_ethernet "$failure_reason"; then
+			set_state active "$iface" "$address"
+			say "$iface recovered without enabling Wi-Fi"
+			continue
+		fi
+		;;
+	esac
+	wifi_rescue "${failure_reason:-wired-unhealthy}"
+	exit 0
+done
+
+fallback service-stop
+needs_fallback=0
+exit 0

@@ -113,6 +113,27 @@ func TestDriftIsCorrectedWithSmallStepsWithinOneMillisecond(t *testing.T) {
 	}
 }
 
+func TestCorrectedHardwareTimelineDoesNotNeedPerPeriodDrops(t *testing.T) {
+	// Biscuit, Radar, and Rook submit 2064 hardware-accounting frames for
+	// every 2048-frame mixer block. Asking the timestamped source for the full
+	// 2064-frame timeline keeps its source clock aligned with that 43ms DAC
+	// period instead of dropping samples at every boundary.
+	const hardwareTimelineFrames = 2064
+	p := newTestPlayer(0)
+	out := make([]byte, hardwareTimelineFrames*4)
+	playAt := int64(5_000_000)
+	for period := 0; period < 180; period++ {
+		if !p.Fill(out, at(playAt)) {
+			t.Fatalf("period %d: ran dry", period)
+		}
+		playAt += int64(hardwareTimelineFrames) * 1_000_000 / outRate
+	}
+	st := p.stats()
+	if st.Snaps != 1 || st.Corrections != 0 {
+		t.Fatalf("timeline produced snaps=%d corrections=%d, want startup snap only", st.Snaps, st.Corrections)
+	}
+}
+
 // A disturbance past 5ms (a stall, a clock step) is a one-shot resync, not a
 // second of audible speed change.
 func TestALargeErrorSnaps(t *testing.T) {

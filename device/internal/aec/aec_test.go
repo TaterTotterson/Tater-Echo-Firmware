@@ -657,6 +657,29 @@ func TestCheckersKeepsLeftRightAndOmniEchoPaths(t *testing.T) {
 	}
 }
 
+func TestAthenaKeepsCoherentAndOmniEchoPaths(t *testing.T) {
+	c := NewForTarget("athena")
+	if c.pathCount != 2 || c.defaultPath != 1 || c.activePath != 1 {
+		t.Fatalf("athena paths: count=%d default=%d active=%d, want 2/1/1",
+			c.pathCount, c.defaultPath, c.activePath)
+	}
+	c.SetParams(true, 0, 200)
+	for path := 0; path < 2; path++ {
+		if c.states[path] == nil {
+			t.Fatalf("athena echo path %d was not allocated", path)
+		}
+	}
+	for path := 2; path < len(c.states); path++ {
+		if c.states[path] != nil {
+			t.Fatalf("athena allocated unused echo path %d", path)
+		}
+	}
+	c.SelectPath(6)
+	if c.activePath != 1 || c.st != c.states[1] {
+		t.Fatalf("athena invalid selection changed path: active=%d", c.activePath)
+	}
+}
+
 func TestRookKeepsOmniAndFourSteeredEchoPaths(t *testing.T) {
 	c := NewForTarget("rook")
 	if c.pathCount != 5 || c.defaultPath != 4 || c.activePath != 4 {

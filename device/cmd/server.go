@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -79,11 +80,13 @@ func satChatVideoCaptureDelay(elapsed time.Duration, succeeded bool) time.Durati
 
 func main() {
 	log.SetOutput(os.Stdout)
-	// A held key predates the daemon's normal evdev subscription, so inspect
-	// the kernel's current key bitmap before either the normal runtime or the
-	// unpaired setup runtime takes ownership of the buttons.
+	// Biscuit and Radar have no dependable bootloader-level Volume Up route.
+	// Inspect their held-key bitmap before either runtime takes the buttons so
+	// the current factory image can perform its automatic-return TWRP handoff.
+	// Screen satellites enter TWRP in their boot chain and intentionally skip
+	// this Linux-side check.
 	if len(os.Args) == 1 || (len(os.Args) == 2 && os.Args[1] == "setup-mode") {
-		attemptStartupRecoveryGesture()
+		attemptStartupTWRPGesture()
 	}
 
 	// Only a bare invocation runs the daemon. `server --version` used to
@@ -589,6 +592,8 @@ func main() {
 	deviceName := sendspinName
 	room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
 	var screenDiagnostics atomic.Pointer[show.ScreenDiagnostics]
+	var videoAudioMu sync.Mutex
+	videoAudioStream := ""
 	if isScreenTarget(client.FirmwareTarget) {
 		screen := show.New(show.DefaultAddress, show.Snapshot{
 			Phase: "offline", DeviceName: deviceName, Room: room,
@@ -602,6 +607,7 @@ func main() {
 			ScreenNightStart:            "22:00",
 			ScreenNightEnd:              "07:00",
 			ScreenNightDisplay:          "red_clock",
+			ScreenClockFormat:           "12h",
 		}, func(command show.Command) {
 			switch command.Action {
 			case "screen.ready":
@@ -658,9 +664,84 @@ func main() {
 				if nativeClient != nil {
 					nativeClient.StopCapture(false)
 				}
+			case "video.pause", "video.resume", "video.stop", "video.progress", "video.ended", "video.error":
+				action := strings.TrimPrefix(command.Action, "video.")
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+					if snapshot.Video == nil || snapshot.Video.SessionID != command.SessionID {
+						return
+					}
+					switch action {
+					case "pause":
+						next := *snapshot.Video
+						next.State = "paused"
+						next.PositionMS = max(command.PositionMS, 0)
+						snapshot.Video = &next
+					case "resume":
+						next := *snapshot.Video
+						next.State = "playing"
+						next.PositionMS = max(command.PositionMS, 0)
+						next.Error = ""
+						snapshot.Video = &next
+					case "progress":
+						// The renderer already owns the live clock. Updating the
+						// snapshot here would change its decoder identity and restart
+						// playback every time progress is reported upstream.
+						return
+					default:
+						snapshot.Video = nil
+					}
+				})
+				if nativeClient != nil {
+					nativeClient.VideoAction(action, command.SessionID, command.PositionMS, command.Error)
+				}
 			case "timer.stop":
 				if nativeClient != nil {
 					nativeClient.StopDisplayedTimer("screen")
+				}
+			}
+		})
+		screen.SetVideoAudioHandler(func(audioCtx context.Context, sessionID, streamID string, input io.Reader) error {
+			const periodBytes = 4096 // mono S16LE, 2048 frames at 48 kHz
+			videoAudioMu.Lock()
+			pcmSpeaker.FlushMusic()
+			pcmSpeaker.EndMusicStream()
+			pcmSpeaker.SetMusicLive(true)
+			videoAudioStream = streamID
+			videoAudioMu.Unlock()
+			defer func() {
+				videoAudioMu.Lock()
+				if videoAudioStream == streamID {
+					if audioCtx.Err() != nil {
+						pcmSpeaker.FlushMusic()
+					}
+					pcmSpeaker.EndMusicStream()
+					pcmSpeaker.SetMusicLive(false)
+					videoAudioStream = ""
+				}
+				videoAudioMu.Unlock()
+			}()
+
+			period := make([]byte, periodBytes)
+			for {
+				n, readErr := io.ReadFull(input, period)
+				videoAudioMu.Lock()
+				if videoAudioStream != streamID {
+					videoAudioMu.Unlock()
+					return context.Canceled
+				}
+				if n > 0 && audioCtx.Err() == nil {
+					clear(period[n:])
+					if pumpErr := pcmSpeaker.PumpMusic(period); pumpErr != nil {
+						videoAudioMu.Unlock()
+						return pumpErr
+					}
+				}
+				videoAudioMu.Unlock()
+				if readErr != nil {
+					if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+						return nil
+					}
+					return readErr
 				}
 			}
 		})
@@ -677,6 +758,10 @@ func main() {
 	}
 	var nativeErr error
 	nativeCapabilities := taternative.CapabilitiesForTarget(client.FirmwareTarget)
+	if systemVersion := platform.Release(""); systemVersion != "" {
+		nativeCapabilities["system_version"] = systemVersion
+		nativeCapabilities["system_target"] = client.FirmwareTarget
+	}
 	if !activeGATTEnabled {
 		nativeCapabilities["ble_gatt"] = false
 		nativeCapabilities["ble_gatt_pairing"] = false
@@ -697,6 +782,39 @@ func main() {
 			screen.SetSatChatVideo(nil)
 		}
 	}
+	streamCameraVideo := func(videoCtx context.Context, profile string, receive func([]byte)) error {
+		streamErr := show.StreamCameraVideoProfile(videoCtx, satChatCameraAddress, profile, func(image []byte) {
+			if videoCtx.Err() == nil && !s.IsMuted() && receive != nil {
+				receive(image)
+			}
+		})
+		if videoCtx.Err() != nil {
+			return videoCtx.Err()
+		}
+		log.Printf("[camera-video] continuous stream unavailable at %s; using snapshot compatibility path: %v", satChatCameraAddress, streamErr)
+		for videoCtx.Err() == nil {
+			captureStarted := time.Now()
+			captureOK := false
+			if !s.IsMuted() {
+				captureCtx, captureCancel := context.WithTimeout(videoCtx, 4*time.Second)
+				snapshot, captureErr := show.CaptureCameraVideoFrameProfile(captureCtx, satChatCameraAddress, profile)
+				captureCancel()
+				if captureErr == nil && !s.IsMuted() && receive != nil {
+					receive(snapshot.Image)
+					captureOK = true
+				}
+			}
+			delay := satChatVideoCaptureDelay(time.Since(captureStarted), captureOK)
+			timer := time.NewTimer(delay)
+			select {
+			case <-videoCtx.Done():
+				timer.Stop()
+				return videoCtx.Err()
+			case <-timer.C:
+			}
+		}
+		return videoCtx.Err()
+	}
 	startSatChatVideo := func(profile string) {
 		stopSatChatVideo()
 		videoCtx, cancel := context.WithCancel(ctx)
@@ -704,36 +822,11 @@ func main() {
 		satChatVideoCancel = cancel
 		satChatVideoMu.Unlock()
 		go func() {
-			streamErr := show.StreamCameraVideoProfile(videoCtx, satChatCameraAddress, profile, func(image []byte) {
-				if videoCtx.Err() == nil && !s.IsMuted() && nativeClient != nil {
+			_ = streamCameraVideo(videoCtx, profile, func(image []byte) {
+				if nativeClient != nil {
 					nativeClient.SendSatChatVideo(image)
 				}
 			})
-			if videoCtx.Err() != nil {
-				return
-			}
-			log.Printf("[sat-chat] camera stream unavailable at %s; using snapshot compatibility path: %v", satChatCameraAddress, streamErr)
-			for videoCtx.Err() == nil {
-				captureStarted := time.Now()
-				captureOK := false
-				if !s.IsMuted() {
-					captureCtx, captureCancel := context.WithTimeout(videoCtx, 4*time.Second)
-					snapshot, captureErr := show.CaptureCameraVideoFrameProfile(captureCtx, satChatCameraAddress, profile)
-					captureCancel()
-					if captureErr == nil && !s.IsMuted() && nativeClient != nil {
-						nativeClient.SendSatChatVideo(snapshot.Image)
-						captureOK = true
-					}
-				}
-				delay := satChatVideoCaptureDelay(time.Since(captureStarted), captureOK)
-				timer := time.NewTimer(delay)
-				select {
-				case <-videoCtx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
 		}()
 	}
 	nativeClient, nativeErr = taternative.New(taternative.Config{
@@ -743,7 +836,13 @@ func main() {
 		Room: room, Capabilities: nativeCapabilities,
 	}, taternative.Hooks{
 		ReplyDirection: s.SetReplyDirectionDegrees,
-		BLEGATT:        bleGATTBridge.Handle,
+		DNDChanged: func(active bool) {
+			sendspinSetBlocked(active)
+			if active {
+				satChatPlayer.Stop()
+			}
+		},
+		BLEGATT: bleGATTBridge.Handle,
 		CameraSnapshot: func(captureCtx context.Context) (taternative.CameraSnapshot, error) {
 			if s.IsMuted() {
 				return taternative.CameraSnapshot{}, fmt.Errorf("camera unavailable while muted")
@@ -758,6 +857,12 @@ func main() {
 			return taternative.CameraSnapshot{
 				Image: snapshot.Image, ContentType: snapshot.ContentType,
 			}, nil
+		},
+		CameraStream: func(streamCtx context.Context, profile string, receive func([]byte)) error {
+			if s.IsMuted() {
+				return fmt.Errorf("camera unavailable while muted")
+			}
+			return streamCameraVideo(streamCtx, profile, receive)
 		},
 		DisplayWeather: func(payload map[string]any) {
 			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
@@ -792,7 +897,24 @@ func main() {
 					Available: cameras.Available, Items: rows, SelectedID: cameras.SelectedID,
 					SelectedName: cameras.SelectedName, SelectedRoom: cameras.SelectedRoom,
 					SelectedTalkback: cameras.SelectedTalkback, Loading: cameras.Loading,
-					Error: cameras.Error, FrameURL: frameURL,
+					Error: cameras.Error, FrameURL: frameURL, StreamURL: cameras.StreamURL,
+					StreamActive: cameras.StreamActive,
+				}
+			})
+		},
+		DisplayVideo: func(video taternative.DisplayVideo) {
+			if !video.Active || video.SessionID == "" || video.URL == "" {
+				updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) { snapshot.Video = nil })
+				pcmSpeaker.FlushMusic()
+				pcmSpeaker.EndMusicStream()
+				return
+			}
+			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+				snapshot.Video = &show.Video{
+					Active: true, SessionID: video.SessionID, URL: video.URL,
+					Title: video.Title, Subtitle: video.Subtitle, State: video.State,
+					PositionMS: video.PositionMS, DurationMS: video.DurationMS, FPS: video.FPS,
+					Loop: video.Loop, Live: video.Live, ServerSeek: video.ServerSeek, Error: video.Error,
 				}
 			})
 		},
@@ -888,9 +1010,11 @@ func main() {
 				s.StartAnim(nativeStateAnimation("idle"))
 				dataClient.StartLocalMic()
 			}
-			nativeClient.ReportSettings(map[string]any{
-				"volume_percent": deviceVolumePercent(s.VolumeLevel()),
-			})
+			settings := map[string]any{"volume_percent": deviceVolumePercent(s.VolumeLevel())}
+			for key, value := range usbEthernetSettings() {
+				settings[key] = value
+			}
+			nativeClient.ReportSettings(settings)
 			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 				if snapshot.SatChat == nil {
 					snapshot.SatChat = &show.SatChat{}
@@ -1038,6 +1162,7 @@ func main() {
 				"led_owner":                  s.LEDOwner(),
 				"wake_engine":                wakeEngine,
 				"ble":                        bleScanner.Stats(),
+				"usb_ethernet":               usbEthernetDiagnostics(),
 				"memory": map[string]any{
 					"heap_alloc_kb": memory.HeapAlloc / 1024,
 					"heap_sys_kb":   memory.HeapSys / 1024,
@@ -1106,6 +1231,7 @@ func main() {
 		},
 		SetupReset: func() error { return resetToSetup("Tater command", false) },
 		OTA:        otaInstaller.Install,
+		SystemOTA:  otaInstaller.InstallSystem,
 	})
 	if nativeErr != nil {
 		log.Fatalf("Tater native configuration invalid: %v", nativeErr)
@@ -1505,6 +1631,7 @@ func runScreenSetupMode() error {
 			ScreenNightStart:            "22:00",
 			ScreenNightEnd:              "07:00",
 			ScreenNightDisplay:          "red_clock",
+			ScreenClockFormat:           "12h",
 		}, nil)
 		go func() {
 			if err := setupScreen.Run(ctx); err != nil && ctx.Err() == nil {
@@ -1607,8 +1734,12 @@ func rebootTaterLinux() error {
 	return nil
 }
 
-func attemptStartupRecoveryGesture() {
+func attemptStartupTWRPGesture() {
 	if platform.Base() != platform.TaterLinux {
+		return
+	}
+	command, err := recovery.StartupTWRPCommand(client.FirmwareTarget)
+	if err != nil {
 		return
 	}
 	inside, err := recovery.InStartupGestureWindow("/proc/uptime")
@@ -1632,23 +1763,18 @@ func attemptStartupRecoveryGesture() {
 	if !held {
 		return
 	}
-	command, err := recovery.TaterRecoveryCommand(client.FirmwareTarget)
-	if err != nil {
-		log.Printf("[recovery] %v", err)
-		return
-	}
-	log.Printf("[recovery] Volume Up held for %s during startup; entering Tater Recovery", recovery.StartupGestureHold)
+	log.Printf("[recovery] Volume Up held for %s during startup; entering TWRP", recovery.StartupGestureHold)
 	output, runErr := exec.Command(command.Path, command.Args...).CombinedOutput()
 	if message := strings.TrimSpace(string(output)); message != "" {
 		log.Printf("[recovery] %s", message)
 	}
 	if runErr != nil {
-		log.Printf("[recovery] Tater Recovery request failed; continuing normal startup: %v", runErr)
+		log.Printf("[recovery] TWRP request failed; continuing normal startup: %v", runErr)
 		return
 	}
 	// The reboot helper performs a synchronized restart and should not return
 	// on success. Fail open to the normal runtime if it unexpectedly does.
-	log.Printf("[recovery] recovery command returned without rebooting; continuing normal startup")
+	log.Printf("[recovery] TWRP command returned without rebooting; continuing normal startup")
 }
 
 // A setup form submission or physical reset is an intentional reboot, not a
@@ -2561,7 +2687,7 @@ func hasScreenSettings(values map[string]any) bool {
 	for _, key := range []string{
 		"screen_brightness", "screen_auto_brightness_enabled", "screen_auto_brightness_minimum",
 		"screen_night_mode_enabled", "screen_night_brightness", "screen_night_start",
-		"screen_night_end", "screen_night_display",
+		"screen_night_end", "screen_night_display", "screen_clock_format",
 	} {
 		if _, ok := values[key]; ok {
 			return true
@@ -2599,6 +2725,9 @@ func applyScreenSettings(snapshot *show.Snapshot, values map[string]any) {
 	if value, ok := values["screen_night_display"]; ok {
 		snapshot.ScreenNightDisplay = normalizeScreenNightDisplay(value)
 	}
+	if value, ok := values["screen_clock_format"]; ok {
+		snapshot.ScreenClockFormat = normalizeScreenClockFormat(value)
+	}
 }
 
 func normalizeScreenPercent(value any, fallback int) int {
@@ -2624,6 +2753,15 @@ func normalizeScreenNightDisplay(value any) string {
 	}
 }
 
+func normalizeScreenClockFormat(value any) string {
+	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
+	case "24h", "24":
+		return "24h"
+	default:
+		return "12h"
+	}
+}
+
 // applyTaterSettings maps Tater's native settings vocabulary onto the
 // firmware's existing runtime configuration and hardware controllers.
 func applyTaterSettings(values map[string]any, srv *server.Server, canceller *aec.Canceller,
@@ -2634,6 +2772,10 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 		// overrides instead of claiming that the firmware applied them.
 		switch key {
 		case "aec_enabled", "aec_strength_percent", "aec_delay_ms":
+			continue
+		case "ssh_password":
+			// Apply this separately through the root-only helper and never echo
+			// it into settings.changed, including on an unrelated early error.
 			continue
 		}
 		applied[key] = value
@@ -2680,6 +2822,25 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 	if value, ok := values["screen_night_display"]; ok {
 		applied["screen_night_display"] = normalizeScreenNightDisplay(value)
 	}
+	if value, ok := values["screen_clock_format"]; ok {
+		applied["screen_clock_format"] = normalizeScreenClockFormat(value)
+	}
+	if value, ok := values["dnd_enabled"]; ok {
+		applied["dnd_enabled"] = nativeBool(value, false)
+	}
+	if value, ok := values["dnd_schedule_enabled"]; ok {
+		applied["dnd_schedule_enabled"] = nativeBool(value, false)
+	}
+	if value, ok := values["dnd_start"]; ok {
+		applied["dnd_start"] = normalizeScreenClock(value, "22:00")
+	}
+	if value, ok := values["dnd_end"]; ok {
+		applied["dnd_end"] = normalizeScreenClock(value, "07:00")
+	}
+	if value, ok := values["utc_offset_seconds"]; ok {
+		offset := int(math.Round(nativeNumber(value, 0)))
+		applied["utc_offset_seconds"] = max(-18*60*60, min(18*60*60, offset))
+	}
 	if player != nil {
 		if err := player.ConfigureWakeSound(values); err != nil {
 			return applied, err
@@ -2702,6 +2863,12 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 			return applied, err
 		}
 		applied["output_channel_mode"] = sendspinOutputChannel()
+	}
+	if err := applyUSBEthernetSetting(values, applied); err != nil {
+		return applied, err
+	}
+	if err := applySSHSettings(values, applied); err != nil {
+		return applied, err
 	}
 	if value, ok := values["wake_threshold"]; ok {
 		threshold := nativeNumber(value, 0)

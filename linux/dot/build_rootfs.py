@@ -60,6 +60,23 @@ def write(path: Path, contents: str, mode: int = 0o644) -> None:
     path.chmod(mode)
 
 
+def ensure_tater_ssh_group(root: Path) -> None:
+    """Give Dropbear one fail-closed login allowlist containing only root."""
+    group = root / "etc/group"
+    contents = group.read_text() if group.is_file() else ""
+    expected = "tater-ssh:x:900:root"
+    for line in contents.splitlines():
+        fields = line.split(":")
+        if fields[0] == "tater-ssh":
+            if line != expected:
+                raise SystemExit("base rootfs has an unexpected tater-ssh group")
+            return
+        if len(fields) >= 3 and fields[2] == "900":
+            raise SystemExit("base rootfs already uses reserved tater-ssh gid 900")
+    separator = "" if not contents or contents.endswith("\n") else "\n"
+    write(group, contents + separator + expected + "\n")
+
+
 def alpine_file(
     cache: Path,
     name: str,
@@ -291,6 +308,8 @@ say "ready at $($BB date)"
 INITTAB = """# Tater Linux for Biscuit and Radar — BusyBox init.
 ::sysinit:/etc/techo5/boot.sh
 ::respawn:/usr/local/sbin/tater-run
+::respawn:/usr/local/sbin/tater-usb-ethernet
+::respawn:/usr/local/sbin/tater-sshd
 ::respawn:/usr/local/sbin/techo5-console
 ::respawn:/usr/local/sbin/techo5-logs
 ::ctrlaltdel:/usr/local/bin/tater-reboot-now
@@ -486,8 +505,29 @@ def build(args: argparse.Namespace) -> None:
 
         copy(args.setup_ap, root / "usr/local/sbin/tater-setup-ap", 0o755)
         copy(args.setup_ap_base, root / "usr/local/sbin/tater-setup-ap-base", 0o755)
-        copy(args.network, root / "usr/local/sbin/techo5-net", 0o755)
+        copy(args.network, root / "usr/local/sbin/tater-net", 0o755)
+        copy(args.eth, root / "usr/local/sbin/tater-usb-ethernet", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-usb-inventory",
+             root / "usr/local/sbin/tater-usb-inventory", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-sshd",
+             root / "usr/local/sbin/tater-sshd", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-ssh-authorize",
+             root / "usr/local/sbin/tater-ssh-authorize", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-ssh-control",
+             root / "usr/local/sbin/tater-ssh-control", 0o755)
+        ensure_tater_ssh_group(root)
+        for old_name, tater_name in (
+            ("techo5-net", "tater-net"),
+            ("techo5-eth", "tater-usb-ethernet"),
+        ):
+            compatibility = root / "usr/local/sbin" / old_name
+            compatibility.unlink(missing_ok=True)
+            compatibility.symlink_to(tater_name)
         copy(args.wifi_set, root / "usr/local/sbin/wifi-set", 0o755)
+        # The release rootfs predates Tater's checked automatic-return TWRP
+        # route. Always overlay the script from the exact pinned platform
+        # source revision used to build the factory archive.
+        copy(args.to_twrp, root / "usr/local/sbin/to-twrp", 0o755)
         for name, digest, member in SETUP_PACKAGES:
             alpine_file(args.apk_cache, name, digest, member, root / member)
         name, digest, member = CXX_RUNTIME_PACKAGE
@@ -541,7 +581,9 @@ def main() -> int:
     parser.add_argument("--setup-ap", type=Path, required=True)
     parser.add_argument("--setup-ap-base", type=Path, required=True)
     parser.add_argument("--network", type=Path, required=True)
+    parser.add_argument("--eth", type=Path, required=True)
     parser.add_argument("--wifi-set", type=Path, required=True)
+    parser.add_argument("--to-twrp", type=Path, required=True)
     parser.add_argument("--apk-cache", type=Path, required=True)
     parser.add_argument("--platform-license", type=Path, required=True)
     parser.add_argument("--platform-notice", type=Path, required=True)

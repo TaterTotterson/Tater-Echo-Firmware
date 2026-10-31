@@ -17,6 +17,7 @@ source for a published bundle is available from the matching tag at
 | Microsoft ONNX Runtime 1.19.2 | openWakeWord and NanoWakeWord inference on all six targets | MIT |
 | Eigen e7248b26 | ONNX Runtime build dependency | MPL-2.0 |
 | openWakeWord feature models | openWakeWord feature extraction | Apache-2.0 |
+| FFmpeg 8.1.2 | Software video decoding for live camera streams on screen satellites | LGPL-2.1-or-later |
 | Sendspin player implementation | Synchronized media playback in `device/internal/sendspin/` | MIT |
 | EchoLocal Radar ALSA byte-control helper | Writing Radar's byte-valued codec control in `device/internal/bindings/mixer/bytes_server.go` | MIT |
 
@@ -28,6 +29,13 @@ license in [`LICENSES/SENDSPIN-MIT.txt`](LICENSES/SENDSPIN-MIT.txt). Applicable
 notices are retained in the source tree and release bundles. Detailed
 microWakeWord runtime attribution is recorded in
 [`device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md`](device/internal/wakeword/microwakeword/native/THIRD_PARTY_NOTICES.md).
+
+The screen-satellite video decoder is the reduced ARMv7 FFmpeg 8.1.2 build
+from the hash-pinned Athena Tater Echo Linux baseline. It is built without
+FFmpeg's GPL or nonfree components and remains under LGPL-2.1-or-later. The
+matching Tater Echo Linux commit, build recipe, official source archive, and
+license are identified by `platforms/tater-echo-linux-lock.json`; factory
+images and full application OTAs retain the LGPL text beside the decoder.
 
 The small Radar ALSA byte-control layout and name-lookup helper was adapted
 from the MIT-licensed EchoLocal Radar work by Vithurshan Selvarajah, based on

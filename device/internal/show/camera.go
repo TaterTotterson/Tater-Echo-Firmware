@@ -37,13 +37,16 @@ func CaptureCameraVideoFrame(ctx context.Context, address string) (CameraSnapsho
 	return CaptureCameraVideoFrameProfile(ctx, address, "")
 }
 
-// CaptureCameraVideoFrameProfile requests the low-bandwidth Echo-to-Echo
-// profile when Tater has selected it for this endpoint. Unknown or empty
-// profiles deliberately retain the normal video frame for mobile peers.
+// CaptureCameraVideoFrameProfile requests the Echo-to-Echo profile selected
+// for this endpoint. Unknown or empty profiles deliberately retain the normal
+// video frame for mobile peers.
 func CaptureCameraVideoFrameProfile(ctx context.Context, address, profile string) (CameraSnapshot, error) {
 	endpoint := "/snapshot?profile=video"
-	if strings.EqualFold(strings.TrimSpace(profile), "echo-low") {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "echo-low":
 		endpoint = "/snapshot?profile=echo-low"
+	case "echo-balanced":
+		endpoint = "/snapshot?profile=echo-balanced"
 	}
 	return captureCamera(ctx, address, endpoint)
 }
@@ -57,7 +60,7 @@ func StreamCameraVideo(ctx context.Context, address string, callback func([]byte
 }
 
 // StreamCameraVideoProfile consumes the selected helper profile. Echo-to-Echo
-// calls use a smaller frame encoded at the source; mobile peers retain the
+// calls use a frame sized for the receiving display; mobile peers retain the
 // helper's normal stream.
 func StreamCameraVideoProfile(ctx context.Context, address, profile string, callback func([]byte)) error {
 	address = strings.TrimSpace(address)
@@ -65,8 +68,11 @@ func StreamCameraVideoProfile(ctx context.Context, address, profile string, call
 		address = DefaultCameraAddress
 	}
 	endpoint := "/stream"
-	if strings.EqualFold(strings.TrimSpace(profile), "echo-low") {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "echo-low":
 		endpoint += "?profile=echo-low"
+	case "echo-balanced":
+		endpoint += "?profile=echo-balanced"
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+endpoint, nil)
 	if err != nil {

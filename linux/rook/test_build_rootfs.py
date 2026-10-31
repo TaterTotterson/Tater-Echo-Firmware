@@ -48,6 +48,55 @@ t5_wifi_up() {
             patched.index("until ip link set wlan0 up"),
         )
 
+    def test_current_pinned_wifi_helper_keeps_order_and_rook_fallback(self):
+        source = """#!/bin/sh
+t5_wifi_mac() { :; }
+# t5_wifi_up <module.ko> <wpa.conf>: current pinned fixture
+t5_wifi_up() {
+\tt5_ipv6_private wlan0
+\tn=0; until t5_wifi_mac wlan0; do
+\t\tsleep 1
+\tdone
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do
+\t\tsleep 1
+\tdone
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "lib/techo5-lib.sh"
+            library.parent.mkdir(parents=True)
+            library.write_text(source)
+            build_rootfs.common.patch_rook_wifi_mac(root)
+            patched = library.read_text()
+            subprocess.run(["sh", "-n", str(library)], check=True)
+
+        self.assertEqual(1, patched.count("tater_rook_wifi_mac()"))
+        self.assertEqual(1, patched.count("until tater_rook_wifi_mac wlan0"))
+        self.assertNotIn("until t5_wifi_mac wlan0", patched)
+        self.assertIn("/proc/idme/serial", patched)
+        self.assertLess(
+            patched.index("until tater_rook_wifi_mac wlan0"),
+            patched.index("until ip link set wlan0 up"),
+        )
+
+    def test_rejects_current_wifi_helper_when_mac_runs_after_link_up(self):
+        source = """#!/bin/sh
+t5_wifi_mac() { :; }
+# t5_wifi_up <module.ko> <wpa.conf>: invalid pinned fixture
+t5_wifi_up() {
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do :; done
+\tn=0; until t5_wifi_mac wlan0; do :; done
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "lib/techo5-lib.sh"
+            library.parent.mkdir(parents=True)
+            library.write_text(source)
+            with self.assertRaisesRegex(SystemExit, "after link-up"):
+                build_rootfs.common.patch_rook_wifi_mac(root)
+
     def test_wifi_mac_guard_uses_factory_then_serial_fallback(self):
         source = """#!/bin/sh
 # t5_wifi_up <module.ko> <wpa.conf>: test fixture
@@ -147,6 +196,14 @@ tater_rook_wifi_mac wlan0
             "020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea",
             rook_job,
         )
+        self.assertEqual(
+            2,
+            rook_job.count("--spot-source /tmp/tater-echo-linux-spot/platforms/spot"),
+        )
+        self.assertEqual(
+            2,
+            rook_job.count("--show-source /tmp/tater-echo-linux-show/platforms/show"),
+        )
 
     def test_workflows_build_and_cache_onnx_runtime_once(self):
         repo = Path(__file__).resolve().parents[2]
@@ -159,7 +216,7 @@ tater_rook_wifi_mac wlan0
         )
 
         shared_job = release.split("\n  onnxruntime-armv7:\n", 1)[1].split(
-            "\n  biscuit:\n", 1
+            "\n  ffmpeg-armv7:\n", 1
         )[0]
         self.assertIn("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", shared_job)
         self.assertIn(cache_key, shared_job)
@@ -174,17 +231,29 @@ tater_rook_wifi_mac wlan0
         )
         self.assertIn("include-hidden-files: true", shared_job)
 
-        for target, following in (("checkers", "rook"), ("rook", "publish")):
+        decoder_job = release.split("\n  ffmpeg-armv7:\n", 1)[1].split(
+            "\n  biscuit:\n", 1
+        )[0]
+        self.assertIn("tools/fetch_platform_input.py", decoder_job)
+        self.assertIn("platforms.athena.video_decoder device/build/tater-ffmpeg", decoder_job)
+        self.assertIn("platforms.athena.video_decoder.license", decoder_job)
+        self.assertIn("--enable-protocol=.*srtp", decoder_job)
+        self.assertIn("name: tater-ffmpeg-linux-armv7", decoder_job)
+
+        for target, following in (
+            ("checkers", "athena"), ("athena", "rook"), ("rook", "publish"),
+        ):
             job = release.split(f"\n  {target}:\n", 1)[1].split(
                 f"\n  {following}:\n", 1
             )[0]
             with self.subTest(target=target):
-                self.assertIn("needs: onnxruntime-armv7", job)
+                self.assertIn("needs: [onnxruntime-armv7, ffmpeg-armv7]", job)
                 self.assertIn(
                     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
                     job,
                 )
                 self.assertIn("name: tater-onnxruntime-linux-armv7", job)
+                self.assertIn("name: tater-ffmpeg-linux-armv7", job)
 
         promote_job = promote.split("\n  promote:\n", 1)[1]
         self.assertIn("github.event.workflow_run.conclusion == 'success'", promote_job)
@@ -285,13 +354,15 @@ log "boot script done"
             output = root / "rook.tar.gz"
             args = SimpleNamespace(
                 base_rootfs=base, server=payload, show=payload, reboot=payload,
-                camera=payload, mww_runtime=payload, onnx_runtime=payload, hey_tater_model=payload,
+                camera=payload, ffmpeg=payload, mww_runtime=payload, onnx_runtime=payload, hey_tater_model=payload,
                 hey_tater_manifest=payload, hey_tater_oww_onnx=payload,
                 hey_tater_oww_metadata=payload, hey_tater_nww_cnn=payload,
                 hey_tater_nww_gru=payload, hey_tater_bundle=payload, stop_model=payload,
                 stop_manifest=payload, oww_melspectrogram_onnx=payload,
                 oww_embedding_onnx=payload, tinyalsa=payload,
+                techo5_lib=payload,
                 techo5_spot_license=license_file, techo5_license=license_file,
+                ffmpeg_license=license_file,
                 apk_cache=root, version="v0.0.1", output=output,
             )
             with (
@@ -305,16 +376,40 @@ log "boot script done"
             wifi_patch.assert_called_once()
             with tarfile.open(output, "r:gz") as archive:
                 camera = archive.extractfile("./usr/local/bin/tater-camera").read()
+                ffmpeg = archive.extractfile("./usr/local/bin/tater-ffmpeg").read()
                 inittab = archive.extractfile("./etc/inittab").read().decode()
+                ethernet = archive.extractfile("./usr/local/sbin/tater-usb-ethernet").read().decode()
+                sshd = archive.extractfile("./usr/local/sbin/tater-sshd").read().decode()
+                authorize = archive.extractfile("./usr/local/sbin/tater-ssh-authorize").read().decode()
+                groups = archive.extractfile("./etc/group").read().decode()
+                passwd = archive.extractfile("./etc/passwd").read().decode()
                 runner = archive.extractfile("./usr/local/sbin/tater-camera-run").read().decode()
                 license_text = archive.extractfile("./usr/share/licenses/tater-linux/TECHO5-LICENSE").read().decode()
+                ffmpeg_license = archive.extractfile("./usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt").read().decode()
                 wake_bundle = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.wake-bundle.json").read()
                 onnx_runtime = archive.extractfile("./usr/share/tater/microwakeword/libonnxruntime.so").read()
                 onnx_classifier = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.oww.onnx").read()
+                techo5_lib = archive.extractfile("./lib/techo5-lib.sh").read()
             self.assertEqual(camera, b"trial-binary")
+            self.assertEqual(ffmpeg, b"trial-binary")
+            self.assertEqual(techo5_lib, b"trial-binary")
             self.assertIn("::respawn:/usr/local/sbin/tater-camera-run", inittab)
+            self.assertIn("::respawn:/usr/local/sbin/tater-usb-ethernet", inittab)
+            self.assertIn("::respawn:/usr/local/sbin/tater-sshd", inittab)
+            self.assertIn("automatic USB Ethernet supervisor", ethernet)
+            self.assertIn("-F -E -j -k", sshd)
+            self.assertIn("/proc/self/mountinfo", sshd)
+            self.assertIn('mount -o bind "$SHADOW_SOURCE" "$SHADOW_TARGET"', sshd)
+            self.assertIn("TATER_SSH_FAIL_SECONDS", sshd)
+            self.assertNotIn("chpasswd", sshd)
+            self.assertIn("OpenSSH public key", authorize)
+            self.assertIn("tater-ssh:x:900:root", groups)
+            self.assertIn("techo5-video:x:89:", groups)
+            self.assertIn("inet:x:3003:techo5-video", groups)
+            self.assertIn("techo5-video:x:89:89:", passwd)
             self.assertIn("/usr/local/bin/tater-camera", runner)
             self.assertEqual(license_text, "MIT license\n")
+            self.assertEqual(ffmpeg_license, "MIT license\n")
             self.assertEqual(wake_bundle, b"trial-binary")
             self.assertEqual(onnx_runtime, b"trial-binary")
             self.assertEqual(onnx_classifier, b"trial-binary")

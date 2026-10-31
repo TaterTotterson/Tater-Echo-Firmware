@@ -1,0 +1,126 @@
+#!/bin/sh
+# Read-only USB Ethernet qualification inventory for every Tater Linux target.
+# It never changes USB role, GPIOs, interfaces, routes, or persistent state.
+set -u
+PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+export PATH
+
+PROC_ROOT=${TATER_PROC_ROOT:-/proc}
+SYS_ROOT=${TATER_SYS_ROOT:-/sys}
+ETC_ROOT=${TATER_ETC_ROOT:-/etc}
+BOOT_ROOT=${TATER_BOOT_ROOT:-/boot}
+
+section() {
+	printf '\n[%s]\n' "$1"
+}
+
+show_text_file() {
+	label=$1
+	path=$2
+	if [ -r "$path" ]; then
+		printf '%s=' "$label"
+		tr '\000' '\n' < "$path" | sed -n '1p'
+	else
+		printf '%s=unavailable\n' "$label"
+	fi
+}
+
+show_role_file() {
+	path=$1
+	[ -r "$path" ] || return 0
+	printf '%s=' "${path#"$SYS_ROOT"}"
+	sed -n '1p' "$path"
+}
+
+section identity
+printf 'collector=tater-usb-inventory-v1\n'
+printf 'read_only=true\n'
+show_text_file target "$ETC_ROOT/hostname"
+show_text_file release "$ETC_ROOT/tater-release"
+show_text_file model "$SYS_ROOT/firmware/devicetree/base/model"
+show_text_file compatible "$SYS_ROOT/firmware/devicetree/base/compatible"
+printf 'kernel='
+uname -a 2>/dev/null || printf 'unavailable\n'
+
+section kernel-usb-config
+config_kind=
+config_path=
+if [ -r "$PROC_ROOT/config.gz" ] && command -v gzip >/dev/null 2>&1; then
+	config_kind=gzip
+	config_path=$PROC_ROOT/config.gz
+elif [ -r "$BOOT_ROOT/config-$(uname -r 2>/dev/null)" ]; then
+	config_kind=plain
+	config_path=$BOOT_ROOT/config-$(uname -r 2>/dev/null)
+fi
+if [ -n "$config_kind" ]; then
+	if [ "$config_kind" = gzip ]; then
+		gzip -cd "$config_path" 2>/dev/null
+	else
+		cat "$config_path" 2>/dev/null
+	fi | grep -E '^(CONFIG_(CMD_MODE_CHANGE|MTK_USB_CMD_CHANGE_MODE|USB_MTK_HDRC|USB_MTK_OTG|USB_MTU3|USB_MTU3_HOST|USB_MTU3_GADGET|USB_OTG|USB_ROLE_SWITCH|USB_USBNET|USB_NET_DRIVERS|USB_NET_CDCETHER|USB_NET_CDC_ETHER|USB_NET_CDC_EEM|USB_NET_CDC_NCM|USB_NET_CDC_MBIM|USB_NET_RNDIS_HOST|USB_NET_AX8817X|USB_NET_AX88179_178A|USB_NET_DM9601|USB_NET_SMSC95XX|USB_LAN78XX|USB_RTL8152|MII)=|# CONFIG_(CMD_MODE_CHANGE|MTK_USB_CMD_CHANGE_MODE|USB_MTU3_HOST|USB_ROLE_SWITCH|USB_USBNET|USB_NET_DRIVERS|USB_NET_CDCETHER|USB_NET_CDC_ETHER|USB_NET_CDC_EEM|USB_NET_CDC_NCM|USB_NET_CDC_MBIM|USB_NET_RNDIS_HOST|USB_NET_AX8817X|USB_NET_AX88179_178A|USB_NET_DM9601|USB_NET_SMSC95XX|USB_LAN78XX|USB_RTL8152) is not set)' || true
+else
+	printf 'config=unavailable\n'
+fi
+
+section role-controls
+if [ -r "$PROC_ROOT/mchange" ]; then
+	printf '/proc/mchange='
+	sed -n '1p' "$PROC_ROOT/mchange"
+else
+	printf '/proc/mchange=unavailable\n'
+fi
+found_role=0
+for path in \
+	"$SYS_ROOT"/class/usb_role/*/role \
+	"$SYS_ROOT"/class/dual_role_usb/*/mode \
+	"$SYS_ROOT"/class/dual_role_usb/*/data_role \
+	"$SYS_ROOT"/bus/platform/devices/*usb*/role \
+	"$SYS_ROOT"/bus/platform/devices/*musb*/role \
+	"$SYS_ROOT"/bus/platform/devices/*mtu3*/role; do
+	[ -r "$path" ] || continue
+	show_role_file "$path"
+	found_role=1
+done
+[ "$found_role" -eq 1 ] || printf 'sysfs-role=unavailable\n'
+
+section usb-devices
+found_usb=0
+for path in "$SYS_ROOT"/bus/usb/devices/*/uevent; do
+	[ -r "$path" ] || continue
+	found_usb=1
+	printf '%s\n' "device=${path%/uevent}"
+	# Deliberately omit SERIAL and every other unit-specific identifier.
+	grep -E '^(BUSNUM|DEVNUM|DRIVER|PRODUCT|TYPE)=' "$path" 2>/dev/null || true
+done
+[ "$found_usb" -eq 1 ] || printf 'devices=unavailable\n'
+
+section usb-network-drivers
+if [ -r "$PROC_ROOT/modules" ]; then
+	grep -E '^(usbnet|cdc_ether|cdc_eem|cdc_ncm|cdc_mbim|rndis_host|r8152|asix|ax88179_178a|dm9601|lan78xx|smsc95xx) ' "$PROC_ROOT/modules" 2>/dev/null || printf 'loaded=none\n'
+else
+	printf 'modules=unavailable-or-built-in\n'
+fi
+
+section network-interfaces
+found_net=0
+for path in "$SYS_ROOT"/class/net/*; do
+	[ -e "$path" ] || continue
+	found_net=1
+	name=${path##*/}
+	printf 'interface=%s' "$name"
+	[ -r "$path/operstate" ] && printf ' operstate=%s' "$(sed -n '1p' "$path/operstate")"
+	[ -r "$path/carrier" ] && printf ' carrier=%s' "$(sed -n '1p' "$path/carrier")"
+	if [ -L "$path/device/driver" ]; then
+		driver=$(readlink "$path/device/driver" 2>/dev/null || true)
+		printf ' driver=%s' "${driver##*/}"
+	fi
+	printf '\n'
+done
+[ "$found_net" -eq 1 ] || printf 'interfaces=unavailable\n'
+
+if [ "${1:-}" = "--include-logs" ]; then
+	section recent-usb-kernel-log
+	# Serial-number lines are excluded so the inventory is safe to attach to an issue.
+	dmesg 2>/dev/null | grep -Ei 'usb|musb|mtu3|vbus|iddig|cdc_ether|usbnet|r8152' |
+		grep -Eiv 'serial(number)?[=: ]' | tail -120 || true
+fi

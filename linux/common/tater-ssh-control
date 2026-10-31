@@ -1,0 +1,157 @@
+#!/bin/sh
+# Apply Tater's per-satellite SSH switch without putting a password in argv.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SSH_DIR=${TATER_SSH_DIR:-/data/tater-linux/ssh}
+STATE=${TATER_SSH_STATE:-/run/tater-sshd.state}
+BUSYBOX=${TATER_BUSYBOX:-/bin/busybox}
+PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
+MODE_FILE=$SSH_DIR/mode
+PASSWORD_HASH=$SSH_DIR/password_hash
+SHADOW_SOURCE=${TATER_SSH_SHADOW_SOURCE:-/run/tater-sshd.shadow}
+SHADOW_TARGET=${TATER_SSH_SHADOW_TARGET:-/etc/shadow}
+SHADOW_MARKER=${TATER_SSH_SHADOW_MARKER:-/run/tater-sshd.shadow-mounted}
+
+usage() {
+	cat <<'EOF'
+Usage:
+  printf 'true\nPASSWORD\n' | tater-ssh-control configure
+  printf 'false\n\n' | tater-ssh-control configure
+  tater-ssh-control status
+EOF
+}
+
+fail() {
+	printf 'tater-ssh-control: %s\n' "$*" >&2
+	exit 1
+}
+
+prepare_directory() {
+	umask 077
+	mkdir -p "$SSH_DIR" || fail "cannot create $SSH_DIR"
+	chmod 700 "$SSH_DIR" || fail "cannot protect $SSH_DIR"
+}
+
+write_private() {
+	destination=$1
+	value=$2
+	temporary=$destination.tmp.$$
+	printf '%s\n' "$value" > "$temporary" || fail "cannot write $destination"
+	chmod 600 "$temporary" || fail "cannot protect $destination"
+	mv -f "$temporary" "$destination" || fail "cannot install $destination"
+}
+
+restart_supervisor() {
+	if [ -r "$PID_FILE" ]; then
+		pid=$(cat "$PID_FILE" 2>/dev/null)
+		case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+	fi
+}
+
+shadow_is_mounted() {
+	"$BUSYBOX" awk -v target="$SHADOW_TARGET" '
+		$5 == target { found = 1 }
+		END { exit !found }
+	' /proc/self/mountinfo
+}
+
+remove_managed_shadow() {
+	[ -r "$SHADOW_MARKER" ] || return 0
+	managed_source=
+	IFS= read -r managed_source < "$SHADOW_MARKER"
+	[ "$managed_source" = "$SHADOW_SOURCE" ] || \
+		fail "managed shadow marker does not match $SHADOW_SOURCE"
+	if shadow_is_mounted; then
+		"$BUSYBOX" umount "$SHADOW_TARGET" || \
+			fail "cannot remove managed shadow mount"
+	fi
+	rm -f "$SHADOW_MARKER" "$SHADOW_SOURCE" || \
+		fail "cannot clear managed shadow files"
+}
+
+command=${1:-status}
+case "$command" in
+configure)
+	[ "$#" -eq 1 ] || fail "configure accepts settings on standard input only"
+	IFS= read -r enabled || fail "missing enabled setting"
+	IFS= read -r password || password=
+	case "$enabled" in
+		true|1|yes|on) enabled=true ;;
+		false|0|no|off) enabled=false ;;
+		*) fail "enabled must be true or false" ;;
+	esac
+	prepare_directory
+	if [ "$enabled" = false ]; then
+		current=
+		[ ! -r "$MODE_FILE" ] || IFS= read -r current < "$MODE_FILE"
+		if [ "$current" = disabled ]; then
+			remove_managed_shadow
+			printf 'unchanged disabled\n'
+			exit 0
+		fi
+		write_private "$MODE_FILE" disabled
+		restart_supervisor
+		remove_managed_shadow
+		printf 'disabled\n'
+		exit 0
+	fi
+
+	[ "${#password}" -ge 12 ] || fail "password must contain at least 12 characters"
+	[ "${#password}" -le 64 ] || fail "password must contain at most 64 characters"
+	case "$password" in
+		*[!A-Za-z0-9._@%+=-]*) fail "password contains unsupported characters" ;;
+	esac
+	[ -x "$BUSYBOX" ] || fail "BusyBox is missing or not executable"
+	current_mode=
+	[ ! -r "$MODE_FILE" ] || IFS= read -r current_mode < "$MODE_FILE"
+	if [ "$current_mode" = password ] && [ -s "$PASSWORD_HASH" ]; then
+		current_hash=$(cat "$PASSWORD_HASH")
+		case "$current_hash" in
+			\$6\$*)
+				hash_tail=${current_hash#\$6\$}
+				salt=${hash_tail%%\$*}
+				candidate=$(printf '%s\n' "$password" | "$BUSYBOX" mkpasswd -P 0 -m sha512 -S "$salt") || \
+					fail "cannot verify password"
+				if [ "$candidate" = "$current_hash" ]; then
+					current_state=
+					[ ! -r "$STATE" ] || IFS= read -r current_state < "$STATE"
+					case "$current_state" in
+					active\ *)
+						printf 'unchanged enabled username=root\n'
+						exit 0
+						;;
+					esac
+					restart_supervisor
+					printf 'restarted enabled username=root\n'
+					exit 0
+				fi
+				;;
+		esac
+	fi
+	password_hash=$(printf '%s\n' "$password" | "$BUSYBOX" mkpasswd -P 0 -m sha512) || \
+		fail "cannot hash password"
+	case "$password_hash" in
+		\$6\$*) ;;
+		*) fail "password hashing did not produce SHA-512 crypt" ;;
+	esac
+	write_private "$PASSWORD_HASH" "$password_hash"
+	write_private "$MODE_FILE" password
+	restart_supervisor
+	printf 'enabled username=root\n'
+	;;
+status)
+	mode=disabled
+	[ ! -r "$MODE_FILE" ] || IFS= read -r mode < "$MODE_FILE"
+	printf 'mode=%s username=root\n' "$mode"
+	[ ! -r "$STATE" ] || cat "$STATE"
+	;;
+-h|--help|help)
+	usage
+	;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

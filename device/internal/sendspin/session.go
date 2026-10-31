@@ -745,7 +745,7 @@ func (s *session) endStream() {
 func (s *session) onAudio(msg []byte) {
 	// Audio for a connection that is not the admitted one, or while HA has
 	// the music plane, is discarded — valid, and never a reason to close.
-	if s.dec == nil || !s.isAdmitted() || s.c.external() {
+	if s.dec == nil || !s.isAdmitted() || s.c.external() || s.c.blocked.Load() {
 		return
 	}
 	ts, payload, err := chunkPayload(msg, s.dec.f.Codec)

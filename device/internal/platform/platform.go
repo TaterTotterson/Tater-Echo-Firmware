@@ -49,6 +49,27 @@ func Detect(root string) string {
 	return Unknown
 }
 
+// Release returns the Tater Linux root filesystem version from os-release.
+// It deliberately returns nothing for any other operating system so callers
+// never mistake an Android/vendor version for an installed Tater system.
+func Release(root string) string {
+	b, err := os.ReadFile(root + "/etc/os-release")
+	if err != nil {
+		return ""
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok {
+			values[key] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	if values["ID"] != TaterLinux {
+		return ""
+	}
+	return strings.TrimSpace(values["VERSION_ID"])
+}
+
 // Linux reports whether the device is running Tater's Alpine image.
 func Linux() bool {
 	return Base() == TaterLinux

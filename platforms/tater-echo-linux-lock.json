@@ -1,5 +1,8 @@
 {
-  "schema": 1,
+  "schema": 2,
+  "source": {
+    "repository": "https://github.com/TaterTotterson/Tater-Echo-Linux.git"
+  },
   "builder": {
     "image": "ghcr.io/tatertotterson/tater-echo-firmware-builder",
     "tag": "go1.24.0-alpine3.21-v3",
@@ -29,15 +32,10 @@
     }
   },
   "platforms": {
-    "techo5": {
-      "repository": "https://github.com/HuskerMinion/techo5.git",
-      "checkers_commit": "0f042360fbc22d798930cfd683d251606bfb7412",
-      "athena_commit": "3062cb0a7b812145248c9b60ce88ee3c6474924d"
-    },
     "dot": {
-      "repository": "https://github.com/HuskerMinion/techo5-dot.git",
       "release": "dot-v1.0.24",
-      "commit": "33b402480ed946dda98bd615a2dfcdeeb4e7a167",
+      "kernel_release": "dot-kernel-v1.0.1",
+      "commit": "f99397141e82a3f03b0b3b1000090c9e72ef3f28",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",
         "sha256": "7b78889fd2d7df25cc5816b4fe29190980fda6ff1c880f287017d0d6e98604ac"
@@ -53,69 +51,88 @@
       "targets": {
         "biscuit": {
           "kernel": {
-            "name": "techo5-dot-kernel-bt.zImage-dtb",
-            "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-kernel-bt.zImage-dtb",
-            "sha256": "c2981fc9b8451a29b2d8a38bfd0029c62d78cf65d641bd03640df70e4a098082"
+            "name": "tater-echo-biscuit-kernel.zImage-dtb",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.1/tater-echo-biscuit-kernel.zImage-dtb",
+            "sha256": "1d3d7e6ade694c60ef29fe49683497b885afcea8c2ea3b23b6e47b077d953729"
           }
         },
         "radar": {
           "kernel": {
-            "name": "techo5-dot-kernel-bt-radar.zImage-dtb",
-            "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-kernel-bt-radar.zImage-dtb",
-            "sha256": "d17465f61dd1261aa84b44955c1c0c3f821943ac91162979c9ff214b8ad5adda"
+            "name": "tater-echo-radar-kernel.zImage-dtb",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.1/tater-echo-radar-kernel.zImage-dtb",
+            "sha256": "e9d245735b5bbf962cc0ad8baa50aa982d9bcc1368423725236eff966d9c1cfd"
           }
         }
       }
     },
     "show": {
+      "checkers_commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
       "release": "v0.9.26",
+      "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v0.9.26/rootfs-v0.9.26.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-show-baseline-rootfs.tar.gz",
         "sha256": "a72bbdfd0d26f536552b44aa9258f136e05d5243220c761a22c0f691a943f14e"
       },
       "targets": {
         "checkers": {
           "boot": {
-            "name": "techo5-boot-checkers-v0.7.16.img",
-            "url": "https://github.com/HuskerMinion/techo5/releases/download/v0.7.16/techo5-boot-checkers-v0.7.16.img",
+            "name": "tater-echo-checkers-baseline-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-checkers-baseline-boot.img",
             "sha256": "46c19fd23c210714e29eb2bf88c77b540f3290c0cf50b680b22032e7a4771da7"
           }
         },
         "crown": {
           "boot": {
-            "name": "techo5-boot-crown-v1.0.1.img",
-            "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.0.1/techo5-boot-crown-v1.0.1.img",
+            "name": "tater-echo-crown-baseline-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-crown-baseline-boot.img",
             "sha256": "e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7"
           }
         }
       }
     },
     "athena": {
+      "commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
       "release": "v1.6.4",
+      "custody_release": "satellite-baselines-v1.0.0",
+      "kernel_release": "athena-kernel-v1.0.0",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.6.4/techo5-rootfs-athena-v1.6.4.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-rootfs.tar.gz",
         "sha256": "cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5"
       },
+      "video_decoder": {
+        "release": "video-decoder-v8.1.2-1",
+        "source_commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/tater-ffmpeg-armv7",
+        "sha256": "8f66c428bfca9ef7990aa1ba20dcf40d48a7cf451c05b733331b75142ae1da89",
+        "size": 4250248,
+        "license": {
+          "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/FFMPEG-LGPL-2.1.txt",
+          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+          "size": 26517
+        }
+      },
       "boot": {
-        "name": "techo5-boot-athena-v1.6.4.img",
-        "url": "https://github.com/HuskerMinion/techo5/releases/download/v1.6.4/techo5-boot-athena-v1.6.4.img",
-        "sha256": "ccea79be61d8d3b99a9851f004b0f3974fee6e8028f8fbd1b4fab03eace65e68"
+        "name": "boot-athena.img",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/athena-kernel-v1.0.0/boot-athena.img",
+        "sha256": "5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191",
+        "size": 12951552
       }
     },
     "rook": {
-      "repository": "https://github.com/HuskerMinion/techo5-spot.git",
       "release": "spot-v0.5.25",
-      "commit": "8253a4a1d52dd37dd152dd1d435b97e541e0a191",
+      "custody_release": "satellite-baselines-v1.0.0",
+      "kernel_release": "rook-kernel-v1.0.0",
+      "commit": "a514109abeccb75c67593d3b1b9f614f181436f3",
       "rootfs": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-rootfs.tar.gz",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rootfs.tar.gz",
         "sha256": "c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2"
       },
       "kernel": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-kernel-bt.Image.gz-dtb",
-        "sha256": "368738ee20b86dc3dc0268d3b4b145e67cca9666379ac26b2379abd6c9136298"
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/rook-kernel-v1.0.0/tater-echo-rook-kernel.Image.gz-dtb",
+        "sha256": "57e6d7401e091f26d0efeadc86170144195f54b50105f98ea311cf0523c31a00"
       },
       "rescue": {
-        "url": "https://github.com/HuskerMinion/techo5-spot/releases/download/spot-v0.5.25/techo5-spot-rescue.tar",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rescue.tar",
         "sha256": "a6f3860d0e3bd5b298ff310d8fe0d6a9a7885a2f6aa792e4134783df4cbf15bf"
       },
       "lineage": {

@@ -68,12 +68,20 @@ func (a *mediaAsset) publish(frames int64, err error, done bool) {
 	if err != nil && a.err == nil && !errors.Is(err, context.Canceled) {
 		a.err = err
 	}
+	// Mark the asset complete before waking frame waiters. Otherwise a waiter
+	// can observe the new frame count in the small window before done closes,
+	// subscribe to the replacement notification channel, and sleep forever
+	// because a completed decoder will never publish again.
+	if done {
+		select {
+		case <-a.done:
+		default:
+			close(a.done)
+		}
+	}
 	close(a.notify)
 	a.notify = make(chan struct{})
 	a.mu.Unlock()
-	if done {
-		close(a.done)
-	}
 }
 
 func (a *mediaAsset) snapshot() (frames int64, done bool, err error, notify <-chan struct{}) {

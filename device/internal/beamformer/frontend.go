@@ -35,10 +35,12 @@ type WakeBeam struct {
 	PCM       []byte
 }
 
-// WakeArray is implemented only by front ends that can form multiple,
-// independently useful wake-word beams from one capture. DataClient discovers
-// it at runtime, so single-stream targets keep their existing scorer and audio
-// path while Checkers, Rook, and Biscuit can use their measured arrays.
+// WakeArray is implemented by front ends that can form an independently useful
+// wake-word beam from one multi-microphone capture. DataClient discovers it at
+// runtime, so ordinary single-stream targets keep their existing scorer and
+// audio path. Measured arrays may expose multiple fixed candidates; Athena
+// exposes one confidence-gated adaptive candidate without claiming a physical
+// bearing that has not been fully mapped.
 type WakeArray interface {
 	WakeBeamCount() int
 	WakeBeams(raw []byte, gain float64) []WakeBeam
@@ -85,3 +87,5 @@ var _ FrontEnd = (*RookFrontEnd)(nil)
 var _ WakeArray = (*RookFrontEnd)(nil)
 var _ WakeDirectionProvider = (*RookFrontEnd)(nil)
 var _ FrontEnd = (*AthenaFrontEnd)(nil)
+var _ WakeArray = (*AthenaFrontEnd)(nil)
+var _ WakeDirectionProvider = (*AthenaFrontEnd)(nil)

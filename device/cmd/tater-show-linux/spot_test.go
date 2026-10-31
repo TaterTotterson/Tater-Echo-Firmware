@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -332,6 +333,36 @@ func TestSpotPhotoHomeAlwaysUsesAssignedRoom(t *testing.T) {
 	}
 }
 
+func TestSpotPhotoMetricsFollowBottomArc(t *testing.T) {
+	tops := make([]int, 6)
+	previousRight := 0
+	for index := range tops {
+		cell, top := spotPhotoMetricArcCell(6, index)
+		if cell.Empty() {
+			t.Fatalf("metric %d has empty cell", index)
+		}
+		if index > 0 && cell.Min.X != previousRight {
+			t.Fatalf("metric %d starts at %d, want previous right %d", index, cell.Min.X, previousRight)
+		}
+		previousRight = cell.Max.X
+		tops[index] = top
+	}
+	if tops[0] != tops[5] || tops[1] != tops[4] || tops[2] != tops[3] {
+		t.Fatalf("metric arc is not symmetric: %v", tops)
+	}
+	if !(tops[0] < tops[1] && tops[1] < tops[2]) {
+		t.Fatalf("metric arc does not rise toward the sides: %v", tops)
+	}
+	for index := range tops {
+		cell, top := spotPhotoMetricArcCell(6, index)
+		outerX := max(int(math.Abs(float64(cell.Min.X-2-240))), int(math.Abs(float64(cell.Max.X+2-240))))
+		circleBottom := 240 + int(math.Sqrt(float64(236*236-outerX*outerX)))
+		if top+28 > circleBottom {
+			t.Fatalf("metric %d extends below circular safe area: top=%d bottom=%d", index, top, circleBottom)
+		}
+	}
+}
+
 func TestSpotReplyRimFollowsSpeakerAudioWithoutBottomBubble(t *testing.T) {
 	faces, err := newFaceSet()
 	if err != nil {
@@ -638,8 +669,21 @@ func TestSpotClimateControlsStayInsideCircularScreen(t *testing.T) {
 			}
 		}
 	}
+	assertRoundControlInside := func(name string, bounds image.Rectangle) {
+		t.Helper()
+		cx, cy := (bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2
+		for _, point := range []image.Point{
+			{X: bounds.Min.X, Y: cy}, {X: bounds.Max.X - 1, Y: cy},
+			{X: cx, Y: bounds.Min.Y}, {X: cx, Y: bounds.Max.Y - 1},
+		} {
+			if !inside(point) {
+				t.Fatalf("%s painted edge %v lies outside Rook circle", name, point)
+			}
+		}
+	}
 
-	assertBoundsInside("close", climateCloseBounds(480, 480, true))
+	assertRoundControlInside("close", climateCloseBounds(480, 480, true))
+	assertRoundControlInside("next", spotClimateNextBounds())
 	for index := 0; index < 3; index++ {
 		assertBoundsInside(fmt.Sprintf("room %d", index+1), spotClimateRoomBounds(index))
 	}
@@ -660,13 +704,22 @@ func TestSpotClimatePreview(t *testing.T) {
 			CurrentTemperature: &current, TargetTemperature: &target, CurrentHumidity: &humidity,
 			TemperatureUnit: "F", HVACMode: "auto", HVACAction: "heating",
 			AvailableHVACModes: []string{"heat", "cool", "auto", "off"}, CanSetTemperature: true, CanSetMode: true,
-			RoomTemperatures: []show.RoomTemperature{{RoomName: "Kitchen", Temperature: 73}, {RoomName: "Bedroom", Temperature: 68}, {RoomName: "Office", Temperature: 72}},
+			RoomTemperatures: []show.RoomTemperature{
+				{RoomName: "Living Room", Temperature: 71}, {RoomName: "Kitchen", Temperature: 73}, {RoomName: "Office", Temperature: 72},
+				{RoomName: "Bedroom", Temperature: 68}, {RoomName: "Nursery", Temperature: 70}, {RoomName: "Garage", Temperature: 64},
+			},
 		}},
 	}
 	canvas := image.NewRGBA(image.Rect(0, 0, 480, 480))
 	r.render(canvas, now)
 	if previewDir := os.Getenv("SPOT_PREVIEW_DIR"); previewDir != "" {
 		writeSpotPreview(t, filepath.Join(previewDir, "spot-climate.png"), canvas)
+	}
+	client := &socketClient{writer: bufio.NewWriter(&bytes.Buffer{})}
+	next := spotClimateNextBounds()
+	r.handleClimateTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 480, 480)
+	if r.climatePage != 1 {
+		t.Fatalf("Rook climate next page = %d, want 1", r.climatePage)
 	}
 }
 
