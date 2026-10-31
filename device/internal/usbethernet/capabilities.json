@@ -51,7 +51,7 @@
       "detection": "bounded-active-probe",
       "status": "qualified",
       "port": "external-micro-usb",
-      "power": "shared-micro-usb-powered-pass-through",
+      "power": "separate-device-power-powered-adapter",
       "recovery": "usb-serial",
       "reason": "Real-hardware forced host mode, RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Rook."
     }
