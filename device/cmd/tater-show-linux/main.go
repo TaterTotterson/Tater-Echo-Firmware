@@ -158,6 +158,9 @@ type faceSet struct {
 	bold    map[int]font.Face
 }
 
+// faceSizes lists every preloaded point size, smallest first.
+var faceSizes = []int{8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 28, 30, 34, 36, 42, 48, 64, 74, 82, 96}
+
 func newFaceSet() (*faceSet, error) {
 	regular, err := opentype.Parse(goregular.TTF)
 	if err != nil {
@@ -168,7 +171,7 @@ func newFaceSet() (*faceSet, error) {
 		return nil, err
 	}
 	result := &faceSet{regular: map[int]font.Face{}, bold: map[int]font.Face{}}
-	for _, size := range []int{8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 28, 30, 34, 36, 42, 48, 64, 74, 82, 96} {
+	for _, size := range faceSizes {
 		result.regular[size], err = opentype.NewFace(regular, &opentype.FaceOptions{Size: float64(size), DPI: 72, Hinting: font.HintingFull})
 		if err != nil {
 			return nil, err
@@ -792,8 +795,8 @@ func (r *renderer) drawPhotoHome(canvas *image.RGBA, now time.Time, accent color
 
 	local := r.localTime(now)
 	left, right := width-margin-groupWidth, width-margin
-	timeText := local.Format("3:04")
-	timeWidth := font.MeasureString(r.faces.regular[clockSize], timeText).Round()
+	timeDigits, timeSuffix := r.clockParts(local)
+	timeWidth := r.clockWidth(timeDigits, timeSuffix, clockSize)
 	weather := r.state.Weather
 	temperature, temperatureWidth := "", 0
 	if weather != nil && strings.TrimSpace(weather.TemperatureText) != "" {
@@ -808,7 +811,7 @@ func (r *renderer) drawPhotoHome(canvas *image.RGBA, now time.Time, accent color
 		mainWidth += 20 + 1 + 20 + iconSize + 8 + temperatureWidth
 	}
 	mainLeft := max(left, right-mainWidth)
-	r.text(canvas, mainLeft, mainBaseline, timeText, clockSize, false, color.White)
+	r.drawClock(canvas, mainLeft, mainBaseline, timeDigits, timeSuffix, clockSize, color.White)
 	if temperature != "" {
 		separatorX := mainLeft + timeWidth + 20
 		separatorTop := mainBaseline - clockSize + 5
@@ -1172,7 +1175,7 @@ func (r *renderer) crownCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(mediaPrimaryColor(r.state.Media)), fmt.Sprint(mediaAccentColor(r.state.Media)),
 		fmt.Sprint(timerSecond),
 		r.notificationID, r.lastEventID, fmt.Sprint(r.notificationImage != nil), fmt.Sprint(r.lastEventImage != nil),
-		r.localTime(now).Format("200601021504"), fmt.Sprint(r.mediaImage != nil), r.wallpaperID,
+		r.clockKey(now), fmt.Sprint(r.mediaImage != nil), r.wallpaperID,
 		stableCacheValue(r.state.WallpaperURLs),
 		fmt.Sprint(r.climateOpen, "|", r.climatePage),
 		fmt.Sprint(r.cameraOpen, "|", r.cameraPage),
@@ -2506,6 +2509,55 @@ func (r *renderer) centeredText(canvas *image.RGBA, centerX, baseline int, value
 	r.text(canvas, centerX-width/2, baseline, value, size, bold, ink)
 }
 
+// clockParts returns the clock digits and, for 12-hour screens, the AM/PM
+// marker drawn beside them in a smaller face.
+func (r *renderer) clockParts(local time.Time) (string, string) {
+	if r.state.ScreenClockFormat == "24h" {
+		return local.Format("15:04"), ""
+	}
+	return local.Format("3:04"), local.Format("PM")
+}
+
+// clockKey changes when the displayed minute or clock format changes.
+func (r *renderer) clockKey(now time.Time) string {
+	return r.localTime(now).Format("200601021504") + "|" + r.state.ScreenClockFormat
+}
+
+// clockSuffixSize picks the largest preloaded face at most 3/8 of the clock.
+func clockSuffixSize(size int) int {
+	chosen := faceSizes[0]
+	for _, candidate := range faceSizes {
+		if candidate*8 <= size*3 {
+			chosen = candidate
+		}
+	}
+	return chosen
+}
+
+func (r *renderer) clockWidth(digits, suffix string, size int) int {
+	width := font.MeasureString(r.faces.regular[size], digits).Round()
+	if suffix != "" {
+		suffixSize := clockSuffixSize(size)
+		width += suffixSize/3 + font.MeasureString(r.faces.regular[suffixSize], suffix).Round()
+	}
+	return width
+}
+
+func (r *renderer) drawClock(canvas *image.RGBA, x, baseline int, digits, suffix string, size int, ink color.Color) {
+	r.text(canvas, x, baseline, digits, size, false, ink)
+	if suffix == "" {
+		return
+	}
+	suffixSize := clockSuffixSize(size)
+	digitsWidth := font.MeasureString(r.faces.regular[size], digits).Round()
+	r.text(canvas, x+digitsWidth+suffixSize/3, baseline, suffix, suffixSize, false, ink)
+}
+
+func (r *renderer) centeredClock(canvas *image.RGBA, centerX, baseline int, local time.Time, size int, ink color.Color) {
+	digits, suffix := r.clockParts(local)
+	r.drawClock(canvas, centerX-r.clockWidth(digits, suffix, size)/2, baseline, digits, suffix, size, ink)
+}
+
 func wrapTextToWidth(value string, face font.Face, maxWidth int) []string {
 	words := strings.Fields(value)
 	lines := make([]string, 0, 4)
@@ -2796,7 +2848,7 @@ func main() {
 		state: show.Snapshot{
 			Phase: "offline", Message: "Connecting to Tater", DeviceName: deviceName, DisplayEdgeGlow: true,
 			ScreenBrightness: 35, ScreenAutoBrightnessMinimum: 12, ScreenNightBrightness: 3,
-			ScreenNightStart: "22:00", ScreenNightEnd: "07:00", ScreenNightDisplay: "red_clock",
+			ScreenNightStart: "22:00", ScreenNightEnd: "07:00", ScreenNightDisplay: "red_clock", ScreenClockFormat: "12h",
 		},
 		animationStart: time.Now(),
 	}

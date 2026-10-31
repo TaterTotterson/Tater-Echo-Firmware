@@ -408,6 +408,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen_auto_brightness"] = true
 		capabilities["screen_night_mode"] = true
 		capabilities["screen_red_clock"] = true
+		capabilities["screen_clock_format"] = true
 		capabilities["sat_chat_ui"] = true
 		capabilities["sat_chat_can_initiate"] = true
 		capabilities["sat_chat_can_end"] = true

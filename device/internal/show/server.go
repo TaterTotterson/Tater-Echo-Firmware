@@ -224,6 +224,7 @@ type Snapshot struct {
 	ScreenNightStart            string        `json:"screen_night_start,omitempty"`
 	ScreenNightEnd              string        `json:"screen_night_end,omitempty"`
 	ScreenNightDisplay          string        `json:"screen_night_display,omitempty"`
+	ScreenClockFormat           string        `json:"screen_clock_format,omitempty"`
 	Message                     string        `json:"message,omitempty"`
 	ToolName                    string        `json:"tool_name,omitempty"`
 	ToolMessage                 string        `json:"tool_message,omitempty"`

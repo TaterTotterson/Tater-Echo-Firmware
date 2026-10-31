@@ -607,6 +607,7 @@ func main() {
 			ScreenNightStart:            "22:00",
 			ScreenNightEnd:              "07:00",
 			ScreenNightDisplay:          "red_clock",
+			ScreenClockFormat:           "12h",
 		}, func(command show.Command) {
 			switch command.Action {
 			case "screen.ready":
@@ -1630,6 +1631,7 @@ func runScreenSetupMode() error {
 			ScreenNightStart:            "22:00",
 			ScreenNightEnd:              "07:00",
 			ScreenNightDisplay:          "red_clock",
+			ScreenClockFormat:           "12h",
 		}, nil)
 		go func() {
 			if err := setupScreen.Run(ctx); err != nil && ctx.Err() == nil {
@@ -2685,7 +2687,7 @@ func hasScreenSettings(values map[string]any) bool {
 	for _, key := range []string{
 		"screen_brightness", "screen_auto_brightness_enabled", "screen_auto_brightness_minimum",
 		"screen_night_mode_enabled", "screen_night_brightness", "screen_night_start",
-		"screen_night_end", "screen_night_display",
+		"screen_night_end", "screen_night_display", "screen_clock_format",
 	} {
 		if _, ok := values[key]; ok {
 			return true
@@ -2723,6 +2725,9 @@ func applyScreenSettings(snapshot *show.Snapshot, values map[string]any) {
 	if value, ok := values["screen_night_display"]; ok {
 		snapshot.ScreenNightDisplay = normalizeScreenNightDisplay(value)
 	}
+	if value, ok := values["screen_clock_format"]; ok {
+		snapshot.ScreenClockFormat = normalizeScreenClockFormat(value)
+	}
 }
 
 func normalizeScreenPercent(value any, fallback int) int {
@@ -2745,6 +2750,15 @@ func normalizeScreenNightDisplay(value any) string {
 		return display
 	default:
 		return "red_clock"
+	}
+}
+
+func normalizeScreenClockFormat(value any) string {
+	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) {
+	case "24h", "24":
+		return "24h"
+	default:
+		return "12h"
 	}
 }
 
@@ -2807,6 +2821,9 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 	}
 	if value, ok := values["screen_night_display"]; ok {
 		applied["screen_night_display"] = normalizeScreenNightDisplay(value)
+	}
+	if value, ok := values["screen_clock_format"]; ok {
+		applied["screen_clock_format"] = normalizeScreenClockFormat(value)
 	}
 	if value, ok := values["dnd_enabled"]; ok {
 		applied["dnd_enabled"] = nativeBool(value, false)

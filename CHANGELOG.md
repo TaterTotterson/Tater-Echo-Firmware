@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### What's Changed
+
+#### Screens
+
+- Added a 12-hour or 24-hour clock format for Checkers, Crown, Athena, and Rook
+  through the new `screen_clock_format` setting (`12h` or `24h`). The 12-hour
+  clock now shows a smaller AM/PM marker on the home screen, red night clock,
+  and Spot clocks; screens advertise `screen_clock_format` so controllers only
+  send the setting to firmware that understands it.
+
 ## v3.1.2
 
 ### What's Changed

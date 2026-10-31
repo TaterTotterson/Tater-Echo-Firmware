@@ -98,7 +98,7 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 func (r *renderer) drawSpotLegacyBackdrop(canvas *image.RGBA, now time.Time, accent color.RGBA) {
 	r.spotBackground(canvas, accent)
 	local := r.localTime(now)
-	r.centeredText(canvas, 240, 111, local.Format("3:04"), 82, false, color.White)
+	r.centeredClock(canvas, 240, 111, local, 82, color.White)
 	r.centeredText(canvas, 240, 138, strings.ToUpper(local.Format("Mon · Jan 2")), 16, true, color.RGBA{167, 180, 199, 255})
 	line(canvas, 125, 158, 355, 158, 1, color.RGBA{226, 154, 90, 48})
 }
@@ -113,7 +113,6 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 
 	local := r.localTime(now)
 	weather := r.state.Weather
-	timeText := local.Format("3:04")
 	clockSize, temperatureSize, weatherIconSize := 74, 48, 42
 	temperature, temperatureWidth := "", 0
 	if weather != nil {
@@ -123,7 +122,7 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 		}
 		temperatureWidth = font.MeasureString(r.faces.regular[temperatureSize], temperature).Round()
 	}
-	r.centeredText(canvas, 240, 237, timeText, clockSize, false, color.White)
+	r.centeredClock(canvas, 240, 237, local, clockSize, color.White)
 	if temperature != "" {
 		weatherGap := 9
 		weatherLeft := (480 - weatherIconSize - weatherGap - temperatureWidth) / 2
@@ -270,7 +269,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
 		fmt.Sprint(duration > 0),
-		r.localTime(now).Format("200601021504"),
+		r.clockKey(now),
 		fmt.Sprint(r.mediaImage != nil),
 		r.wallpaperID,
 		fmt.Sprint(r.wallpaperImage != nil),

@@ -173,7 +173,7 @@ func TestCapabilitiesForTargetDescribesRookScreenAndCamera(t *testing.T) {
 func TestScreenTargetsAdvertiseDisplayPowerManagement(t *testing.T) {
 	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
 		got := CapabilitiesForTarget(target)
-		if got["screen_power_management_version"] != 1 || got["screen_brightness"] != true || got["screen_auto_brightness"] != true || got["screen_night_mode"] != true || got["screen_red_clock"] != true {
+		if got["screen_power_management_version"] != 1 || got["screen_brightness"] != true || got["screen_auto_brightness"] != true || got["screen_night_mode"] != true || got["screen_red_clock"] != true || got["screen_clock_format"] != true {
 			t.Errorf("%s display power capabilities = %#v", target, got)
 		}
 		if got["camera_stream"] != true || got["camera_stream_version"] != 1 {
