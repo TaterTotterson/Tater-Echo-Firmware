@@ -36,8 +36,8 @@ screen, audio, recovery, and installation behavior.
   normal power supplies.
 - Similar powered USB Ethernet adapters may also work, but only the adapter
   linked above has been tested.
-- Radar is not yet ready for normal USB Ethernet use. Its internal USB hardware
-  still needs physical validation.
+- Radar's USB Ethernet support is included, but it is currently disabled
+  because using it requires a permanent internal USB hardware modification.
 
 ### New satellite controls
 
