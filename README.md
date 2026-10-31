@@ -58,7 +58,12 @@ Target metadata used by Tater and the release builds lives in
 >    python3 to_twrp.py
 >    ```
 >
-> 5. Wait for TWRP to start, then run the normal factory installer.
+> 5. Wait for TWRP to start.
+> 6. Run the factory installer:
+>
+>    ```bash
+>    ./install.sh
+>    ```
 >
 > You do not need to hold Volume Up or enter Tater Recovery. Do not use
 > `--repair`; it only repairs an existing Tater system slot.
