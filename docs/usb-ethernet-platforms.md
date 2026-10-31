@@ -23,7 +23,7 @@ qualify a target.
 | Checkers | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 5; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Crown | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 8; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Athena | `qualified` | Mainline MediaTek MTU3 + GPIO OTG | Physical ID/VBUS path, RTL8152 Ethernet, Wi-Fi fallback, USB serial/RNDIS, OTA, factory reinstall, and recovery verified |
-| Rook | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered UCTRONICS B0B9ZLVGJ4, RTL8152, bounded forced-role switching, fallback, and serial verified |
+| Rook | `qualified` | MediaTek `/proc/mchange` | Separately powered Spot; powered UCTRONICS B0B9ZLVGJ4 on the micro-USB data/OTG path, RTL8152, bounded forced-role switching, fallback, and serial verified |
 
 All six images start the controller automatically. Radar remains an
 unqualified passive candidate: if its kernel enumerates a supported USB NIC,
@@ -31,7 +31,7 @@ the common policy can use it, but firmware performs no speculative role or VBUS
 write. Checkers, Crown, and Athena are passive in userspace, but their physical
 OTG signaling and automatic device-mode restoration are qualified independently
 on real hardware. Rook's stock dual-role sysfs files are intentionally read-only
-and the powered pass-through adapter does not assert its physical ID pin. Its
+and the tested powered adapter does not assert its physical ID pin. Its
 Tater kernel therefore exposes MediaTek `/proc/mchange` control and includes
 the RTL8152 driver, while the common controller uses the same bounded host
 probe as Biscuit. Internal Wi-Fi remains on the separate USB1 controller during
@@ -111,8 +111,8 @@ network, fallback, update, reinstall, and recovery gates.
 ### Rook qualification record — 2026-10-27
 
 - Hardware: Amazon Echo Spot first generation (2017), model VN94DQ (`rook`),
-  using the powered pass-through adapter for its shared power/data micro-USB
-  port.
+  using its normal device power with the powered adapter on the micro-USB
+  data/OTG path.
 - Adapter: [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4),
   Realtek RTL8152 (`r8152`).
 - Tested firmware: commit `e43f9688c13dc6820a1d683d7d808a0311a53048`,

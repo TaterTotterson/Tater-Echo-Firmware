@@ -13,10 +13,11 @@
   unit returns to a direct USB connection.
 - Hardware-qualified the powered
   [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter using its
-  Realtek RTL8152 controller (`0bda:8152`, Linux `r8152`). Biscuit and Rook use
-  powered pass-through on their shared power/data micro-USB port, allowing the
-  powered Ethernet arrangement to carry both network and device power.
-  Checkers, Crown, and Athena use their target-specific host/OTG path.
+  Realtek RTL8152 controller (`0bda:8152`, Linux `r8152`). Biscuit uses powered
+  pass-through on its shared power/data micro-USB port, allowing the Ethernet
+  arrangement to carry both network and device power. Rook remains on its
+  normal device power and uses the powered adapter on its micro-USB data/OTG
+  path. Checkers, Crown, and Athena use their target-specific host/OTG path.
 - Similar powered adapters using the Realtek RTL8152/RTL8153 family are expected
   to work with the same driver but are not hardware-qualified. Power delivery,
   connector wiring, and OTG/host signaling must match the target; generic
