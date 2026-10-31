@@ -44,6 +44,9 @@ Target metadata used by Tater and the release builds lives in
 > verified A/B OTA flow with automatic rollback.
 
 > [!NOTE]
+> On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
+> starts to enter TWRP.
+>
 > On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
 > directly by USB. Run `python3 to_twrp.py` from the extracted v4 factory archive
 > (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
@@ -98,59 +101,82 @@ Target metadata used by Tater and the release builds lives in
 
 ## USB Ethernet adapters
 
-The hardware-tested reference adapter is the powered
-[UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4), using a Realtek
-RTL8152 controller (`0bda:8152`, Linux `r8152`). This exact adapter passed the
-documented Ethernet, Wi-Fi fallback, SSH, update, reboot, and recovery gates on
-Biscuit, Checkers, Crown, Athena, and Rook. Radar remains a passive
-hardware-validation target because its USB connection uses internal pads.
+Tater tested USB Ethernet with the powered
+[UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter on Biscuit,
+Checkers, Crown, Athena, and Rook.
 
-Similar powered pass-through adapters using the Realtek RTL8152/RTL8153 family
-are expected to work with the same `r8152` driver, but they are not
-hardware-qualified by Tater. The adapter must also provide the correct OTG/host
-signaling and power arrangement for the target. Biscuit and Rook share power
-and data on their micro-USB port and therefore require powered pass-through;
-Checkers, Crown, and Athena retain their normal separate device power.
+Biscuit can receive both power and Ethernet through the adapter, giving it a
+simple PoE-style setup. Checkers, Crown, Athena, and Rook continue using their
+normal power supplies. Radar support is included but currently disabled because
+using it requires a permanent internal USB hardware modification.
 
-Do not assume every generic USB Ethernet adapter is equivalent. In particular,
-Biscuit's tested adapter could receive but not transmit through its advertised
-generic CDC-ECM interface, so the v4 kernel binds it to the native RTL8152
-driver instead. Prefer the verified adapter or confirm the adapter's chipset
-and USB ID before relying on an alternative. See
-[`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for the full
-per-device qualification and fallback behavior.
+Similar powered USB Ethernet adapters may also work, but only the adapter linked
+above has been tested. See
+[`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for technical
+details and per-device test results.
 
 ## Install Biscuit — Echo Dot 2
 
-Start with an Echo Dot 2nd Generation (`biscuit`, model **RS03QR**) that has
-completed the [amonet-biscuit v2.0.0 bootloader unlock](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
-and has working TWRP. Do not flash or boot Fire OS as part of the Tater
-installation. These steps are also the required upgrade path for every Biscuit
-running Tater firmware earlier than v4.0.0.
+Use these instructions only for the Echo Dot 2nd Generation (`biscuit`, model
+**RS03QR**).
 
-1. Boot the Echo into TWRP—the ring should be white—and connect USB.
-2. Download `tater-echo-biscuit-<version>-factory.tar.gz` from the
-   [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
-3. Extract the archive and run its installer:
+### What you need
+
+- The
+  [amonet-biscuit v2.0.0 bootloader unlock](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
+  with working TWRP.
+- Python 3 and `adb` on the computer.
+- The Biscuit factory archive from the
+  [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
+
+Do not flash or boot Fire OS as part of the Tater installation.
+
+### Install or upgrade
+
+1. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz`.
+2. Enter TWRP. The ring should be white:
+
+   - When upgrading a pre-v4 Biscuit, boot the satellite normally, connect it
+     directly by USB, and run `python3 to_twrp.py` from the extracted archive.
+     On Windows, run `py -3 to_twrp.py`.
+   - For a new installation, enter TWRP using the amonet-biscuit instructions.
+
+3. Verify the archive before making changes:
 
    ```bash
-   tar -xzf tater-echo-biscuit-v*-factory.tar.gz
-   cd tater-echo-biscuit-v*-factory
    ./install.sh --verify-bundle
+   ```
+
+   On Windows, run `py -3 install.py --verify-bundle`.
+
+4. Start the installation:
+
+   ```bash
    ./install.sh
    ```
 
-4. A previously paired Biscuit reconnects automatically. On a new/reset unit,
-   join `Tater-Setup-XXXX` and complete the setup page.
+   On Windows, run `py -3 install.py`.
 
-The computer needs Python 3 and `adb`. The installer verifies the device and bundle, backs up every
-boot-critical partition, builds the Linux recovery image and automatic-return
-TWRP handoff from that unit's own backup, installs an A/B Alpine rootfs on cache, and restores verified
-Tater setup while discarding old OTA application slots. Add `--factory-reset`
-for a clean start. Stock system partitions and a verified TWRP copy are retained. See
-the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v4.0.0
-or newer is running, reconnect USB and run `python3 to_recovery.py` from an
-extracted Biscuit or Radar factory archive to enter Tater Recovery.
+5. Keep USB connected and keep the Biscuit powered until installation finishes.
+6. A previously paired Biscuit reconnects automatically. On a new or reset
+   Biscuit, join `Tater-Setup-XXXX` and complete the setup page.
+
+Add `--factory-reset` to the install command only when you want to erase the
+saved Wi-Fi, pairing, SSH, and satellite settings.
+
+### What the installer does
+
+- Confirms that the archive and connected satellite are both Biscuit.
+- Saves private recovery backups of the boot-critical partitions.
+- Installs the A/B Tater Linux system and automatic-return TWRP handoff.
+- Preserves verified Tater setup by default while removing obsolete application
+  slots.
+- Retains the stock system partitions and a verified TWRP copy.
+
+Keep the generated `backups/` directory private. See the shared
+[`factory/dot-linux` guide](factory/dot-linux/README.md) for recovery and
+advanced options. After v4.0.0 is installed, use `python3 to_recovery.py` from
+an extracted Biscuit or Radar factory archive when a system repair is needed.
 
 > [!NOTE]
 > A factory install or System OTA reboots Biscuit into a trial root-system
@@ -169,9 +195,14 @@ connected and use the D+, D-, and GND pads documented in that guide.
 These steps are also the required upgrade path for every Radar running Tater
 firmware earlier than v4.0.0.
 
-1. Boot TWRP using the method documented by the amonet-radar unlock guide.
-   Radar does not provide a dependable hold-button shortcut for recovery.
-2. Download and extract `tater-echo-radar-<version>-factory.tar.gz`.
+1. Download and extract `tater-echo-radar-<version>-factory.tar.gz`.
+2. Enter TWRP:
+
+   - When upgrading a pre-v4 Radar, boot the satellite normally, connect its
+     internal USB pads, and run `python3 to_twrp.py` from the extracted archive.
+     On Windows, run `py -3 to_twrp.py`.
+   - For a new installation, enter TWRP using the amonet-radar instructions.
+
 3. Verify, then install the bundle:
 
    ```bash

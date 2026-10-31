@@ -11,6 +11,8 @@ screen, audio, recovery, and installation behavior.
 - **A one-time USB/TWRP installation is required** for every satellite running
   a version earlier than v4.0.0. Download the factory archive made for your
   exact Echo model and follow its included instructions.
+- On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
+  starts to enter TWRP.
 - On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
   directly by USB. Run `python3 to_twrp.py` from the extracted v4 factory archive
   (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
