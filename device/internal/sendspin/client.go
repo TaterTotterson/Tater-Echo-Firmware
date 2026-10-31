@@ -48,10 +48,11 @@ type Config struct {
 // recommended direction, and the one Music Assistant uses): it advertises
 // itself over mDNS and listens.
 type Client struct {
-	cfg    Config
-	store  *store
-	player *player
-	oc     atomic.Pointer[OutputClock] // made and fed by the speaker goroutine (Fill); read for diagnostics
+	cfg     Config
+	store   *store
+	player  *player
+	oc      atomic.Pointer[OutputClock] // made and fed by the speaker goroutine (Fill); read for diagnostics
+	blocked atomic.Bool
 
 	mu         sync.Mutex
 	admitted   *session
@@ -290,6 +291,26 @@ func (c *Client) SetVolume(v int) {
 	c.changed()
 }
 
+// SetBlocked silences synchronized music without dropping its LAN session.
+// DND can therefore end on schedule and the next server command works without
+// requiring discovery or pairing again.
+func (c *Client) SetBlocked(blocked bool) {
+	if c.blocked.Swap(blocked) == blocked {
+		return
+	}
+	if blocked {
+		c.player.clear()
+		c.clearPresentation()
+	}
+	c.mu.Lock()
+	s := c.admitted
+	c.mu.Unlock()
+	if s != nil {
+		s.sendState()
+	}
+	c.changed()
+}
+
 // gainVolume is the volume the player itself applies: none when the device
 // owns the volume, since the device applies it to everything it plays.
 func (c *Client) gainVolume(v int) int {
@@ -328,6 +349,9 @@ func (c *Client) applySettings(p playerSettings) {
 // prediction for that period. False when there is nothing to play then.
 // Called from one goroutine only.
 func (c *Client) Fill(out []byte, playAt time.Time, uncertain time.Duration) bool {
+	if c.blocked.Load() {
+		return false
+	}
 	oc := c.oc.Load()
 	if oc == nil {
 		oc = NewOutputClock(time.Duration(len(out)/4) * time.Second / outRate)
@@ -344,7 +368,7 @@ func (c *Client) Fill(out []byte, playAt time.Time, uncertain time.Duration) boo
 
 // Active reports whether Sendspin has audio queued: the speaker's cue that
 // the music plane is taken.
-func (c *Client) Active() bool { return c.player.active() }
+func (c *Client) Active() bool { return !c.blocked.Load() && c.player.active() }
 
 // Buffered is how much audio is queued and not yet played.
 func (c *Client) Buffered() time.Duration { return c.player.buffered() }

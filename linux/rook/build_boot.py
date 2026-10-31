@@ -116,7 +116,7 @@ def build(args: argparse.Namespace) -> None:
             init = work / "init"
             init.write_bytes(branded_init((args.spot_source / "tools/linux/init").read_bytes()))
             fbprobe = work / "tater-rook-rescue-fbprobe"
-            build_rescue_fbprobe.build(args.techo5, fbprobe)
+            build_rescue_fbprobe.build(args.show_source, fbprobe)
             boot = work / "lineage-boot.img"
             with archive.open("boot.img") as source, boot.open("wb") as target:
                 while chunk := source.read(1024 * 1024):
@@ -164,8 +164,9 @@ def build(args: argparse.Namespace) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("lineage-zip", "kernel", "rescue", "alpine-rootfs", "spot-source", "techo5", "output"):
+    for name in ("lineage-zip", "kernel", "rescue", "alpine-rootfs", "spot-source", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
+    parser.add_argument("--show-source", "--techo5", dest="show_source", required=True, type=Path)
     build(parser.parse_args())
     return 0
 

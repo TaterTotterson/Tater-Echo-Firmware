@@ -23,13 +23,16 @@ import (
 )
 
 const (
-	defaultAddress      = "127.0.0.1:43823"
-	streamBoundary      = "taterframe"
-	streamFramePeriod   = time.Second / 15
-	echoStreamPeriod    = time.Second / 20
-	streamJPEGQuality   = 60
-	echoJPEGQuality     = 55
-	snapshotJPEGQuality = 88
+	defaultAddress       = "127.0.0.1:43823"
+	streamBoundary       = "taterframe"
+	streamFramePeriod    = time.Second / 15
+	echoStreamPeriod     = time.Second / 20
+	balancedStreamPeriod = time.Second / 15
+	streamJPEGQuality    = 60
+	echoJPEGQuality      = 55
+	balancedJPEGQuality  = 62
+	snapshotJPEGQuality  = 88
+	balancedVideoWidth   = 640
 )
 
 func main() {
@@ -84,13 +87,16 @@ func snapshot(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	image := frame.Full()
 	quality := snapshotJPEGQuality
-	profile := request.URL.Query().Get("profile")
+	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
 	if profile == "video" {
 		image = frame.Image()
 		quality = streamJPEGQuality
 	} else if profile == "echo-low" {
 		image = frame.TaterEchoVideo(nil)
 		quality = echoJPEGQuality
+	} else if profile == "echo-balanced" {
+		image = echoBalancedVideoImage(frame.Image(), nil)
+		quality = balancedJPEGQuality
 	}
 	if err := jpeg.Encode(response, image, &jpeg.Options{Quality: quality}); err != nil {
 		log.Printf("camera JPEG: %v", err)
@@ -139,7 +145,8 @@ func stream(response http.ResponseWriter, request *http.Request) {
 	var encoded bytes.Buffer
 	encoded.Grow(128 * 1024)
 	var echoFrame *image.RGBA
-	echoLow := request.URL.Query().Get("profile") == "echo-low"
+	var balancedFrame *image.RGBA
+	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
 	statsStarted := time.Now()
 	statsFrames := 0
 	statsBytes := 0
@@ -153,15 +160,20 @@ func stream(response http.ResponseWriter, request *http.Request) {
 			if now.Before(nextFrame) {
 				continue
 			}
-			nextFrame = now.Add(cameraStreamPeriod(echoLow))
+			nextFrame = now.Add(cameraStreamPeriod(profile))
 			encoded.Reset()
 			var cameraImage image.Image
 			quality := streamJPEGQuality
-			if echoLow {
+			switch profile {
+			case "echo-low":
 				echoFrame = frame.TaterEchoVideo(echoFrame)
 				cameraImage = echoFrame
 				quality = echoJPEGQuality
-			} else {
+			case "echo-balanced":
+				balancedFrame = echoBalancedVideoImage(frame.Image(), balancedFrame)
+				cameraImage = balancedFrame
+				quality = balancedJPEGQuality
+			default:
 				cameraImage = frame.Image()
 			}
 			encodeStarted := time.Now()
@@ -174,7 +186,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 			statsBytes += encoded.Len()
 			if elapsed := time.Since(statsStarted); elapsed >= 10*time.Second {
 				log.Printf("[camera-video] profile=%s %.1f fps, JPEG avg=%s, bytes avg=%d",
-					firstNonEmptyProfile(echoLow), float64(statsFrames)/elapsed.Seconds(),
+					profile, float64(statsFrames)/elapsed.Seconds(),
 					averageDuration(statsEncode, statsFrames).Round(time.Millisecond), statsBytes/max(statsFrames, 1))
 				statsStarted, statsFrames, statsBytes, statsEncode = time.Now(), 0, 0, 0
 			}
@@ -192,13 +204,6 @@ func stream(response http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func firstNonEmptyProfile(echoLow bool) string {
-	if echoLow {
-		return "echo-low"
-	}
-	return "video"
-}
-
 func averageDuration(total time.Duration, count int) time.Duration {
 	if count <= 0 {
 		return 0
@@ -206,9 +211,61 @@ func averageDuration(total time.Duration, count int) time.Duration {
 	return total / time.Duration(count)
 }
 
-func cameraStreamPeriod(echoLow bool) time.Duration {
-	if echoLow {
+func cameraStreamPeriod(profile string) time.Duration {
+	switch cameraVideoProfile(profile) {
+	case "echo-low":
 		return echoStreamPeriod
+	case "echo-balanced":
+		return balancedStreamPeriod
+	default:
+		return streamFramePeriod
 	}
-	return streamFramePeriod
+}
+
+func cameraVideoProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "echo-low", "echo-balanced":
+		return strings.ToLower(strings.TrimSpace(profile))
+	default:
+		return "video"
+	}
+}
+
+// echoBalancedVideoImage prepares the 640x360 profile used by the larger Echo
+// displays. Developing the native image preserves the extra Bayer detail;
+// Athena's 4:3 camera is center-cropped before scaling so every target sees an
+// uncropped 16:9 call frame.
+func echoBalancedVideoImage(source *image.RGBA, reuse *image.RGBA) *image.RGBA {
+	if source == nil || source.Bounds().Dx() < 16 || source.Bounds().Dy() < 9 {
+		return source
+	}
+	bounds := source.Bounds()
+	cropWidth := bounds.Dx()
+	cropHeight := cropWidth * 9 / 16
+	if cropHeight > bounds.Dy() {
+		cropHeight = bounds.Dy()
+		cropWidth = cropHeight * 16 / 9
+	}
+	outputWidth := min(cropWidth, balancedVideoWidth)
+	outputWidth -= outputWidth % 16
+	outputHeight := outputWidth * 9 / 16
+	if outputWidth < 16 || outputHeight < 9 {
+		return source
+	}
+	if reuse == nil || reuse.Bounds().Dx() != outputWidth || reuse.Bounds().Dy() != outputHeight {
+		reuse = image.NewRGBA(image.Rect(0, 0, outputWidth, outputHeight))
+	}
+	cropX := bounds.Min.X + (bounds.Dx()-cropWidth)/2
+	cropY := bounds.Min.Y + (bounds.Dy()-cropHeight)/2
+	for y := 0; y < outputHeight; y++ {
+		sourceY := cropY + y*cropHeight/outputHeight
+		sourceRow := source.PixOffset(cropX, sourceY)
+		destinationRow := reuse.PixOffset(0, y)
+		for x := 0; x < outputWidth; x++ {
+			sourcePixel := sourceRow + (x*cropWidth/outputWidth)*4
+			destinationPixel := destinationRow + x*4
+			copy(reuse.Pix[destinationPixel:destinationPixel+4], source.Pix[sourcePixel:sourcePixel+4])
+		}
+	}
+	return reuse
 }

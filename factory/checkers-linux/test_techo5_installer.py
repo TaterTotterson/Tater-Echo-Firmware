@@ -1,9 +1,11 @@
 import hashlib
 import importlib.util
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest import mock
+import zlib
 
 
 SOURCE = Path(__file__).parent / "tools/techo5/install-show.py"
@@ -60,6 +62,30 @@ class LineageInstallTests(unittest.TestCase):
             self.assertLess(adb.actions.index("reboot recovery"),
                             adb.actions.index("push /data/lineage.zip"))
             self.assertIn("twrp install /data/lineage.zip", adb.actions)
+
+
+class BootLogoTests(unittest.TestCase):
+    def test_boot_logo_uses_twrps_notrunc_capable_toybox(self):
+        self.assertEqual("/sbin/toybox dd", installer.TWRP_DD)
+
+    def test_checkers_bootloader_fingerprint_is_pinned(self):
+        self.assertEqual({
+            "offset": 335308,
+            "length": 379309,
+            "stock": "d578c12a2023cd41c3b158f1a74622fd17202aee061a188fa4df0c1384e149fc",
+        }, installer.LOGO_KAERU["checkers"])
+
+    def test_monochrome_tater_logo_matches_show_slot(self):
+        logo = Path(installer.LOGO_FILE).read_bytes()
+        self.assertEqual(installer.LOGO_SIZE, len(logo))
+        self.assertEqual(installer.LOGO_SHA, hashlib.sha256(logo).hexdigest())
+        count, total, offset = struct.unpack_from("<III", logo)
+        self.assertEqual((1, 12), (count, offset))
+        raw = zlib.decompress(logo[12:total])
+        self.assertEqual(315 * 170 * 4, len(raw))
+        self.assertEqual({b"\x00\x00\x00\xff", b"\xff\xff\xff\xff"},
+                         {raw[index:index + 4] for index in range(0, len(raw), 4)})
+        self.assertEqual(bytes(installer.LOGO_SIZE - total), logo[total:])
 
 
 if __name__ == "__main__":

@@ -101,6 +101,72 @@ def write(path: Path, contents: str, mode: int = 0o644) -> None:
     path.chmod(mode)
 
 
+def ensure_tater_ssh_group(root: Path) -> None:
+    """Give Dropbear one fail-closed login allowlist containing only root."""
+    group = root / "etc/group"
+    contents = group.read_text() if group.is_file() else ""
+    expected = "tater-ssh:x:900:root"
+    for line in contents.splitlines():
+        fields = line.split(":")
+        if fields[0] == "tater-ssh":
+            if line != expected:
+                raise SystemExit("base rootfs has an unexpected tater-ssh group")
+            return
+        if len(fields) >= 3 and fields[2] == "900":
+            raise SystemExit("base rootfs already uses reserved tater-ssh gid 900")
+    separator = "" if not contents or contents.endswith("\n") else "\n"
+    write(group, contents + separator + expected + "\n")
+
+
+def ensure_video_decoder_user(root: Path) -> None:
+    """Give the network decoder a dedicated account that owns no files."""
+    passwd = root / "etc/passwd"
+    passwd_contents = passwd.read_text() if passwd.is_file() else ""
+    expected_user = "techo5-video:x:89:89:techo5-video:/var/empty:/sbin/nologin"
+    users = [line.split(":") for line in passwd_contents.splitlines() if line]
+    user_found = False
+    for fields in users:
+        if fields[0] == "techo5-video":
+            if ":".join(fields) != expected_user:
+                raise SystemExit("base rootfs has an unexpected techo5-video user")
+            user_found = True
+        elif len(fields) >= 4 and (fields[2] == "89" or fields[3] == "89"):
+            raise SystemExit("base rootfs already uses reserved video uid/gid 89")
+    if not user_found:
+        separator = "" if not passwd_contents or passwd_contents.endswith("\n") else "\n"
+        write(passwd, passwd_contents + separator + expected_user + "\n")
+
+    group = root / "etc/group"
+    group_contents = group.read_text() if group.is_file() else ""
+    groups = [line.split(":") for line in group_contents.splitlines() if line]
+    video_found = False
+    inet_found = False
+    rewritten: list[str] = []
+    for fields in groups:
+        if fields[0] == "techo5-video":
+            if len(fields) < 4 or fields[2] != "89":
+                raise SystemExit("base rootfs has an unexpected techo5-video group")
+            video_found = True
+        elif len(fields) >= 3 and fields[2] == "89":
+            raise SystemExit("base rootfs already uses reserved video gid 89")
+        if fields[0] == "inet":
+            if len(fields) < 4 or fields[2] != "3003":
+                raise SystemExit("base rootfs has an unexpected inet group")
+            members = [member for member in fields[3].split(",") if member]
+            if "techo5-video" not in members:
+                members.append("techo5-video")
+            fields[3] = ",".join(members)
+            inet_found = True
+        elif len(fields) >= 3 and fields[2] == "3003":
+            raise SystemExit("base rootfs already uses reserved inet gid 3003")
+        rewritten.append(":".join(fields))
+    if not video_found:
+        rewritten.append("techo5-video:x:89:")
+    if not inet_found:
+        rewritten.append("inet:x:3003:techo5-video")
+    write(group, "\n".join(rewritten) + "\n")
+
+
 def setup_binary(cache: Path, name: str, digest: str, member: str, destination: Path) -> None:
     """Install only the pinned APK's executable, not its post-install scripts."""
     cache.mkdir(parents=True, exist_ok=True)
@@ -138,6 +204,26 @@ def patch_rook_wifi_mac(root: Path) -> None:
         "\n" + ROOK_WIFI_MAC_FUNCTION + function_marker,
         1,
     )
+    # Current pinned Tater Echo Linux already calls its shared factory-MAC
+    # helper after the driver firmware loads and before the link comes up.
+    # Keep that ordering, but use Rook's stricter helper so damaged IDME data
+    # still receives the stable serial-derived fallback instead of retaining
+    # Broadcom's shared placeholder address.
+    shared_mac_call = "\tn=0; until t5_wifi_mac wlan0; do"
+    link_up_call = "\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
+    if contents.count(shared_mac_call) == 1 and contents.count(link_up_call) == 1:
+        if contents.index(shared_mac_call) > contents.index(link_up_call):
+            raise SystemExit("pinned Rook Wi-Fi library sets its MAC after link-up")
+        contents = contents.replace(
+            shared_mac_call,
+            "\tn=0; until tater_rook_wifi_mac wlan0; do",
+            1,
+        )
+        path.write_text(contents)
+        return
+
+    # Older pinned libraries had no shared factory-MAC helper. Insert the same
+    # guarded call immediately before their exact link-up sequence.
     link_up = "\tt5_ipv6_private wlan0\n\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
     mac_before_link = (
         "\tt5_ipv6_private wlan0\n"
@@ -154,6 +240,28 @@ def patch_rook_wifi_mac(root: Path) -> None:
         raise SystemExit("pinned Rook Wi-Fi library no longer has the expected link-up sequence")
     contents = contents.replace(link_up, mac_before_link, 1)
     path.write_text(contents)
+
+
+def patch_network_keeper(contents: str) -> str:
+    """Keep the vendor Wi-Fi watchdog from fighting an active wired route."""
+    marker = (
+        "\twhile true; do\n"
+        "\t\tsleep 60\n"
+        "\t\t# Someone is choosing a network on the screen: not a fault, no reboot.\n"
+    )
+    if marker not in contents:
+        return contents
+    replacement = (
+        "\twhile true; do\n"
+        "\t\tsleep 60\n"
+        "\t\t# USB Ethernet owns the default route only after DHCP succeeds. Do\n"
+        "\t\t# not restart Wi-Fi or reboot while that wired link is active.\n"
+        "\t\tif grep -q '^active ' /run/tater-usb-ethernet.state 2>/dev/null; then\n"
+        "\t\t\tdown=0; lost=0; continue\n"
+        "\t\tfi\n"
+        "\t\t# Someone is choosing a network on the screen: not a fault, no reboot.\n"
+    )
+    return contents.replace(marker, replacement, 1)
 
 
 def patch_boot(root: Path, *, target: str = "checkers") -> None:
@@ -309,7 +417,7 @@ def patch_boot(root: Path, *, target: str = "checkers") -> None:
     if final_log not in contents:
         raise SystemExit("pinned base boot script no longer has its final log marker")
     contents = contents.replace(final_log, app_health + final_log, 1)
-    path.write_text(contents)
+    path.write_text(patch_network_keeper(contents))
 
 
 def patch_boot_athena(root: Path) -> None:
@@ -366,7 +474,7 @@ def patch_boot_athena(root: Path) -> None:
     if final not in contents:
         raise SystemExit("pinned Athena boot script no longer has its final marker")
     contents = contents.replace(final, APP_HEALTH + final, 1)
-    path.write_text(contents)
+    path.write_text(patch_network_keeper(contents))
 
 
 def patch_slotctl(root: Path) -> None:
@@ -510,10 +618,24 @@ def build(args: argparse.Namespace) -> None:
         with tarfile.open(args.base_rootfs, "r:gz") as archive:
             safe_extract(archive, root)
 
+        # The signed baseline supplies the filesystem, while the exact pinned
+        # platform checkout supplies the current shared hardware policy.
+        copy(args.techo5_lib, root / "lib/techo5-lib.sh", 0o644)
         copy(args.server, root / "usr/local/bin/tater-echo", 0o755)
         copy(args.show, root / "usr/local/bin/tater-show", 0o755)
         copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
         copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
+        copy(args.ffmpeg, root / "usr/local/bin/tater-ffmpeg", 0o755)
+        if args.target == "athena":
+            if args.kernelctl is None or args.kernel_image is None:
+                raise SystemExit("Athena rootfs requires its kernel updater and pinned boot image")
+            copy(args.kernelctl, root / "usr/local/bin/tater-kernelctl", 0o755)
+            kernel_dir = root / "usr/share/techo5/kernel"
+            copy(args.kernel_image, kernel_dir / "boot-athena.img", 0o644)
+            write(
+                kernel_dir / "boot-athena.img.sha256",
+                f"{sha256(args.kernel_image)}  boot-athena.img\n",
+            )
         copy(
             args.mww_runtime,
             root / "usr/share/tater/microwakeword/libtater_microwakeword.so",
@@ -541,6 +663,18 @@ def build(args: argparse.Namespace) -> None:
                  root / "usr/local/libexec/tater-setup-ap-common", 0o755)
         else:
             copy(Path(__file__).with_name("setup-ap.sh"), root / "usr/local/sbin/tater-setup-ap", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-usb-inventory",
+             root / "usr/local/sbin/tater-usb-inventory", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-usb-ethernet",
+             root / "usr/local/sbin/tater-usb-ethernet", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-sshd",
+             root / "usr/local/sbin/tater-sshd", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-ssh-authorize",
+             root / "usr/local/sbin/tater-ssh-authorize", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-ssh-control",
+             root / "usr/local/sbin/tater-ssh-control", 0o755)
+        ensure_tater_ssh_group(root)
+        ensure_video_decoder_user(root)
         for name in ("libtinyalsa.so", "libtinyalsa.so.2"):
             link = root / "usr/lib" / name
             link.unlink(missing_ok=True)
@@ -570,15 +704,30 @@ def build(args: argparse.Namespace) -> None:
         write(root / "etc/tater-release", release)
         write(root / "etc/techo5-release", release)
         write(root / "usr/share/licenses/tater-linux/TECHO5-LICENSE", args.techo5_license.read_text())
+        write(root / "usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt",
+              args.ffmpeg_license.read_text())
         write(root / "usr/share/licenses/tater-linux/NOTICE", ATTRIBUTION)
         patch_boot(root, target=args.target)
         if args.target != "athena":
             patch_slotctl(root)
         else:
-            # Tater application OTA does not replace Athena's kernel. The
-            # factory bundle pins and fills it with this unit's speaker tuning.
+            # Keep the application daemon and the low-level kernel updater as
+            # separate binaries. A system OTA installs this rootfs into the
+            # inactive slot; only after that slot settles does boot.sh stage
+            # its pinned kernel with the unit's existing speaker tuning and
+            # the platform updater's three-boot rollback state.
+            boot_script = root / "etc/techo5/boot.sh"
+            boot_contents = boot_script.read_text()
+            old_kernel_command = "/usr/local/bin/techo5 tools kernel"
+            if old_kernel_command not in boot_contents:
+                raise SystemExit("Athena base rootfs has no kernel updater hooks")
+            boot_script.write_text(boot_contents.replace(
+                old_kernel_command,
+                "/usr/local/bin/tater-kernelctl tools kernel",
+            ))
             device_conf = root / "etc/techo5/device.conf"
-            device_conf.write_text(device_conf.read_text().replace("\tKERNEL_UPDATE=1", "\tKERNEL_UPDATE="))
+            if "\tKERNEL_UPDATE=1" not in device_conf.read_text():
+                raise SystemExit("Athena base rootfs does not enable kernel updates")
         deterministic_tar(root, args.output)
 
     print(f"built {args.output} ({args.output.stat().st_size} bytes, sha256 {sha256(args.output)})")
@@ -586,6 +735,8 @@ def build(args: argparse.Namespace) -> None:
 
 INITTAB = """# Tater Linux {target} — BusyBox init.
 ::sysinit:/etc/techo5/boot.sh
+::respawn:/usr/local/sbin/tater-usb-ethernet
+::respawn:/usr/local/sbin/tater-sshd
 ::respawn:/usr/local/sbin/tater-run
 ::respawn:/usr/local/sbin/tater-show-run
 ::respawn:/usr/local/sbin/tater-camera-run
@@ -729,6 +880,10 @@ The setup hotspot includes hostapd 2.11 (BSD) and dnsmasq 2.92 (GPL-2.0)
 executables extracted from verified Alpine Linux v3.24 armv7 packages.
 Package sources: https://gitlab.alpinelinux.org/alpine/aports/-/tree/master/main/hostapd
 and https://gitlab.alpinelinux.org/alpine/aports/-/tree/master/main/dnsmasq
+
+Live camera video uses the reduced FFmpeg 8.1.2 decoder from the pinned Tater
+Echo Linux Athena baseline under LGPL-2.1-or-later. Its license is installed at
+/usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt.
 """
 
 APP_HEALTH = r'''# --- Tater application A/B health.
@@ -770,6 +925,9 @@ def main() -> int:
     parser.add_argument("--show", type=Path, required=True)
     parser.add_argument("--reboot", type=Path, required=True)
     parser.add_argument("--camera", type=Path, required=True)
+    parser.add_argument("--ffmpeg", type=Path, required=True)
+    parser.add_argument("--kernelctl", type=Path)
+    parser.add_argument("--kernel-image", type=Path)
     parser.add_argument("--mww-runtime", type=Path, required=True)
     parser.add_argument("--onnx-runtime", type=Path, required=True)
     parser.add_argument("--hey-tater-model", type=Path, required=True)
@@ -784,7 +942,9 @@ def main() -> int:
     parser.add_argument("--oww-melspectrogram-onnx", type=Path, required=True)
     parser.add_argument("--oww-embedding-onnx", type=Path, required=True)
     parser.add_argument("--tinyalsa", type=Path, required=True)
+    parser.add_argument("--techo5-lib", type=Path, required=True)
     parser.add_argument("--techo5-license", type=Path, required=True)
+    parser.add_argument("--ffmpeg-license", type=Path, required=True)
     parser.add_argument("--apk-cache", type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)

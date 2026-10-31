@@ -1,9 +1,9 @@
 name: Tater Echo Firmware Release
 
-# One annotated vX.Y.Z tag builds every target, sharing one pinned/cached Linux
-# ARMv7 ONNX Runtime, then publishes a single compatibility manifest. Every
-# target produces a Tater Linux factory bundle and A/B application OTA around
-# pinned, hash-verified low-level hardware enablement.
+# One annotated vX.Y.Z tag builds every target, sharing a pinned/cached Linux
+# ARMv7 ONNX Runtime and screen video decoder, then publishes one compatibility
+# manifest. Every target produces a Tater Linux factory bundle and A/B
+# application OTA around pinned, hash-verified low-level hardware enablement.
 
 on:
   push:
@@ -70,6 +70,56 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
+  ffmpeg-armv7:
+    name: Shared pinned ARMv7 video decoder
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Restore pinned video decoder
+        id: ffmpeg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            device/build/tater-ffmpeg
+            device/build/FFMPEG-LGPL-2.1.txt
+          key: tater-ffmpeg-armv7-${{ hashFiles('platforms/tater-echo-linux-lock.json', 'tools/fetch_platform_input.py') }}
+
+      - name: Fetch decoder from pinned Tater Echo Linux release
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 tools/fetch_platform_input.py \
+            platforms.athena.video_decoder device/build/tater-ffmpeg
+          python3 tools/fetch_platform_input.py \
+            platforms.athena.video_decoder.license device/build/FFMPEG-LGPL-2.1.txt
+
+      - name: Verify shared video decoder
+        run: |
+          file device/build/tater-ffmpeg | grep -q '32-bit.*ARM'
+          test "$(sha256sum device/build/tater-ffmpeg | awk '{print $1}')" = \
+            "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.sha256)"
+          test "$(stat -c %s device/build/tater-ffmpeg)" = \
+            "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.size)"
+          grep -aq 'Two slices reporting being the first in the same frame' device/build/tater-ffmpeg
+          strings device/build/tater-ffmpeg | grep -Eq -- '--enable-protocol=.*srtp'
+          strings device/build/tater-ffmpeg | grep -Eq -- '--enable-decoder=.*aac.*mp3'
+          strings device/build/tater-ffmpeg | grep -Eq -- '--enable-muxer=.*rawvideo.*pcm_s16le'
+          test "$(sha256sum device/build/FFMPEG-LGPL-2.1.txt | awk '{print $1}')" = \
+            "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.license.sha256)"
+          test "$(stat -c %s device/build/FFMPEG-LGPL-2.1.txt)" = \
+            "$(python3 tools/platform_lock.py get platforms.athena.video_decoder.license.size)"
+
+      - name: Upload shared video decoder
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: tater-ffmpeg-linux-armv7
+          path: |
+            device/build/tater-ffmpeg
+            device/build/FFMPEG-LGPL-2.1.txt
+          if-no-files-found: error
+
   biscuit:
     name: ${{ matrix.name }}
     needs: onnxruntime-armv7
@@ -82,10 +132,10 @@ jobs:
         include:
           - target: biscuit
             name: Echo Dot 2 (biscuit)
-            kernel_name: techo5-dot-kernel-bt.zImage-dtb
+            kernel_name: tater-echo-biscuit-kernel.zImage-dtb
           - target: radar
             name: Echo 2 (radar)
-            kernel_name: techo5-dot-kernel-bt-radar.zImage-dtb
+            kernel_name: tater-echo-radar-kernel.zImage-dtb
 
     steps:
       - name: Checkout
@@ -164,8 +214,8 @@ jobs:
             platforms.dot.rescue_apks /tmp/techo5-dot-rescue-apks.tar
           python3 tools/fetch_platform_input.py \
             platforms.dot.alpine_rootfs /tmp/alpine-minirootfs.tar.gz
-          git clone "$(python3 tools/platform_lock.py get platforms.dot.repository)" /tmp/techo5-dot
-          git -C /tmp/techo5-dot checkout \
+          git clone "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-dot
+          git -C /tmp/tater-echo-linux-dot checkout \
             "$(python3 tools/platform_lock.py get platforms.dot.commit)"
 
       - name: Build Tater Linux rootfs
@@ -174,15 +224,15 @@ jobs:
             --version '${{ steps.version.outputs.version }}' \
             --target '${{ matrix.target }}' \
             --base-rootfs /tmp/techo5-dot-rootfs.tar.gz \
-            --platform /tmp/techo5-dot
+            --platform /tmp/tater-echo-linux-dot/platforms/dot
 
       - name: Package factory and OTA firmware
         env:
-          TATER_DOT_PLATFORM_SOURCE: /tmp/techo5-dot
+          TATER_DOT_PLATFORM_SOURCE: /tmp/tater-echo-linux-dot/platforms/dot
           TATER_DOT_RESCUE_APKS: /tmp/techo5-dot-rescue-apks.tar
           TATER_DOT_ALPINE_ROOTFS: /tmp/alpine-minirootfs.tar.gz
-          TATER_BISCUIT_KERNEL: /tmp/techo5-dot-kernel-bt.zImage-dtb
-          TATER_RADAR_KERNEL: /tmp/techo5-dot-kernel-bt-radar.zImage-dtb
+          TATER_BISCUIT_KERNEL: /tmp/tater-echo-biscuit-kernel.zImage-dtb
+          TATER_RADAR_KERNEL: /tmp/tater-echo-radar-kernel.zImage-dtb
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' \
@@ -193,6 +243,9 @@ jobs:
           /tmp/tater-factory-check/*/install.sh --verify-bundle
           tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-ota.tar.gz \
             | grep -qx 'tater-echo'
+          diff -u \
+            <(printf '%s\n' manifest.json rootfs.tar.gz | sort) \
+            <(tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-system-ota.tar.gz | sort)
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Upload workflow artifacts
@@ -204,7 +257,7 @@ jobs:
 
   checkers:
     name: ${{ matrix.name }} Tater Linux
-    needs: onnxruntime-armv7
+    needs: [onnxruntime-armv7, ffmpeg-armv7]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -212,10 +265,10 @@ jobs:
         include:
           - target: checkers
             name: Echo Show 5 (checkers)
-            boot_name: techo5-boot-checkers-v0.7.16.img
+            boot_name: tater-echo-checkers-baseline-boot.img
           - target: crown
             name: Echo Show 8 1st Gen (crown)
-            boot_name: techo5-boot-crown-v1.0.1.img
+            boot_name: tater-echo-crown-baseline-boot.img
 
     steps:
       - name: Checkout
@@ -238,6 +291,12 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: tater-onnxruntime-linux-armv7
+          path: device/build
+
+      - name: Download shared video decoder
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tater-ffmpeg-linux-armv7
           path: device/build
 
       - name: Set up Go
@@ -272,6 +331,7 @@ jobs:
             ./internal/taternative \
             ./internal/wifi \
             ./internal/show \
+            ./internal/videostream \
             ./internal/linuxinput \
             ./internal/linuxscreen \
             ./internal/wakeword/microwakeword \
@@ -304,14 +364,14 @@ jobs:
         run: |
           mkdir -p linux/checkers/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.show.rootfs linux/checkers/inputs/rootfs-v0.9.26.tar.gz
+            platforms.show.rootfs linux/checkers/inputs/tater-echo-show-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
             'platforms.show.targets.${{ matrix.target }}.boot' \
             'linux/checkers/inputs/${{ matrix.boot_name }}'
           git clone --filter=blob:none \
-            "$(python3 tools/platform_lock.py get platforms.techo5.repository)" /tmp/techo5
-          git -C /tmp/techo5 checkout \
-            "$(python3 tools/platform_lock.py get platforms.techo5.checkers_commit)"
+            "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
+          git -C /tmp/tater-echo-linux-show checkout \
+            "$(python3 tools/platform_lock.py get platforms.show.checkers_commit)"
 
       # The pinned TECHO5 camera and rescue helpers require Go 1.26. The
       # preceding Tater regression suite continues to use device/go.mod's
@@ -327,8 +387,10 @@ jobs:
           linux/checkers/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --target '${{ matrix.target }}' \
-            --base-rootfs linux/checkers/inputs/rootfs-v0.9.26.tar.gz \
-            --techo5 /tmp/techo5 \
+            --base-rootfs linux/checkers/inputs/tater-echo-show-baseline-rootfs.tar.gz \
+            --platform /tmp/tater-echo-linux-show/platforms/show \
+            --ffmpeg device/build/tater-ffmpeg \
+            --ffmpeg-license device/build/FFMPEG-LGPL-2.1.txt \
             --output device/build/tater-${{ matrix.target }}-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
       - name: Package and verify ${{ matrix.target }} Linux firmware
@@ -344,11 +406,14 @@ jobs:
             -C /tmp/tater-show-factory-check
           /tmp/tater-show-factory-check/*/install.sh --verify-bundle
           diff -u \
-            <(printf '%s\n' manifest.json tater-camera tater-echo tater-show | sort) \
+            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show | sort) \
             <(tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-ota.tar.gz | sort)
           diff -u \
             <(printf '%s\n' manifest.json tater-echo tater-show | sort) \
             <(tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-ota-bridge.tar.gz | sort)
+          diff -u \
+            <(printf '%s\n' manifest.json rootfs.tar.gz | sort) \
+            <(tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-system-ota.tar.gz | sort)
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Upload workflow artifacts
@@ -360,7 +425,7 @@ jobs:
 
   athena:
     name: Echo Show 8 2nd Gen (athena) Tater Linux
-    needs: onnxruntime-armv7
+    needs: [onnxruntime-armv7, ffmpeg-armv7]
     runs-on: ubuntu-24.04
 
     steps:
@@ -384,6 +449,12 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: tater-onnxruntime-linux-armv7
+          path: device/build
+
+      - name: Download shared video decoder
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tater-ffmpeg-linux-armv7
           path: device/build
 
       - name: Set up Go
@@ -414,6 +485,7 @@ jobs:
             ./internal/taternative \
             ./internal/wifi \
             ./internal/show \
+            ./internal/videostream \
             ./internal/linuxinput \
             ./internal/linuxscreen \
             ./internal/checkersalsa \
@@ -451,16 +523,17 @@ jobs:
         run: |
           mkdir -p linux/athena/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.athena.rootfs linux/athena/inputs/rootfs-v1.6.4.tar.gz
+            platforms.athena.rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            platforms.athena.boot linux/athena/inputs/techo5-boot-athena-v1.6.4.img
+            platforms.athena.boot linux/athena/inputs/tater-echo-athena-kernel-boot.img
           git clone --filter=blob:none \
-            "$(python3 tools/platform_lock.py get platforms.techo5.repository)" /tmp/techo5
-          git -C /tmp/techo5 checkout \
-            "$(python3 tools/platform_lock.py get platforms.techo5.athena_commit)"
-          patch -d /tmp/techo5 -p1 < platforms/techo5-athena-reproducible.patch
+            "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
+          git -C /tmp/tater-echo-linux-show checkout \
+            "$(python3 tools/platform_lock.py get platforms.athena.commit)"
+          patch -d /tmp/tater-echo-linux-show/platforms/show -p1 \
+            < platforms/techo5-athena-reproducible.patch
 
-      - name: Set up Go for pinned TECHO5 camera helper
+      - name: Set up Go for pinned Tater Echo Linux helpers
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version: '1.26.0'
@@ -471,8 +544,10 @@ jobs:
           linux/checkers/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
             --target athena \
-            --base-rootfs linux/athena/inputs/rootfs-v1.6.4.tar.gz \
-            --techo5 /tmp/techo5 \
+            --base-rootfs linux/athena/inputs/tater-echo-athena-baseline-rootfs.tar.gz \
+            --platform /tmp/tater-echo-linux-show/platforms/show \
+            --ffmpeg device/build/tater-ffmpeg \
+            --ffmpeg-license device/build/FFMPEG-LGPL-2.1.txt \
             --output device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
       - name: Build and verify Athena system store
@@ -483,11 +558,13 @@ jobs:
             -e APK=/opt/tater/bin/apk.static \
             -e E2FSPROGS_FAKE_TIME="$source_date_epoch" \
             -e SOURCE_DATE_EPOCH="$source_date_epoch" \
-            -v "$PWD:/src" -v /tmp/techo5:/techo5:ro -w /src \
-            "$builder" bash /techo5/tools/linux/athena/mkstore.sh \
+            -v "$PWD:/src" -v /tmp/tater-echo-linux-show/platforms/show:/tater-platform:ro -w /src \
+            "$builder" bash /tater-platform/tools/linux/athena/mkstore.sh \
               --inner \
               -r device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz \
               -k none \
+              -f device/build/tater-rescue-fbprobe \
+              -l /tater-platform/logo/tater-boot-315.png \
               -o device/build/tater-athena-system-${{ steps.version.outputs.version }}.img \
               -i /opt/tater/athena-inputs \
               -w /tmp/tater-athena-store
@@ -505,10 +582,10 @@ jobs:
 
       - name: Package and verify Athena firmware
         env:
-          TATER_ATHENA_PLATFORM_SOURCE: /tmp/techo5
+          TATER_ATHENA_PLATFORM_SOURCE: /tmp/tater-echo-linux-show/platforms/show
           TATER_ATHENA_ROOTFS: device/build/tater-athena-rootfs-${{ steps.version.outputs.version }}.tar.gz
           TATER_ATHENA_SYSTEM_IMAGE: device/build/tater-athena-system-${{ steps.version.outputs.version }}.img.gz
-          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/techo5-boot-athena-v1.6.4.img
+          TATER_ATHENA_BOOT_IMAGE: linux/athena/inputs/tater-echo-athena-kernel-boot.img
         run: |
           python3 tools/package_echo_release.py \
             --version '${{ steps.version.outputs.version }}' --target athena --output release
@@ -517,11 +594,14 @@ jobs:
             -C /tmp/tater-athena-factory-check
           /tmp/tater-athena-factory-check/*/install.sh --verify-bundle
           diff -u \
-            <(printf '%s\n' manifest.json tater-camera tater-echo tater-show | sort) \
+            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show | sort) \
             <(tar -tzf release/tater-echo-athena-${{ steps.version.outputs.version }}-ota.tar.gz | sort)
           diff -u \
             <(printf '%s\n' manifest.json tater-echo tater-show | sort) \
             <(tar -tzf release/tater-echo-athena-${{ steps.version.outputs.version }}-ota-bridge.tar.gz | sort)
+          diff -u \
+            <(printf '%s\n' manifest.json rootfs.tar.gz | sort) \
+            <(tar -tzf release/tater-echo-athena-${{ steps.version.outputs.version }}-system-ota.tar.gz | sort)
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Upload workflow artifacts
@@ -533,7 +613,7 @@ jobs:
 
   rook:
     name: Echo Spot 2017 (rook) Tater Linux
-    needs: onnxruntime-armv7
+    needs: [onnxruntime-armv7, ffmpeg-armv7]
     runs-on: ubuntu-24.04
 
     steps:
@@ -558,6 +638,12 @@ jobs:
         with:
           name: tater-onnxruntime-linux-armv7
           path: device/build
+
+      - name: Download shared video decoder
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tater-ffmpeg-linux-armv7
+          path: device/build/rook
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -592,6 +678,7 @@ jobs:
             ./internal/taternative \
             ./internal/wifi \
             ./internal/show \
+            ./internal/videostream \
             ./internal/linuxinput \
             ./internal/linuxscreen \
             ./internal/wakeword/microwakeword \
@@ -620,23 +707,23 @@ jobs:
         run: |
           mkdir -p linux/rook/inputs
           python3 tools/fetch_platform_input.py \
-            platforms.rook.rootfs linux/rook/inputs/techo5-spot-rootfs.tar.gz
+            platforms.rook.rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            platforms.rook.kernel linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb
+            platforms.rook.kernel linux/rook/inputs/tater-echo-rook-baseline-kernel.Image.gz-dtb
           python3 tools/fetch_platform_input.py \
-            platforms.rook.rescue linux/rook/inputs/techo5-spot-rescue.tar
+            platforms.rook.rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar
           python3 tools/fetch_platform_input.py \
             platforms.rook.lineage linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip
           python3 tools/fetch_platform_input.py \
             platforms.rook.alpine_rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz
           git clone --filter=blob:none \
-            "$(python3 tools/platform_lock.py get platforms.rook.repository)" /tmp/techo5-spot
-          git -C /tmp/techo5-spot checkout \
+            "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-spot
+          git -C /tmp/tater-echo-linux-spot checkout \
             "$(python3 tools/platform_lock.py get platforms.rook.commit)"
           git clone --filter=blob:none \
-            "$(python3 tools/platform_lock.py get platforms.techo5.repository)" /tmp/techo5
-          git -C /tmp/techo5 checkout \
-            "$(python3 tools/platform_lock.py get platforms.techo5.checkers_commit)"
+            "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-show
+          git -C /tmp/tater-echo-linux-show checkout \
+            "$(python3 tools/platform_lock.py get platforms.show.checkers_commit)"
 
       - name: Set up ARMv7 emulation
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
@@ -653,16 +740,18 @@ jobs:
         run: |
           python3 linux/rook/build_boot.py \
             --lineage-zip linux/rook/inputs/lineage-18.1-20251108-UNOFFICIAL-rook.zip \
-            --kernel linux/rook/inputs/techo5-spot-kernel-bt.Image.gz-dtb \
-            --rescue linux/rook/inputs/techo5-spot-rescue.tar \
+            --kernel linux/rook/inputs/tater-echo-rook-baseline-kernel.Image.gz-dtb \
+            --rescue linux/rook/inputs/tater-echo-rook-baseline-rescue.tar \
             --alpine-rootfs linux/rook/inputs/alpine-minirootfs-3.24.1-armv7.tar.gz \
-            --spot-source /tmp/techo5-spot \
-            --techo5 /tmp/techo5 \
+            --spot-source /tmp/tater-echo-linux-spot/platforms/spot \
+            --show-source /tmp/tater-echo-linux-show/platforms/show \
             --output device/build/rook/tater-rook-boot.img
           sh linux/rook/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
-            --base-rootfs linux/rook/inputs/techo5-spot-rootfs.tar.gz \
-            --spot-source /tmp/techo5-spot --techo5 /tmp/techo5 \
+            --base-rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz \
+            --spot-source /tmp/tater-echo-linux-spot/platforms/spot --show-source /tmp/tater-echo-linux-show/platforms/show \
+            --ffmpeg device/build/rook/tater-ffmpeg \
+            --ffmpeg-license device/build/rook/FFMPEG-LGPL-2.1.txt \
             --output device/build/rook/tater-rook-rootfs-${{ steps.version.outputs.version }}.tar.gz
 
       - name: Package and verify Rook firmware
@@ -676,11 +765,14 @@ jobs:
             -C /tmp/tater-rook-factory-check
           /tmp/tater-rook-factory-check/*/install.sh --verify-bundle
           diff -u \
-            <(printf '%s\n' manifest.json tater-camera tater-echo tater-show | sort) \
+            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show | sort) \
             <(tar -tzf release/tater-echo-rook-${{ steps.version.outputs.version }}-ota.tar.gz | sort)
           diff -u \
             <(printf '%s\n' manifest.json tater-echo tater-show | sort) \
             <(tar -tzf release/tater-echo-rook-${{ steps.version.outputs.version }}-ota-bridge.tar.gz | sort)
+          diff -u \
+            <(printf '%s\n' manifest.json rootfs.tar.gz | sort) \
+            <(tar -tzf release/tater-echo-rook-${{ steps.version.outputs.version }}-system-ota.tar.gz | sort)
           (cd release && sha256sum -c SHA256SUMS)
 
       - name: Upload workflow artifacts

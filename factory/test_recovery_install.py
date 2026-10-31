@@ -100,6 +100,8 @@ class RecoveryInstallTests(unittest.TestCase):
         release = helper.probe_recovery(console, "/dev/ttyACM0", "crown")
         self.assertEqual("Tater Linux Crown v3.0.0", release)
         self.assertIn("! -s /run/techo5/slot", console.commands[0])
+        self.assertIn("[ -e /.techo5-store ]", console.commands[0])
+        self.assertIn('STORE="$store" slotctl status', console.commands[0])
 
     def test_usb_payload_is_verified_on_device(self) -> None:
         console = FakeUploadConsole()
@@ -125,6 +127,8 @@ class RecoveryInstallTests(unittest.TestCase):
         ])
         helper.install_rootfs(preserved, "/dev/ttyACM0", "checkers", False)
         self.assertNotIn("native.json", preserved.commands[0])
+        self.assertIn("[ -e /.techo5-store ]", preserved.commands[0])
+        self.assertIn('STORE="$store" slotctl install', preserved.commands[0])
         reset = FakeConsole([
             "TATER_RECOVERY_INSTALL_OK\nactive: b\nslot b: trial 3 — Tater Linux Checkers v3.1.0"
         ])

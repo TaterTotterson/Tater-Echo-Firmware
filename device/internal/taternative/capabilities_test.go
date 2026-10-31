@@ -54,6 +54,29 @@ func TestSupportedEchoTargetsAdvertiseOutputChain(t *testing.T) {
 	}
 }
 
+func TestSupportedEchoTargetsAdvertiseManagedSSH(t *testing.T) {
+	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+		got := CapabilitiesForTarget(target)
+		if got["ssh_management"] != true || got["ssh_management_version"] != 1 {
+			t.Errorf("%s managed SSH capabilities = %#v", target, got)
+		}
+	}
+	if got := CapabilitiesForTarget("future-echo")["ssh_management"]; got != nil {
+		t.Fatalf("unknown target ssh_management = %#v, want absent", got)
+	}
+}
+
+func TestSupportedEchoTargetsAdvertiseSystemOTA(t *testing.T) {
+	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+		if got := CapabilitiesForTarget(target)["system_ota_version"]; got != 1 {
+			t.Errorf("%s system_ota_version = %#v, want 1", target, got)
+		}
+	}
+	if got := CapabilitiesForTarget("future-echo")["system_ota_version"]; got != nil {
+		t.Fatalf("unknown target system_ota_version = %#v, want absent", got)
+	}
+}
+
 func TestCapabilitiesForTargetDescribesCrownScreenAndCamera(t *testing.T) {
 	got := CapabilitiesForTarget("crown")
 	for _, key := range []string{
@@ -107,10 +130,13 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	if got["camera_snapshot"] != true || got["camera_snapshot_version"] != 1 {
 		t.Fatal("checkers did not advertise its on-demand Room Vision camera")
 	}
+	if got["screen_camera_stream"] != true || got["screen_camera_stream_version"] != 1 {
+		t.Fatal("checkers did not advertise native camera stream decoding")
+	}
 	if got["ota"] != true {
 		t.Fatal("checkers did not advertise OTA support")
 	}
-	if got["ota_bundle_components_version"] != 1 {
+	if got["ota_bundle_components_version"] != 2 {
 		t.Fatal("checkers did not advertise staged component OTA continuation")
 	}
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
@@ -147,8 +173,11 @@ func TestCapabilitiesForTargetDescribesRookScreenAndCamera(t *testing.T) {
 func TestScreenTargetsAdvertiseDisplayPowerManagement(t *testing.T) {
 	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
 		got := CapabilitiesForTarget(target)
-		if got["screen_power_management_version"] != 1 || got["screen_brightness"] != true || got["screen_auto_brightness"] != true || got["screen_night_mode"] != true || got["screen_red_clock"] != true {
+		if got["screen_power_management_version"] != 1 || got["screen_brightness"] != true || got["screen_auto_brightness"] != true || got["screen_night_mode"] != true || got["screen_red_clock"] != true || got["screen_clock_format"] != true {
 			t.Errorf("%s display power capabilities = %#v", target, got)
+		}
+		if got["camera_stream"] != true || got["camera_stream_version"] != 1 {
+			t.Errorf("%s native camera stream capabilities = %#v", target, got)
 		}
 	}
 	if got := CapabilitiesForTarget("biscuit")["screen_power_management_version"]; got != nil {

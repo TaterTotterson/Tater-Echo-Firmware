@@ -1,0 +1,184 @@
+#!/bin/sh
+# Maintenance SSH for Tater Linux. BusyBox init supervises this process.
+# Tater explicitly enables a per-satellite password. An authorized key may be
+# accepted alongside that password, but it never enables the listener itself.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SSH_DIR=${TATER_SSH_DIR:-/data/tater-linux/ssh}
+STATE=${TATER_SSH_STATE:-/run/tater-sshd.state}
+LOG=${TATER_SSH_LOG:-/data/tater-linux/sshd.log}
+DROPBEAR=${TATER_DROPBEAR:-/usr/sbin/dropbear}
+DROPBEARKEY=${TATER_DROPBEARKEY:-/usr/bin/dropbearkey}
+BUSYBOX=${TATER_BUSYBOX:-/bin/busybox}
+PORT=${TATER_SSH_PORT:-22}
+WAIT_SECONDS=${TATER_SSH_WAIT_SECONDS:-2}
+FAIL_SECONDS=${TATER_SSH_FAIL_SECONDS:-5}
+AUTHORIZED_KEYS=$SSH_DIR/authorized_keys
+HOST_KEY=$SSH_DIR/dropbear_ed25519_host_key
+MODE_FILE=$SSH_DIR/mode
+PASSWORD_HASH=$SSH_DIR/password_hash
+PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
+SHADOW_SOURCE=${TATER_SSH_SHADOW_SOURCE:-/run/tater-sshd.shadow}
+SHADOW_TARGET=${TATER_SSH_SHADOW_TARGET:-/etc/shadow}
+SHADOW_MARKER=${TATER_SSH_SHADOW_MARKER:-/run/tater-sshd.shadow-mounted}
+
+case "$FAIL_SECONDS" in
+	''|*[!0-9]*) FAIL_SECONDS=5 ;;
+esac
+
+set_state() {
+	state_dir=${STATE%/*}
+	[ "$state_dir" = "$STATE" ] && state_dir=.
+	mkdir -p "$state_dir" 2>/dev/null || return 1
+	state_temporary=$STATE.tmp.$$
+	printf '%s\n' "$*" > "$state_temporary" && mv -f "$state_temporary" "$STATE"
+}
+
+fail() {
+	set_state "error $*"
+	printf 'tater-sshd: %s\n' "$*" >&2
+	# BusyBox init respawns this service. Back off on configuration or runtime
+	# errors so a broken SSH setting cannot become a watchdog-triggering loop.
+	[ "$FAIL_SECONDS" -eq 0 ] 2>/dev/null || sleep "$FAIL_SECONDS"
+	exit 1
+}
+
+shadow_is_mounted() {
+	"$BUSYBOX" awk -v target="$SHADOW_TARGET" '
+		$5 == target { found = 1 }
+		END { exit !found }
+	' /proc/self/mountinfo
+}
+
+remove_managed_shadow() {
+	if [ -r "$SHADOW_MARKER" ]; then
+		managed_source=
+		IFS= read -r managed_source < "$SHADOW_MARKER"
+		[ "$managed_source" = "$SHADOW_SOURCE" ] || \
+			fail "managed shadow marker does not match $SHADOW_SOURCE"
+		if shadow_is_mounted; then
+			"$BUSYBOX" umount "$SHADOW_TARGET" || \
+				fail "cannot remove managed shadow mount"
+		fi
+		rm -f "$SHADOW_MARKER" || fail "cannot clear managed shadow marker"
+	elif shadow_is_mounted; then
+		fail "$SHADOW_TARGET is already a mount point"
+	fi
+	rm -f "$SHADOW_SOURCE" 2>/dev/null || true
+}
+
+install_managed_shadow() {
+	[ -r "$SHADOW_TARGET" ] || fail "$SHADOW_TARGET is missing or unreadable"
+	remove_managed_shadow
+	shadow_dir=${SHADOW_SOURCE%/*}
+	[ "$shadow_dir" = "$SHADOW_SOURCE" ] && shadow_dir=.
+	mkdir -p "$shadow_dir" || fail "cannot create $shadow_dir"
+	shadow_temporary=$SHADOW_SOURCE.tmp.$$
+	"$BUSYBOX" awk -F: -v OFS=: -v password_hash="$password_hash" '
+		$1 == "root" { $2 = password_hash; found = 1 }
+		{ print }
+		END { if (!found) exit 1 }
+	' "$SHADOW_TARGET" > "$shadow_temporary" || {
+		rm -f "$shadow_temporary"
+		fail "cannot prepare managed shadow file"
+	}
+	chmod 600 "$shadow_temporary" || {
+		rm -f "$shadow_temporary"
+		fail "cannot protect managed shadow file"
+	}
+	mv -f "$shadow_temporary" "$SHADOW_SOURCE" || \
+		fail "cannot install managed shadow file"
+	"$BUSYBOX" mount -o bind "$SHADOW_SOURCE" "$SHADOW_TARGET" || \
+		fail "cannot mount managed shadow file"
+	printf '%s\n' "$SHADOW_SOURCE" > "$SHADOW_MARKER" || {
+		"$BUSYBOX" umount "$SHADOW_TARGET" 2>/dev/null || true
+		fail "cannot record managed shadow mount"
+	}
+}
+
+case "$PORT" in
+	''|*[!0-9]*) fail "invalid port: $PORT" ;;
+esac
+[ "$PORT" -ge 1 ] 2>/dev/null && [ "$PORT" -le 65535 ] 2>/dev/null || \
+	fail "invalid port: $PORT"
+
+umask 077
+mkdir -p "$SSH_DIR" || fail "cannot create $SSH_DIR"
+chmod 700 "$SSH_DIR" || fail "cannot protect $SSH_DIR"
+pid_dir=${PID_FILE%/*}
+[ "$pid_dir" = "$PID_FILE" ] && pid_dir=.
+mkdir -p "$pid_dir" || fail "cannot create $pid_dir"
+printf '%s\n' "$$" > "$PID_FILE" || fail "cannot write supervisor pid"
+
+while :; do
+	configured_mode=
+	[ ! -r "$MODE_FILE" ] || IFS= read -r configured_mode < "$MODE_FILE"
+	case "$configured_mode" in
+	password)
+		[ -s "$PASSWORD_HASH" ] || fail "managed password mode has no password hash"
+		break
+		;;
+	disabled)
+		set_state "disabled managed-by-tater"
+		;;
+	'' )
+		set_state "disabled waiting-for-tater"
+		;;
+	*) fail "invalid managed SSH mode: $configured_mode" ;;
+	esac
+	if [ "${TATER_SSH_RUN_ONCE:-0}" = 1 ]; then
+		exit 0
+	fi
+	sleep "$WAIT_SECONDS"
+done
+[ ! -e "$AUTHORIZED_KEYS" ] || chmod 600 "$AUTHORIZED_KEYS" || fail "cannot protect authorized_keys"
+[ -x "$BUSYBOX" ] || fail "BusyBox is missing or not executable"
+chmod 600 "$PASSWORD_HASH" || fail "cannot protect password hash"
+password_hash=$(cat "$PASSWORD_HASH")
+case "$password_hash" in
+\$6\$*) ;;
+*) fail "managed password hash is not SHA-512 crypt" ;;
+esac
+install_managed_shadow
+
+log_dir=${LOG%/*}
+[ "$log_dir" = "$LOG" ] && log_dir=.
+mkdir -p "$log_dir" || fail "cannot create $log_dir"
+if [ -f "$LOG" ] && [ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+	mv -f "$LOG" "$LOG.1"
+fi
+exec >> "$LOG" 2>&1
+
+[ -x "$DROPBEAR" ] || fail "Dropbear server is missing or not executable"
+[ -x "$DROPBEARKEY" ] || fail "dropbearkey is missing or not executable"
+
+if [ -e "$HOST_KEY" ]; then
+	[ -f "$HOST_KEY" ] && [ -s "$HOST_KEY" ] || fail "host key is not a regular nonempty file"
+	chmod 600 "$HOST_KEY" || fail "cannot protect host key"
+	host_public=$("$DROPBEARKEY" -y -f "$HOST_KEY" 2>/dev/null) || \
+		fail "existing Ed25519 host key is invalid"
+	case "$host_public" in
+		*'ssh-ed25519 '*) ;;
+		*) fail "existing host key is not Ed25519" ;;
+	esac
+else
+	host_temporary=$HOST_KEY.tmp.$$
+	trap 'rm -f "$host_temporary"' EXIT HUP INT TERM
+	"$DROPBEARKEY" -t ed25519 -f "$host_temporary" || fail "could not generate Ed25519 host key"
+	chmod 600 "$host_temporary" || fail "cannot protect new host key"
+	mv "$host_temporary" "$HOST_KEY" || fail "cannot install new host key"
+	trap - EXIT HUP INT TERM
+fi
+
+set_state "active port=$PORT authentication=password authorized_keys=$AUTHORIZED_KEYS"
+printf 'tater-sshd: starting managed password/key SSH on port %s\n' "$PORT"
+exec "$DROPBEAR" \
+	-F -E -j -k \
+	-G tater-ssh \
+	-D "$SSH_DIR" \
+	-r "$HOST_KEY" \
+	-p "$PORT" \
+	-P "$PID_FILE" \
+	-K 30 -T 5

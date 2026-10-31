@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <techo5 checkout> <output>" >&2
+    echo "usage: $0 <Tater Echo Linux Show checkout> <output>" >&2
     exit 2
 fi
 
@@ -13,12 +13,12 @@ output_dir=$(dirname "$2")
 mkdir -p "$output_dir"
 output=$(cd "$output_dir" && pwd)/$(basename "$2")
 actual=$(git -C "$checkout" rev-parse HEAD)
-checkers_commit=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.checkers_commit)
-athena_commit=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.athena_commit)
+checkers_commit=$(python3 "$repo/tools/platform_lock.py" get platforms.show.checkers_commit)
+athena_commit=$(python3 "$repo/tools/platform_lock.py" get platforms.athena.commit)
 case "$actual" in
     "$checkers_commit"|"$athena_commit") ;;
     *)
-        echo "TECHO5 checkout is $actual, not a pinned Checkers/Crown or Athena platform" >&2
+        echo "Tater Echo Linux Show checkout is $actual, not a pinned Checkers/Crown or Athena platform" >&2
         exit 1
         ;;
 esac

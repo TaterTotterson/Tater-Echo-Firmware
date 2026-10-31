@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "targets": {
+    "biscuit": {
+      "backend": "mediatek-mchange",
+      "detection": "bounded-active-probe",
+      "status": "qualified",
+      "port": "external-micro-usb",
+      "power": "shared-micro-usb-powered-pass-through",
+      "recovery": "usb-serial",
+      "reason": "Real-hardware forced host mode, native RTL8152, DHCP, sole-route Ethernet, powered cold boot, sustained traffic, and power-cycle restoration to USB serial plus Wi-Fi passed."
+    },
+    "radar": {
+      "backend": "mediatek-mchange-candidate",
+      "detection": "passive-until-role-qualified",
+      "status": "hardware-validation",
+      "port": "internal-usb-pads",
+      "power": "barrel-jack-device-powered-adapter-required",
+      "recovery": "usb-serial-on-internal-pads",
+      "reason": "Radar has no external USB port; power, enumeration, and recovery must be qualified with the internal pads and a powered adapter."
+    },
+    "checkers": {
+      "backend": "mediatek-musb-hardware-otg",
+      "detection": "hardware-id-passive",
+      "status": "qualified",
+      "port": "external-micro-usb",
+      "power": "separate-device-power-vbus-verified",
+      "recovery": "usb-serial",
+      "reason": "Real-hardware RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Checkers."
+    },
+    "crown": {
+      "backend": "mediatek-musb-hardware-otg",
+      "detection": "hardware-id-passive",
+      "status": "qualified",
+      "port": "external-micro-usb",
+      "power": "separate-device-power-vbus-verified",
+      "recovery": "usb-serial",
+      "reason": "Real-hardware RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Crown."
+    },
+    "athena": {
+      "backend": "mediatek-mtu3-gpio-otg",
+      "detection": "hardware-id-passive",
+      "status": "qualified",
+      "port": "external-usb",
+      "power": "gpio150-host-vbus-verified",
+      "recovery": "usb-serial-and-rndis",
+      "reason": "Real-hardware MTU3 OTG, GPIO150 host VBUS, RTL8152 enumeration, DHCP, sole-route Ethernet, Wi-Fi fallback, USB serial/RNDIS restoration, OTA, factory reinstall, reboot, and TWRP recovery passed on Athena."
+    },
+    "rook": {
+      "backend": "mediatek-mchange",
+      "detection": "bounded-active-probe",
+      "status": "qualified",
+      "port": "external-micro-usb",
+      "power": "shared-micro-usb-powered-pass-through",
+      "recovery": "usb-serial",
+      "reason": "Real-hardware forced host mode, RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Rook."
+    }
+  }
+}

@@ -5,6 +5,12 @@ Spot (`rook`). It is not for Show 5 (`checkers`), Show 8 (`crown`), newer Spot m
 Echo devices. The device must already be unlocked with amonet-rook v2.0.0 and
 booted into TWRP over USB.
 
+Every Rook running Tater v3.x must use this USB/TWRP factory bundle once to
+upgrade to v4.0.0. Add `--reinstall-existing-tater` to both the preflight and
+install commands for that upgrade. The v4 transition itself is not an OTA
+update; compatible releases after v4.0.0 use verified application and System
+OTA.
+
 The computer needs Python 3, `adb`, and `fastboot`. The installer supports
 macOS, Linux, and Windows and otherwise uses only Python's standard library.
 
@@ -14,7 +20,14 @@ verified backups of the device's boot, recovery, system, lk, and expdb
 partitions. It asks for `ERASE` before formatting userdata. It installs
 LineageOS without starting Android, keeps the device's own vendor drivers,
 flashes Tater's Rook boot image, and converts **system partition 11** into the
-Tater Linux A/B store. It never writes TWRP, lk, expdb, or a boot logo.
+Tater Linux A/B store. It never writes TWRP or `lk`. After verifying the full
+`expdb` backup and Rook's exact embedded-logo layout, it replaces only the
+12,096-byte Amazon logo slot with the monochrome Tater mark. An unknown layout
+is left alone, and a failed readback restores the complete `expdb` backup.
+Before userdata is formatted, any existing Tater pairing, Wi-Fi, SSH, and
+satellite settings are saved and verified on the computer, then restored. Add
+`--factory-reset` when a clean setup is wanted. Old OTA application slots are
+never restored.
 
 The pinned LineageOS ZIP is downloaded on demand or can be supplied with
 `--lineage-zip PATH`. Its SHA-256 is
@@ -39,9 +52,20 @@ installer requires the existing Tater slot-store filesystem label and either
 the bundle's boot image or an exact hash-verified earlier Rook Tater boot image
 before allowing this path. It saves the installed system
 under `backups/<serial>/pre-reinstall/` and never overwrites the original
-factory backups. Reinstallation erases the existing Tater setup, settings,
-and A/B slots; pair the Spot again afterward. Do not use this option on a
+factory backups. Reinstallation formats userdata and erases the A/B slots;
+the saved Tater setup and settings are then restored unless
+`--factory-reset` is also supplied. Do not use this option on a
 newly unlocked device.
+
+For a v3.x-to-v4.0.0 upgrade, the commands are:
+
+```sh
+./install.sh --preflight-only --reinstall-existing-tater
+./install.sh --reinstall-existing-tater
+```
+
+Add `--factory-reset` to the second command only when a deliberately clean
+setup is wanted.
 
 The current factory bundle corrects the Broadcom driver's shared
 `00:90:4c:1a:09:00` Wi-Fi placeholder before association and DHCP. An older
@@ -49,14 +73,21 @@ installation missing that platform fix needs this `--reinstall-existing-tater`
 path because routine application OTA does not replace the Linux root
 filesystem.
 
-During factory installation, the rescue stage shows an upright, round-safe
-`INSTALLING TATER` screen. This screen is part of the boot image, so an
-application OTA cannot change it on an already-installed Spot. The first boot
-is expected to show Tater setup. The root slot stays in trial
-state until it connects to Tater and passes its health check. On OTA-capable
+During factory installation, the bootloader and rescue stage show the same
+round-safe monochrome Tater mark, followed by `INSTALLING TATER`. The rescue
+screen is part of the boot image, so an
+application OTA cannot change it on an already-installed Spot. A previously
+paired Spot reconnects automatically; a new or reset Spot shows Tater setup.
+The root slot stays in trial
+state until it connects to Tater and passes its five-minute health check. It
+then commits and deliberately restarts one additional time so the shared
+root/store filesystem returns read-only. The same confirmation restart follows
+a successful System OTA; ordinary boots and application-only OTA do not trigger
+it. A System OTA first reboots into its trial slot, so two reboots during that
+complete update are expected: activation, then confirmation. On OTA-capable
 builds, Tater can update the daemon and screen together in application A/B
-slots with automatic rollback; the Linux root filesystem and boot image still
-require USB/rescue for updates. The direct-`wlan0` setup hotspot and application
+slots, then stage a verified rootfs in the inactive Linux slot with automatic
+rollback. The boot and rescue images still require USB recovery. The direct-`wlan0` setup hotspot and application
 OTA rollback have been hardware-tested on Rook. If installation stops, keep the
 device connected and preserve `backups/<serial>/` for recovery.
 
@@ -67,10 +98,9 @@ device-specific Amazon data and a local platform key.
 To enter Tater Recovery from a normally booted Rook, connect USB and run
 `python3 to_recovery.py` from this extracted factory archive. On Windows use
 `py -3 to_recovery.py`; on Linux, use `sudo python3 to_recovery.py` if the
-serial port reports permission denied. You can instead begin holding **Volume
-Up** before powering on or restarting and keep it held until Rook restarts
-into Tater Recovery. The gesture is accepted only during the first 90 seconds
-of Linux startup and requires an uninterrupted five-second hold.
+serial port reports permission denied. Holding **Volume Up** while Rook powers
+on enters its retained TWRP through the native boot chain; it no longer
+requests Tater Recovery after Linux starts.
 
 Run `./install.sh --repair` (`py -3 install.py --repair` on Windows) to repair
 the inactive root slot while preserving settings. Add `--factory-reset` only

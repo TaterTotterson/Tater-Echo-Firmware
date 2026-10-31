@@ -238,7 +238,7 @@ func (c *Client) startWakeWithAudio(wakeWord string, score float32, preferredPre
 	// before opening the microphone turn. Persistent music stays alive and is
 	// ducked by the eventual reply.
 	c.stopVoice()
-	if !replyActive {
+	if !replyActive && !c.DNDActive() {
 		if hook := c.hooks.PlayWakeSound; hook != nil {
 			hook()
 		}

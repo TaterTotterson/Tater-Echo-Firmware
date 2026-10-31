@@ -42,27 +42,27 @@ func InStartupGestureWindow(path string) (bool, error) {
 	return uptime <= StartupGestureWindow, nil
 }
 
-// TaterRecoveryCommand arms the platform's one-boot initramfs rescue marker
-// and performs the normal synchronized Tater Linux restart. All six Echo
-// targets use slotctl even though Biscuit/Radar keep their store under
-// /store/techo5 while the screen targets use /store directly; slotctl owns
-// that platform-specific path.
+// StartupTWRPCommand selects the Linux-side Volume Up route used only by
+// Biscuit and Radar. The screen satellites enter their retained TWRP directly
+// in the boot chain, before Linux starts, so they must not retain the older
+// Linux-side gesture that requested Tater Recovery.
 //
-// This deliberately does not use the bootloader's Android "recovery" target.
-// On Biscuit/Radar that would replace or bypass the Linux image, and on the
-// screen targets it would enter TWRP.  TWRP remains the lower-level fallback;
-// the physical gesture enters the safer Tater rescue environment.
-func TaterRecoveryCommand(target string) (Command, error) {
+// Biscuit and Radar run Linux from the recovery partition itself. A current
+// factory install keeps a verified handoff TWRP image that restores Linux to
+// that partition while TWRP continues running from RAM. Do not fall back to
+// Tater Recovery when that image is absent: the physical gesture now has one
+// unambiguous meaning on every satellite, while to_recovery.py remains the
+// explicit route to Tater Recovery.
+func StartupTWRPCommand(target string) (Command, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "biscuit", "radar", "checkers", "crown", "athena", "rook":
+	case "biscuit", "radar":
 		return Command{
-			Path: "/bin/sh",
+			Path: "/usr/local/sbin/to-twrp",
 			Args: []string{
-				"-c",
-				"/usr/local/sbin/slotctl rescue && exec /usr/local/bin/tater-reboot-now",
+				"--handoff",
 			},
 		}, nil
 	default:
-		return Command{}, fmt.Errorf("unsupported recovery target %q", target)
+		return Command{}, fmt.Errorf("no Linux-side TWRP gesture for target %q", target)
 	}
 }

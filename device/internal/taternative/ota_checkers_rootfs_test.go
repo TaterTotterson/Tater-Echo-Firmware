@@ -259,6 +259,47 @@ func TestLinuxAppBundleInstallsOptionalStreamingCamera(t *testing.T) {
 	}
 }
 
+func TestLinuxAppBundleInstallsOptionalVideoDecoder(t *testing.T) {
+	stateDir := t.TempDir()
+	payload := linuxAppBundle(t, "athena", "tater-linux", map[string]string{
+		"tater-ffmpeg":        "\x7fELFdecoder",
+		"FFMPEG-LGPL-2.1.txt": "LGPL license",
+	})
+	bundle := writeLinuxAppBundle(t, payload)
+	manifest, err := readLinuxAppManifest(bundle, "athena")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installLinuxAppBundle(bundle, stateDir, manifest); err != nil {
+		t.Fatal(err)
+	}
+	decoder := filepath.Join(stateDir, "app", "slots", "a", "tater-ffmpeg")
+	if err := verifyELF(decoder); err != nil {
+		t.Fatalf("installed video decoder: %v", err)
+	}
+	if info, err := os.Stat(decoder); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("video decoder executable mode: info=%v err=%v", info, err)
+	}
+	slot := filepath.Dir(decoder)
+	if info, err := os.Stat(slot); err != nil || info.Mode().Perm() != linuxAppDirectoryMode {
+		t.Fatalf("video decoder slot mode: info=%v err=%v", info, err)
+	}
+	license := filepath.Join(stateDir, "app", "slots", "a", "FFMPEG-LGPL-2.1.txt")
+	if info, err := os.Stat(license); err != nil || info.Mode()&0o111 != 0 {
+		t.Fatalf("video decoder license mode: info=%v err=%v", info, err)
+	}
+}
+
+func TestLinuxAppBundleRejectsVideoDecoderWithoutLicense(t *testing.T) {
+	payload := linuxAppBundle(t, "checkers", "tater-linux", map[string]string{
+		"tater-ffmpeg": "\x7fELFdecoder",
+	})
+	_, err := readLinuxAppManifest(writeLinuxAppBundle(t, payload), "checkers")
+	if err == nil || !strings.Contains(err.Error(), "decoder and its license together") {
+		t.Fatalf("unlicensed decoder error = %v", err)
+	}
+}
+
 func TestInstallLinuxAppBundleSwitchesApplicationSlot(t *testing.T) {
 	stateDir := t.TempDir()
 	payload := linuxAppBundle(t, "checkers", "tater-linux", nil)

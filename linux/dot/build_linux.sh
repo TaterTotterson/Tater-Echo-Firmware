@@ -36,7 +36,7 @@ mkdir -p "$device/build" "$(dirname "$output")"
 expected_platform=$(python3 "$repo/tools/platform_lock.py" get platforms.dot.commit)
 actual_platform=$(git -C "$platform_source" rev-parse HEAD)
 [ "$actual_platform" = "$expected_platform" ] || {
-    echo "TECHO5 Dot checkout is $actual_platform, expected $expected_platform" >&2
+    echo "Tater Echo Linux Dot checkout is $actual_platform, expected $expected_platform" >&2
     exit 1
 }
 
@@ -128,8 +128,10 @@ python3 "$script_dir/build_rootfs.py" \
     --tinyalsa "$device/build/dot/libtinyalsa.so.2.0.0" \
     --setup-ap "$script_dir/setup-ap.sh" \
     --setup-ap-base "$repo/linux/checkers/setup-ap.sh" \
-    --network "$script_dir/techo5-net" \
+    --network "$script_dir/tater-net" \
+    --eth "$repo/linux/common/tater-usb-ethernet" \
     --wifi-set "$script_dir/wifi-set" \
+    --to-twrp "$platform_source/tools/linux/rootfs/usr/local/sbin/to-twrp" \
     --apk-cache "$device/build" \
     --platform-license "$platform_source/LICENSE" \
     --platform-notice "$platform_source/NOTICE" \
@@ -147,8 +149,18 @@ tar -tzf "$output" > "$listing"
 for required in \
     ./usr/local/bin/tater-echo \
     ./usr/local/sbin/tater-run \
+    ./usr/local/sbin/tater-net \
+    ./usr/local/sbin/tater-usb-ethernet \
+    ./usr/local/sbin/tater-usb-inventory \
+    ./usr/local/sbin/tater-sshd \
+    ./usr/local/sbin/tater-ssh-authorize \
+    ./usr/local/sbin/tater-ssh-control \
+    ./usr/sbin/dropbear \
+    ./usr/bin/dropbearkey \
     ./usr/local/sbin/techo5-net \
+    ./usr/local/sbin/techo5-eth \
     ./usr/local/sbin/wifi-set \
+    ./usr/local/sbin/to-twrp \
     ./usr/local/sbin/tater-setup-ap \
     ./usr/sbin/hostapd \
     ./usr/sbin/dnsmasq \

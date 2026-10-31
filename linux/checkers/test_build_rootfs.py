@@ -15,6 +15,65 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class BootPatchTests(unittest.TestCase):
+    def test_release_workflow_uses_unified_show_platform_subdirectory(self):
+        workflow = (
+            Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
+        ).read_text()
+        checkers_job = workflow.split("\n  checkers:\n", 1)[1].split(
+            "\n  athena:\n", 1
+        )[0]
+
+        self.assertEqual(
+            1,
+            checkers_job.count(
+                "--platform /tmp/tater-echo-linux-show/platforms/show"
+            ),
+        )
+
+    def test_ssh_group_is_root_only_idempotent_and_collision_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            group = root / "etc/group"
+            group.parent.mkdir(parents=True)
+            group.write_text("root:x:0:root\nusers:x:100:alice\n")
+            build_rootfs.ensure_tater_ssh_group(root)
+            build_rootfs.ensure_tater_ssh_group(root)
+            self.assertEqual(1, group.read_text().count("tater-ssh:x:900:root"))
+
+            group.write_text("root:x:0:root\noccupied:x:900:user\n")
+            with self.assertRaisesRegex(SystemExit, "reserved tater-ssh gid"):
+                build_rootfs.ensure_tater_ssh_group(root)
+
+    def test_video_decoder_user_is_unprivileged_idempotent_and_network_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "etc").mkdir(parents=True)
+            (root / "etc/passwd").write_text("root:x:0:0:root:/root:/bin/sh\n")
+            (root / "etc/group").write_text("root:x:0:root\ninet:x:3003:avahi\n")
+            build_rootfs.ensure_video_decoder_user(root)
+            build_rootfs.ensure_video_decoder_user(root)
+            self.assertEqual(1, (root / "etc/passwd").read_text().count("techo5-video:x:89:89:"))
+            self.assertEqual(1, (root / "etc/group").read_text().count("techo5-video:x:89:"))
+            self.assertIn("inet:x:3003:avahi,techo5-video", (root / "etc/group").read_text())
+
+    def test_network_keeper_yields_to_active_usb_ethernet(self):
+        source = """(
+\tdown=0; lost=0
+\twhile true; do
+\t\tsleep 60
+\t\t# Someone is choosing a network on the screen: not a fault, no reboot.
+\t\t[ -e /run/techo5/wifi-setup ] && continue
+\tdone
+) &
+"""
+        patched = build_rootfs.patch_network_keeper(source)
+        self.assertIn("grep -q '^active ' /run/tater-usb-ethernet.state", patched)
+        self.assertIn("down=0; lost=0; continue", patched)
+        self.assertLess(
+            patched.index("/run/tater-usb-ethernet.state"),
+            patched.index("/run/techo5/wifi-setup"),
+        )
+
     def test_safe_extract_allows_rootfs_absolute_links_but_not_link_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

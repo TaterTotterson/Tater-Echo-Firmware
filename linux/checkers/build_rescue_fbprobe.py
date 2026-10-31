@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build TECHO5's proven rescue framebuffer renderer with Tater's setup colors.
+"""Build Tater Echo Linux's rescue framebuffer renderer with Tater's setup colors.
 
 Go's source overlay changes only the four palette literals in the pinned
 renderer. The upstream checkout is never edited, and the build fails if its
@@ -18,6 +18,7 @@ import tempfile
 
 
 SOURCE_SHA256 = "bf915b9f295e6c4fb5a402dc22709c464615b944f6ceea8f0825fdee8942ce72"
+ATHENA_SOURCE_SHA256 = "16d565a0fb0f1f03a43c2c48a9d7fbb37fb4b8e5350e40b21c69aef228f78699"
 PALETTE = {
     # Match tater-show-linux's setup background, orange accent and cool white.
     "bg := color.RGBA{0x1c, 0x15, 0x11, 0xff}":
@@ -32,8 +33,8 @@ PALETTE = {
 
 
 def themed_source(source: bytes) -> bytes:
-    if hashlib.sha256(source).hexdigest() != SOURCE_SHA256:
-        raise ValueError("fbprobe source is not the pinned TECHO5 revision")
+    if hashlib.sha256(source).hexdigest() not in {SOURCE_SHA256, ATHENA_SOURCE_SHA256}:
+        raise ValueError("fbprobe source is not a pinned Tater Echo Linux revision")
     result = source.decode()
     for before, after in PALETTE.items():
         if result.count(before) != 1:

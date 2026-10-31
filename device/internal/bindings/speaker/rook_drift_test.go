@@ -47,3 +47,49 @@ func TestPlaybackDriftPeriodBoundary(t *testing.T) {
 		t.Fatalf("period boundary last=%d begin=%d", last, begin)
 	}
 }
+
+func TestPlaybackDriftCompressionConsumesHardwareTimeline(t *testing.T) {
+	timeline := make([]byte, driftOutputFrames*4)
+	compressed := make([]byte, driftInputFrames*4)
+	for frame := 0; frame < driftOutputFrames; frame++ {
+		value := int16(frame * 8)
+		binary.LittleEndian.PutUint16(timeline[frame*4:], uint16(value))
+		binary.LittleEndian.PutUint16(timeline[frame*4+2:], uint16(-value))
+	}
+	got := compressPlaybackDrift(compressed, timeline)
+	if len(got) != driftInputFrames*4 {
+		t.Fatalf("compressed bytes = %d, want %d", len(got), driftInputFrames*4)
+	}
+	first := int16(binary.LittleEndian.Uint16(got[:2]))
+	last := int16(binary.LittleEndian.Uint16(got[(driftInputFrames-1)*4:]))
+	if first < 0 || first > 8 || last != int16((driftOutputFrames-1)*8) {
+		t.Fatalf("compressed endpoints = %d..%d, want 0..%d", first, last, (driftOutputFrames-1)*8)
+	}
+}
+
+func TestPlaybackDriftCompressionRoundTripStaysSmooth(t *testing.T) {
+	timeline := make([]byte, driftOutputFrames*4)
+	compressed := make([]byte, driftInputFrames*4)
+	for frame := 0; frame < driftOutputFrames; frame++ {
+		value := int16(frame * 8)
+		binary.LittleEndian.PutUint16(timeline[frame*4:], uint16(value))
+		binary.LittleEndian.PutUint16(timeline[frame*4+2:], uint16(value))
+	}
+	var drift playbackDriftCorrection
+	roundTrip := drift.expand(compressPlaybackDrift(compressed, timeline))
+	var maxDelta int
+	for frame := 1; frame < driftOutputFrames; frame++ {
+		previous := int(int16(binary.LittleEndian.Uint16(roundTrip[(frame-1)*4:])))
+		current := int(int16(binary.LittleEndian.Uint16(roundTrip[frame*4:])))
+		delta := current - previous
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > maxDelta {
+			maxDelta = delta
+		}
+	}
+	if maxDelta > 9 {
+		t.Fatalf("round-trip introduced a %d-sample step, want at most 9", maxDelta)
+	}
+}

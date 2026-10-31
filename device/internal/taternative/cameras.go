@@ -22,6 +22,8 @@ type DisplayCameras struct {
 	SelectedName     string
 	SelectedRoom     string
 	SelectedTalkback bool
+	StreamURL        string
+	StreamActive     bool
 	Loading          bool
 	Error            string
 }
@@ -43,6 +45,7 @@ func decodeDisplayCameras(payload map[string]any) DisplayCameras {
 		Available: boolValue(payload["available"]), SelectedID: stringValue(payload["selected_id"]),
 		SelectedName: stringValue(payload["selected_name"]), SelectedRoom: stringValue(payload["selected_room"]),
 		SelectedTalkback: boolValue(payload["selected_talkback"]), Loading: boolValue(payload["loading"]),
+		StreamURL: stringValue(payload["stream_url"]), StreamActive: boolValue(payload["stream_active"]),
 		Error: stringValue(payload["error"]),
 	}
 	rows, _ := payload["cameras"].([]any)

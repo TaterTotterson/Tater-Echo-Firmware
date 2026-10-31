@@ -37,7 +37,7 @@ root filesystem are downloaded and checked. Each step is checked before the next
 From TWRP the steps before the flash differ: the unit's small partitions are saved into
 backups/<serial>/partitions/ first, and after the one question userdata is formatted, LineageOS's zip is
 installed and its Wi-Fi driver checked against the kernel TECHO5's is built from. On a Show 5 2nd gen or
-a Show 8 the TECHO5 logo then replaces Amazon's at boot (--amazon-logo keeps Amazon's); see put_logo.
+a Show 8 the Tater logo then replaces Amazon's at boot (--amazon-logo keeps Amazon's); see put_logo.
 
 The Home Assistant key is kept in backups/<serial>/home-assistant.key (api.psk on a unit installed
 before that name) and reused on a later run, so Home Assistant keeps the device. Undo: TWRP stays in
@@ -45,7 +45,9 @@ recovery; flash the LineageOS zip and the LineageOS boot image.
 """
 import argparse
 import hashlib
+import importlib.util
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -78,30 +80,44 @@ def quote(s):
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def load_tater_settings():
+    here = Path(__file__).resolve()
+    candidates = (here.parents[2] / 'tater_settings.py', here.parents[3] / 'tater_settings.py')
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if path is None:
+        fail('the factory bundle is missing tater_settings.py')
+    spec = importlib.util.spec_from_file_location('tater_factory_settings', path)
+    if spec is None or spec.loader is None:
+        fail('cannot load %s' % path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # The partitions saved from a unit in TWRP before anything is written: the bootloader chain, the logo,
 # the vendor's small ones, boot and recovery, persist and metadata. Everything the store, userdata and
 # cache are not. By number, because TWRP's by-name links differ from LineageOS's.
 SMALL_PARTITIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15)
 
-# The TECHO5 logo in place of Amazon's at boot. What the bootloader paints is compiled into kaeru, the
+# The Tater logo in place of Amazon's at boot. What the bootloader paints is compiled into kaeru, the
 # unlock's bootloader, which lives in the expdb partition: the wordmark is a zlib bundle, and the Show 5
-# 2nd gen's and the Show 8's hold the same Amazon picture in the same 6105-byte slot, at different
-# places. boot-logo/cronos-wordmark.bin is that slot with the TECHO5 wordmark in it, made by
-# tools/linux/patch-lk-logo.py --in-place --colors 16; it has run in both boards' kaeru. It is only ever
+# and Show 8 bootloaders hold the same Amazon picture in the same 6105-byte slot, at different
+# places. boot-logo/tater-wordmark.bin is that slot with the monochrome Tater mark in it. It is only ever
 # written over the kaeru it was made for (stock), in place, so the header, the size and every pointer
 # stay as they are; anything else keeps Amazon's logo. Never into lk (the stock bootloader): changed,
 # it relocks the unit. And expdb only this way: a unit whose kaeru is broken does not start at all.
-LOGO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'boot-logo', 'cronos-wordmark.bin')
-LOGO_SHA = '1354914c8a2498a7f69a8ebc4a23782ff3369f9e4f980de04f7b9b77734c3403'
+LOGO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'boot-logo', 'tater-wordmark.bin')
+LOGO_SHA = '9cfa08b845406dea4e1aa6b3878126afce16aa05a2a9afe5058c8c84d034c7d6'
 LOGO_SIZE = 6105
-# Per board: where the slot is in kaeru, kaeru's length, and kaeru's sha256 without and with the logo.
+TWRP_DD = '/sbin/toybox dd'
+# Per board: where the slot is in kaeru, kaeru's length, and kaeru's sha256 before branding.
 LOGO_KAERU = {
     'cronos': dict(offset=335736, length=399440,  # amonet-cronos v2.0.1
-                   stock='a9fb5acb08ee99ab5562da612b329249157f96dabc5702fad6e14ec6cf5a415b',
-                   logo='8f062790f7d150928bfcf4967039e38926739f10f22325c5f64a471b29e765cd'),
+                   stock='a9fb5acb08ee99ab5562da612b329249157f96dabc5702fad6e14ec6cf5a415b'),
+    'checkers': dict(offset=335308, length=379309,  # Checkers kaeru, verified 2026-10-26
+                     stock='d578c12a2023cd41c3b158f1a74622fd17202aee061a188fa4df0c1384e149fc'),
     'crown': dict(offset=288716, length=481792,  # amonet-crown
-                  stock='6a717f0f8bd3502df2e2a811f1a90a2ec83e58f151874e11c2920a9a63dc4fa1',
-                  logo='926bc8449b1a9e0ce894c0df1bc66f549c2b294247bc73da9e8998b5e9344f64'),
+                  stock='6a717f0f8bd3502df2e2a811f1a90a2ec83e58f151874e11c2920a9a63dc4fa1'),
 }
 
 
@@ -169,7 +185,7 @@ def expdb_partition(adb):
 
 
 def put_logo(adb, parts, board):
-    """The TECHO5 logo into kaeru's wordmark slot (see LOGO_FILE), from TWRP, and read back from the
+    """The Tater logo into kaeru's wordmark slot (see LOGO_FILE), from TWRP, and read back from the
     flash. What it did, as a line for the log; a unit it does not fit keeps Amazon's logo. A read back
     that is wrong puts the saved expdb back at once, before anything restarts the unit."""
     k = LOGO_KAERU[board]
@@ -187,15 +203,17 @@ def put_logo(adb, parts, board):
     with open(LOGO_FILE, 'rb') as f:
         logo = f.read()
     kaeru = saved[:k['length']]
-    if sha256(kaeru) == k['logo']:
-        return 'the TECHO5 boot logo is already there'
     if sha256(logo) != LOGO_SHA or len(logo) != LOGO_SIZE:
         return "kept Amazon's boot logo: %s is not the one this installer knows" % LOGO_FILE
+    at = k['offset']
+    if kaeru[at:at + LOGO_SIZE] == logo:
+        return 'the Tater boot logo is already there'
     if sha256(kaeru) != k['stock']:
         return "kept Amazon's boot logo: this unit's bootloader (kaeru, in expdb) is not the one the logo was made for"
-    at = k['offset']
-    if sha256(kaeru[:at] + logo + kaeru[at + LOGO_SIZE:]) != k['logo']:
-        return "kept Amazon's boot logo: the patched bootloader would not be the one that has been run"
+    if adb.sh('test -x /sbin/toybox && echo TATER_TOYBOX_DD') != 'TATER_TOYBOX_DD':
+        return "kept Amazon's boot logo: TWRP has no verified in-place dd implementation"
+    branded = kaeru[:at] + logo + kaeru[at + LOGO_SIZE:]
+    branded_sha = sha256(branded)
     # The copy on this computer is the one that goes back if anything reads back wrong: it has to be
     # what the unit holds now.
     if adb.sh('sha256sum %s' % part).split(' ')[0] != sha256(saved):
@@ -215,14 +233,16 @@ def put_logo(adb, parts, board):
     if adb.sh('sha256sum /tmp/techo5-logo.bin').split(' ')[0] != LOGO_SHA:
         adb.sh('rm -f /tmp/techo5-logo.bin')
         return "kept Amazon's boot logo: the logo changed on its way to the unit"
-    adb.sh('dd if=/tmp/techo5-logo.bin of=%s bs=1 seek=%d count=%d conv=notrunc 2>/dev/null; sync; '
-           'rm -f /tmp/techo5-logo.bin' % (part, at, LOGO_SIZE))
-    if flash_kaeru() == k['logo']:
-        return 'the TECHO5 boot logo written into expdb (p%d) and read back from the flash' % n
+    adb.sh('%s if=/tmp/techo5-logo.bin of=%s bs=1 seek=%d count=%d '
+           'conv=notrunc,fsync status=none 2>/dev/null; sync; '
+           'rm -f /tmp/techo5-logo.bin' % (TWRP_DD, part, at, LOGO_SIZE))
+    if flash_kaeru() == branded_sha:
+        return 'the Tater boot logo written into expdb (p%d) and read back from the flash' % n
 
     # Wrong on the flash: the saved copy goes back whole, now, while TWRP still runs from RAM.
     adb.push(expdb_backup, '/tmp/expdb.img')
-    adb.sh('dd if=/tmp/expdb.img of=%s bs=4096 2>/dev/null; sync; rm -f /tmp/expdb.img' % part)
+    adb.sh('%s if=/tmp/expdb.img of=%s bs=4096 conv=notrunc,fsync status=none '
+           '2>/dev/null; sync; rm -f /tmp/expdb.img' % (TWRP_DD, part))
     if flash_kaeru() == k['stock']:
         return "kept Amazon's boot logo: writing the logo did not read back right, so the saved expdb was put back"
     fail('expdb (p%d) did not read back right after the boot logo, nor after putting the saved copy back.\n'
@@ -351,8 +371,10 @@ def main():
     ap.add_argument('--wifi', help="a Wi-Fi network to join (its passphrase is asked for); otherwise LineageOS's saved one, or the Show's screen")
     ap.add_argument('--wifi-passphrase-file', help='a file holding the --wifi passphrase, for running from a script')
     ap.add_argument('--amazon-logo', action='store_true',
-                    help="from TWRP on a Show 5 2nd gen or a Show 8: keep Amazon's logo at boot rather than put TECHO5's in")
+                    help="from TWRP on a supported Show 5 or Show 8: keep Amazon's logo at boot rather than put Tater's in")
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
+    ap.add_argument('--factory-reset', action='store_true',
+                    help='erase Wi-Fi, pairing, SSH, and satellite settings instead of preserving them')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
     ap.add_argument('--backups', default=default_dir('TECHO5_BACKUPS', 'backups'))
     ap.add_argument('--work', default=default_dir('TECHO5_WORK', 'build'))
@@ -474,17 +496,43 @@ def main():
         note('boot image %s checked' % os.path.basename(boot))
     if a.dry_run:
         print('\nDry run: TECHO5 %s downloaded and checked in %s; nothing written to the unit.' % (version, rel.dir))
-        return
+        return False
+
+    settings = load_tater_settings() if twrp else None
+    saved_settings = None
+    if twrp and not a.factory_reset:
+        try:
+            saved_settings = settings.capture(adb, Path(backup) / 'tater-settings.tar')
+        except settings.SettingsError as error:
+            fail(str(error))
+        if saved_settings:
+            note('Tater setup saved and verified: %s' % saved_settings.archive)
+        else:
+            note('no existing Tater setup was found; this unit will start clean')
 
     if twrp:
         # From TWRP the first thing written is userdata, so the one question comes before it.
+        setup_action = (
+            'Wi-Fi, pairing, SSH, and satellite settings will be erased (--factory-reset).'
+            if a.factory_reset else
+            'Existing Tater setup will be restored afterward.' if saved_settings else
+            'No existing Tater setup was found; the satellite will enter setup mode.'
+        )
         confirm(a.force, [
             "About to install Tater Linux %s on %s (%s) as '%s', from TWRP." % (version, a.serial, BOARDS[dev], a.name),
             "This formats userdata, installs LineageOS for its drivers without starting it,",
             "flashes the Tater Linux boot image, then erases the system partition (mmcblk0p12) to make the slot store.",
+            setup_action,
         ])
         step('LineageOS, for its drivers')
         install_lineage(adb, a.lineage_zip)
+        if saved_settings:
+            step('restore Tater setup')
+            try:
+                settings.restore(adb, saved_settings)
+            except settings.SettingsError as error:
+                fail(str(error))
+            note('pairing, Wi-Fi, SSH, and satellite settings restored')
         check_lineage_driver(adb)
         if not os.path.exists(los_boot):
             # Through a .partial kept only when whole, as on the LineageOS path: this is the image the way
@@ -497,7 +545,7 @@ def main():
             os.replace(los_boot + '.partial', los_boot)
             note('LineageOS boot image: %s' % los_boot)
         if dev not in LOGO_KAERU:
-            note("boot logo: Amazon's is kept (TECHO5's is made for the Show 5 2nd gen and the Show 8)")
+            note("boot logo: Amazon's is kept (this bootloader layout has not been verified for Tater's logo)")
         elif a.amazon_logo:
             note("boot logo: Amazon's is kept (--amazon-logo)")
         else:
@@ -598,8 +646,14 @@ def main():
     for line in o.split('\n'):
         if line.startswith('slot a'):
             note(line)
-    prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
-            "(umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk)" % (quote(a.name), quote(psk)))
+    if saved_settings:
+        prov = ("mkdir -p /data/misc/techo5 && "
+                "{ [ -s /data/misc/techo5/name ] || printf '%%s\\n' %s > /data/misc/techo5/name; } && "
+                "{ [ -s /data/misc/techo5/psk ] || (umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk); }"
+                % (quote(a.name), quote(psk)))
+    else:
+        prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
+                "(umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk)" % (quote(a.name), quote(psk)))
     if pub:
         prov += (" && mkdir -p -m 700 /data/misc/techo5/ssh && (umask 077; printf '%%s\\n' %s > /data/misc/techo5/ssh/authorized_keys)"
                  " && { [ -e /data/misc/techo5/state.json ] || printf '{\"security\":{\"ssh\":true}}\\n' > /data/misc/techo5/state.json; }"
@@ -631,9 +685,10 @@ def main():
 
     print("\nDone. '%s' runs Tater Linux %s from slot a; the slot commits itself after five healthy minutes." % (a.name, version))
     print('The unused low-level platform key remains private in %s.' % key_file)
-    if twrp and not wifi:
+    if twrp and not wifi and not saved_settings:
         print('It has no home Wi-Fi yet: join the Tater-Setup network shown on the screen to finish setup.')
     print("Later versions arrive through Tater's normal satellite OTA flow.")
+    return bool(saved_settings and saved_settings.paired)
 
 
 if __name__ == '__main__':

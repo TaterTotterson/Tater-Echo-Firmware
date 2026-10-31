@@ -20,6 +20,7 @@ import (
 )
 
 const linuxAppState = "/data/tater-linux"
+const linuxAppDirectoryMode = 0o755
 
 type linuxAppFile struct {
 	SHA256 string `json:"sha256"`
@@ -41,9 +42,11 @@ type linuxAppPending struct {
 }
 
 var linuxAppKnownFiles = map[string]bool{
-	"tater-echo":   true,
-	"tater-show":   true,
-	"tater-camera": true,
+	"FFMPEG-LGPL-2.1.txt": true,
+	"tater-echo":          true,
+	"tater-show":          true,
+	"tater-camera":        true,
+	"tater-ffmpeg":        true,
 }
 var linuxAppVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
 
@@ -56,8 +59,11 @@ func (i *OTAInstaller) installLinuxApp(ctx context.Context, req OTARequest, repo
 	if stateDir == "" {
 		stateDir = linuxAppState
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create Tater Linux OTA state: %w", err)
+	}
+	if err := os.Chmod(stateDir, linuxAppDirectoryMode); err != nil {
+		return fmt.Errorf("make Tater Linux OTA state traversable: %w", err)
 	}
 	bundle := filepath.Join(stateDir, "app.download")
 	defer os.Remove(bundle)
@@ -191,7 +197,7 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 			if err := json.NewDecoder(io.LimitReader(archive, header.Size)).Decode(&manifest); err != nil {
 				return manifest, fmt.Errorf("decode Linux application manifest: %w", err)
 			}
-		case "tater-echo", "tater-show", "tater-camera":
+		case "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg", "FFMPEG-LGPL-2.1.txt":
 			if header.Typeflag != tar.TypeReg || header.Size <= 0 {
 				return manifest, fmt.Errorf("Linux application %s is invalid", name)
 			}
@@ -213,6 +219,8 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 	if target == "checkers" || target == "crown" || target == "athena" || target == "rook" {
 		required = append(required, "tater-show")
 		optional["tater-camera"] = true
+		optional["tater-ffmpeg"] = true
+		optional["FFMPEG-LGPL-2.1.txt"] = true
 	}
 	allowed := map[string]bool{"tater-echo": true}
 	for _, name := range required[1:] {
@@ -225,6 +233,11 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 		if !linuxAppKnownFiles[name] || !allowed[name] {
 			return manifest, errors.New("Linux application manifest has unexpected files")
 		}
+	}
+	_, hasDecoder := manifest.Files["tater-ffmpeg"]
+	_, hasDecoderLicense := manifest.Files["FFMPEG-LGPL-2.1.txt"]
+	if hasDecoder != hasDecoderLicense {
+		return manifest, errors.New("Linux application must include the video decoder and its license together")
 	}
 	for _, name := range required {
 		entry, ok := manifest.Files[name]
@@ -253,8 +266,25 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 func installLinuxAppBundle(bundle, stateDir string, manifest linuxAppManifest) error {
 	appDir := filepath.Join(stateDir, "app")
 	slotsDir := filepath.Join(appDir, "slots")
-	if err := os.MkdirAll(slotsDir, 0o700); err != nil {
-		return fmt.Errorf("create Linux application slots: %w", err)
+	for _, directory := range []string{stateDir, appDir, slotsDir} {
+		if err := os.MkdirAll(directory, linuxAppDirectoryMode); err != nil {
+			return fmt.Errorf("create Linux application directory %s: %w", directory, err)
+		}
+		if err := os.Chmod(directory, linuxAppDirectoryMode); err != nil {
+			return fmt.Errorf("make Linux application directory %s traversable: %w", directory, err)
+		}
+	}
+	// FFmpeg runs as techo5-video rather than root. Repair slots created by an
+	// older installer so the decoder can traverse the active A/B directory.
+	for _, slot := range []string{"a", "b"} {
+		directory := filepath.Join(slotsDir, slot)
+		if info, err := os.Stat(directory); err == nil && info.IsDir() {
+			if err := os.Chmod(directory, linuxAppDirectoryMode); err != nil {
+				return fmt.Errorf("make Linux application slot %s traversable: %w", slot, err)
+			}
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect Linux application slot %s: %w", slot, err)
+		}
 	}
 	pendingPath := filepath.Join(appDir, "pending.env")
 	currentPath := filepath.Join(appDir, "current")
@@ -282,7 +312,7 @@ func installLinuxAppBundle(bundle, stateDir string, manifest linuxAppManifest) e
 	target := filepath.Join(slotsDir, inactive)
 	backup := filepath.Join(slotsDir, "."+inactive+".old")
 	_ = os.RemoveAll(stage)
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := os.MkdirAll(stage, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create inactive Linux application slot: %w", err)
 	}
 	defer os.RemoveAll(stage)
@@ -375,7 +405,7 @@ func continueLinuxAppTrial(bundle, slotsDir, currentPath, pendingPath string, pe
 	target := filepath.Join(slotsDir, pending.New)
 	backup := filepath.Join(slotsDir, "."+pending.New+".old")
 	_ = os.RemoveAll(stage)
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := os.MkdirAll(stage, linuxAppDirectoryMode); err != nil {
 		return fmt.Errorf("create Linux application continuation slot: %w", err)
 	}
 	defer os.RemoveAll(stage)
@@ -427,7 +457,11 @@ func extractLinuxApp(bundle, destination string, manifest linuxAppManifest) erro
 			return fmt.Errorf("Linux application %s size does not match its manifest", name)
 		}
 		target := filepath.Join(destination, name)
-		file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+		mode := os.FileMode(0o755)
+		if name == "FFMPEG-LGPL-2.1.txt" {
+			mode = 0o644
+		}
+		file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if err != nil {
 			return fmt.Errorf("create Linux application %s: %w", name, err)
 		}
@@ -441,8 +475,10 @@ func extractLinuxApp(bundle, destination string, manifest linuxAppManifest) erro
 		if actual := hex.EncodeToString(hash.Sum(nil)); !strings.EqualFold(actual, entry.SHA256) {
 			return fmt.Errorf("Linux application %s digest mismatch", name)
 		}
-		if err := verifyELF(target); err != nil {
-			return fmt.Errorf("verify Linux application %s: %w", name, err)
+		if name != "FFMPEG-LGPL-2.1.txt" {
+			if err := verifyELF(target); err != nil {
+				return fmt.Errorf("verify Linux application %s: %w", name, err)
+			}
 		}
 		extracted[name] = true
 	}

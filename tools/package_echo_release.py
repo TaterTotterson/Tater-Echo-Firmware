@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import gzip
 import hashlib
 import io
@@ -32,11 +31,14 @@ ELFCLASS32 = 1
 ELFCLASS64 = 2
 EM_ARM = 40
 EM_AARCH64 = 183
-SHOW_BOOT_LOGO_SHA256 = "1354914c8a2498a7f69a8ebc4a23782ff3369f9e4f980de04f7b9b77734c3403"
+SHOW_BOOT_LOGO_SHA256 = "9cfa08b845406dea4e1aa6b3878126afce16aa05a2a9afe5058c8c84d034c7d6"
 SHOW_BOOT_LOGO_SIZE = 6105
+ROOK_BOOT_LOGO_SHA256 = "2c8d54f6987cef2e0877360e873191bfc48a35a13e8d7f42e0ecb987f2df860d"
+ROOK_BOOT_LOGO_SIZE = 12096
 PLATFORM_LOCK = platform_lock.load()
 DOT_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["dot"]["commit"]
-ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["techo5"]["athena_commit"]
+ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
+PLATFORM_REPOSITORY = PLATFORM_LOCK["source"]["repository"]
 
 
 def platform_provenance(target: str) -> dict:
@@ -46,28 +48,30 @@ def platform_provenance(target: str) -> dict:
     builder = PLATFORM_LOCK["builder"]
     if target in LINUX_DOT_TARGETS:
         source = {
-            "repository": platforms["dot"]["repository"],
+            "repository": PLATFORM_REPOSITORY,
             "commit": platforms["dot"]["commit"],
-            "release": platforms["dot"]["release"],
+            "release": platforms["dot"]["kernel_release"],
+            "base_release": platforms["dot"]["release"],
         }
     elif target in LINUX_SHOW_TARGETS:
         source = {
-            "repository": platforms["techo5"]["repository"],
-            "commit": platforms["techo5"]["checkers_commit"],
+            "repository": PLATFORM_REPOSITORY,
+            "commit": platforms["show"]["checkers_commit"],
             "release": platforms["show"]["release"],
         }
     elif target in LINUX_ATHENA_TARGETS:
         source = {
-            "repository": platforms["techo5"]["repository"],
-            "commit": platforms["techo5"]["athena_commit"],
-            "release": platforms["athena"]["release"],
+            "repository": PLATFORM_REPOSITORY,
+            "commit": platforms["athena"]["commit"],
+            "release": platforms["athena"]["kernel_release"],
+            "base_release": platforms["athena"]["release"],
         }
     elif target == "rook":
         source = {
-            "repository": platforms["rook"]["repository"],
+            "repository": PLATFORM_REPOSITORY,
             "commit": platforms["rook"]["commit"],
             "release": platforms["rook"]["release"],
-            "techo5_helper_commit": platforms["techo5"]["checkers_commit"],
+            "show_helper_commit": platforms["show"]["checkers_commit"],
         }
     else:
         return {}
@@ -105,26 +109,18 @@ def metadata(path: Path) -> dict:
     return {"sha256": digest(path), "size": path.stat().st_size}
 
 
+def require_asset(path: Path, expected_sha256: str, expected_size: int) -> None:
+    if (not path.is_file() or path.stat().st_size != expected_size
+            or digest(path) != expected_sha256):
+        raise SystemExit(f"required release asset failed verification: {path}")
+
+
 def copy(source: Path, destination: Path, mode: int) -> None:
     if not source.is_file():
         raise SystemExit(f"required release input is missing: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(mode)
-
-
-def decode_verified_asset(source: Path, destination: Path, expected_sha256: str,
-                          expected_size: int) -> None:
-    try:
-        encoded = "".join(source.read_text(encoding="ascii").split())
-        payload = base64.b64decode(encoded, validate=True)
-    except (OSError, UnicodeError, ValueError) as exc:
-        raise SystemExit(f"required encoded release asset is invalid: {source}") from exc
-    if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
-        raise SystemExit(f"required encoded release asset failed verification: {source}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(payload)
-    destination.chmod(0o644)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -161,6 +157,26 @@ def deterministic_files_tar(entries: dict[str, bytes], destination: Path,
                     info.uname = info.gname = "root"
                     info.mtime = 0
                     archive.addfile(info, io.BytesIO(contents))
+
+
+def deterministic_mixed_tar(entries: dict[str, bytes | Path], destination: Path) -> None:
+    """Write stable flat archives without loading large rootfs images in memory."""
+    with destination.open("wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0, compresslevel=9) as gz:
+            with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                for name, source in sorted(entries.items()):
+                    info = tarfile.TarInfo(name)
+                    info.mode = 0o644
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = "root"
+                    info.mtime = 0
+                    if isinstance(source, Path):
+                        info.size = source.stat().st_size
+                        with source.open("rb") as stream:
+                            archive.addfile(info, stream)
+                    else:
+                        info.size = len(source)
+                        archive.addfile(info, io.BytesIO(source))
 
 
 def verify_rook_factory_inputs(rootfs: Path, boot: Path, version: str) -> None:
@@ -226,7 +242,9 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         if target not in LINUX_DOT_TARGETS:
             show = build_dir / ("tater-show" if target == "rook" else "tater-show-linux")
             camera = build_dir / "tater-camera"
-            required_sources.extend((show, camera))
+            ffmpeg = build_dir / "tater-ffmpeg"
+            ffmpeg_license = build_dir / "FFMPEG-LGPL-2.1.txt"
+            required_sources.extend((show, camera, ffmpeg, ffmpeg_license))
         for source in required_sources:
             if not source.is_file():
                 raise SystemExit(f"required release input is missing: {source}")
@@ -248,18 +266,48 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 **app_files,
                 "manifest.json": (json.dumps(app_manifest, indent=2, sort_keys=True) + "\n").encode(),
             }
-            deterministic_files_tar(app_entries, path, set(app_files))
+            executables = {name for name in app_files if name.startswith("tater-")}
+            deterministic_files_tar(app_entries, path, executables)
 
         ota = output / f"{stem}-ota.tar.gz"
         if target in LINUX_DOT_TARGETS:
             write_app_ota(ota, {"tater-echo": server.read_bytes()})
         else:
-            bridge_files = {"tater-echo": server.read_bytes(), "tater-show": show.read_bytes()}
+            bridge_files = {
+                "tater-echo": server.read_bytes(),
+                "tater-show": show.read_bytes(),
+            }
             ota_bridge = output / f"{stem}-ota-bridge.tar.gz"
             write_app_ota(ota_bridge, bridge_files)
             artifacts["ota_bridge"] = ota_bridge
-            write_app_ota(ota, {**bridge_files, "tater-camera": camera.read_bytes()})
+            write_app_ota(ota, {
+                **bridge_files,
+                "FFMPEG-LGPL-2.1.txt": ffmpeg_license.read_bytes(),
+                "tater-camera": camera.read_bytes(),
+                "tater-ffmpeg": ffmpeg.read_bytes(),
+            })
         artifacts["ota"] = ota
+
+        system_ota = output / f"{stem}-system-ota.tar.gz"
+        rootfs_meta = metadata(rootfs_source)
+        system_manifest = {
+            "schema": 1,
+            "kind": "tater-linux-rootfs",
+            "target": target,
+            "base_os": "tater-linux",
+            "version": version,
+            "rootfs": rootfs_meta,
+        }
+        deterministic_mixed_tar(
+            {
+                "manifest.json": (
+                    json.dumps(system_manifest, indent=2, sort_keys=True) + "\n"
+                ).encode(),
+                "rootfs.tar.gz": rootfs_source,
+            },
+            system_ota,
+        )
+        artifacts["system"] = system_ota
     else:
         raise SystemExit(f"factory packaging is not implemented for {target!r}")
 
@@ -324,8 +372,11 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     platform_source / "tools/linux/back-to-linux.sh", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/slotctl": (
                     platform_source / "tools/linux/rootfs/usr/local/sbin/slotctl", 0o755),
+                "tools/linux/rootfs/usr/local/sbin/tater-net": (
+                    REPO / "linux/dot/tater-net", 0o755),
+                # The pinned platform rescue init still invokes the old name.
                 "tools/linux/rootfs/usr/local/sbin/techo5-net": (
-                    REPO / "linux/dot/techo5-net", 0o755),
+                    REPO / "linux/dot/tater-net", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/wifi-set": (
                     REPO / "linux/dot/wifi-set", 0o755),
                 "tools/linux/rootfs/usr/local/sbin/to-twrp": (
@@ -341,8 +392,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 or os.getenv("TATER_LINUX_BOOT_IMAGE", "").strip()
             )
             default_boot = {
-                "checkers": REPO / "linux/checkers/inputs/techo5-boot-checkers-v0.7.16.img",
-                "crown": REPO / "linux/checkers/inputs/techo5-boot-crown-v1.0.1.img",
+                "checkers": REPO / "linux/checkers/inputs/tater-echo-checkers-baseline-boot.img",
+                "crown": REPO / "linux/checkers/inputs/tater-echo-crown-baseline-boot.img",
             }[target]
             boot_source = (
                 Path(configured_boot) if configured_boot
@@ -365,6 +416,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
                 "tools/techo5/LICENSE": (
                     REPO / "factory/checkers-linux/tools/techo5/LICENSE", 0o644),
+                "tools/techo5/boot-logo/tater-wordmark.bin": (
+                    REPO / "factory/checkers-linux/tools/techo5/boot-logo/tater-wordmark.bin", 0o644),
             }
         elif target == "athena":
             platform_source_value = os.getenv("TATER_ATHENA_PLATFORM_SOURCE", "").strip()
@@ -379,7 +432,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 raise SystemExit(f"cannot verify TECHO5 Athena source: {platform_source}") from error
             if platform_commit != ATHENA_PLATFORM_COMMIT:
                 raise SystemExit(
-                    f"TECHO5 Athena checkout is {platform_commit}, expected {ATHENA_PLATFORM_COMMIT}"
+                    f"Tater Echo Linux Athena checkout is {platform_commit}, expected {ATHENA_PLATFORM_COMMIT}"
                 )
             system_value = os.getenv("TATER_ATHENA_SYSTEM_IMAGE", "").strip()
             boot_value = os.getenv("TATER_ATHENA_BOOT_IMAGE", "").strip()
@@ -419,6 +472,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     REPO / "factory/checkers-linux/tools/techo5/techo5lib.py", 0o644),
                 "tools/techo5/LICENSE": (
                     REPO / "factory/checkers-linux/tools/techo5/LICENSE", 0o644),
+                "boot-logo/tater-boot-480.bin": (
+                    REPO / "factory/rook-linux/boot-logo/tater-boot-480.bin", 0o644),
             }
 
         inputs["licenses/ECHOLOCAL-MIT.txt"] = (
@@ -427,6 +482,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             REPO / "LICENSES/SENDSPIN-MIT.txt", 0o644)
         inputs["to_recovery.py"] = (REPO / "factory/to_recovery.py", 0o755)
         inputs["recovery_install.py"] = (REPO / "factory/recovery_install.py", 0o755)
+        inputs["tater_settings.py"] = (REPO / "factory/tater_settings.py", 0o644)
         # TWRP remains the lower-level escape hatch.  Tater Recovery is the
         # normal user path, but do not remove the tool needed when the Linux
         # rescue image itself is what needs repair.
@@ -434,6 +490,18 @@ def build(version: str, target: str, output: Path) -> list[Path]:
 
         for relative, (source, mode) in inputs.items():
             copy(source, factory / relative, mode)
+        if target in LINUX_SHOW_TARGETS:
+            require_asset(
+                factory / "tools/techo5/boot-logo/tater-wordmark.bin",
+                SHOW_BOOT_LOGO_SHA256,
+                SHOW_BOOT_LOGO_SIZE,
+            )
+        if target == "rook":
+            require_asset(
+                factory / "boot-logo/tater-boot-480.bin",
+                ROOK_BOOT_LOGO_SHA256,
+                ROOK_BOOT_LOGO_SIZE,
+            )
         if target in LINUX_DOT_TARGETS:
             init = factory / "tools/linux/init"
             init_text = init.read_text()
@@ -450,12 +518,6 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             slotctl.write_text(slotctl.read_text().replace(
                 "usr/local/bin/echod", "usr/local/bin/tater-echo"))
         if target in LINUX_SHOW_TARGETS:
-            decode_verified_asset(
-                REPO / "factory/checkers-linux/tools/techo5/boot-logo/cronos-wordmark.bin.b64",
-                factory / "tools/techo5/boot-logo/cronos-wordmark.bin",
-                SHOW_BOOT_LOGO_SHA256,
-                SHOW_BOOT_LOGO_SIZE,
-            )
             branded_boot = factory / "payload/boot.img"
             subprocess.run([
                 sys.executable,
@@ -494,12 +556,17 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     }
     if target in LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
         target_manifest["ota_migrations"] = [{
-            "id": "linux-app-components-v1",
+            "id": "linux-app-components-v2",
             "required_capability": "ota_bundle_components_version",
-            "minimum_capability_version": 1,
+            "minimum_capability_version": 2,
             "bridge_artifact": "ota_bridge",
             "final_artifact": "ota",
         }]
+    target_manifest["system_ota"] = {
+        "required_capability": "system_ota_version",
+        "minimum_capability_version": 1,
+        "boot_policy": "inactive-rootfs-trial",
+    }
     target_manifest["platform"] = platform_provenance(target)
     write_json(release_manifest, {
         "schema": 1,

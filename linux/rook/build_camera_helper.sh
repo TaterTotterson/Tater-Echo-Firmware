@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <techo5 checkout> <output>" >&2
+    echo "usage: $0 <Tater Echo Linux Show checkout> <output>" >&2
     exit 2
 fi
 
@@ -12,10 +12,10 @@ repo=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 output_dir=$(dirname "$2")
 mkdir -p "$output_dir"
 output=$(cd "$output_dir" && pwd)/$(basename "$2")
-expected=$(python3 "$repo/tools/platform_lock.py" get platforms.techo5.checkers_commit)
+expected=$(python3 "$repo/tools/platform_lock.py" get platforms.show.checkers_commit)
 actual=$(git -C "$checkout" rev-parse HEAD)
 [ "$actual" = "$expected" ] || {
-    echo "TECHO5 checkout is $actual, expected $expected" >&2
+    echo "Tater Echo Linux Show checkout is $actual, expected $expected" >&2
     exit 1
 }
 

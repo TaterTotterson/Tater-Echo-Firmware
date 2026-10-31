@@ -8,8 +8,8 @@ Only tags in that format trigger a firmware release.
 
 ## Build provenance
 
-[`platforms/techo5-lock.json`](../platforms/techo5-lock.json) is the single
-source of truth for TECHO5 family commits, platform downloads and hashes, the
+[`platforms/tater-echo-linux-lock.json`](../platforms/tater-echo-linux-lock.json) is the single
+source of truth for Tater Echo Linux commits, platform downloads and hashes, the
 Go/Alpine base, exact build packages, and the immutable multi-architecture
 builder index and per-platform digests. Firmware build scripts disable Go's automatic toolchain
 download and do not install packages from live repositories. Athena's rescue
@@ -35,42 +35,69 @@ upstream licenses and notices.
 Biscuit and Radar installers run in TWRP. They build the Linux recovery image
 locally from the unit's TWRP header and the pinned board kernel, preserve
 verified boot-critical backups and a restorable TWRP image, then install the
-A/B rootfs under cache. Checkers, Crown, and Rook use hash-pinned TECHO5
+A/B rootfs under cache. Checkers, Crown, and Rook use hash-pinned Tater Echo Linux
 platform images and retain TWRP. Their USB installations use target-matched
 LineageOS packages only as the source of each unit's vendor driver tree, then
 replace Android's system partition with the A/B store. Athena instead uses
-TECHO5's pinned 64-bit mainline kernel and system-partition store. Its
+Tater Echo Linux's pinned 64-bit mainline kernel and system-partition store. Its
 installer extracts the unit-specific speaker tuning from the private Fire OS
 boot backup, inserts it into the release boot image, and writes only `system`
 and `boot`.
 
-v3.0.0 is the Biscuit and Radar Tater Linux factory baseline. A unit running
-firmware older than v3.0.0 must install the matching factory archive through
-USB/TWRP once; the pre-v3 base system cannot consume the v3 OTA format. This is
-a clean reset that clears its Tater satellite settings. Routine A/B OTA begins
-after the v3.0.0 factory installation. Every factory archive includes
+v4.0.0 is a new factory baseline for Biscuit, Radar, Checkers, Crown, Athena,
+and Rook. Every unit running Tater v3.x must install its matching v4.0.0 factory
+archive through USB/TWRP once; the v3 updater cannot safely apply the complete
+platform, recovery, kernel/boot, branding, and System OTA transition. The v4
+release must therefore never be offered as an application-only OTA substitute
+to a v3 satellite. Factory installers preserve verified Tater identity, Wi-Fi,
+SSH, and satellite settings by default, while discarding prior OTA application
+slots so the bundled version boots. Pass `--factory-reset` for a clean setup.
+Routine verified application and root-system OTA begins after the v4.0.0
+factory installation. Every factory archive includes
 `to_recovery.py` and a verified rootfs repair payload. The normal recovery flow
 enters Tater Recovery over USB, then runs `install.sh --repair` to install the
 bundle into the inactive A/B root slot without clearing the satellite's
 settings. An explicit `--factory-reset` clears Wi-Fi and pairing too.
 
-The same one-boot Tater Recovery request powers the local startup gesture on
-all six targets: hold Volume Up continuously for five seconds during the first
-90 seconds of Tater Linux startup. It is deliberately an early-userspace
-fallback, not a bootloader replacement. Every archive therefore retains
-`to_twrp.py` as a lower-level escape hatch, and a unit that cannot start Tater
-Linux still needs its target-specific unlock/TWRP recovery procedure.
+Volume Up has one recovery meaning on all six targets: TWRP. Checkers, Crown,
+Athena, and Rook handle it in their native boot chain before Linux starts.
+Biscuit and Radar have no dependable bootloader shortcut, so a current factory
+install detects a continuous five-second hold during the first 90 seconds of
+Linux startup and enters a device-specific TWRP handoff that restores Linux to
+their shared recovery partition while TWRP runs from RAM. A Dot without the
+current handoff image continues normal startup rather than entering Tater
+Recovery. Every archive retains `to_recovery.py` as the explicit USB route to
+Tater Recovery and `to_twrp.py` as the explicit lower-level TWRP route.
 
 ## OTA artifacts
 
-All routine OTA assets are deterministic gzip-compressed application bundles
-with a per-file manifest. Biscuit and Radar bundles contain the native daemon;
+Routine releases contain two deterministic OTA layers. Application bundles
+have a per-file manifest; Biscuit and Radar bundles contain the native daemon;
 screen-target bundles also contain the native renderer and optional camera
 helper. The daemon embeds and verifies the matched built-in Hey Tater
 MWW/OWW/NWW wake bundle, so
-an ordinary OTA installs or repairs every built-in engine model. Full Linux
-root filesystems remain in USB factory bundles for recovery and rare
-base-system changes.
+an ordinary OTA installs or repairs every built-in engine model. USB factory
+bundles retain a full Linux rootfs for recovery.
+
+Every target also publishes a `system-ota.tar.gz` wrapper containing a complete
+rootfs plus an internal target, version, size, and SHA-256 manifest. This path
+is available after the v4.0.0 factory baseline is installed; it does not make
+the v3-to-v4 transition OTA-compatible. For later compatible releases, Tater
+first updates the application when the connected daemon lacks the required
+System OTA support, then sends `ota.system.url`. The daemon verifies the outer
+download and embedded rootfs independently before `slotctl install` writes the
+inactive root slot. The established trial-boot health check commits the new
+slot or automatically returns to the previous one. System OTA never replaces
+the kernel, boot image, rescue environment, partition table, or device-specific
+vendor storage. It also never writes bootloader branding. The monochrome Tater
+boot logo is a guarded USB-factory step on Checkers, Crown, and Rook: the
+installer changes only a known logo slot in the verified `expdb` backup, reads
+the partition back, and
+restores the complete backup if verification fails. Unknown bootloader layouts
+keep Amazon's logo. Athena deliberately never patches its protected `lk_real`
+unlock chain. Its factory-built system store paints the Tater mark at the first
+safe Linux framebuffer stage, so a brief Amazon frame can remain immediately
+after power-on. Biscuit and Radar have no screen.
 
 Each target also publishes target-specific `wake-runtime.so` and
 `onnxruntime.so` sidecars. Every target receives the reduced Linux/musl ARMv7
@@ -86,7 +113,7 @@ Tater sends the same target-independent command envelope to every target:
 ```json
 {
   "type": "ota.url",
-  "url": "https://…/tater-echo-biscuit-v3.0.0-ota.tar.gz",
+  "url": "https://…/tater-echo-biscuit-v4.0.1-ota.tar.gz",
   "sha256": "<64 lowercase hex characters>",
   "size_bytes": 16410287
 }
@@ -103,6 +130,43 @@ On every target, success stages the bundle in the inactive slot under
 fast exits or a failed health window restores the prior application slot.
 Routine OTA never remounts the live Linux rootfs.
 
+System OTA uses the same authenticated native connection with a distinct
+command so old application updaters fail closed:
+
+```json
+{
+  "type": "ota.system.url",
+  "url": "https://…/tater-echo-biscuit-v4.0.1-system-ota.tar.gz",
+  "sha256": "<64 lowercase hex characters>",
+  "size_bytes": 73400320
+}
+```
+
+Success means the inactive root slot has been staged and a trial reboot has
+been requested. Tater verifies the rootfs `system_version` after reconnect;
+the device's existing slot health policy remains responsible for commit or
+rollback.
+
+### Expected root-system reboots
+
+Factory installation and System OTA both activate a newly written root-system
+slot as a trial. This behavior is separate from routine application OTA and
+does not occur on an ordinary boot.
+
+| Target | Root-slot activation | After the health trial passes |
+|---|---|---|
+| Biscuit | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Radar | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Checkers | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+| Crown | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+| Athena | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
+| Rook | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+
+Consequently, a successful Checkers, Crown, or Rook System OTA normally shows
+two reboots across the complete operation: one to activate the trial slot and
+one after the health commit. The second reboot is intentional and should not
+repeat after the slot is marked good.
+
 ## Manifest
 
 `firmware-manifest.json` is the API consumed by Tater. For every target it
@@ -110,6 +174,7 @@ records:
 
 - unlock compatibility and support status;
 - whether factory and OTA are available;
+- the application, System OTA, and factory artifacts;
 - the exact asset names;
 - byte sizes; and
 - SHA-256 hashes.

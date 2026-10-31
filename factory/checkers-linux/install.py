@@ -237,7 +237,7 @@ def load_module(name: str, path: Path):
     return module
 
 
-def run_platform_installer(args, manifest: dict, serial: str) -> None:
+def run_platform_installer(args, manifest: dict, serial: str) -> bool:
     sys.path.insert(0, str(TECHO_TOOLS))
     techo5lib = importlib.import_module("techo5lib")
     installer = load_module("tater_techo5_install_show", TECHO_TOOLS / "install-show.py")
@@ -267,22 +267,28 @@ def run_platform_installer(args, manifest: dict, serial: str) -> None:
         argv += ["--wifi-passphrase-file", str(args.wifi_passphrase_file)]
     if args.force:
         argv.append("--force")
+    if getattr(args, "factory_reset", False):
+        argv.append("--factory-reset")
     before = sys.argv
     try:
         sys.argv = argv
         try:
-            installer.main()
+            return bool(installer.main())
         except techo5lib.Fail as error:
             raise InstallError(str(error)) from error
     finally:
         sys.argv = before
 
 
-def finish_tater_provisioning(args, serial: str) -> None:
+def finish_tater_provisioning(args, serial: str, preserved_pairing: bool = False) -> None:
     # A fresh unit is intentionally left unpaired. Its local setup network
     # takes the Wi-Fi and one-time code from the user after USB flashing ends.
     if not args.usb_pair and not args.tater_url and not args.pairing_code:
         label = show_profile(getattr(args, "target", "checkers"))["label"]
+        if preserved_pairing:
+            print("\nFactory flash complete. %s kept its Tater pairing, Wi-Fi, SSH, and settings." % label)
+            print("It is rebooting and will reconnect to Tater automatically.")
+            return
         print("\nFactory flash complete. Join the open Tater-Setup network shown on %s," % label)
         print("then open http://192.168.4.1.")
         print("Create an Add Satellite pairing code in Tater and enter it there.")
@@ -325,6 +331,8 @@ def parse_args():
     parser.add_argument("--pairing-code")
     parser.add_argument("--usb-pair", action="store_true",
                         help="enter the Tater server and pairing code over USB instead of using the setup hotspot")
+    parser.add_argument("--factory-reset", action="store_true",
+                        help="erase Wi-Fi, pairing, SSH, and satellite settings instead of preserving them")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--backups", type=Path, default=ROOT / "backups")
     parser.add_argument("--work", type=Path, default=ROOT / "build")
@@ -353,8 +361,8 @@ def main() -> int:
         raise InstallError("connected device reports %r, not %s" % (product, target))
     if args.lineage_zip is None:
         args.lineage_zip = download_lineage_zip(args.work, profile)
-    run_platform_installer(args, manifest, serial)
-    finish_tater_provisioning(args, serial)
+    preserved_pairing = run_platform_installer(args, manifest, serial)
+    finish_tater_provisioning(args, serial, preserved_pairing)
     print(
         "\n%s now runs Tater Linux %s; TWRP remains in recovery."
         % (profile["label"], manifest["version"])

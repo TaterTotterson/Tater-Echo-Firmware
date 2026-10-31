@@ -1,0 +1,128 @@
+#!/bin/sh
+# Provision optional public-key login for Tater Linux maintenance SSH.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SSH_DIR=${TATER_SSH_DIR:-/data/tater-linux/ssh}
+AUTHORIZED_KEYS=$SSH_DIR/authorized_keys
+DISABLED_KEYS=$SSH_DIR/authorized_keys.disabled
+STATE=${TATER_SSH_STATE:-/run/tater-sshd.state}
+PID_FILE=${TATER_SSH_PID_FILE:-/run/tater-sshd.pid}
+KEY_RESTRICTIONS=no-agent-forwarding,no-X11-forwarding,no-port-forwarding
+
+usage() {
+	cat <<'EOF'
+Usage:
+  tater-ssh-authorize add 'ssh-ed25519 AAAA... name'
+  tater-ssh-authorize add < public-key-file
+  tater-ssh-authorize status
+  tater-ssh-authorize list
+  tater-ssh-authorize disable
+  tater-ssh-authorize enable
+  tater-ssh-authorize path
+EOF
+}
+
+fail() {
+	printf 'tater-ssh-authorize: %s\n' "$*" >&2
+	exit 1
+}
+
+prepare_directory() {
+	umask 077
+	mkdir -p "$SSH_DIR" || fail "cannot create $SSH_DIR"
+	chmod 700 "$SSH_DIR" || fail "cannot protect $SSH_DIR"
+}
+
+validate_public_key() {
+	key_type=$(printf '%s\n' "$1" | awk '{print $1}')
+	key_data=$(printf '%s\n' "$1" | awk '{print $2}')
+	field_count=$(printf '%s\n' "$1" | awk '{print NF}')
+	[ "$field_count" -ge 2 ] || fail "expected an OpenSSH public key"
+	case "$key_type" in
+		ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) ;;
+		*) fail "unsupported public-key type: $key_type" ;;
+	esac
+	case "$key_data" in
+		''|*[!A-Za-z0-9+/=]*) fail "public-key data is not base64" ;;
+	esac
+	[ "${#key_data}" -ge 16 ] || fail "public-key data is too short"
+}
+
+command=${1:-status}
+[ "$#" -eq 0 ] || shift
+
+case "$command" in
+add)
+	if [ "$#" -gt 0 ]; then
+		key=$*
+	else
+		IFS= read -r key || fail "no public key received on stdin"
+	fi
+	case "$key" in
+		*'
+'*) fail "one public key is allowed per add command" ;;
+	esac
+	validate_public_key "$key"
+	stored_key="$KEY_RESTRICTIONS $key"
+	prepare_directory
+	if [ -e "$DISABLED_KEYS" ] && [ ! -e "$AUTHORIZED_KEYS" ]; then
+		fail "SSH is disabled; run 'tater-ssh-authorize enable' before adding a key"
+	fi
+	touch "$AUTHORIZED_KEYS" || fail "cannot create authorized_keys"
+	chmod 600 "$AUTHORIZED_KEYS" || fail "cannot protect authorized_keys"
+	if grep -Fqx "$stored_key" "$AUTHORIZED_KEYS"; then
+		printf 'already authorized\n'
+	else
+		printf '%s\n' "$stored_key" >> "$AUTHORIZED_KEYS" || fail "cannot update authorized_keys"
+		printf 'authorized; this key will be accepted whenever SSH is enabled\n'
+	fi
+	;;
+status)
+	if [ -s "$AUTHORIZED_KEYS" ]; then
+		count=$(grep -cve '^[[:space:]]*\(#\|$\)' "$AUTHORIZED_KEYS" 2>/dev/null || true)
+		printf 'enabled keys=%s path=%s\n' "$count" "$AUTHORIZED_KEYS"
+	elif [ -e "$DISABLED_KEYS" ]; then
+		printf 'disabled saved_keys=%s path=%s\n' \
+			"$(grep -cve '^[[:space:]]*\(#\|$\)' "$DISABLED_KEYS" 2>/dev/null || true)" "$DISABLED_KEYS"
+	else
+		printf 'disabled keys=0 path=%s\n' "$AUTHORIZED_KEYS"
+	fi
+	[ ! -r "$STATE" ] || cat "$STATE"
+	;;
+list)
+	[ -r "$AUTHORIZED_KEYS" ] || fail "SSH is disabled or has no authorized keys"
+	cat "$AUTHORIZED_KEYS"
+	;;
+disable)
+	prepare_directory
+	[ -e "$AUTHORIZED_KEYS" ] || fail "SSH is already disabled"
+	[ ! -e "$DISABLED_KEYS" ] || fail "$DISABLED_KEYS already exists"
+	mv "$AUTHORIZED_KEYS" "$DISABLED_KEYS" || fail "cannot disable SSH"
+	chmod 600 "$DISABLED_KEYS" || fail "cannot protect saved keys"
+	if [ -r "$PID_FILE" ]; then
+		pid=$(cat "$PID_FILE" 2>/dev/null)
+		case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+	fi
+	printf 'authorized-key login disabled; managed password access is unchanged\n'
+	;;
+enable)
+	prepare_directory
+	[ ! -e "$AUTHORIZED_KEYS" ] || fail "SSH is already enabled"
+	[ -s "$DISABLED_KEYS" ] || fail "there are no saved keys to enable"
+	mv "$DISABLED_KEYS" "$AUTHORIZED_KEYS" || fail "cannot enable SSH"
+	chmod 600 "$AUTHORIZED_KEYS" || fail "cannot protect authorized_keys"
+	printf 'authorized-key login restored; the key will be accepted whenever SSH is enabled\n'
+	;;
+path)
+	printf '%s\n' "$AUTHORIZED_KEYS"
+	;;
+-h|--help|help)
+	usage
+	;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

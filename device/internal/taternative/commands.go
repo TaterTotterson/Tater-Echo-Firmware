@@ -24,6 +24,13 @@ func (c *Client) handle(message Envelope) {
 		}
 	case "sat_chat.started":
 		state := decodeSatChatState(payload)
+		if c.stopCameraStream() {
+			c.sendJSON("camera.stream.ended", "", map[string]any{
+				"ok":     false,
+				"reason": "sat_chat",
+				"error":  "camera stream was preempted by Sat Chat",
+			})
+		}
 		c.StopCapture(true)
 		c.stopVoice()
 		c.setSatChatActive(true)
@@ -47,6 +54,10 @@ func (c *Client) handle(message Envelope) {
 		if hook := c.hooks.DisplayCameras; hook != nil {
 			hook(decodeDisplayCameras(payload))
 		}
+	case "display.video":
+		if hook := c.hooks.DisplayVideo; hook != nil {
+			hook(decodeDisplayVideo(payload))
+		}
 	case "display.notification":
 		if hook := c.hooks.DisplayNotification; hook != nil {
 			hook(copyMap(payload))
@@ -57,6 +68,14 @@ func (c *Client) handle(message Envelope) {
 		}
 	case "camera.snapshot":
 		go c.captureCameraSnapshot(message.ID)
+	case "camera.stream.start":
+		c.startCameraStream(message.ID, stringValue(payload["profile"]))
+	case "camera.stream.stop":
+		c.stopCameraStream()
+		c.sendJSON("camera.stream.stop.result", "", map[string]any{
+			"reply_to": message.ID,
+			"ok":       true,
+		})
 	case "ble.gatt":
 		c.handleBLEGATT(message.ID, payload)
 	case "settings":
@@ -73,6 +92,7 @@ func (c *Client) handle(message Envelope) {
 		c.stateMu.Lock()
 		c.settings = copyMap(applied)
 		c.stateMu.Unlock()
+		c.syncDNDState()
 		result["settings"] = applied
 		c.sendJSON("settings.changed", message.ID, result)
 	case "state":
@@ -124,6 +144,9 @@ func (c *Client) handle(message Envelope) {
 			c.setState("error", statePayload)
 		}
 	case "play.url":
+		if c.rejectDNDPlayback("playback.finished", message.ID, nil) {
+			return
+		}
 		req := PlayRequest{
 			URL: stringValue(payload["url"]), TTSKind: stringValue(payload["tts_kind"]),
 			StateAfter:           stringValue(payload["state_after"]),
@@ -153,6 +176,9 @@ func (c *Client) handle(message Envelope) {
 		c.stopVoiceCapture()
 		c.setState("idle", payload)
 	case "play.tone":
+		if c.rejectDNDPlayback("playback.finished", message.ID, nil) {
+			return
+		}
 		// Tone URLs use the same player when provided; otherwise acknowledge
 		// without inventing a built-in asset that the Echo image may not have.
 		if url := stringValue(payload["url"]); url != "" {
@@ -163,6 +189,12 @@ func (c *Client) handle(message Envelope) {
 			c.sendJSON("playback.finished", message.ID, map[string]any{"ok": true})
 		}
 	case "audio.overlay.start":
+		if c.rejectDNDPlayback("audio.overlay.finished", "", map[string]any{
+			"overlay_id": stringValue(payload["overlay_id"]),
+			"group_id":   stringValue(payload["group_id"]),
+		}) {
+			return
+		}
 		foreground, _ := payload["foreground"].(map[string]any)
 		ducking, _ := payload["ducking"].(map[string]any)
 		finish, _ := payload["finish"].(map[string]any)
@@ -198,6 +230,11 @@ func (c *Client) handle(message Envelope) {
 		c.applyReplyDirection(req.DirectionDegrees)
 		c.startOverlay(req)
 	case "audio.scene.start":
+		if c.rejectDNDPlayback("audio.scene.finished", "", map[string]any{
+			"scene_id": stringValue(payload["scene_id"]),
+		}) {
+			return
+		}
 		foreground, _ := payload["foreground"].(map[string]any)
 		background, _ := payload["background"].(map[string]any)
 		ducking, _ := payload["ducking"].(map[string]any)
@@ -264,6 +301,28 @@ func (c *Client) handle(message Envelope) {
 				return
 			}
 			report("ready", 100, "Firmware installed; restarting")
+		}()
+	case "ota.system.url":
+		req := OTARequest{URL: stringValue(payload["url"]), SHA256: strings.ToLower(stringValue(payload["sha256"])), SizeBytes: int64(intValue(payload["size_bytes"], 0))}
+		hook := c.hooks.SystemOTA
+		if hook == nil {
+			c.sendJSON("ota.status", message.ID, map[string]any{"status": "error", "message": "System OTA unavailable"})
+			return
+		}
+		go func() {
+			report := func(status string, progress int, detail string) {
+				body := map[string]any{"status": status, "progress": clamp(progress, 0, 100)}
+				if detail != "" {
+					body["message"] = detail
+				}
+				c.sendJSON("ota.status", message.ID, body)
+			}
+			report("downloading", 0, "")
+			if err := hook(context.Background(), req, report); err != nil {
+				report("error", 0, err.Error())
+				return
+			}
+			report("ready", 100, "Tater Linux installed; restarting into its trial slot")
 		}()
 	case "ping":
 		c.sendJSON("pong", message.ID, map[string]any{"ok": true})

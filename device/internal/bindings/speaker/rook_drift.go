@@ -17,6 +17,35 @@ type playbackDriftCorrection struct {
 	started bool
 }
 
+// compressPlaybackDrift maps one hardware-accounting period back onto the
+// mixer's ordinary 2048-frame period. Timestamped sources use it before the
+// mixer, then expand applies the inverse mapping at the ALSA write. That lets
+// Sendspin consume the full 2064 frames represented by the DAC clock without
+// dropping 16 adjacent source samples at every period boundary.
+func compressPlaybackDrift(out, in []byte) []byte {
+	if len(in) != driftOutputFrames*4 || len(out) < driftInputFrames*4 {
+		return nil
+	}
+	out = out[:driftInputFrames*4]
+	for outFrame := 0; outFrame < driftInputFrames; outFrame++ {
+		// This is the inverse of expand's 128/129 mapping. Offset by one
+		// numerator unit so both mappings agree at the final frame.
+		pos := outFrame*129 + 1
+		frame := pos / 128
+		fraction := pos % 128
+		for channel := 0; channel < 2; channel++ {
+			a := int32(int16(binary.LittleEndian.Uint16(in[frame*4+channel*2:])))
+			b := a
+			if frame+1 < driftOutputFrames {
+				b = int32(int16(binary.LittleEndian.Uint16(in[(frame+1)*4+channel*2:])))
+			}
+			value := (a*int32(128-fraction) + b*int32(fraction)) / 128
+			binary.LittleEndian.PutUint16(out[outFrame*4+channel*2:], uint16(int16(value)))
+		}
+	}
+	return out
+}
+
 func (r *playbackDriftCorrection) expand(in []byte) []byte {
 	if len(in) != driftInputFrames*4 {
 		return in
