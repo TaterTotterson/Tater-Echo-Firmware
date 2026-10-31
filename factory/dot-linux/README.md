@@ -12,8 +12,8 @@ default; add `--factory-reset` when you deliberately want a clean setup.
 > releases after v4.0.0 use the normal verified application and System OTA flow.
 
 > [!NOTE]
-> On a pre-v4 Biscuit or Radar, boot Tater normally and connect it directly by
-> USB. Run `python3 to_twrp.py` from this extracted archive
+> On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
+> directly by USB. Run `python3 to_twrp.py` from this extracted archive
 > (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
 > with the normal installer below. You do not need to hold Volume Up or enter
 > Tater Recovery first. Do not use `--repair` for the v4 upgrade; repair mode
