@@ -4,6 +4,33 @@
 
 ### What's Changed
 
+#### USB Ethernet and powered adapters
+
+- **Headline feature:** added automatic USB Ethernet detection and handoff on
+  qualified Echo satellites, with no opt-in switch. Firmware verifies the link,
+  DHCP address, default route, and Tater reachability before disabling Wi-Fi,
+  then restores Wi-Fi and USB serial/RNDIS when wired connectivity fails or the
+  unit returns to a direct USB connection.
+- Hardware-qualified the powered
+  [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter using its
+  Realtek RTL8152 controller (`0bda:8152`, Linux `r8152`). Biscuit and Rook use
+  powered pass-through on their shared power/data micro-USB port, allowing the
+  powered Ethernet arrangement to carry both network and device power.
+  Checkers, Crown, and Athena use their target-specific host/OTG path.
+- Similar powered adapters using the Realtek RTL8152/RTL8153 family are expected
+  to work with the same driver but are not hardware-qualified. Power delivery,
+  connector wiring, and OTG/host signaling must match the target; generic
+  CDC-ECM adapters are not equivalent and the tested CDC-ECM path could not
+  transmit reliably on Biscuit.
+- Added visible wired-recovery behavior so a satellite that loses Tater while
+  Ethernet remains attached can restore Wi-Fi instead of remaining silently
+  disconnected. Stable Wi-Fi links are otherwise left alone.
+- Added the native Realtek RTL8152 driver to the pinned Biscuit and Radar
+  kernels. Biscuit, Checkers, Crown, Athena, and Rook passed their documented
+  real-hardware Ethernet, fallback, SSH, OTA, reboot, and recovery gates. Radar
+  remains in passive hardware-validation mode until its internal USB-pad path
+  is qualified, so firmware does not actively change its USB role or VBUS.
+
 #### Upgrade and updates
 
 - **USB/TWRP update required:** every Biscuit, Radar, Checkers, Crown, Athena,
@@ -21,22 +48,6 @@
   changes remain USB factory/recovery operations.
 - Moved every target to revision- and digest-pinned Tater Echo Linux platform
   inputs maintained under Tater custody.
-
-#### USB Ethernet
-
-- Added automatic USB Ethernet detection and handoff on qualified targets, plus
-  a passive-safe validation path for Radar. Firmware requires a usable link,
-  DHCP address, default route, and Tater reachability before disabling Wi-Fi,
-  then restores Wi-Fi and USB serial/RNDIS when the wired path becomes
-  unhealthy or the unit returns to a direct USB connection.
-- Added visible wired-recovery behavior so a satellite that loses Tater while
-  Ethernet remains attached can restore Wi-Fi instead of remaining silently
-  disconnected. Stable Wi-Fi links are otherwise left alone.
-- Added the native Realtek RTL8152 driver to the pinned Biscuit and Radar
-  kernels. Biscuit, Checkers, Crown, Athena, and Rook passed their documented
-  real-hardware Ethernet, fallback, SSH, OTA, reboot, and recovery gates. Radar
-  remains in passive hardware-validation mode until its internal USB-pad path
-  is qualified, so firmware does not actively change its USB role or VBUS.
 
 #### Remote maintenance and playback policy
 
