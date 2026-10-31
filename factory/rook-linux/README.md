@@ -5,6 +5,12 @@ Spot (`rook`). It is not for Show 5 (`checkers`), Show 8 (`crown`), newer Spot m
 Echo devices. The device must already be unlocked with amonet-rook v2.0.0 and
 booted into TWRP over USB.
 
+Every Rook running Tater v3.x must use this USB/TWRP factory bundle once to
+upgrade to v4.0.0. Add `--reinstall-existing-tater` to both the preflight and
+install commands for that upgrade. The v4 transition itself is not an OTA
+update; compatible releases after v4.0.0 use verified application and System
+OTA.
+
 The computer needs Python 3, `adb`, and `fastboot`. The installer supports
 macOS, Linux, and Windows and otherwise uses only Python's standard library.
 
@@ -50,6 +56,16 @@ factory backups. Reinstallation formats userdata and erases the A/B slots;
 the saved Tater setup and settings are then restored unless
 `--factory-reset` is also supplied. Do not use this option on a
 newly unlocked device.
+
+For a v3.x-to-v4.0.0 upgrade, the commands are:
+
+```sh
+./install.sh --preflight-only --reinstall-existing-tater
+./install.sh --reinstall-existing-tater
+```
+
+Add `--factory-reset` to the second command only when a deliberately clean
+setup is wanted.
 
 The current factory bundle corrects the Broadcom driver's shared
 `00:90:4c:1a:09:00` Wi-Fi placeholder before association and DHCP. An older

@@ -44,13 +44,16 @@ installer extracts the unit-specific speaker tuning from the private Fire OS
 boot backup, inserts it into the release boot image, and writes only `system`
 and `boot`.
 
-v3.0.0 is the Biscuit and Radar Tater Linux factory baseline. A unit running
-firmware older than v3.0.0 must install the matching factory archive through
-USB/TWRP once; the pre-v3 base system cannot consume the v3 OTA format. Factory
-installers preserve verified Tater identity, Wi-Fi, SSH, and satellite settings
-by default, while discarding prior OTA application slots so the bundled version
-boots. Pass `--factory-reset` for a clean setup. Routine A/B OTA begins after
-the v3.0.0 factory installation. Every factory archive includes
+v4.0.0 is a new factory baseline for Biscuit, Radar, Checkers, Crown, Athena,
+and Rook. Every unit running Tater v3.x must install its matching v4.0.0 factory
+archive through USB/TWRP once; the v3 updater cannot safely apply the complete
+platform, recovery, kernel/boot, branding, and System OTA transition. The v4
+release must therefore never be offered as an application-only OTA substitute
+to a v3 satellite. Factory installers preserve verified Tater identity, Wi-Fi,
+SSH, and satellite settings by default, while discarding prior OTA application
+slots so the bundled version boots. Pass `--factory-reset` for a clean setup.
+Routine verified application and root-system OTA begins after the v4.0.0
+factory installation. Every factory archive includes
 `to_recovery.py` and a verified rootfs repair payload. The normal recovery flow
 enters Tater Recovery over USB, then runs `install.sh --repair` to install the
 bundle into the inactive A/B root slot without clearing the satellite's
@@ -77,16 +80,19 @@ an ordinary OTA installs or repairs every built-in engine model. USB factory
 bundles retain a full Linux rootfs for recovery.
 
 Every target also publishes a `system-ota.tar.gz` wrapper containing a complete
-rootfs plus an internal target, version, size, and SHA-256 manifest. Tater first
-updates the application when the connected daemon lacks System OTA support,
-then sends `ota.system.url`. The daemon verifies the outer download and embedded
-rootfs independently before `slotctl install` writes the inactive root slot.
-The established trial-boot health check commits the new slot or automatically
-returns to the previous one. System OTA never replaces the kernel, boot image,
-rescue environment, partition table, or device-specific vendor storage. It
-also never writes bootloader branding. The monochrome Tater boot logo is a
-guarded USB-factory step on Checkers, Crown, and Rook: the installer changes only a known
-logo slot in the verified `expdb` backup, reads the partition back, and
+rootfs plus an internal target, version, size, and SHA-256 manifest. This path
+is available after the v4.0.0 factory baseline is installed; it does not make
+the v3-to-v4 transition OTA-compatible. For later compatible releases, Tater
+first updates the application when the connected daemon lacks the required
+System OTA support, then sends `ota.system.url`. The daemon verifies the outer
+download and embedded rootfs independently before `slotctl install` writes the
+inactive root slot. The established trial-boot health check commits the new
+slot or automatically returns to the previous one. System OTA never replaces
+the kernel, boot image, rescue environment, partition table, or device-specific
+vendor storage. It also never writes bootloader branding. The monochrome Tater
+boot logo is a guarded USB-factory step on Checkers, Crown, and Rook: the
+installer changes only a known logo slot in the verified `expdb` backup, reads
+the partition back, and
 restores the complete backup if verification fails. Unknown bootloader layouts
 keep Amazon's logo. Athena deliberately never patches its protected `lk_real`
 unlock chain. Its factory-built system store paints the Tater mark at the first
@@ -107,7 +113,7 @@ Tater sends the same target-independent command envelope to every target:
 ```json
 {
   "type": "ota.url",
-  "url": "https://…/tater-echo-biscuit-v3.0.0-ota.tar.gz",
+  "url": "https://…/tater-echo-biscuit-v4.0.1-ota.tar.gz",
   "sha256": "<64 lowercase hex characters>",
   "size_bytes": 16410287
 }
@@ -130,7 +136,7 @@ command so old application updaters fail closed:
 ```json
 {
   "type": "ota.system.url",
-  "url": "https://…/tater-echo-biscuit-v3.1.0-system-ota.tar.gz",
+  "url": "https://…/tater-echo-biscuit-v4.0.1-system-ota.tar.gz",
   "sha256": "<64 lowercase hex characters>",
   "size_bytes": 73400320
 }

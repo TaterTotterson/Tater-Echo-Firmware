@@ -5,11 +5,11 @@ Existing Tater pairing, Wi-Fi, SSH, and satellite settings are preserved by
 default; add `--factory-reset` when you deliberately want a clean setup.
 
 > [!IMPORTANT]
-> Biscuit and Radar running firmware older than v3.0.0 must use this USB/TWRP
-> factory installer once. The pre-v3 base system cannot install the v3 OTA
-> format. The installer keeps any Tater setup it can verify, but replaces the
-> old firmware and application slots; later releases use the normal Tater OTA
-> flow.
+> Every Biscuit and Radar running Tater v3.x must use this USB/TWRP factory
+> installer once to upgrade to v4.0.0. The v3 updater cannot safely install the
+> complete v4 platform transition. The installer keeps any Tater setup it can
+> verify, but replaces the old firmware and application slots. Compatible
+> releases after v4.0.0 use the normal verified application and System OTA flow.
 
 1. Complete the matching amonet unlock and boot the unit into TWRP.
 2. Connect USB and extract the matching factory archive.
@@ -21,10 +21,10 @@ default; add `--factory-reset` when you deliberately want a clean setup.
 5. A previously paired satellite reconnects automatically. On a new or reset
    satellite, join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair it.
 
-The factory installer and a future System OTA reboot Biscuit or Radar into a
-trial root-system slot. A healthy root slot commits in place on these two
-targets, without the additional five-minute confirmation restart used by
-Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
+The factory installer and a compatible post-v4 System OTA reboot Biscuit or
+Radar into a trial root-system slot. A healthy root slot commits in place on
+these two targets, without the additional five-minute confirmation restart used
+by Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
 
 The installer checksum-verifies every bundled file and every partition backup,
 builds the Linux boot image and an automatic-return TWRP handoff from that

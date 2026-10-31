@@ -5,6 +5,11 @@ This installer is only for the 2021 Echo Show 8 second generation, model
 `saiyaku-athena` from Fire OS 7080 / PS7574.1.7080N and booted into TWRP with
 working ADB. It is not compatible with the first-generation `crown` model.
 
+Every Athena running Tater v3.x must use this USB/TWRP factory bundle once to
+upgrade to v4.0.0. The v4 transition itself is not an OTA update. Existing
+Tater setup is preserved by default, and compatible releases after v4.0.0 can
+update both the application and inactive root-system slot through Tater.
+
 Keep reliable power and USB attached. From the extracted bundle, first run:
 
 ```sh
@@ -37,8 +42,8 @@ soon as Linux owns the framebuffer. The installer never writes `tee1`, `tee2`,
 
 The tested upstream panel variants are checked automatically. An unknown panel
 is refused unless the operator deliberately passes `--force-panel`; a forced
-panel may remain dark. Routine Tater OTA updates the application A/B slots and
-can stage a verified rootfs in the inactive System slot. Use `./install.sh
+panel may remain dark. Compatible post-v4 Tater OTA updates the application A/B
+slots and can stage a verified rootfs in the inactive System slot. Use `./install.sh
 --repair` from Tater Recovery when the device cannot boot far enough for OTA.
 
 A factory install or System OTA reboots Athena into a trial root-system slot.

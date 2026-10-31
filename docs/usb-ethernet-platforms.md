@@ -63,7 +63,7 @@ network, fallback, update, reinstall, and recovery gates.
 
 - Hardware: Amazon Echo Show 8 second generation, model A8H3N2 (`athena`).
 - Adapter: powered UCTRONICS B0B9ZLVGJ4, Realtek RTL8152 (`r8152`).
-- Tested firmware: the v3.1.2 candidate line through commit
+- Tested firmware: the v4.0.0 candidate line through commit
   `81c1ca1e12b527b27d91f57a7540de42a8c495e8`; pinned Tater Echo Linux
   platform commit `3a0c2d480e281226d28c831730abc3301d605ba4`.
 - Pinned Athena boot SHA-256:

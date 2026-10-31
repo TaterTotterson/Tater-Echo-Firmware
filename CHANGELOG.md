@@ -1,67 +1,99 @@
 # Changelog
 
-## Unreleased
+## v4.0.0
 
 ### What's Changed
 
-#### Screens
+#### Upgrade and updates
 
-- Added a 12-hour or 24-hour clock format for Checkers, Crown, Athena, and Rook
-  through the new `screen_clock_format` setting (`12h` or `24h`). The 12-hour
-  clock now shows a smaller AM/PM marker on the home screen, red night clock,
-  and Spot clocks; screens advertise `screen_clock_format` so controllers only
-  send the setting to firmware that understands it.
+- **USB/TWRP update required:** every Biscuit, Radar, Checkers, Crown, Athena,
+  and Rook running Tater v3.x must install its matching v4.0.0 factory archive
+  once. v4.0.0 changes the pinned platform, recovery, kernel/boot inputs, system
+  updater, and guarded branding paths, so it is not offered as an
+  application-only OTA from v3.x.
+- Preserved verified pairing, Wi-Fi, SSH, and satellite settings during the v4
+  factory installation by default; `--factory-reset` provides a clean setup.
+  Rook reinstalls use the guarded `--reinstall-existing-tater` path.
+- Added verified A/B System OTA for all six targets after the v4 factory
+  baseline. Tater can update the application first, stage a target-matched
+  rootfs in the inactive Linux slot, verify it after reboot, and roll back a
+  failed health trial. Kernel, boot, rescue, partition-layout, and boot-logo
+  changes remain USB factory/recovery operations.
+- Moved every target to revision- and digest-pinned Tater Echo Linux platform
+  inputs maintained under Tater custody.
+
+#### USB Ethernet
+
+- Added automatic USB Ethernet detection and handoff on qualified targets, plus
+  a passive-safe validation path for Radar. Firmware requires a usable link,
+  DHCP address, default route, and Tater reachability before disabling Wi-Fi,
+  then restores Wi-Fi and USB serial/RNDIS when the wired path becomes
+  unhealthy or the unit returns to a direct USB connection.
+- Added visible wired-recovery behavior so a satellite that loses Tater while
+  Ethernet remains attached can restore Wi-Fi instead of remaining silently
+  disconnected. Stable Wi-Fi links are otherwise left alone.
+- Added the native Realtek RTL8152 driver to the pinned Biscuit and Radar
+  kernels. Biscuit, Checkers, Crown, Athena, and Rook passed their documented
+  real-hardware Ethernet, fallback, SSH, OTA, reboot, and recovery gates. Radar
+  remains in passive hardware-validation mode until its internal USB-pad path
+  is qualified, so firmware does not actively change its USB role or VBUS.
+
+#### Remote maintenance and playback policy
+
+- Added per-satellite SSH maintenance with an explicit enable switch,
+  generated readable password, read-only-rootfs-safe credential mount, and
+  bounded supervisor backoff. SSH remains off by default.
+- Added per-satellite Do Not Disturb with immediate and scheduled local-time
+  control. It blocks music, announcements, wake sounds, and remote playback
+  while retaining wake detection and safety-critical timers and alarms.
+
+#### Screens and video
+
+- Added native fullscreen video playback to Checkers, Crown, Athena, and Rook,
+  including HLS and RTSPS through the pinned FFmpeg decoder, native Tater Echo
+  MJPEG relay playback, and automatic JPEG fallback.
+- Modernized the screen menus and sensor layout, including the Rook-specific
+  curved-screen presentation.
+- Added a 12-hour or 24-hour clock format through the new
+  `screen_clock_format` setting. The 12-hour clock shows a smaller AM/PM marker
+  on the home screen, red night clock, and Spot clocks; screens advertise the
+  capability so controllers send it only to compatible firmware.
+
+#### Voice capture and playback
+
+- Added Athena's hardware-measured adaptive four-microphone wake and locked
+  turn beam. Each 96 kHz channel is filtered independently before a
+  speech-gated relative-delay estimate aligns healthy microphones at 16 kHz;
+  uncertain or idle audio and microphone failures retain the established omni
+  fallback.
+- Removed slight Sendspin pops on corrected playback paths by consuming the
+  complete 2,064-frame hardware timeline before mixing, preventing the periodic
+  sample drop and hard resynchronization previously heard on Biscuit.
+
+#### Installation, recovery, and branding
+
+- Added an automatic-return TWRP handoff for Biscuit and Radar factory
+  installs. Holding Volume Up during startup now reaches TWRP like the screen
+  targets; Linux is restored to the shared recovery partition while TWRP runs
+  from RAM, so the next reboot returns to Linux. `to_recovery.py` remains the
+  explicit USB route to Tater Recovery.
+- Added guarded monochrome Tater boot branding for Checkers, Crown, and Rook,
+  with exact-layout verification, readback, and full-partition restoration on
+  failure. Athena safely paints the Tater mark at the first Linux framebuffer
+  stage without writing its protected saiyaku bootloader chain.
+- Preserved verified satellite setup across factory reinstalls while removing
+  stale application slots, and documented the expected root-slot activation
+  and confirmation reboots for each target.
 
 ## v3.1.2
 
 ### What's Changed
-
-#### Voice capture
-
-- Added Athena's hardware-measured adaptive four-microphone wake and locked
-  turn beam. Each 96 kHz channel is now filtered independently before a
-  speech-gated relative-delay estimate aligns healthy microphones at 16 kHz;
-  uncertain or idle audio and microphone failures retain the established omni
-  fallback. Coherent and omni output keep separate AEC state, and physical
-  bearing remains intentionally unreported until the remaining front/back
-  geometry is mapped.
 
 #### Voice playback
 
 - Preserved the Echo speaker's fixed 4,096-byte playback periods across
   arbitrary streaming HTTP chunk boundaries, eliminating static between reply
   chunks; only the final incomplete period is padded with silence.
-
-#### Boot branding
-
-- Added a hardware-verified Athena early-Linux Tater splash without writing its
-  protected saiyaku bootloader chain. Checkers, Crown, and Rook retain their
-  guarded verified bootloader-logo flow; Athena may show a brief protected
-  Amazon frame before Linux safely paints the Tater mark.
-
-#### Recovery
-
-- Added a verified automatic-return TWRP handoff for Biscuit and Radar factory
-  installs. Holding Volume Up during startup now enters TWRP like the screen
-  satellites; TWRP restores Linux to the shared recovery partition while
-  continuing to run from RAM, so its next reboot returns to Linux. Removed the
-  older Linux-side Volume Up route to Tater Recovery on every target; explicit
-  USB recovery remains available through `to_recovery.py`.
-
-#### USB Ethernet
-
-- Replaced Biscuit and Radar's incomplete generic binding for the intended
-  `0bda:8152` adapter with the reproducibly built, in-kernel Realtek RTL8152
-  driver. The controller still requires a DHCP address and default route before
-  disabling Wi-Fi and restores Wi-Fi plus USB serial on failure or unplug.
-- Hardware-qualified Biscuit with the exact pinned kernel and powered RTL8152
-  adapter: factory preservation, cold boot, Ethernet routing, Wi-Fi shutdown,
-  SSH, public traffic, and power-cycle fallback to USB serial and Wi-Fi all
-  passed. Because Ethernet also powers Biscuit in this setup, link removal is
-  correctly documented as a device power-cycle rather than a live-link event.
-- Promoted Athena's mainline MTU3/GPIO OTG path to qualified after its real
-  RTL8152 adapter, DHCP/routing, Wi-Fi fallback, SSH, OTA, factory reinstall,
-  USB serial/RNDIS restoration, reboot, and TWRP recovery gates passed.
 
 ## v3.1.1
 

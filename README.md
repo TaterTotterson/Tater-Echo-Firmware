@@ -35,11 +35,13 @@ Target metadata used by Tater and the release builds lives in
 [`targets/targets.json`](targets/targets.json).
 
 > [!IMPORTANT]
-> Biscuit and Radar running firmware older than **v3.0.0** require one USB/TWRP
-> factory install to move to Tater Linux. They cannot install v3.0.0 through
-> OTA. The factory installer preserves verified Tater pairing, Wi-Fi, SSH, and
-> satellite settings by default; pass `--factory-reset` for a clean start.
-> Normal OTA updates resume after v3.0.0 is installed.
+> **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
+> target.** An existing v3.x installation cannot cross this platform boundary
+> through OTA. Use the factory archive matching the exact device; the installer
+> preserves verified Tater pairing, Wi-Fi, SSH, and satellite settings by
+> default, or pass `--factory-reset` for a clean start. After v4.0.0 is installed,
+> Tater can deliver compatible application and root-system updates through its
+> verified A/B OTA flow with automatic rollback.
 
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
@@ -92,7 +94,7 @@ Start with an Echo Dot 2nd Generation (`biscuit`, model **RS03QR**) that has
 completed the [amonet-biscuit v2.0.0 bootloader unlock](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
 and has working TWRP. Do not flash or boot Fire OS as part of the Tater
 installation. These steps are also the required upgrade path for every Biscuit
-running Tater firmware older than v3.0.0.
+running Tater v3.x firmware that is upgrading to v4.0.0.
 
 1. Boot the Echo into TWRP—the ring should be white—and connect USB.
 2. Download `tater-echo-biscuit-<version>-factory.tar.gz` from the
@@ -114,7 +116,7 @@ boot-critical partition, builds the Linux recovery image and automatic-return
 TWRP handoff from that unit's own backup, installs an A/B Alpine rootfs on cache, and restores verified
 Tater setup while discarding old OTA application slots. Add `--factory-reset`
 for a clean start. Stock system partitions and a verified TWRP copy are retained. See
-the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v3.0.0
+the shared [`factory/dot-linux` guide](factory/dot-linux/README.md). Once v4.0.0
 or newer is running, reconnect USB and run `python3 to_recovery.py` from an
 extracted Biscuit or Radar factory archive to enter Tater Recovery.
 
@@ -133,7 +135,7 @@ and confirming that TWRP works. Do not flash or boot Fire OS as part of the
 Tater installation. The device has no external USB socket; keep normal power
 connected and use the D+, D-, and GND pads documented in that guide.
 These steps are also the required upgrade path for every Radar running Tater
-firmware older than v3.0.0.
+v3.x firmware that is upgrading to v4.0.0.
 
 1. Boot TWRP using the method documented by the amonet-radar unlock guide.
    Radar does not provide a dependable hold-button shortcut for recovery.
@@ -169,6 +171,10 @@ Start with an unlocked Echo Show 5 **1st Generation** (`checkers`, model
 **H23K37**), amonet-checkers 2.0.1 or newer, and working TWRP. The
 [Checkers unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-1st-gen-2019-checkers.4762900/)
 covers those prerequisites.
+
+Every Checkers running Tater v3.x must use these USB/TWRP factory steps once
+to upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
+selected.
 
 1. Download and extract `tater-echo-checkers-<version>-factory.tar.gz` from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
@@ -208,6 +214,10 @@ able to boot TWRP. Follow the
 [Crown unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-1st-gen-2019-crown.4766687/).
 Do not use this on the second-generation Echo Show 8 (model A8H3N2).
 
+Every Crown running Tater v3.x must use these USB/TWRP factory steps once to
+upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
+selected.
+
 1. Download and extract `tater-echo-crown-<version>-factory.tar.gz`.
 2. Boot Crown into TWRP, connect a USB data cable, and keep external power on.
 3. Verify the bundle and run the conversion:
@@ -240,6 +250,10 @@ checksum, provisioning, and recovery requirements.
 Athena is the 2021 second-generation Echo Show 8, model **A8H3N2**. It is not
 Crown. Begin with Fire OS 7080 / PS7574.1.7080N and complete the
 [saiyaku-athena unlock and TWRP procedure](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/).
+
+Every Athena running Tater v3.x must use these USB/TWRP factory steps once to
+upgrade to v4.0.0. Existing setup is preserved unless `--factory-reset` is
+selected.
 
 1. Download and extract `tater-echo-athena-<version>-factory.tar.gz`.
 2. Boot Athena into TWRP, connect USB data, and keep normal power attached.
@@ -277,6 +291,11 @@ preserved by default; `--factory-reset` starts clean. See
 Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`, model
 **VN94DQ**), amonet-rook v2.0.0, and working TWRP.
 
+Every Rook running Tater v3.x must use this USB/TWRP factory path once to
+upgrade to v4.0.0. For that reinstall, add `--reinstall-existing-tater` to both
+the preflight and install commands. Existing setup is preserved unless
+`--factory-reset` is also selected.
+
 1. Download and extract `tater-echo-rook-<version>-factory.tar.gz` from the
    [latest release](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/latest).
 2. Boot Rook into TWRP. Connect USB while keeping normal power connected.
@@ -287,9 +306,15 @@ Start with an unlocked 2017 Echo Spot **1st Generation** (`rook`, model
    ./install.sh --preflight-only
    ```
 
+   When upgrading an existing Tater v3.x installation to v4.0.0, use
+   `./install.sh --preflight-only --reinstall-existing-tater` instead.
+
 4. Run `./install.sh` and type `ERASE` only after checking the displayed model
    and partition information. Keep both cables connected until first-boot
    checks finish.
+
+   When upgrading an existing Tater v3.x installation to v4.0.0, run
+   `./install.sh --reinstall-existing-tater` instead.
 5. An already paired Rook reconnects automatically. On a new/reset unit, join
    the `Tater-Setup-XXXX` network shown on the Spot and complete setup.
 
@@ -332,19 +357,27 @@ amonet/TWRP recovery procedure.
 
 ## Updates and release files
 
-After factory installation, use Tater's normal satellite updater. The first
-v3 update for Biscuit and Radar is the exception: firmware older than v3.0.0
-must use the matching USB/TWRP factory archive and cannot use the OTA archive.
-Biscuit and Radar then stage their daemon in A/B application slots; Checkers,
-Crown, Athena, and Rook stage the daemon and native display together. Tater can
-then stage a verified rootfs in the inactive Linux slot. Failed application or
-rootfs health checks roll back to their preceding working slots. Kernel, boot,
-rescue, partition-layout, and bootloader-logo updates still use the
-factory/recovery archive. Checkers, Crown, and Rook apply the monochrome Tater
-boot logo only through guarded, verified USB factory steps. Athena never patches
-its protected bootloader; its factory-built system store safely paints the Tater
-mark at the first Linux framebuffer stage, so a brief Amazon frame can remain
-immediately after power-on. Unsupported or unknown layouts retain Amazon's logo.
+v4.0.0 itself is a one-time USB/TWRP update for every supported target. Do not
+offer or install its application OTA on a v3.x satellite as a substitute for
+the matching factory archive. This boundary installs the pinned Tater Echo
+Linux platform, system updater, recovery changes, and target-specific kernel or
+boot components that the v3 updater cannot safely replace as one transaction.
+The factory path is also the only path that applies the guarded boot-logo work.
+
+After the v4.0.0 factory installation, use Tater's normal satellite updater for
+compatible releases. Biscuit and Radar stage their daemon in A/B application
+slots; Checkers, Crown, Athena, and Rook stage the daemon and native display
+together. Tater can then stage a verified rootfs in the inactive Linux slot.
+Failed application or rootfs health checks roll back to their preceding working
+slots. Kernel, boot, rescue, partition-layout, and bootloader-logo updates still
+require the matching USB factory/recovery archive; they are intentionally not
+System OTA payloads.
+
+Checkers, Crown, and Rook apply the monochrome Tater boot logo only through
+guarded, verified USB factory steps. Athena never patches its protected
+bootloader; its factory-built system store safely paints the Tater mark at the
+first Linux framebuffer stage, so a brief Amazon frame can remain immediately
+after power-on. Unsupported or unknown layouts retain Amazon's logo.
 
 | Release file | Use |
 |---|---|

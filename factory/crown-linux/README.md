@@ -5,6 +5,11 @@ first-generation Echo Show 8**, model **C7H6N3**, codename `crown`. It
 preserves TWRP, flashes the pinned Crown Linux boot image, and creates the A/B
 rootfs store. It preserves an existing Tater pairing by default.
 
+Every Crown running Tater v3.x must use this USB/TWRP factory bundle once to
+upgrade to v4.0.0. The v4 transition itself is not an OTA update. Compatible
+releases after v4.0.0 can update both the application and inactive root-system
+slot through Tater's verified A/B updater.
+
 > **Do not use this bundle on an Echo Show 8 2nd Gen (`A8H3N2`) or any other
 > model.** The installer also reads `ro.product.device` in TWRP and refuses to
 > proceed unless it reports `crown`.
@@ -12,8 +17,9 @@ rootfs store. It preserves an existing Tater pairing by default.
 The conversion reformats userdata and the former system partition, but first
 saves and verifies existing Tater pairing, Wi-Fi, SSH, and satellite settings
 and restores them afterward. Old OTA application slots are not restored. It
-must be done over USB and is not an OTA update. Routine updates after conversion use
-Tater's A/B application updater on `/data`.
+must be done over USB and is not an OTA update. Compatible updates after
+conversion use Tater's A/B application updater on `/data` and verified System
+OTA for the inactive Linux rootfs slot.
 
 ## Before you start
 
