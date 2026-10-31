@@ -43,6 +43,14 @@ Target metadata used by Tater and the release builds lives in
 > Tater can deliver compatible application and root-system updates through its
 > verified A/B OTA flow with automatic rollback.
 
+> [!NOTE]
+> On a pre-v4 Biscuit or Radar, Volume Up may open Tater Recovery instead of
+> TWRP. Tater Recovery cannot perform the complete v4 factory conversion. With
+> USB connected, run `python3 to_twrp.py` from the extracted v4 factory archive
+> (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
+> with the normal factory installer. Do not use `--repair` for this upgrade;
+> repair mode only fixes an existing Tater system slot.
+
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
 > tuning before writing either partition. Keep the private Fire OS backup it
