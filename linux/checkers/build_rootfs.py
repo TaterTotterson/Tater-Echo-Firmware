@@ -204,6 +204,26 @@ def patch_rook_wifi_mac(root: Path) -> None:
         "\n" + ROOK_WIFI_MAC_FUNCTION + function_marker,
         1,
     )
+    # Current pinned Tater Echo Linux already calls its shared factory-MAC
+    # helper after the driver firmware loads and before the link comes up.
+    # Keep that ordering, but use Rook's stricter helper so damaged IDME data
+    # still receives the stable serial-derived fallback instead of retaining
+    # Broadcom's shared placeholder address.
+    shared_mac_call = "\tn=0; until t5_wifi_mac wlan0; do"
+    link_up_call = "\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
+    if contents.count(shared_mac_call) == 1 and contents.count(link_up_call) == 1:
+        if contents.index(shared_mac_call) > contents.index(link_up_call):
+            raise SystemExit("pinned Rook Wi-Fi library sets its MAC after link-up")
+        contents = contents.replace(
+            shared_mac_call,
+            "\tn=0; until tater_rook_wifi_mac wlan0; do",
+            1,
+        )
+        path.write_text(contents)
+        return
+
+    # Older pinned libraries had no shared factory-MAC helper. Insert the same
+    # guarded call immediately before their exact link-up sequence.
     link_up = "\tt5_ipv6_private wlan0\n\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do"
     mac_before_link = (
         "\tt5_ipv6_private wlan0\n"

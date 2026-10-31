@@ -48,6 +48,55 @@ t5_wifi_up() {
             patched.index("until ip link set wlan0 up"),
         )
 
+    def test_current_pinned_wifi_helper_keeps_order_and_rook_fallback(self):
+        source = """#!/bin/sh
+t5_wifi_mac() { :; }
+# t5_wifi_up <module.ko> <wpa.conf>: current pinned fixture
+t5_wifi_up() {
+\tt5_ipv6_private wlan0
+\tn=0; until t5_wifi_mac wlan0; do
+\t\tsleep 1
+\tdone
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do
+\t\tsleep 1
+\tdone
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "lib/techo5-lib.sh"
+            library.parent.mkdir(parents=True)
+            library.write_text(source)
+            build_rootfs.common.patch_rook_wifi_mac(root)
+            patched = library.read_text()
+            subprocess.run(["sh", "-n", str(library)], check=True)
+
+        self.assertEqual(1, patched.count("tater_rook_wifi_mac()"))
+        self.assertEqual(1, patched.count("until tater_rook_wifi_mac wlan0"))
+        self.assertNotIn("until t5_wifi_mac wlan0", patched)
+        self.assertIn("/proc/idme/serial", patched)
+        self.assertLess(
+            patched.index("until tater_rook_wifi_mac wlan0"),
+            patched.index("until ip link set wlan0 up"),
+        )
+
+    def test_rejects_current_wifi_helper_when_mac_runs_after_link_up(self):
+        source = """#!/bin/sh
+t5_wifi_mac() { :; }
+# t5_wifi_up <module.ko> <wpa.conf>: invalid pinned fixture
+t5_wifi_up() {
+\tn=0; until ip link set wlan0 up 2>/tmp/ifup.err; do :; done
+\tn=0; until t5_wifi_mac wlan0; do :; done
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "lib/techo5-lib.sh"
+            library.parent.mkdir(parents=True)
+            library.write_text(source)
+            with self.assertRaisesRegex(SystemExit, "after link-up"):
+                build_rootfs.common.patch_rook_wifi_mac(root)
+
     def test_wifi_mac_guard_uses_factory_then_serial_fallback(self):
         source = """#!/bin/sh
 # t5_wifi_up <module.ko> <wpa.conf>: test fixture
