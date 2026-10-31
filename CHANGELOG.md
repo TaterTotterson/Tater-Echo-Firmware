@@ -6,40 +6,6 @@ Tater Echo Firmware v4.0.0 adds automatic USB Ethernet, future system updates
 through Tater, remote maintenance, new satellite controls, and improvements to
 screen, audio, recovery, and installation behavior.
 
-### Before you update
-
-- **A one-time USB/TWRP installation is required** for every satellite running
-  a version earlier than v4.0.0. Download the factory archive made for your
-  exact Echo model and follow its included instructions.
-- On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
-  starts to enter TWRP.
-- **Pre-v4 Biscuit and Radar:**
-
-  1. Boot the satellite normally.
-  2. Extract the v4 factory archive for the device.
-  3. Connect the satellite directly by USB.
-  4. Open Terminal in the extracted archive folder and run:
-
-     ```bash
-     python3 to_twrp.py
-     ```
-
-  5. Wait for TWRP to start, then run the normal factory installer.
-
-  You do not need to hold Volume Up or enter Tater Recovery. Do not use
-  `--repair`; it only repairs an existing Tater system slot.
-- The installer keeps existing Tater pairing, Wi-Fi, SSH, and satellite
-  settings by default. Use `--factory-reset` only when you want a clean setup.
-  Existing Rook installations should follow the additional reinstall command
-  shown in the Rook instructions.
-- Keep the satellite powered until installation finishes and it reconnects to
-  Tater. A factory installation or system update may reboot more than once.
-- After v4.0.0 is installed, Tater can deliver compatible application and Linux
-  system updates over the network. A failed system update automatically returns
-  to the previous working version. Some low-level changes, including boot-logo
-  updates, still require USB/TWRP.
-- Use Tater v2.0.0 or newer to manage the new settings and system updates.
-
 ### USB Ethernet
 
 - Connect a supported USB Ethernet adapter and the satellite automatically uses
@@ -94,6 +60,40 @@ screen, audio, recovery, and installation behavior.
 Contributions from @heapsoftware included in this release:
 
 - [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
+
+### Before you update
+
+- **A one-time USB/TWRP installation is required** for every satellite running
+  a version earlier than v4.0.0. Download the factory archive made for your
+  exact Echo model and follow its included instructions.
+- On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
+  starts to enter TWRP.
+- **Pre-v4 Biscuit and Radar:**
+
+  1. Boot the satellite normally.
+  2. Extract the v4 factory archive for the device.
+  3. Connect the satellite directly by USB.
+  4. Open Terminal in the extracted archive folder and run:
+
+     ```bash
+     python3 to_twrp.py
+     ```
+
+  5. Wait for TWRP to start, then run the normal factory installer.
+
+  You do not need to hold Volume Up or enter Tater Recovery. Do not use
+  `--repair`; it only repairs an existing Tater system slot.
+- The installer keeps existing Tater pairing, Wi-Fi, SSH, and satellite
+  settings by default. Use `--factory-reset` only when you want a clean setup.
+  Existing Rook installations should follow the additional reinstall command
+  shown in the Rook instructions.
+- Keep the satellite powered until installation finishes and it reconnects to
+  Tater. A factory installation or system update may reboot more than once.
+- After v4.0.0 is installed, Tater can deliver compatible application and Linux
+  system updates over the network. A failed system update automatically returns
+  to the previous working version. Some low-level changes, including boot-logo
+  updates, still require USB/TWRP.
+- Use Tater v2.0.0 or newer to manage the new settings and system updates.
 
 ## v3.1.2
 
