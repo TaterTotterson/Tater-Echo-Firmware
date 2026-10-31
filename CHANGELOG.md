@@ -2,16 +2,33 @@
 
 ## v4.0.0
 
-### What's Changed
+Tater Echo Firmware v4.0.0 adds automatic USB Ethernet, future system updates
+through Tater, remote maintenance, new satellite controls, and improvements to
+screen, audio, recovery, and installation behavior.
 
-#### USB Ethernet and powered adapters
+### Before you update
 
-- **Headline feature:** added automatic USB Ethernet detection and handoff on
-  qualified Echo satellites, with no opt-in switch. Firmware verifies the link,
-  DHCP address, default route, and Tater reachability before disabling Wi-Fi,
-  then restores Wi-Fi and USB serial/RNDIS when wired connectivity fails or the
-  unit returns to a direct USB connection.
-- Tested USB Ethernet with the powered
+- **A one-time USB/TWRP installation is required** for every satellite running
+  a version earlier than v4.0.0. Download the factory archive made for your
+  exact Echo model and follow its included instructions.
+- The installer keeps existing Tater pairing, Wi-Fi, SSH, and satellite
+  settings by default. Use `--factory-reset` only when you want a clean setup.
+  Existing Rook installations should follow the additional reinstall command
+  shown in the Rook instructions.
+- Keep the satellite powered until installation finishes and it reconnects to
+  Tater. A factory installation or system update may reboot more than once.
+- After v4.0.0 is installed, Tater can deliver compatible application and Linux
+  system updates over the network. A failed system update automatically returns
+  to the previous working version. Some low-level changes, including boot-logo
+  updates, still require USB/TWRP.
+- Use Tater v2.0.0 or newer to manage the new settings and system updates.
+
+### USB Ethernet
+
+- Connect a supported USB Ethernet adapter and the satellite automatically uses
+  Ethernet when the wired connection is ready. Wi-Fi returns automatically if
+  Ethernet is unplugged or stops working.
+- USB Ethernet was tested with the powered
   [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter on
   Biscuit, Checkers, Crown, Athena, and Rook.
 - Biscuit can receive both power and Ethernet through the adapter, giving it a
@@ -19,79 +36,41 @@
   normal power supplies.
 - Similar powered USB Ethernet adapters may also work, but only the adapter
   linked above has been tested.
-- Added visible wired-recovery behavior so a satellite that loses Tater while
-  Ethernet remains attached can restore Wi-Fi instead of remaining silently
-  disconnected. Stable Wi-Fi links are otherwise left alone.
-- Added the native Realtek RTL8152 driver to the pinned Biscuit and Radar
-  kernels. Biscuit, Checkers, Crown, Athena, and Rook passed their documented
-  real-hardware Ethernet, fallback, SSH, OTA, reboot, and recovery gates. Radar
-  remains in passive hardware-validation mode until its internal USB-pad path
-  is qualified, so firmware does not actively change its USB role or VBUS.
+- Radar is not yet ready for normal USB Ethernet use. Its internal USB hardware
+  still needs physical validation.
 
-#### Upgrade and updates
+### New satellite controls
 
-- **USB/TWRP update required:** every Biscuit, Radar, Checkers, Crown, Athena,
-  and Rook running Tater firmware earlier than v4.0.0 must install its matching
-  factory archive once. v4.0.0 changes the pinned platform, recovery,
-  kernel/boot inputs, system updater, and guarded branding paths, so it is not
-  offered as an application-only OTA to pre-v4 installations.
-- Preserved verified pairing, Wi-Fi, SSH, and satellite settings during the v4
-  factory installation by default; `--factory-reset` provides a clean setup.
-  Rook reinstalls use the guarded `--reinstall-existing-tater` path.
-- Added verified A/B System OTA for all six targets after the v4 factory
-  baseline. Tater can update the application first, stage a target-matched
-  rootfs in the inactive Linux slot, verify it after reboot, and roll back a
-  failed health trial. Kernel, boot, rescue, partition-layout, and boot-logo
-  changes remain USB factory/recovery operations.
-- Moved every target to revision- and digest-pinned Tater Echo Linux platform
-  inputs maintained under Tater custody.
+- SSH can be turned on separately for each satellite from Tater. It uses a
+  generated password and remains off by default.
+- Do Not Disturb can be turned on manually or scheduled for each satellite. It
+  silences music, announcements, wake sounds, and other normal playback while
+  keeping wake detection, timers, and alarms available.
 
-#### Remote maintenance and playback policy
+### Screens and video
 
-- Added per-satellite SSH maintenance with an explicit enable switch,
-  generated readable password, read-only-rootfs-safe credential mount, and
-  bounded supervisor backoff. SSH remains off by default.
-- Added per-satellite Do Not Disturb with immediate and scheduled local-time
-  control. It blocks music, announcements, wake sounds, and remote playback
-  while retaining wake detection and safety-critical timers and alarms.
+- Checkers, Crown, Athena, and Rook can play fullscreen camera and video streams
+  with an automatic still-image fallback when streaming is unavailable.
+- Screen menus and sensor layouts have been refreshed, including a layout made
+  for Rook's round display.
+- Screen satellites can use a 12-hour or 24-hour clock. The 12-hour option shows
+  an AM/PM marker.
 
-#### Screens and video
+### Audio and reliability
 
-- Added native fullscreen video playback to Checkers, Crown, Athena, and Rook,
-  including HLS and RTSPS through the pinned FFmpeg decoder, native Tater Echo
-  MJPEG relay playback, and automatic JPEG fallback.
-- Modernized the screen menus and sensor layout, including the Rook-specific
-  curved-screen presentation.
-- Added a 12-hour or 24-hour clock format through the new
-  `screen_clock_format` setting. The 12-hour clock shows a smaller AM/PM marker
-  on the home screen, red night clock, and Spot clocks; screens advertise the
-  capability so controllers send it only to compatible firmware.
+- Athena now uses all four microphones more effectively for wake detection and
+  voice capture, with a safe fallback if a microphone is unavailable.
+- Fixed the slight popping that could be heard during Sendspin playback on
+  Biscuit.
+- Improved reconnection when a wired satellite loses contact with Tater.
 
-#### Voice capture and playback
+### Recovery and branding
 
-- Added Athena's hardware-measured adaptive four-microphone wake and locked
-  turn beam. Each 96 kHz channel is filtered independently before a
-  speech-gated relative-delay estimate aligns healthy microphones at 16 kHz;
-  uncertain or idle audio and microphone failures retain the established omni
-  fallback.
-- Removed slight Sendspin pops on corrected playback paths by consuming the
-  complete 2,064-frame hardware timeline before mixing, preventing the periodic
-  sample drop and hard resynchronization previously heard on Biscuit.
-
-#### Installation, recovery, and branding
-
-- Added an automatic-return TWRP handoff for Biscuit and Radar factory
-  installs. Holding Volume Up during startup now reaches TWRP like the screen
-  targets; Linux is restored to the shared recovery partition while TWRP runs
-  from RAM, so the next reboot returns to Linux. `to_recovery.py` remains the
-  explicit USB route to Tater Recovery.
-- Added guarded monochrome Tater boot branding for Checkers, Crown, and Rook,
-  with exact-layout verification, readback, and full-partition restoration on
-  failure. Athena safely paints the Tater mark at the first Linux framebuffer
-  stage without writing its protected saiyaku bootloader chain.
-- Preserved verified satellite setup across factory reinstalls while removing
-  stale application slots, and documented the expected root-slot activation
-  and confirmation reboots for each target.
+- Holding Volume Up during startup enters TWRP on all supported satellites.
+  Biscuit and Radar automatically return to Tater Linux on the next normal
+  reboot.
+- Added Tater boot branding to Checkers, Crown, and Rook, plus a safe Tater
+  startup splash on Athena.
 
 ### New Contributor
 
