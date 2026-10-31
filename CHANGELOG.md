@@ -11,11 +11,12 @@ screen, audio, recovery, and installation behavior.
 - **A one-time USB/TWRP installation is required** for every satellite running
   a version earlier than v4.0.0. Download the factory archive made for your
   exact Echo model and follow its included instructions.
-- On a pre-v4 Biscuit or Radar, Volume Up may open Tater Recovery instead of
-  TWRP. With USB connected, run `python3 to_twrp.py` from the extracted v4
-  factory archive (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and
-  then continue with the normal factory installer. Do not use `--repair` for
-  this upgrade; repair mode only fixes an existing Tater system slot.
+- On a pre-v4 Biscuit or Radar, boot Tater normally and connect it directly by
+  USB. Run `python3 to_twrp.py` from the extracted v4 factory archive
+  (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
+  with the normal factory installer. You do not need to hold Volume Up or enter
+  Tater Recovery first. Do not use `--repair` for this upgrade; repair mode only
+  fixes an existing Tater system slot.
 - The installer keeps existing Tater pairing, Wi-Fi, SSH, and satellite
   settings by default. Use `--factory-reset` only when you want a clean setup.
   Existing Rook installations should follow the additional reinstall command
