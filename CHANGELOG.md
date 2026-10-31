@@ -96,6 +96,13 @@
   stale application slots, and documented the expected root-slot activation
   and confirmation reboots for each target.
 
+### New Contributor
+
+Contributions from [@heapsoftware](https://github.com/heapsoftware) included in
+this release:
+
+- [#4 — Automatic USB Ethernet and Tater satellite baselines](https://github.com/TaterTotterson/Tater-Echo-Firmware/pull/4)
+
 ## v3.1.2
 
 ### What's Changed
