@@ -34,47 +34,6 @@ installer on a similar-looking Echo from another generation.
 Target metadata used by Tater and the release builds lives in
 [`targets/targets.json`](targets/targets.json).
 
-> [!IMPORTANT]
-> **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
-> target.** Any existing installation earlier than v4.0.0 cannot cross this platform boundary
-> through OTA. Use the factory archive matching the exact device; the installer
-> preserves verified Tater pairing, Wi-Fi, SSH, and satellite settings by
-> default, or pass `--factory-reset` for a clean start. After v4.0.0 is installed,
-> Tater can deliver compatible application and root-system updates through its
-> verified A/B OTA flow with automatic rollback.
-
-> [!NOTE]
-> On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
-> starts to enter TWRP.
->
-> **Pre-v4 Biscuit and Radar:**
->
-> 1. Boot the satellite normally.
-> 2. Extract the v4 factory archive for the device.
-> 3. Connect the satellite directly by USB.
-> 4. Open Terminal in the extracted archive folder and run:
->
->    ```bash
->    python3 to_twrp.py
->    ```
->
-> 5. Wait for TWRP to start.
-> 6. Run the factory installer:
->
->    ```bash
->    ./install.sh
->    ```
->
-> You do not need to hold Volume Up or enter Tater Recovery. Do not use
-> `--repair`; it only repairs an existing Tater system slot.
-
-> [!IMPORTANT]
-> Athena's installer validates the display panel and unit-specific speaker
-> tuning before writing either partition. Keep the private Fire OS backup it
-> creates; it is required for rollback and contains that unit's original
-> speaker tuning. See [`docs/athena.md`](docs/athena.md) for the supported
-> hardware contract and regression checklist.
-
 ## Features
 
 - Sat Chat audio and video calls from satellite to satellite and from Tater on
@@ -128,6 +87,47 @@ Similar powered USB Ethernet adapters may also work, but only the adapter linked
 above has been tested. See
 [`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for technical
 details and per-device test results.
+
+> [!IMPORTANT]
+> **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
+> target.** Any existing installation earlier than v4.0.0 cannot cross this platform boundary
+> through OTA. Use the factory archive matching the exact device; the installer
+> preserves verified Tater pairing, Wi-Fi, SSH, and satellite settings by
+> default, or pass `--factory-reset` for a clean start. After v4.0.0 is installed,
+> Tater can deliver compatible application and root-system updates through its
+> verified A/B OTA flow with automatic rollback.
+
+> [!NOTE]
+> On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
+> starts to enter TWRP.
+>
+> **Pre-v4 Biscuit and Radar:**
+>
+> 1. Boot the satellite normally.
+> 2. Extract the v4 factory archive for the device.
+> 3. Connect the satellite directly by USB.
+> 4. Open Terminal in the extracted archive folder and run:
+>
+>    ```bash
+>    python3 to_twrp.py
+>    ```
+>
+> 5. Wait for TWRP to start.
+> 6. Run the factory installer:
+>
+>    ```bash
+>    ./install.sh
+>    ```
+>
+> You do not need to hold Volume Up or enter Tater Recovery. Do not use
+> `--repair`; it only repairs an existing Tater system slot.
+
+> [!IMPORTANT]
+> Athena's installer validates the display panel and unit-specific speaker
+> tuning before writing either partition. Keep the private Fire OS backup it
+> creates; it is required for rollback and contains that unit's original
+> speaker tuning. See [`docs/athena.md`](docs/athena.md) for the supported
+> hardware contract and regression checklist.
 
 ## Install Biscuit — Echo Dot 2
 
