@@ -16,6 +16,9 @@ import (
 // Zero values are replaced by defaults on first access via Get().
 type Device struct {
 	mu sync.RWMutex
+	// firmwareTarget selects board-calibrated defaults. It is configured by
+	// the daemon before the first Get call and is not changed at runtime.
+	firmwareTarget string
 
 	// Microphone / VAD
 	VadThreshold float64
@@ -105,6 +108,14 @@ type Device struct {
 
 var global = &Device{}
 
+// ConfigureTarget selects the board-specific defaults used when the global
+// config is first initialised. The daemon calls this before any Get call.
+func ConfigureTarget(target string) {
+	global.mu.Lock()
+	defer global.mu.Unlock()
+	global.firmwareTarget = strings.ToLower(strings.TrimSpace(target))
+}
+
 // Get returns the global device config, initialised from environment
 // variables on first call.
 func Get() *Device {
@@ -138,7 +149,7 @@ func (d *Device) loadDefaults() {
 	d.NwwThreshold = envFloat("NWW_THRESHOLD", 0)
 	d.NwwPatience = envInt("NWW_PATIENCE", 0)
 	d.DuckDb = envFloat("DUCK_DB", -18)
-	d.MicGainDb = clampMicGainDb(envInt("MIC_GAIN_DB", 24))
+	d.MicGainDb = clampMicGainDb(envInt("MIC_GAIN_DB", defaultMicGainDb(d.firmwareTarget)))
 	d.BeamAngle = envFloat("BEAM_ANGLE", -1)
 	d.BeamformingEnabled = envBool("BEAMFORMING_ENABLED", true)
 	// Echo AEC is firmware-owned and starts enabled. AEC_ENABLED remains an
@@ -386,6 +397,18 @@ func clampMicGainDb(db int) int {
 		return 42
 	}
 	return db
+}
+
+// defaultMicGainDb compensates for the lower capture level measured on the
+// shared Puffin seven-microphone path used by Biscuit and Radar. Other targets
+// need only a smaller lift over the old +24dB fleet default.
+func defaultMicGainDb(target string) int {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "biscuit", "radar":
+		return 40
+	default:
+		return 28
+	}
 }
 
 const (

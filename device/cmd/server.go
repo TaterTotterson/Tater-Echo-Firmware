@@ -80,6 +80,7 @@ func satChatVideoCaptureDelay(elapsed time.Duration, succeeded bool) time.Durati
 
 func main() {
 	log.SetOutput(os.Stdout)
+	config.ConfigureTarget(client.FirmwareTarget)
 	// Biscuit and Radar have no dependable bootloader-level Volume Up route.
 	// Inspect their held-key bitmap before either runtime takes the buttons so
 	// the current factory image can perform its automatic-return TWRP handoff.

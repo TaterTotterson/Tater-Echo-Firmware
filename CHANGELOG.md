@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.0.1
+
+### What's Changed
+
+#### Microphone capture
+
+- Raised the calibrated default microphone input gain to +40 dB on Biscuit and
+  Radar, whose shared seven-microphone capture path is quieter than the other
+  Echo targets.
+- Raised the default input gain to +28 dB on Checkers, Crown, Athena, and Rook,
+  improving wake detection and command capture while retaining headroom for
+  close speech.
+- Kept `MIC_GAIN_DB` as an explicit override for installations that already
+  provide their own device-level calibration.
+
+**Full Changelog**: [v4.0.0...v4.0.1](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.0.0...v4.0.1)
+
 ## v4.0.0
 
 Tater Echo Firmware v4.0.0 adds automatic USB Ethernet, future system updates
