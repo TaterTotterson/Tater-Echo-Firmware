@@ -136,6 +136,7 @@ type Hooks struct {
 	DisplayWeather      func(payload map[string]any)
 	DisplayClimate      func(payload map[string]any)
 	DisplayCameras      func(DisplayCameras)
+	DisplayConversation func(payload map[string]any)
 	DisplayVideo        func(DisplayVideo)
 	DisplayNotification func(payload map[string]any)
 	DisplayLastEvent    func(payload map[string]any)

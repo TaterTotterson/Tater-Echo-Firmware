@@ -1,5 +1,47 @@
 # Changelog
 
+## v4.0.2
+
+### What's Changed
+
+#### Live conversations on Echo screens
+
+- Added one shared live-conversation display protocol for Checkers, Crown,
+  Athena, and Rook, with streamed user transcription and assistant reply text.
+- Added a polished full-screen listening, thinking, working, and replying flow
+  with theme-aware edge lighting, smooth transitions, and layouts tailored to
+  both rectangular and round displays.
+- Centered the initial listening prompt and faded it naturally into the first
+  transcript instead of abruptly replacing the screen.
+- Kept the completed user request visible while Tater thinks and works, then
+  transitioned into the assistant reply without competing screen states or
+  flicker.
+- Supported both streaming and non-streaming speech engines: partial text is
+  shown live when available, while a complete transcript or reply appears when
+  an engine only supplies final text.
+- Ignored late, out-of-order conversation revisions so an older listening
+  update cannot replace a newer thinking, working, or reply state.
+
+#### Music display
+
+- Kept Sendspin's timestamped spectrum visualization synchronized while
+  calming its attack and release so the bars feel musical instead of overly
+  twitchy.
+- Fixed the music progress bar rapidly jumping between two positions on
+  page-flipped displays by updating the progress region on every rendered
+  frame.
+- Applied the music display fixes across Checkers, Crown, Athena, and Rook.
+
+#### Reliability and testing
+
+- Added renderer coverage for cached screen composition, conversation state
+  ordering, smooth spectrum response, and consistent progress updates across
+  framebuffer pages.
+- Added the approved live-conversation screen mockup to the firmware
+  documentation assets.
+
+**Full Changelog**: [v4.0.1...v4.0.2](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.0.1...v4.0.2)
+
 ## v4.0.1
 
 ### What's Changed

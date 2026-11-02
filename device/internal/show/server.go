@@ -202,6 +202,19 @@ type Climate struct {
 	RoomTemperatures   []RoomTemperature `json:"room_temperatures,omitempty"`
 }
 
+// Conversation is the display-only live text for one voice turn. Tater sends
+// complete snapshots so partial STT revisions, streamed LLM output, reconnects,
+// and non-streaming engines all share the same renderer contract.
+type Conversation struct {
+	TurnID         string `json:"turn_id,omitempty"`
+	Phase          string `json:"phase,omitempty"`
+	UserText       string `json:"user_text,omitempty"`
+	UserFinal      bool   `json:"user_final"`
+	AssistantText  string `json:"assistant_text,omitempty"`
+	AssistantFinal bool   `json:"assistant_final"`
+	Revision       int64  `json:"revision,omitempty"`
+}
+
 // Snapshot is the complete screen state. Complete snapshots make reconnects
 // deterministic: the renderer never has to replay a missed transition.
 type Snapshot struct {
@@ -228,6 +241,7 @@ type Snapshot struct {
 	Message                     string        `json:"message,omitempty"`
 	ToolName                    string        `json:"tool_name,omitempty"`
 	ToolMessage                 string        `json:"tool_message,omitempty"`
+	Conversation                *Conversation `json:"conversation,omitempty"`
 	Muted                       bool          `json:"muted"`
 	VolumePercent               int           `json:"volume_percent"`
 	AudioLevel                  float64       `json:"audio_level"`
