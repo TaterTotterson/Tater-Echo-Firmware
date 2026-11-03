@@ -42,6 +42,6 @@ Do not disconnect power or USB while the installer is writing the device.
 Hold Volume Up while powering on to enter TWRP. The factory archive also
 includes `to_twrp.py` for entering TWRP from a normally booted satellite.
 
-The first Cronos release remains marked as hardware validation until its full
-factory install, display, touch, audio, camera, privacy, recovery, OTA, and
-network checks pass on a real unit.
+Cronos support is hardware-tested on model C76N8S, including factory install,
+display and touch, audio and wake detection, recovery, and automatic USB
+Ethernet handoff.

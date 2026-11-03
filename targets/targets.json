@@ -61,7 +61,7 @@
       "native_framebuffer_ui": true,
       "rootfs_slots": "a-b",
       "ota_slots": "application-a-b-on-data",
-      "status": "hardware-validation"
+      "status": "hardware-tested"
     },
     "crown": {
       "display_name": "Amazon Echo Show 8 1st Generation (2019)",

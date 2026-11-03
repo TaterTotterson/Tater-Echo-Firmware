@@ -21,7 +21,7 @@ qualify a target.
 | Biscuit | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered pass-through adapter required; built-in RTL8152 driver |
 | Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
 | Checkers | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 5; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
-| Cronos | `hardware-validation` | MediaTek MUSB hardware OTG candidate | Separately powered Show 5 second generation; passive controller is installed, but adapter and fallback behavior require qualification |
+| Cronos | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 5 second generation; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Crown | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 8; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Athena | `qualified` | Mainline MediaTek MTU3 + GPIO OTG | Physical ID/VBUS path, RTL8152 Ethernet, Wi-Fi fallback, USB serial/RNDIS, OTA, factory reinstall, and recovery verified |
 | Rook | `qualified` | MediaTek `/proc/mchange` | Separately powered Spot; powered UCTRONICS B0B9ZLVGJ4 on the micro-USB data/OTG path, RTL8152, bounded forced-role switching, fallback, and serial verified |
@@ -29,11 +29,11 @@ qualify a target.
 All seven images start the controller automatically. Radar remains an
 unqualified passive candidate: if its kernel enumerates a supported USB NIC,
 the common policy can use it, but firmware performs no speculative role or VBUS
-write. Cronos is also passive until its physical OTG path is validated.
-Checkers, Crown, and Athena are passive in userspace, but their physical OTG
-signaling and automatic device-mode restoration are qualified independently on
-real hardware. Rook's stock dual-role sysfs files are intentionally read-only
-and the tested powered adapter does not assert its physical ID pin. Its
+write. Checkers, Cronos, Crown, and Athena are passive in userspace, but their
+physical OTG signaling and automatic device-mode restoration are qualified
+independently on real hardware. Rook's stock dual-role sysfs files are
+intentionally read-only and the tested powered adapter does not assert its
+physical ID pin. Its
 Tater kernel therefore exposes MediaTek `/proc/mchange` control and includes
 the RTL8152 driver, while the common controller uses the same bounded host
 probe as Biscuit. Internal Wi-Fi remains on the separate USB1 controller during
@@ -90,6 +90,21 @@ network, fallback, update, reinstall, and recovery gates.
   shutdown, link-loss/unplug fallback to Wi-Fi without reboot, USB serial
   restoration, SSH, application OTA, A/B System OTA activation and
   confirmation reboots, boot with the adapter attached, and volume-up TWRP.
+
+### Cronos qualification record — 2026-11-02
+
+- Hardware: Amazon Echo Show 5 second generation (2021), model C76N8S
+  (`cronos`), with separate device power.
+- Adapter: [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4),
+  Realtek RTL8152 (`0bda:8152`, `r8152`).
+- Tested firmware: commit `479631c1125a1644135f4210b5d5f3d423d6e2df`,
+  `v4.1.0-cronos-test1`; Tater Linux platform v0.9.26, kernel
+  `4.9.337-g8d928c5176cc`.
+- Passed: physical MUSB host selection, RTL8152 enumeration, DHCP,
+  Ethernet-only default route, Wi-Fi shutdown, Tater reconnection, SSH,
+  zero-error wired traffic, return to the normal Wi-Fi and USB device path,
+  verified factory install, root-system health commit and confirmation reboot,
+  and Volume Up TWRP.
 
 ### Crown qualification record — 2026-10-27
 
@@ -227,9 +242,7 @@ whose immutable kernel or root filesystem lacks the required controller.
 
 1. Treat Radar as an experimental internal hardware modification, not a normal
    external-port feature.
-2. Keep Cronos advertised as prepared, not supported, until its external port
-   passes the complete adapter, fallback, reboot, and serial-restoration gate.
 
 Biscuit completed its exact-kernel real-hardware release gate on 2026-10-29;
 Athena completed its independent gate on 2026-10-28; Checkers, Crown, and Rook
-completed theirs on 2026-10-27. Cronos validation is pending.
+completed theirs on 2026-10-27; Cronos completed its gate on 2026-11-02.

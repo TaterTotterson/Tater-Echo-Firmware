@@ -27,7 +27,7 @@ installer on a similar-looking Echo from another generation.
 | Echo Dot 2nd Generation (2016), RS03QR | `biscuit` | amonet-biscuit v2.0.0 | Tater Linux | Yes | Yes |
 | Echo 2nd Generation (2017), XC56PY | `radar` | amonet-radar v1.0.0 | Tater Linux | Yes | Yes |
 | Echo Show 5 1st Generation (2019), H23K37 | `checkers` | amonet-checkers v2.0.1+ | Tater Linux | Yes | Yes |
-| Echo Show 5 2nd Generation (2021), C76N8S | `cronos` | amonet-cronos v2.0.1 | Tater Linux | Validation | Validation |
+| Echo Show 5 2nd Generation (2021), C76N8S | `cronos` | amonet-cronos v2.0.1 | Tater Linux | Yes | Yes |
 | Echo Show 8 1st Generation (2019), C7H6N3 | `crown` | amonet-crown v2.0.1+ | Tater Linux | Yes | Yes |
 | Echo Show 8 2nd Generation (2021), A8H3N2 | `athena` | saiyaku-athena, Fire OS 7080 | Tater Linux | Yes | Yes |
 | Echo Spot 1st Generation (2017), VN94DQ | `rook` | amonet-rook v2.0.0 | Tater Linux | Yes | Yes |
@@ -80,18 +80,17 @@ Target metadata used by Tater and the release builds lives in
 
 Tater tested USB Ethernet with the powered
 [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter on Biscuit,
-Checkers, Crown, Athena, and Rook.
+Checkers, Cronos, Crown, Athena, and Rook.
 
 Biscuit can receive both power and Ethernet through the adapter, giving it a
-simple PoE-style setup. Checkers, Crown, Athena, and Rook continue using their
-normal power supplies. Radar support is included but currently disabled because
-using it requires a permanent internal USB hardware modification.
+simple PoE-style setup. Checkers, Cronos, Crown, Athena, and Rook continue using
+their normal power supplies. Radar support is included but currently disabled
+because using it requires a permanent internal USB hardware modification.
 
 Similar powered USB Ethernet adapters may also work, but only the adapter linked
 above has been tested. See
 [`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for technical
-details and per-device test results. Cronos includes the passive controller but
-remains unqualified until this adapter path is tested on real hardware.
+details and per-device test results.
 
 ## Before you install
 
@@ -313,8 +312,8 @@ Cronos support is for the 2021 Echo Show 5 **2nd Generation** (`cronos`), model
 booted into TWRP. See the
 [Cronos unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/).
 
-Cronos is currently a hardware-validation target. Use the development factory
-bundle only while participating in bring-up; do not use the Checkers archive.
+Cronos support is hardware-tested. Use only the Cronos factory archive; the
+similar-looking Checkers archive is not compatible.
 
 1. Download and extract `tater-echo-cronos-<version>-factory.tar.gz`.
 2. Boot Cronos into TWRP, connect a USB data cable, and keep external power on.

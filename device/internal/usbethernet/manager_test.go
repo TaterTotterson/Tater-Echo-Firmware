@@ -50,6 +50,10 @@ func TestSupportIsQualifiedAndPlatformGated(t *testing.T) {
 	if !manager.Prepared() || !manager.Supported() {
 		t.Fatal("qualified Checkers hardware-OTG path should be prepared and supported")
 	}
+	manager.Target = "cronos"
+	if !manager.Prepared() || !manager.Supported() {
+		t.Fatal("qualified Cronos hardware-OTG path should be prepared and supported")
+	}
 	manager.Target = "rook"
 	if !manager.Prepared() || !manager.Supported() {
 		t.Fatal("qualified Rook MediaTek role path should be prepared and supported")
@@ -130,7 +134,7 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 			capability.Recovery == "" || capability.Reason == "" {
 			t.Errorf("incomplete %s capability: %#v", target, capability)
 		}
-		qualified := target == "athena" || target == "biscuit" || target == "checkers" || target == "crown" || target == "rook"
+		qualified := target == "athena" || target == "biscuit" || target == "checkers" || target == "cronos" || target == "crown" || target == "rook"
 		if qualified && !capability.qualified() {
 			t.Errorf("hardware-qualified target %s lost qualification: %#v", target, capability)
 		}
@@ -207,7 +211,7 @@ func TestRecoveringDiagnosticsKeepFailureReason(t *testing.T) {
 }
 
 func TestShowDiagnosticsReportQualifiedHardwareOTG(t *testing.T) {
-	for _, target := range []string{"checkers", "crown"} {
+	for _, target := range []string{"checkers", "cronos", "crown"} {
 		t.Run(target, func(t *testing.T) {
 			manager := testManager(t, target)
 			if err := os.WriteFile(manager.Paths.State, []byte("active eth0 10.4.20.159\n"), 0o644); err != nil {
@@ -255,7 +259,6 @@ func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 		detection string
 	}{
 		{target: "radar", backend: "mediatek-mchange-candidate", detection: "passive-until-role-qualified"},
-		{target: "cronos", backend: "mediatek-musb-hardware-otg-candidate", detection: "hardware-id-passive"},
 	}
 	for _, test := range tests {
 		t.Run(test.target, func(t *testing.T) {

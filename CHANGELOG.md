@@ -1,5 +1,40 @@
 # Changelog
 
+## v4.1.0
+
+Tater Echo Firmware v4.1.0 adds hardware-tested support for the Amazon Echo
+Show 5 second generation (2021), model C76N8S, codename `cronos`.
+
+### Cronos support
+
+- Added a dedicated Cronos factory archive with guarded model detection,
+  verified backups, pinned LineageOS driver inputs, a Tater Linux A/B system,
+  preserved TWRP recovery, and optional settings-preserving reinstalls.
+- Added the native 960×480 Tater display, touch controls, camera, dashboards,
+  Sat Chat, climate and camera panels, live conversation screens, clock
+  choices, Do Not Disturb, and screen power controls.
+- Added Cronos-specific two-microphone capture and AEC, speaker routing, volume
+  buttons, hardware privacy controls, wake detection, Sendspin playback, SSH,
+  Bluetooth, and application and System OTA support.
+- Added Volume Up access to TWRP, Tater boot branding, and verified A/B health
+  checks with automatic rollback.
+
+### USB Ethernet
+
+- Hardware-qualified automatic USB Ethernet on Cronos with the powered
+  [UCTRONICS B0B9ZLVGJ4](https://www.amazon.com/dp/B0B9ZLVGJ4) adapter and its
+  Realtek RTL8152 controller.
+- Verified passive MUSB host selection, DHCP, Ethernet-only routing, automatic
+  Wi-Fi shutdown, Tater reconnection, SSH, and return to the normal Wi-Fi and
+  USB device path.
+
+### Companion app
+
+- Use Tater v2.0.4 or newer for distinct Cronos identification, settings,
+  device artwork, and target-matched factory and OTA downloads.
+
+**Full Changelog**: [v4.0.2...v4.1.0](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.0.2...v4.1.0)
+
 ## v4.0.2
 
 ### What's Changed

@@ -44,17 +44,21 @@ frontend. The two loopback channels provide the aligned playback reference for
 AEC. Cronos keeps its own speaker-route and hardware-privacy implementations;
 it does not reuse Checkers' RT5616 amplifier controls or `gating` input node.
 
-## Validation gate
+## Hardware validation
 
-Cronos remains `hardware-validation` until this real device passes:
+Cronos completed its real-device release gate on 2026-11-02 using model C76N8S
+and the `v4.1.0-cronos-test1` candidate. The validated paths include the
+verified factory installer and first boot; framebuffer, touch, camera and boot
+branding; two-microphone capture, wake detection, AEC, speaker playback,
+buttons and privacy controls; Wi-Fi setup and normal Tater pairing; SSH and
+Volume Up TWRP; and the A/B root-system health commit and confirmation restart.
 
-1. verified factory install and first boot;
-2. framebuffer, touch, auto-brightness, camera, and boot logo;
-3. microphones, wake word, AEC, speaker, volume, and privacy latch;
-4. Wi-Fi setup, pairing, Bluetooth, SSH, and reconnect behavior;
-5. application OTA, System OTA trial/commit/rollback, and Volume Up TWRP;
-6. USB Ethernet enumeration, wired preference, Wi-Fi fallback, reboot, and
-   USB-serial restoration.
+USB Ethernet was validated with the powered UCTRONICS B0B9ZLVGJ4 adapter and
+its Realtek RTL8152 controller (`0bda:8152`, Linux `r8152`). Cronos selected its
+physical MUSB host role, obtained `10.4.20.159` by DHCP, made Ethernet its only
+default route, stopped Wi-Fi, reconnected to Tater, and carried SSH traffic
+without packet errors. Returning to the normal USB path restores device mode
+and Wi-Fi recovery behavior.
 
 See [`../factory/cronos-linux/README.md`](../factory/cronos-linux/README.md)
 for the factory procedure.
