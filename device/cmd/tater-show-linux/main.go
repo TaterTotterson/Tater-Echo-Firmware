@@ -1387,6 +1387,9 @@ func (r *renderer) showTarget() string {
 	if strings.EqualFold(strings.TrimSpace(r.target), "athena") {
 		return "Athena"
 	}
+	if strings.EqualFold(strings.TrimSpace(r.target), "cronos") {
+		return "Cronos"
+	}
 	if r.isCrown() {
 		return "Crown"
 	}
@@ -2844,6 +2847,8 @@ func main() {
 	deviceName := "Tater Checkers"
 	if normalizedTarget == "athena" {
 		deviceName = "Tater Athena"
+	} else if normalizedTarget == "cronos" {
+		deviceName = "Tater Cronos"
 	} else if normalizedTarget == "crown" {
 		deviceName = "Tater Crown"
 	} else if spotScreen {

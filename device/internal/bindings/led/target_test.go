@@ -27,6 +27,18 @@ func TestCheckersUsesScreenOnlyController(t *testing.T) {
 	}
 }
 
+func TestCronosUsesScreenOnlyController(t *testing.T) {
+	ConfigureTarget("cronos")
+	defer ConfigureTarget("biscuit")
+	controller, err := NewDefaultController()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := controller.(discardController); !ok {
+		t.Fatalf("controller = %T, want screen-only sink", controller)
+	}
+}
+
 func TestCrownUsesScreenOnlyController(t *testing.T) {
 	ConfigureTarget("crown")
 	defer ConfigureTarget("biscuit")

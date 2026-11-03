@@ -121,6 +121,15 @@ class InstallerTests(unittest.TestCase):
             with mock.patch.object(install, "MANIFEST", path):
                 self.assertEqual("crown", install.load_manifest()["target"])
 
+    def test_manifest_accepts_cronos_linux_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bundle-manifest.json"
+            path.write_text(json.dumps({
+                "target": "cronos", "base_os": "tater-linux", "files": {"x": {}},
+            }))
+            with mock.patch.object(install, "MANIFEST", path):
+                self.assertEqual("cronos", install.load_manifest()["target"])
+
     def test_bundle_verification_rejects_size_change(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -145,6 +154,13 @@ class InstallerTests(unittest.TestCase):
             path.write_bytes(b"crown image")
             with mock.patch.object(install, "sha256", return_value=install.CROWN_LINEAGE_SHA256):
                 install.verify_lineage_zip(path, install.show_profile("crown"))
+
+    def test_cronos_lineage_zip_uses_its_own_pinned_digest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "lineage.zip"
+            path.write_bytes(b"cronos image")
+            with mock.patch.object(install, "sha256", return_value=install.CRONOS_LINEAGE_SHA256):
+                install.verify_lineage_zip(path, install.show_profile("cronos"))
 
     def test_lineage_zip_must_exist(self):
         with tempfile.TemporaryDirectory() as directory:

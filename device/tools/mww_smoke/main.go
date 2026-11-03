@@ -24,12 +24,12 @@ import (
 )
 
 func main() {
-	target := flag.String("target", "", "firmware target (checkers, crown, or athena)")
+	target := flag.String("target", "", "firmware target (checkers, cronos, crown, or athena)")
 	duration := flag.Duration("duration", 60*time.Second, "listening duration, 5s..2m")
 	flag.Parse()
 
-	if *target != "checkers" && *target != "crown" && *target != "athena" {
-		log.Fatal("refusing microphone test: pass -target checkers, crown, or athena explicitly")
+	if *target != "checkers" && *target != "cronos" && *target != "crown" && *target != "athena" {
+		log.Fatal("refusing microphone test: pass -target checkers, cronos, crown, or athena explicitly")
 	}
 	if os.Geteuid() != 0 {
 		log.Fatal("microWakeWord smoke test must run as root")

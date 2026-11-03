@@ -199,6 +199,7 @@ func main() {
 
 	s := server.NewServer(buttonController, microphone, pcmSpeaker)
 	var rookPrivacy *hardwareprivacy.Controller
+	var cronosPrivacy *hardwareprivacy.CronosController
 	var athenaPrivacy *hardwareprivacy.AthenaController
 	if client.FirmwareTarget == "rook" {
 		s.EnsureMuteStateFile()
@@ -207,6 +208,14 @@ func main() {
 		} else {
 			rookPrivacy = controller
 			log.Printf("[privacy] Rook kernel privacy state enabled")
+		}
+	} else if client.FirmwareTarget == "cronos" {
+		s.EnsureMuteStateFile()
+		if controller, privacyErr := hardwareprivacy.OpenCronos(); privacyErr != nil {
+			log.Printf("[privacy] Cronos hardware latch unavailable; retaining evdev mute fallback: %v", privacyErr)
+		} else {
+			cronosPrivacy = controller
+			log.Printf("[privacy] Cronos hardware privacy latch enabled")
 		}
 	} else if client.FirmwareTarget == "athena" {
 		s.EnsureMuteStateFile()
@@ -242,7 +251,7 @@ func main() {
 		if screenSetupResetting.Load() {
 			return // the held sixth press belongs to setup, not mute toggle
 		}
-		if rookPrivacy != nil || athenaPrivacy != nil {
+		if rookPrivacy != nil || cronosPrivacy != nil || athenaPrivacy != nil {
 			// The hardware privacy state has already changed for this button
 			// event. Its watcher applies that explicit state; toggling here too
 			// would occasionally undo the physical press due to event ordering.
@@ -448,7 +457,7 @@ func main() {
 	activeGATTEnabled := nativeBLEEnabled
 	if nativeBLEEnabled && platform.Base() == platform.TaterLinux &&
 		(isRingTarget(client.FirmwareTarget) || strings.EqualFold(client.FirmwareTarget, "athena") ||
-			strings.EqualFold(client.FirmwareTarget, "rook")) {
+			strings.EqualFold(client.FirmwareTarget, "cronos") || strings.EqualFold(client.FirmwareTarget, "rook")) {
 		manager, err := bluetooth.NewBlueZGATTManager(bleScanner.SetConnectionHold)
 		if err != nil {
 			activeGATTEnabled = false
@@ -508,7 +517,7 @@ func main() {
 	// Init leaves the internal amp on regardless of what is plugged in.
 	// SetJackRouting owns the whole mapping (issue #80 for the removal half,
 	// measured against a stock Dot 2026-09-03 for the rest).
-	if client.FirmwareTarget != "checkers" && client.FirmwareTarget != "crown" && client.FirmwareTarget != "athena" {
+	if client.FirmwareTarget != "checkers" && client.FirmwareTarget != "cronos" && client.FirmwareTarget != "crown" && client.FirmwareTarget != "athena" {
 		go jack.Watch(ctx, func(inserted bool) {
 			pcmSpeaker.SetJackRouting(inserted)
 		})
@@ -1341,6 +1350,35 @@ func main() {
 			return s.SetMuted(muted)
 		})
 	}
+	if cronosPrivacy != nil {
+		watchInitial := s.IsMuted()
+		hardwareMuted, privacyErr := cronosPrivacy.State()
+		if privacyErr != nil {
+			log.Printf("[privacy] Cronos startup state unavailable: %v", privacyErr)
+		} else {
+			watchInitial = hardwareMuted
+			logicalMuted := s.IsMuted()
+			switch {
+			case logicalMuted && !hardwareMuted:
+				if err := cronosPrivacy.Engage(); err != nil {
+					log.Printf("[privacy] Cronos startup privacy engage failed: %v", err)
+				} else {
+					log.Printf("[privacy] Cronos startup privacy engage requested")
+				}
+			case hardwareMuted && !logicalMuted:
+				if err := s.SetMuted(true); err != nil {
+					log.Printf("[privacy] Cronos startup mute synchronization: %v", err)
+				}
+			}
+		}
+		go cronosPrivacy.Watch(ctx, watchInitial, func(muted bool) error {
+			if s.IsMuted() == muted {
+				return nil
+			}
+			log.Printf("[privacy] Cronos physical privacy changed muted=%t", muted)
+			return s.SetMuted(muted)
+		})
+	}
 	if athenaPrivacy != nil {
 		watchInitial := s.IsMuted()
 		hardwareMuted, privacyErr := athenaPrivacy.State()
@@ -1461,7 +1499,7 @@ func main() {
 
 func isScreenTarget(target string) bool {
 	target = strings.ToLower(strings.TrimSpace(target))
-	return target == "checkers" || target == "crown" || target == "athena" || target == "rook"
+	return target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook"
 }
 
 // startSlottedCameraHelper launches the camera binary delivered beside an A/B
@@ -1621,6 +1659,8 @@ func runScreenSetupMode() error {
 		deviceLabel, defaultName = "Echo Dot 2nd Generation", "Tater Biscuit"
 	} else if strings.EqualFold(client.FirmwareTarget, "radar") {
 		deviceLabel, defaultName = "Echo 2nd Generation", "Tater Radar"
+	} else if strings.EqualFold(client.FirmwareTarget, "cronos") {
+		deviceLabel, defaultName = "Echo Show 5 2nd Generation", "Tater Cronos"
 	} else if strings.EqualFold(client.FirmwareTarget, "crown") {
 		deviceLabel, defaultName = "Echo Show 8", "Tater Crown"
 	} else if strings.EqualFold(client.FirmwareTarget, "athena") {

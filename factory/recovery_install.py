@@ -38,7 +38,7 @@ def load_manifest() -> dict:
         data = json.loads((ROOT / "bundle-manifest.json").read_text())
     except (OSError, ValueError) as error:
         raise Fail(f"cannot read bundle manifest: {error}") from error
-    if data.get("target") not in {"biscuit", "radar", "checkers", "crown", "athena", "rook"}:
+    if data.get("target") not in {"biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook"}:
         raise Fail("this is not a supported Tater Echo factory bundle")
     if data.get("base_os") != "tater-linux" or not isinstance(data.get("files"), dict):
         raise Fail("this bundle does not contain a Tater Linux recovery payload")

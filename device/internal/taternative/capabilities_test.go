@@ -44,7 +44,7 @@ func TestCapabilitiesForTargetKeepsRadarRing(t *testing.T) {
 }
 
 func TestSupportedEchoTargetsAdvertiseOutputChain(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook"} {
 		if got := CapabilitiesForTarget(target)["output_chain"]; got != true {
 			t.Errorf("%s output_chain = %#v, want true", target, got)
 		}
@@ -55,7 +55,7 @@ func TestSupportedEchoTargetsAdvertiseOutputChain(t *testing.T) {
 }
 
 func TestSupportedEchoTargetsAdvertiseManagedSSH(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook"} {
 		got := CapabilitiesForTarget(target)
 		if got["ssh_management"] != true || got["ssh_management_version"] != 1 {
 			t.Errorf("%s managed SSH capabilities = %#v", target, got)
@@ -67,7 +67,7 @@ func TestSupportedEchoTargetsAdvertiseManagedSSH(t *testing.T) {
 }
 
 func TestSupportedEchoTargetsAdvertiseSystemOTA(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook"} {
 		if got := CapabilitiesForTarget(target)["system_ota_version"]; got != 1 {
 			t.Errorf("%s system_ota_version = %#v, want 1", target, got)
 		}
@@ -171,7 +171,7 @@ func TestCapabilitiesForTargetDescribesRookScreenAndCamera(t *testing.T) {
 }
 
 func TestScreenTargetsAdvertiseDisplayPowerManagement(t *testing.T) {
-	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
 		got := CapabilitiesForTarget(target)
 		if got["screen_power_management_version"] != 1 || got["screen_brightness"] != true || got["screen_auto_brightness"] != true || got["screen_night_mode"] != true || got["screen_red_clock"] != true || got["screen_clock_format"] != true {
 			t.Errorf("%s display power capabilities = %#v", target, got)

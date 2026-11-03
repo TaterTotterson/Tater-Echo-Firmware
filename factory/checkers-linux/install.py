@@ -36,6 +36,12 @@ CROWN_LINEAGE_URL = (
     "https://github.com/amazon-oss/releases/releases/download/"
     "lineage-18.1-crown-v0.5/" + CROWN_LINEAGE_NAME
 )
+CRONOS_LINEAGE_SHA256 = "4c355998061a454792128d4b730932b47ed05a3d2a6d2628599218f44cc84678"
+CRONOS_LINEAGE_NAME = "lineage-18.1-20260904-UNOFFICIAL-cronos.zip"
+CRONOS_LINEAGE_URL = (
+    "https://github.com/amazon-oss/releases/releases/download/"
+    "lineage-18.1-cronos-v0.4/" + CRONOS_LINEAGE_NAME
+)
 
 SHOWS = {
     "checkers": {
@@ -57,6 +63,16 @@ SHOWS = {
         "lineage_sha256": CROWN_LINEAGE_SHA256,
         "lineage_release": "Crown v0.5",
         "user_agent": "Tater-Crown-Installer",
+    },
+    "cronos": {
+        "display": "Echo Show 5 (2nd Gen)",
+        "label": "Cronos",
+        "default_name": "Tater Cronos",
+        "lineage_name": CRONOS_LINEAGE_NAME,
+        "lineage_url": CRONOS_LINEAGE_URL,
+        "lineage_sha256": CRONOS_LINEAGE_SHA256,
+        "lineage_release": "Cronos v0.4",
+        "user_agent": "Tater-Cronos-Installer",
     },
 }
 

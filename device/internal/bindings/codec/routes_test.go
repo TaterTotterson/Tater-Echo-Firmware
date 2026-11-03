@@ -35,6 +35,7 @@ func TestInputGainsMatchEachTargetsPhysicalADCs(t *testing.T) {
 		"biscuit":  {"A", "B", "C", "D"},
 		"radar":    {"A", "B", "C", "D"},
 		"checkers": {"A"},
+		"cronos":   {"A"},
 		"crown":    {"A", "B"},
 		"athena":   {},
 		"rook":     {"A", "B"},
@@ -77,6 +78,7 @@ func TestInputGainsAreNotMixedIntoDAPMRoutes(t *testing.T) {
 		"biscuit":  Routes,
 		"radar":    RadarRoutes,
 		"checkers": CheckersRoutes,
+		"cronos":   CronosRoutes,
 		"crown":    CrownRoutes,
 		"athena":   AthenaRoutes,
 		"rook":     RookRoutes,
@@ -90,7 +92,7 @@ func TestInputGainsAreNotMixedIntoDAPMRoutes(t *testing.T) {
 }
 
 func TestEnsureRoutesWritesEveryTargetInputGain(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar", "checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook"} {
 		t.Run(target, func(t *testing.T) {
 			once = sync.Once{}
 			backend := &codecMixerFake{}

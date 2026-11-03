@@ -302,7 +302,7 @@ rook)
 	wifi_backend=techo5
 	active_probe=1
 	;;
-checkers|crown|athena)
+checkers|cronos|crown|athena)
 	role_backend=passive
 	wifi_backend=techo5
 	active_probe=0

@@ -55,8 +55,17 @@ var Checkers = &Board{
 	DeviceTypeID: "A4ZP7ZC4PI6TO",
 }
 
+// Cronos is the Echo Show 5 second generation (MT8163). Its product id was
+// read from /proc/idme/device_type_id on the hardware-validation unit while it
+// was in TWRP. Keep the vendor kernel's thermal policy until this enclosure's
+// sensors and cooling tables have been measured.
+var Cronos = &Board{
+	ID:           "cronos",
+	DeviceTypeID: "A1XWJRHALS1REP",
+}
+
 // Known is every board the firmware can identify.
-var Known = []*Board{Biscuit, Radar, Checkers}
+var Known = []*Board{Biscuit, Radar, Checkers, Cronos}
 
 // Detect returns the board beneath root, or nil when none matches. root is ""
 // on a device and a fixture directory in tests.

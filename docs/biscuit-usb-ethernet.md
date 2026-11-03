@@ -90,7 +90,7 @@ are `/usr/local/sbin/tater-net` and
 ## Every satellite image
 
 The same controller is installed and supervised on Biscuit, Radar, Checkers,
-Crown, Athena, and Rook. All six automatically use a USB NIC that the kernel has
+Cronos, Crown, Athena, and Rook. All seven automatically use a USB NIC that the kernel has
 already enumerated, after DHCP, route, and end-to-end path validation. A carrier,
 address, and default route are not enough: the controller also binds a TCP probe
 to the wired address and checks the paired Tater endpoint. Once paired, that
@@ -103,14 +103,15 @@ device status while the attached adapter is retried, and a recovered wired path
 automatically takes ownership again. Biscuit performs an active
 userspace role switch; Checkers and Crown use qualified physical OTG paths
 without a firmware role write; Athena uses its qualified mainline MTU3/GPIO OTG
-path; and Rook uses the qualified bounded MediaTek role backend. Radar remains
-passive so untested role or VBUS writes cannot break power, serial, recovery,
-or internal USB Wi-Fi.
+path; and Rook uses the qualified bounded MediaTek role backend. Radar and
+Cronos remain passive so untested role or VBUS writes cannot break power,
+serial, recovery, or internal USB Wi-Fi.
 
 Radar shares the Dot userspace but has no external USB port. Its barrel jack
 powers the device, while its internal USB pads expose D+/D-/GND; the adapter
 therefore needs external power. Checkers, Crown, Athena, and Rook completed
-their separate real-hardware RTL8152 gates. The independent records are in
+their separate real-hardware RTL8152 gates; Cronos still needs that gate. The
+independent records are in
 [`usb-ethernet-platforms.md`](usb-ethernet-platforms.md).
 
 ## Platform dependency

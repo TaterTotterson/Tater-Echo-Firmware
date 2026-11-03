@@ -37,10 +37,16 @@ const (
 // before opening a PCM. Logical volume remains 0..127 everywhere so Tater's
 // stored level does not change when the hardware codec does.
 type targetProfile struct {
-	playbackVolume string
-	playbackMax    int
-	speakerAmps    []ampControl
-	adcMute        []string
+	playbackVolume       string
+	playbackMax          int
+	playbackAlternatives []volumeControl
+	speakerAmps          []ampControl
+	adcMute              []string
+}
+
+type volumeControl struct {
+	name string
+	max  int
 }
 
 type ampControl struct {
@@ -99,6 +105,17 @@ var crownProfile = targetProfile{
 	},
 }
 
+var cronosProfile = targetProfile{
+	// Cronos was shipped with either a TAS5805M or MAX98396. Both are driven
+	// at unity by the vendor setup; Tater maps its stable logical volume onto
+	// whichever amplifier control the unit exposes.
+	playbackVolume:       "Master TAS5805m Playback Volume A",
+	playbackMax:          110,
+	playbackAlternatives: []volumeControl{{name: "Digital Volume A", max: 127}},
+	speakerAmps:          nil,
+	adcMute:              []string{"ADC_A Left Mute", "ADC_A Right Mute"},
+}
+
 var rookProfile = targetProfile{
 	playbackVolume: PlaybackVolume,
 	playbackMax:    127,
@@ -138,6 +155,10 @@ func ConfigureTarget(target string) {
 		activeProfile = crownProfile
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(target), "cronos") {
+		activeProfile = cronosProfile
+		return
+	}
 	if strings.EqualFold(strings.TrimSpace(target), "radar") {
 		activeProfile = radarProfile
 		return
@@ -158,6 +179,7 @@ func profile() targetProfile {
 	p := activeProfile
 	p.adcMute = append([]string(nil), activeProfile.adcMute...)
 	p.speakerAmps = append([]ampControl(nil), activeProfile.speakerAmps...)
+	p.playbackAlternatives = append([]volumeControl(nil), activeProfile.playbackAlternatives...)
 	targetMu.RUnlock()
 	return p
 }
@@ -175,8 +197,17 @@ func SetPlaybackLevel(level, logicalMax int) error {
 	if level > logicalMax {
 		level = logicalMax
 	}
-	raw := (level*p.playbackMax + logicalMax/2) / logicalMax
-	return Set(p.playbackVolume, strconv.Itoa(raw))
+	controls := append([]volumeControl{{name: p.playbackVolume, max: p.playbackMax}}, p.playbackAlternatives...)
+	var failures []string
+	for _, control := range controls {
+		raw := (level*control.max + logicalMax/2) / logicalMax
+		if err := Set(control.name, strconv.Itoa(raw)); err == nil {
+			return nil
+		} else {
+			failures = append(failures, err.Error())
+		}
+	}
+	return fmt.Errorf("%s", strings.Join(failures, "; "))
 }
 
 // GetPlaybackLevel reads the board codec and maps it back to Tater's stable
@@ -186,21 +217,31 @@ func GetPlaybackLevel(logicalMax int) (int, error) {
 	if logicalMax <= 0 {
 		return 0, fmt.Errorf("mixer: invalid logical volume maximum %d", logicalMax)
 	}
-	v, err := Get(p.playbackVolume)
+	controls := append([]volumeControl{{name: p.playbackVolume, max: p.playbackMax}}, p.playbackAlternatives...)
+	var v string
+	var selected volumeControl
+	var err error
+	for _, control := range controls {
+		v, err = Get(control.name)
+		if err == nil {
+			selected = control
+			break
+		}
+	}
 	if err != nil {
 		return 0, err
 	}
 	raw, err := strconv.Atoi(v)
 	if err != nil {
-		return 0, fmt.Errorf("mixer: %q returned %q: %w", p.playbackVolume, v, err)
+		return 0, fmt.Errorf("mixer: %q returned %q: %w", selected.name, v, err)
 	}
 	if raw < 0 {
 		raw = 0
 	}
-	if raw > p.playbackMax {
-		raw = p.playbackMax
+	if raw > selected.max {
+		raw = selected.max
 	}
-	return (raw*logicalMax + p.playbackMax/2) / p.playbackMax, nil
+	return (raw*logicalMax + selected.max/2) / selected.max, nil
 }
 
 // SetSpeakerEnabled applies every gate and polarity in the selected board's

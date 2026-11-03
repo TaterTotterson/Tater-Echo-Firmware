@@ -21,16 +21,18 @@ qualify a target.
 | Biscuit | `qualified` | MediaTek `/proc/mchange` | Shared power/data micro-USB; powered pass-through adapter required; built-in RTL8152 driver |
 | Radar | `hardware-validation` | MediaTek `/proc/mchange` candidate | Barrel-powered device; no external USB port; internal D+/D-/GND pads and externally powered adapter |
 | Checkers | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 5; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
+| Cronos | `hardware-validation` | MediaTek MUSB hardware OTG candidate | Separately powered Show 5 second generation; passive controller is installed, but adapter and fallback behavior require qualification |
 | Crown | `qualified` | MediaTek MUSB hardware OTG | Separately powered Show 8; physical OTG ID path, RTL8152 Ethernet, Wi-Fi fallback, and USB serial verified |
 | Athena | `qualified` | Mainline MediaTek MTU3 + GPIO OTG | Physical ID/VBUS path, RTL8152 Ethernet, Wi-Fi fallback, USB serial/RNDIS, OTA, factory reinstall, and recovery verified |
 | Rook | `qualified` | MediaTek `/proc/mchange` | Separately powered Spot; powered UCTRONICS B0B9ZLVGJ4 on the micro-USB data/OTG path, RTL8152, bounded forced-role switching, fallback, and serial verified |
 
-All six images start the controller automatically. Radar remains an
+All seven images start the controller automatically. Radar remains an
 unqualified passive candidate: if its kernel enumerates a supported USB NIC,
 the common policy can use it, but firmware performs no speculative role or VBUS
-write. Checkers, Crown, and Athena are passive in userspace, but their physical
-OTG signaling and automatic device-mode restoration are qualified independently
-on real hardware. Rook's stock dual-role sysfs files are intentionally read-only
+write. Cronos is also passive until its physical OTG path is validated.
+Checkers, Crown, and Athena are passive in userspace, but their physical OTG
+signaling and automatic device-mode restoration are qualified independently on
+real hardware. Rook's stock dual-role sysfs files are intentionally read-only
 and the tested powered adapter does not assert its physical ID pin. Its
 Tater kernel therefore exposes MediaTek `/proc/mchange` control and includes
 the RTL8152 driver, while the common controller uses the same bounded host
@@ -225,7 +227,9 @@ whose immutable kernel or root filesystem lacks the required controller.
 
 1. Treat Radar as an experimental internal hardware modification, not a normal
    external-port feature.
+2. Keep Cronos advertised as prepared, not supported, until its external port
+   passes the complete adapter, fallback, reboot, and serial-restoration gate.
 
 Biscuit completed its exact-kernel real-hardware release gate on 2026-10-29;
 Athena completed its independent gate on 2026-10-28; Checkers, Crown, and Rook
-completed theirs on 2026-10-27.
+completed theirs on 2026-10-27. Cronos validation is pending.

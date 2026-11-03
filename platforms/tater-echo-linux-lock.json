@@ -87,6 +87,13 @@
             "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-crown-baseline-boot.img",
             "sha256": "e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7"
           }
+        },
+        "cronos": {
+          "boot": {
+            "name": "tater-echo-cronos-baseline-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.1.0/tater-echo-cronos-baseline-boot.img",
+            "sha256": "7e9ce93a54fc613cbfab5d15929aa06bfd6f63c2c432d6f8261b3599fc3cd791"
+          }
         }
       }
     },

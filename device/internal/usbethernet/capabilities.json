@@ -28,6 +28,15 @@
       "recovery": "usb-serial",
       "reason": "Real-hardware RTL8152 enumeration, DHCP, sole-route Ethernet handoff, Wi-Fi fallback, reboot, OTA, SSH, and USB-serial restoration passed on Checkers."
     },
+    "cronos": {
+      "backend": "mediatek-musb-hardware-otg-candidate",
+      "detection": "hardware-id-passive",
+      "status": "hardware-validation",
+      "port": "external-micro-usb",
+      "power": "separate-device-power-vbus-validation-required",
+      "recovery": "usb-serial",
+      "reason": "Cronos has the same MediaTek passive OTG handoff path, but adapter enumeration, DHCP, Wi-Fi fallback, reboot, and USB-serial restoration still require qualification on real Cronos hardware."
+    },
     "crown": {
       "backend": "mediatek-musb-hardware-otg",
       "detection": "hardware-id-passive",

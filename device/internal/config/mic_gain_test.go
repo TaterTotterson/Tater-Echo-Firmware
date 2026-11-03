@@ -12,6 +12,7 @@ func TestMicGainDefaultsByTarget(t *testing.T) {
 		{target: "biscuit", want: 40},
 		{target: "radar", want: 40},
 		{target: "checkers", want: 28},
+		{target: "cronos", want: 28},
 		{target: "crown", want: 28},
 		{target: "athena", want: 28},
 		{target: "rook", want: 28},

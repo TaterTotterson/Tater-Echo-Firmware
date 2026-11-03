@@ -103,6 +103,20 @@ class BrandBootTests(unittest.TestCase):
         self.assertIn(b"Preparing your Crown for Tater", output["init"])
         self.assertNotIn(b"Preparing your Checkers for Tater", output["init"])
 
+    def test_cronos_rescue_screen_names_cronos(self):
+        original = entry("init", b"before\n" + brand.OLD_SCREEN + b"\n" + brand.OLD_CONSOLE + b"after\n")
+        original += entry("usr/local/bin/fbprobe", b"old renderer")
+        original += entry("TRAILER!!!", b"", 0)
+        arm_elf = b"\x7fELF\x01\x01" + b"\0" * 12 + b"\x28\x00" + b"new renderer"
+
+        result = brand.brand_boot(boot_image(original), arm_elf, "cronos")
+        kernel_size, _, ramdisk_size, _, _, _, _, page, _ = struct.unpack_from("<9I", result, 8)
+        ramdisk_at = page + brand.align(kernel_size, page)
+        output = files(lzma.decompress(result[ramdisk_at:ramdisk_at + ramdisk_size]))
+
+        self.assertIn(b"Preparing your Cronos for Tater", output["init"])
+        self.assertNotIn(b"Preparing your Checkers for Tater", output["init"])
+
     def test_theme_uses_tater_setup_colors(self):
         source = "\n".join(renderer.PALETTE) + "\n"
         with mock.patch.object(renderer, "SOURCE_SHA256", hashlib.sha256(source.encode()).hexdigest()):

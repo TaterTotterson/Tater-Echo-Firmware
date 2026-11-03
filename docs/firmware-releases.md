@@ -21,7 +21,8 @@ published artifact can be traced back to the complete platform input set.
 
 Every native `hello` reports `firmware_target`, alongside the existing Echo
 hardware identity. Tater uses that target key with `targets/targets.json`;
-current keys are `biscuit`, `radar`, `checkers`, `crown`, `athena`, and `rook`. A future model
+current keys are `biscuit`, `radar`, `checkers`, `cronos`, `crown`, `athena`,
+and `rook`. A future model
 receives its own target and factory installer even when its userspace binary
 can be shared.
 
@@ -35,7 +36,7 @@ upstream licenses and notices.
 Biscuit and Radar installers run in TWRP. They build the Linux recovery image
 locally from the unit's TWRP header and the pinned board kernel, preserve
 verified boot-critical backups and a restorable TWRP image, then install the
-A/B rootfs under cache. Checkers, Crown, and Rook use hash-pinned Tater Echo Linux
+A/B rootfs under cache. Checkers, Cronos, Crown, and Rook use hash-pinned Tater Echo Linux
 platform images and retain TWRP. Their USB installations use target-matched
 LineageOS packages only as the source of each unit's vendor driver tree, then
 replace Android's system partition with the A/B store. Athena instead uses
@@ -60,8 +61,9 @@ enters Tater Recovery over USB, then runs `install.sh --repair` to install the
 bundle into the inactive A/B root slot without clearing the satellite's
 settings. An explicit `--factory-reset` clears Wi-Fi and pairing too.
 
-Volume Up has one recovery meaning on all six targets: TWRP. Checkers, Crown,
-Athena, and Rook handle it in their native boot chain before Linux starts.
+Volume Up has one recovery meaning on all seven targets: TWRP. Checkers,
+Cronos, Crown, Athena, and Rook handle it in their native boot chain before
+Linux starts.
 Biscuit and Radar have no dependable bootloader shortcut, so a current factory
 install detects a continuous five-second hold during the first 90 seconds of
 Linux startup and enters a device-specific TWRP handoff that restores Linux to
@@ -91,7 +93,7 @@ inactive root slot. The established trial-boot health check commits the new
 slot or automatically returns to the previous one. System OTA never replaces
 the kernel, boot image, rescue environment, partition table, or device-specific
 vendor storage. It also never writes bootloader branding. The monochrome Tater
-boot logo is a guarded USB-factory step on Checkers, Crown, and Rook: the
+boot logo is a guarded USB-factory step on Checkers, Cronos, Crown, and Rook: the
 installer changes only a known logo slot in the verified `expdb` backup, reads
 the partition back, and
 restores the complete backup if verification fails. Unknown bootloader layouts
@@ -159,14 +161,15 @@ does not occur on an ordinary boot.
 | Biscuit | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
 | Radar | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
 | Checkers | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
+| Cronos | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
 | Crown | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
 | Athena | Reboots into the new trial slot | Commits in place; no additional confirmation reboot |
 | Rook | Reboots into the new trial slot | After five connected, healthy minutes, commits and restarts once more with read-only root/store mounts |
 
-Consequently, a successful Checkers, Crown, or Rook System OTA normally shows
-two reboots across the complete operation: one to activate the trial slot and
-one after the health commit. The second reboot is intentional and should not
-repeat after the slot is marked good.
+Consequently, a successful Checkers, Cronos, Crown, or Rook System OTA normally
+shows two reboots across the complete operation: one to activate the trial slot
+and one after the health commit. The second reboot is intentional and should
+not repeat after the slot is marked good.
 
 ## Manifest
 

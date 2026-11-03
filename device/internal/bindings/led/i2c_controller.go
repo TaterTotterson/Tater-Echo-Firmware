@@ -56,7 +56,7 @@ func ConfigureTarget(value string) {
 func screenOnly() bool {
 	targetMu.RLock()
 	defer targetMu.RUnlock()
-	return target == "checkers" || target == "crown" || target == "athena" || target == "rook"
+	return target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook"
 }
 
 type discardController struct{}

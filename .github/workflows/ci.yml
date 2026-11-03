@@ -60,6 +60,7 @@ jobs:
         run: |
           sh -n linux/dot/build_linux.sh
           sh -n linux/checkers/build_linux.sh
+          sh -n linux/checkers/build_btbridge_helper.sh
           sh -n linux/rook/build_linux.sh
           sh -n linux/dot/setup-ap.sh
           sh -n linux/dot/tater-net

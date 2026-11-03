@@ -26,14 +26,14 @@ const (
 )
 
 func main() {
-	target := flag.String("target", "", "firmware target (checkers, crown, or athena)")
+	target := flag.String("target", "", "firmware target (checkers, cronos, crown, or athena)")
 	level := flag.Int("level", 127, "logical codec level, 1..127; waveform amplitude remains bounded")
 	duration := flag.Duration("duration", 500*time.Millisecond, "tone duration, 100ms..2s")
 	frequency := flag.Float64("frequency", 660, "tone frequency in hertz, 100..2000")
 	flag.Parse()
 
-	if *target != "checkers" && *target != "crown" && *target != "athena" {
-		log.Fatal("refusing audible test: pass -target checkers, crown, or athena explicitly")
+	if *target != "checkers" && *target != "cronos" && *target != "crown" && *target != "athena" {
+		log.Fatal("refusing audible test: pass -target checkers, cronos, crown, or athena explicitly")
 	}
 	if os.Geteuid() != 0 {
 		log.Fatal("speaker smoke test must run as root")

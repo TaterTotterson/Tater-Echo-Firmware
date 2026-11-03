@@ -64,7 +64,7 @@ missing or incompatible model/runtime disables local wake without preventing
 the rest of the satellite from booting.
 
 Trainer bundles can include microWakeWord, an independent openWakeWord ONNX
-classifier, and NanoWakeWord CNN/GRU classifiers. All six Echo targets use the
+classifier, and NanoWakeWord CNN/GRU classifiers. All seven Echo targets use the
 same pinned Linux/musl ARMv7 ONNX Runtime/XNNPACK path. OWW TFLite is not part
 of the release contract.
 
@@ -126,24 +126,26 @@ The seven-mic capture, hardware playback reference, two-lane beamformed wake
 frontend, seven-microphone steered speech beam, and audio boundaries are documented in
 [`biscuit-hardware.md`](biscuit-hardware.md).
 
-### Checkers and Crown
+### Checkers, Cronos, and Crown
 
-Checkers and Crown run a native Alpine rootfs on target-matched, pinned TECHO5
+Checkers, Cronos, and Crown run a native Alpine rootfs on target-matched, pinned TECHO5
 kernel/rescue platforms. Tater owns audio and BLE directly; `tater-show` owns
 framebuffer and touch, and a loopback-only camera helper owns the MediaTek ISP.
 The former system partition is an A/B rootfs store, persistent Tater state
 remains on userdata, and TWRP stays in recovery.
 
-Checkers' two live microphone channels are level-calibrated and coherently
-combined. Its two following capture channels are playback loopbacks; the first
-becomes the frame-aligned AEC reference after runtime silence/playback proof.
-Crown uses four microphones and four steering directions. Their
+Checkers and Cronos each expose two live microphone channels followed by two
+playback-loopback channels. The live channels are coherently combined and the
+first proven loopback becomes the frame-aligned AEC reference. Cronos retains
+its separate TAS5805M/MAX98396 speaker controls and GPIO privacy latch rather
+than borrowing Checkers' RT5616 route. Crown uses four microphones and four
+steering directions. Their
 winning beam and pre-roll carry through verification, training, and STT.
 Continued chat acquires from the user's speech onset, then freezes steering so
 competing dialogue cannot pull pickup toward a new direction.
 
-See [`checkers.md`](checkers.md), [`crown.md`](crown.md), and their matching
-factory installer guides.
+See [`checkers.md`](checkers.md), [`cronos.md`](cronos.md),
+[`crown.md`](crown.md), and their matching factory installer guides.
 
 ### Athena
 
@@ -226,8 +228,8 @@ mixed firmware versions can remain online during rollout.
 
 ### Native display dashboard
 
-Checkers, Crown, and Athena share one responsive dashboard renderer sized for
-their rectangular panels. Rook uses a dedicated round-safe 480×480 layout with
+Checkers, Cronos, Crown, and Athena share one responsive dashboard renderer
+sized for their rectangular panels. Rook uses a dedicated round-safe 480×480 layout with
 a large centered clock and weather hero, larger room readings, and the
 assistant's live state beside the room name. Every screen target keeps Tater's
 selected display theme and provides Home, Climate, Music, Voice, Sat Chat,
@@ -237,7 +239,7 @@ satellite UI.
 Each screen satellite advertises display power-management version 1. Its Tater
 popup can set manual brightness, enable smoothed ambient-light auto brightness,
 choose the automatic floor, and schedule a daily dim, red-clock, or screen-off
-night window. Checkers and Crown read the vendor JSA1214 input, Athena converts
+night window. Checkers, Cronos, and Crown read the vendor ALS input, Athena converts
 the mainline TCS3400 color channels to lux, and Rook reads its OPT3001 IIO lux
 channel. Sensor failure falls back to the selected manual brightness. Rook's
 daytime mapping retains its measured readable backlight floor; its scheduled

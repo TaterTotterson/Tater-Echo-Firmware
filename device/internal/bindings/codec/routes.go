@@ -101,6 +101,7 @@ var (
 	biscuitInputGains  = adcInputGains("A", "B", "C", "D")
 	radarInputGains    = adcInputGains("A", "B", "C", "D")
 	checkersInputGains = adcInputGains("A")
+	cronosInputGains   = adcInputGains("A")
 	crownInputGains    = adcInputGains("A", "B")
 	rookInputGains     = adcInputGains("A", "B")
 )
@@ -111,6 +112,8 @@ func inputGainsForTarget(target string) []Write {
 		return radarInputGains
 	case "checkers":
 		return checkersInputGains
+	case "cronos":
+		return cronosInputGains
 	case "crown":
 		return crownInputGains
 	case "rook":
@@ -185,6 +188,19 @@ var CheckersRoutes = []Write{
 	{"LOUT MIX OUTVOL R Switch", "1"},
 	{"OUT Channel Switch", "1"},
 	{"OUT Playback Switch", "1"},
+}
+
+// Cronos keeps the amplifier path configured by its kernel. It has the same
+// AIC3101 microphone converter and four-channel mic-plus-loopback frame as
+// Checkers, but its speaker is either a MAX98396 or TAS5805M rather than the
+// RT5616/GPIO path used by Checkers.
+var CronosRoutes = []Write{
+	{"ADC_A Left Ip Select ADC_A DIF1_L switch", "1"},
+	{"ADC_A Right Ip Select ADC_A DIF1_R switch", "1"},
+	{"ADC_A MICPGA Volume Ctrl", "40"},
+	{"ADC_A Left Mute", "Off"},
+	{"ADC_A Right Mute", "Off"},
+	{"SpiTimeStamps", "Off"},
 }
 
 // CrownRoutes is the Echo Show 8 first-generation path measured by TECHO5 on
@@ -285,6 +301,9 @@ func EnsureRoutes(target string) {
 		} else if strings.EqualFold(strings.TrimSpace(target), "checkers") {
 			routes = CheckersRoutes
 			total = len(routes)
+		} else if strings.EqualFold(strings.TrimSpace(target), "cronos") {
+			routes = CronosRoutes
+			total = len(routes)
 		} else if strings.EqualFold(strings.TrimSpace(target), "crown") {
 			routes = CrownRoutes
 			total = len(routes)
@@ -304,6 +323,11 @@ func EnsureRoutes(target string) {
 			} else {
 				log.Printf("[codec] Radar flat speaker filter applied")
 			}
+		}
+		if strings.EqualFold(strings.TrimSpace(target), "cronos") {
+			// MAX98396 units boot in a heavily power-limited safe mode. TAS5805M
+			// units do not expose this control, so absence is expected.
+			_ = mixer.Set("Speaker Safe Mode A", "0")
 		}
 		for _, w := range routes {
 			if err := mixer.Set(w.Name, w.Value); err != nil {

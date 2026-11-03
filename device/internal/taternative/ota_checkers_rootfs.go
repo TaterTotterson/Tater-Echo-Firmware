@@ -216,7 +216,7 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 	}
 	required := []string{"tater-echo"}
 	optional := map[string]bool{}
-	if target == "checkers" || target == "crown" || target == "athena" || target == "rook" {
+	if target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook" {
 		required = append(required, "tater-show")
 		optional["tater-camera"] = true
 		optional["tater-ffmpeg"] = true

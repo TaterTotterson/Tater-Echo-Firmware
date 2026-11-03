@@ -362,16 +362,16 @@ func CapabilitiesForTarget(target string) map[string]any {
 	capabilities := DefaultCapabilities()
 	target = strings.ToLower(strings.TrimSpace(target))
 	switch target {
-	case "biscuit", "radar", "checkers", "crown", "athena", "rook":
+	case "biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook":
 		capabilities["output_chain"] = true
 		capabilities["ssh_management"] = true
 		capabilities["ssh_management_version"] = 1
 		capabilities["system_ota_version"] = 1
 	}
-	if target == "checkers" || target == "crown" || target == "athena" || target == "rook" {
-		// Checkers and Crown own /dev/stpbt directly, while Athena and Rook use
-		// the BlueZ backend already responsible for hci0. Server startup removes
-		// these claims if the selected backend cannot attach.
+	if target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook" {
+		// Checkers and Crown own /dev/stpbt directly, while Cronos, Athena, and
+		// Rook use the BlueZ backend already responsible for hci0. Server startup
+		// removes these claims if the selected backend cannot attach.
 		capabilities["led_ring"] = false
 		capabilities["ota"] = true
 		// Version 2 accepts the pinned video decoder in addition to the version
@@ -393,7 +393,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 			capabilities["screen_video_transcode_profile"] = "echo_rook_480p"
 			capabilities["screen_video_width"] = 480
 			capabilities["screen_video_height"] = 480
-		case "checkers":
+		case "checkers", "cronos":
 			capabilities["screen_video_transcode_profile"] = "echo_checkers_480p"
 			capabilities["screen_video_width"] = 960
 			capabilities["screen_video_height"] = 480
@@ -416,7 +416,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 		if target == "crown" || target == "athena" {
 			capabilities["screen_last_event"] = true
 		}
-		if target == "checkers" || target == "crown" || target == "athena" || target == "rook" {
+		if target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook" {
 			capabilities["camera_snapshot"] = true
 			capabilities["camera_snapshot_version"] = 1
 			capabilities["camera_stream"] = true

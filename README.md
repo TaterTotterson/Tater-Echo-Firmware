@@ -27,6 +27,7 @@ installer on a similar-looking Echo from another generation.
 | Echo Dot 2nd Generation (2016), RS03QR | `biscuit` | amonet-biscuit v2.0.0 | Tater Linux | Yes | Yes |
 | Echo 2nd Generation (2017), XC56PY | `radar` | amonet-radar v1.0.0 | Tater Linux | Yes | Yes |
 | Echo Show 5 1st Generation (2019), H23K37 | `checkers` | amonet-checkers v2.0.1+ | Tater Linux | Yes | Yes |
+| Echo Show 5 2nd Generation (2021), C76N8S | `cronos` | amonet-cronos v2.0.1 | Tater Linux | Validation | Validation |
 | Echo Show 8 1st Generation (2019), C7H6N3 | `crown` | amonet-crown v2.0.1+ | Tater Linux | Yes | Yes |
 | Echo Show 8 2nd Generation (2021), A8H3N2 | `athena` | saiyaku-athena, Fire OS 7080 | Tater Linux | Yes | Yes |
 | Echo Spot 1st Generation (2017), VN94DQ | `rook` | amonet-rook v2.0.0 | Tater Linux | Yes | Yes |
@@ -40,29 +41,29 @@ Target metadata used by Tater and the release builds lives in
   can use the tested powered adapter for a single-cable PoE-style power and
   network connection.
 - Sat Chat audio and video calls from satellite to satellite and from Tater on
-  a phone to a satellite. Checkers, Crown, Athena, and Rook support audio and video;
-  Biscuit and Radar participate in audio calls.
+  a phone to a satellite. Checkers, Cronos, Crown, Athena, and Rook support
+  audio and video; Biscuit and Radar participate in audio calls.
 - On-device microWakeWord, openWakeWord, or NanoWakeWord CNN/GRU detection,
   including MWW + OWW and MWW + NWW confirmation modes, built-in or custom
   wake bundles, live sensitivity, and room-environment profiles managed from
   Tater.
 - Hardware-appropriate microphone processing, echo cancellation, and
-  beamforming: seven microphones on Biscuit and Radar, two on Checkers, and
-  four on Crown, Athena, and Rook.
+  beamforming: seven microphones on Biscuit and Radar, two on Checkers and
+  Cronos, and four on Crown, Athena, and Rook.
 - Continued conversation, playback barge-in, room intercom, announcements,
   wake sounds, mute, volume, and wake-audio training samples.
 - Per-satellite Do Not Disturb with an immediate toggle and daily local-time
   schedule. DND stops music, announcements, wake sounds, and other remote
   playback while leaving wake detection and safety-critical timers/alarms active.
 - Local timers and alarms with spoken `Stop`, physical action-button controls,
-  and on-screen Stop controls on Checkers, Crown, Athena, and Rook.
+  and on-screen Stop controls on Checkers, Cronos, Crown, Athena, and Rook.
 - Sendspin multi-room and stereo-pair playback with synchronized PCM/FLAC,
   native TTS overlays, audio scenes, music ducking, and persistent output
   channel selection.
-- Native Checkers, Crown, Athena, and Rook photo dashboards with bundled landscapes or
+- Native Checkers, Cronos, Crown, Athena, and Rook photo dashboards with bundled landscapes or
   user wallpapers, weather and room sensors, music, timers, Awareness
   notifications, configurable themes, and live assistant status.
-- Touch access on Checkers, Crown, Athena, and Rook to Sat Chat, integration-backed
+- Touch access on Checkers, Cronos, Crown, Athena, and Rook to Sat Chat, integration-backed
   thermostat controls, and Room Vision camera and doorbell feeds. Integration
   HLS and UniFi Protect RTSPS use the pinned FFmpeg decoder, Tater Echo cameras
   use the native MJPEG relay, and all retain automatic JPEG fallback and optional
@@ -89,7 +90,8 @@ using it requires a permanent internal USB hardware modification.
 Similar powered USB Ethernet adapters may also work, but only the adapter linked
 above has been tested. See
 [`docs/usb-ethernet-platforms.md`](docs/usb-ethernet-platforms.md) for technical
-details and per-device test results.
+details and per-device test results. Cronos includes the passive controller but
+remains unqualified until this adapter path is tested on real hardware.
 
 ## Before you install
 
@@ -103,7 +105,7 @@ details and per-device test results.
 > verified A/B OTA flow with automatic rollback.
 
 > [!NOTE]
-> On Checkers, Crown, Athena, and Rook, hold Volume Up while the satellite
+> On Checkers, Cronos, Crown, Athena, and Rook, hold Volume Up while the satellite
 > starts to enter TWRP.
 >
 > **Pre-v4 Biscuit and Radar:**
@@ -207,7 +209,7 @@ an extracted Biscuit or Radar factory archive when a system repair is needed.
 > A factory install or System OTA reboots Biscuit into a trial root-system
 > slot. After the health check passes, Biscuit commits that slot in place; it
 > does not perform the additional five-minute confirmation restart used by
-> Checkers, Crown, and Rook. Routine application OTA and ordinary boots do not
+> Checkers, Cronos, Crown, and Rook. Routine application OTA and ordinary boots do not
 > trigger that root-slot confirmation behavior.
 
 ## Install Radar — Echo 2
@@ -260,7 +262,7 @@ enter Tater Recovery. See the shared
 > A factory install or System OTA reboots Radar into a trial root-system slot.
 > After the health check passes, Radar commits that slot in place; it does not
 > perform the additional five-minute confirmation restart used by Checkers,
-> Crown, and Rook. Routine application OTA and ordinary boots do not trigger
+> Cronos, Crown, and Rook. Routine application OTA and ordinary boots do not trigger
 > that root-slot confirmation behavior.
 
 ## Install Checkers — Echo Show 5
@@ -303,6 +305,38 @@ USB provisioning, checksum, and recovery instructions.
 > read-only. A System OTA therefore has its activation reboot followed by this
 > one confirmation restart. Ordinary boots and application-only OTA do not
 > trigger the delayed root-slot restart.
+
+## Install Cronos — Echo Show 5 (2nd Gen)
+
+Cronos support is for the 2021 Echo Show 5 **2nd Generation** (`cronos`), model
+**C76N8S**. Start with that exact model, unlocked with amonet-cronos v2.0.1 and
+booted into TWRP. See the
+[Cronos unlock guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/).
+
+Cronos is currently a hardware-validation target. Use the development factory
+bundle only while participating in bring-up; do not use the Checkers archive.
+
+1. Download and extract `tater-echo-cronos-<version>-factory.tar.gz`.
+2. Boot Cronos into TWRP, connect a USB data cable, and keep external power on.
+3. Verify the bundle and run the installer:
+
+   ```bash
+   ./install.sh --verify-bundle
+   ./install.sh
+   ```
+
+4. On a new/reset unit, join `Tater-Setup-XXXX` and complete the setup page.
+
+The installer verifies that the attached device reports `cronos`, downloads
+and verifies the pinned Cronos LineageOS 18.1 v0.4 driver baseline, installs
+the Tater Linux A/B system, and preserves the dedicated TWRP recovery
+partition. See [`factory/cronos-linux`](factory/cronos-linux/README.md).
+
+> [!NOTE]
+> A factory install or System OTA reboots Cronos into a trial root-system
+> slot. After five connected, healthy minutes, Cronos commits the slot and
+> restarts once more with read-only root/store mounts. Routine application OTA
+> and ordinary boots do not trigger that confirmation restart.
 
 ## Install Crown — Echo Show 8 (1st Gen)
 
@@ -381,7 +415,7 @@ preserved by default; `--factory-reset` starts clean. See
 > A factory install or System OTA reboots Athena into a trial root-system slot.
 > After the connected health check passes, Athena commits that slot in place;
 > it does not perform the additional five-minute confirmation restart used by
-> Checkers, Crown, and Rook. Routine application OTA and ordinary boots do not
+> Checkers, Cronos, Crown, and Rook. Routine application OTA and ordinary boots do not
 > trigger that root-slot confirmation behavior.
 
 ## Install Rook — Echo Spot
@@ -438,10 +472,10 @@ enters Tater Recovery, repair its inactive root slot with
 preserves Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
 only when those settings should also be cleared.
 
-All six Echo targets support entering TWRP with **Volume Up**. Checkers, Crown,
-Athena, and Rook handle the button in their native boot chain before Linux
-starts. Biscuit and Radar have no dependable bootloader shortcut, so a current
-factory install detects an uninterrupted five-second hold during the first 90
+All seven Echo targets support entering TWRP with **Volume Up**. Checkers,
+Cronos, Crown, Athena, and Rook handle the button in their native boot chain
+before Linux starts. Biscuit and Radar have no dependable bootloader shortcut,
+so a current factory install detects an uninterrupted five-second hold during the first 90
 seconds of Linux startup and enters its device-specific TWRP handoff. Linux is
 restored to their shared recovery partition while TWRP runs from RAM, so the
 next reboot returns to Linux. There is no longer a Volume Up route to Tater
@@ -464,14 +498,14 @@ The factory path is also the only path that applies the guarded boot-logo work.
 
 After the v4.0.0 factory installation, use Tater's normal satellite updater for
 compatible releases. Biscuit and Radar stage their daemon in A/B application
-slots; Checkers, Crown, Athena, and Rook stage the daemon and native display
+slots; Checkers, Cronos, Crown, Athena, and Rook stage the daemon and native display
 together. Tater can then stage a verified rootfs in the inactive Linux slot.
 Failed application or rootfs health checks roll back to their preceding working
 slots. Kernel, boot, rescue, partition-layout, and bootloader-logo updates still
 require the matching USB factory/recovery archive; they are intentionally not
 System OTA payloads.
 
-Checkers, Crown, and Rook apply the monochrome Tater boot logo only through
+Checkers, Cronos, Crown, and Rook apply the monochrome Tater boot logo only through
 guarded, verified USB factory steps. Athena never patches its protected
 bootloader; its factory-built system store safely paints the Tater mark at the
 first Linux framebuffer stage, so a brief Amazon frame can remain immediately
@@ -485,16 +519,18 @@ after power-on. Unsupported or unknown layouts retain Amazon's logo.
 | `tater-echo-radar-vX.Y.Z-ota.tar.gz` | Radar application OTA |
 | `tater-echo-checkers-vX.Y.Z-factory.tar.gz` | Complete Checkers USB conversion |
 | `tater-echo-checkers-vX.Y.Z-ota.tar.gz` | Checkers application OTA |
+| `tater-echo-cronos-vX.Y.Z-factory.tar.gz` | Complete Cronos USB conversion |
+| `tater-echo-cronos-vX.Y.Z-ota.tar.gz` | Cronos application OTA |
 | `tater-echo-crown-vX.Y.Z-factory.tar.gz` | Complete Crown USB conversion |
 | `tater-echo-crown-vX.Y.Z-ota.tar.gz` | Crown application OTA |
 | `tater-echo-athena-vX.Y.Z-factory.tar.gz` | Complete Athena USB conversion |
 | `tater-echo-athena-vX.Y.Z-ota.tar.gz` | Athena application OTA |
 | `tater-echo-rook-vX.Y.Z-factory.tar.gz` | Complete Rook USB conversion |
 | `tater-echo-rook-vX.Y.Z-ota.tar.gz` | Rook application OTA |
-| `tater-echo-TARGET-vX.Y.Z-system-ota.tar.gz` | Target-matched Tater Linux rootfs OTA for any of the six satellites |
+| `tater-echo-TARGET-vX.Y.Z-system-ota.tar.gz` | Target-matched Tater Linux rootfs OTA for any of the seven satellites |
 | `firmware-manifest.json` | Version, compatibility, filename, size, and SHA-256 metadata used by Tater |
 
-An annotated `vX.Y.Z` tag builds all six targets and publishes the shared
+An annotated `vX.Y.Z` tag builds all seven targets and publishes the shared
 manifest and checksums. See [`docs/firmware-releases.md`](docs/firmware-releases.md)
 for the complete release and OTA contract.
 
@@ -534,6 +570,8 @@ Technical references:
   Radar Linux installation and recovery contract
 - [`docs/checkers.md`](docs/checkers.md) — Checkers hardware and native Linux
   integration
+- [`docs/cronos.md`](docs/cronos.md) — Cronos hardware contract and validation
+  checklist
 - [`docs/crown.md`](docs/crown.md) — Crown hardware assumptions and first-unit
   validation checklist
 - [`docs/athena.md`](docs/athena.md) — Athena mainline hardware contract and

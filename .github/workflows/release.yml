@@ -266,6 +266,9 @@ jobs:
           - target: checkers
             name: Echo Show 5 (checkers)
             boot_name: tater-echo-checkers-baseline-boot.img
+          - target: cronos
+            name: Echo Show 5 2nd Gen (cronos)
+            boot_name: tater-echo-cronos-baseline-boot.img
           - target: crown
             name: Echo Show 8 1st Gen (crown)
             boot_name: tater-echo-crown-baseline-boot.img
@@ -323,6 +326,7 @@ jobs:
             factory/recovery_install.py \
             factory/to_recovery.py \
             factory/to_twrp.py
+          sh -n linux/checkers/build_btbridge_helper.sh
           cd device
           go test -race \
             ./cmd/tater-show-linux \
@@ -339,7 +343,10 @@ jobs:
             ./internal/beamformer \
             ./internal/recovery \
             ./internal/bindings/buttons \
+            ./internal/bindings/codec \
             ./internal/bindings/mixer \
+            ./internal/bindings/privacy \
+            ./internal/bindings/speaker \
             ./pkg/board
 
       - name: Fetch pinned wake models
@@ -825,6 +832,12 @@ jobs:
           name: tater-echo-crown-${{ steps.version.outputs.version }}
           path: staging/crown
 
+      - name: Download Cronos artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tater-echo-cronos-${{ steps.version.outputs.version }}
+          path: staging/cronos
+
       - name: Download Athena artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -844,6 +857,7 @@ jobs:
             staging/biscuit/firmware-manifest.json \
             staging/radar/firmware-manifest.json \
             staging/checkers/firmware-manifest.json \
+            staging/cronos/firmware-manifest.json \
             staging/crown/firmware-manifest.json \
             staging/athena/firmware-manifest.json \
             staging/rook/firmware-manifest.json

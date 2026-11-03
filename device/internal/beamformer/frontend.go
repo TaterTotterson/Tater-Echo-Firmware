@@ -60,7 +60,7 @@ func NewForTarget(target string) FrontEnd {
 	if strings.EqualFold(strings.TrimSpace(target), "athena") {
 		return NewAthena()
 	}
-	if strings.EqualFold(strings.TrimSpace(target), "checkers") {
+	if strings.EqualFold(strings.TrimSpace(target), "checkers") || strings.EqualFold(strings.TrimSpace(target), "cronos") {
 		return NewCheckers()
 	}
 	if strings.EqualFold(strings.TrimSpace(target), "crown") || strings.EqualFold(strings.TrimSpace(target), "rook") {

@@ -69,7 +69,7 @@ func TestTargetFrontEndsStayDistinct(t *testing.T) {
 	if _, ok := NewForTarget("crown").(*RookFrontEnd); !ok {
 		t.Fatal("crown did not get four-microphone/six-channel front end")
 	}
-	for _, target := range []string{"biscuit", "radar", "rook", "checkers", "crown"} {
+	for _, target := range []string{"biscuit", "radar", "rook", "checkers", "cronos", "crown"} {
 		if _, ok := NewForTarget(target).(WakeArray); !ok {
 			t.Fatalf("%s did not expose its independent wake beams", target)
 		}

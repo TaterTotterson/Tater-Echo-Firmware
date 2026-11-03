@@ -36,7 +36,7 @@ func TestStartupGestureWindow(t *testing.T) {
 }
 
 func TestScreenTargetsDoNotRetainLinuxSideRecoveryGesture(t *testing.T) {
-	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
 		if _, err := StartupTWRPCommand(target); err == nil {
 			t.Fatalf("%s unexpectedly retained a Linux-side recovery gesture", target)
 		}

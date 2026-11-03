@@ -70,7 +70,7 @@ func EnsureReleaseCompanionRuntime(parent context.Context, target, version strin
 		return false, nil
 	}
 	switch target {
-	case "biscuit", "radar", "checkers", "crown", "athena", "rook":
+	case "biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook":
 	default:
 		return false, fmt.Errorf("microwakeword: unsupported release runtime target %q", target)
 	}

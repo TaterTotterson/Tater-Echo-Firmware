@@ -25,7 +25,7 @@ from tools import platform_lock  # noqa: E402
 
 TARGETS = REPO / "targets" / "targets.json"
 LINUX_DOT_TARGETS = {"biscuit", "radar"}
-LINUX_SHOW_TARGETS = {"checkers", "crown"}
+LINUX_SHOW_TARGETS = {"checkers", "cronos", "crown"}
 LINUX_ATHENA_TARGETS = {"athena"}
 ELFCLASS32 = 1
 ELFCLASS64 = 2
@@ -393,6 +393,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             )
             default_boot = {
                 "checkers": REPO / "linux/checkers/inputs/tater-echo-checkers-baseline-boot.img",
+                "cronos": REPO / "linux/checkers/inputs/tater-echo-cronos-baseline-boot.img",
                 "crown": REPO / "linux/checkers/inputs/tater-echo-crown-baseline-boot.img",
             }[target]
             boot_source = (
@@ -403,8 +404,11 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 "install.sh": (REPO / "factory/checkers-linux/install.sh", 0o755),
                 "install.py": (REPO / "factory/checkers-linux/install.py", 0o755),
                 "README.md": (
-                    REPO / ("factory/checkers-linux/README.md" if target == "checkers"
-                            else "factory/crown-linux/README.md"), 0o644),
+                    REPO / ({
+                        "checkers": "factory/checkers-linux/README.md",
+                        "cronos": "factory/cronos-linux/README.md",
+                        "crown": "factory/crown-linux/README.md",
+                    }[target]), 0o644),
                 "LICENSE": (REPO / "LICENSE", 0o644),
                 "NOTICE.md": (REPO / "NOTICE.md", 0o644),
                 "payload/rootfs.tar.gz": (rootfs_source, 0o644),

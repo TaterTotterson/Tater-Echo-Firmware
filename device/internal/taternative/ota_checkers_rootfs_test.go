@@ -86,7 +86,7 @@ func linuxAppBundleWithVersionAndExtras(t *testing.T, target, baseOS, version st
 		"tater-echo": []byte("\x7fELFdaemon"),
 	}
 	orderedFiles := []string{"tater-echo"}
-	if target == "checkers" || target == "crown" || target == "athena" || target == "rook" {
+	if target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook" {
 		files["tater-show"] = []byte("\x7fELFrenderer")
 		orderedFiles = append(orderedFiles, "tater-show")
 	}

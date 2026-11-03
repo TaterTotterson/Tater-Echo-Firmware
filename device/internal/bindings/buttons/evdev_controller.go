@@ -281,6 +281,20 @@ func NewButtonControllerForTarget(target string) (*EvDevController, error) {
 		// in the GPIO boot log is not this control.
 		controller.muteCode = 116
 		controller.stopAceButton = false
+	} else if strings.EqualFold(strings.TrimSpace(target), "cronos") {
+		data, err := os.ReadFile("/proc/bus/input/devices")
+		if err != nil {
+			return nil, err
+		}
+		mutePath := inputPathByName(data, "gpio-privacy-button")
+		volumePath := inputPathByName(data, "gpio-keys")
+		if mutePath == "" || volumePath == "" {
+			return nil, errors.New("cronos gpio-privacy-button or gpio-keys input device not found")
+		}
+		controller.dotPath, controller.volumePath = mutePath, volumePath
+		controller.actionCode = 0 // touchscreen hold handles intercom
+		controller.muteCode = 116 // KEY_POWER from the privacy button node
+		controller.stopAceButton = false
 	} else if strings.EqualFold(strings.TrimSpace(target), "athena") {
 		data, err := os.ReadFile("/proc/bus/input/devices")
 		if err != nil {

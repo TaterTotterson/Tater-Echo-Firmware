@@ -463,7 +463,7 @@ func NewForTarget(target string) *Canceller {
 	if target == "athena" {
 		return newWithPaths(2, 1)
 	}
-	if target == "checkers" {
+	if target == "checkers" || target == "cronos" {
 		return newWithPaths(3, 2)
 	}
 	if target == "crown" || target == "rook" {

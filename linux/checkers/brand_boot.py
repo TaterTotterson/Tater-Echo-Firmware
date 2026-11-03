@@ -32,6 +32,11 @@ BASES = {
         "TECHO5 Crown v1.0.1",
         "your Crown",
     ),
+    "cronos": (
+        SHOW_TARGETS["cronos"]["boot"]["sha256"],
+        "TECHO5 Cronos v0.7.16",
+        "your Cronos",
+    ),
 }
 MAGIC = b"070701"
 OLD_SCREEN = b'''# Panel: the test screen with the clock ticking, as proof of life.

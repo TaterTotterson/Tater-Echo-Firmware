@@ -8,7 +8,7 @@ by Tater Echo Firmware:
 | Tater Linux directory | Upstream history | Boards |
 |---|---|---|
 | `platforms/dot/` | `HuskerMinion/techo5-dot` | Biscuit, Radar |
-| `platforms/show/` | `HuskerMinion/techo5` | Checkers, Crown, Athena |
+| `platforms/show/` | `HuskerMinion/techo5` | Checkers, Cronos, Crown, Athena |
 | `platforms/spot/` | `HuskerMinion/techo5-spot` | Rook |
 
 All three upstream projects are MIT-licensed. Their license files, copyright
@@ -35,8 +35,8 @@ Completed:
   The Dot family uses a Tater-owned commit based directly on the pinned
   `dot-v1.0.24` source; Show retains its exact imported baseline commits until
   its replacement artifacts are reproduced.
-- Added a six-target manifest and validation workflow covering Biscuit, Radar,
-  Checkers, Crown, Athena, and Rook.
+- Added a seven-target manifest and validation workflow covering Biscuit,
+  Radar, Checkers, Cronos, Crown, Athena, and Rook.
 - Built and published separately hashed Biscuit and Radar kernels from the
   pinned Tater Dot source as the `dot-kernel-v1.0.1` prerelease. The kernels
   retain generic CDC-ECM and add the built-in RTL8152 driver required by the

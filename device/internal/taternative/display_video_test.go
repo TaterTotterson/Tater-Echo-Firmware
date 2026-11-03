@@ -20,7 +20,7 @@ func TestDecodeDisplayVideoBoundsPlaybackProfile(t *testing.T) {
 }
 
 func TestScreenTargetsAdvertiseFullscreenVideo(t *testing.T) {
-	for _, target := range []string{"checkers", "crown", "athena", "rook"} {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
 		got := CapabilitiesForTarget(target)
 		if got["screen_video_playback"] != true || got["screen_video_playback_version"] != 1 {
 			t.Fatalf("%s fullscreen video capabilities = %#v", target, got)
@@ -31,6 +31,9 @@ func TestScreenTargetsAdvertiseFullscreenVideo(t *testing.T) {
 	}
 	if got := CapabilitiesForTarget("checkers")["screen_video_transcode_profile"]; got != "echo_checkers_480p" {
 		t.Fatalf("Checkers profile = %#v", got)
+	}
+	if got := CapabilitiesForTarget("cronos")["screen_video_transcode_profile"]; got != "echo_checkers_480p" {
+		t.Fatalf("Cronos transcode profile = %#v", got)
 	}
 	if got := CapabilitiesForTarget("athena")["screen_video_transcode_profile"]; got != "echo_show_720p" {
 		t.Fatalf("Athena profile = %#v", got)

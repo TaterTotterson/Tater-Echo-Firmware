@@ -38,7 +38,7 @@ connection. On networks where that address is not directly reachable, use the
 router's DHCP lease for the satellite instead.
 
 The image hostname is `tater-biscuit`, `tater-radar`, `tater-checkers`,
-`tater-crown`, `tater-athena`, or `tater-rook`. A router may make that hostname
+`tater-cronos`, `tater-crown`, `tater-athena`, or `tater-rook`. A router may make that hostname
 resolvable, but Tater Linux does not currently promise `.local` discovery, so
 the current address is the reliable first test.
 

@@ -257,7 +257,7 @@ func TestEmbeddedPhotoHomeAssetsCoverBothScreens(t *testing.T) {
 	for _, target := range []struct {
 		name          string
 		width, height int
-	}{{"checkers", 960, 480}, {"crown", 1280, 800}, {"athena", 1280, 800}, {"rook", 1280, 800}} {
+	}{{"checkers", 960, 480}, {"cronos", 960, 480}, {"crown", 1280, 800}, {"athena", 1280, 800}, {"rook", 1280, 800}} {
 		for index := 0; index < defaultWallpaperCount(); index++ {
 			picture, identity, loadErr := readDefaultWallpaper(target.name, index)
 			if loadErr != nil {

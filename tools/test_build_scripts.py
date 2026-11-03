@@ -309,16 +309,19 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn('./usr/bin/arecord', build_script)
         self.assertIn('linuxCapture: platform.Base() == platform.TaterLinux', mic)
 
-    def test_release_builds_both_tater_show_targets(self) -> None:
+    def test_release_builds_all_shared_tater_show_targets(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         show_job = workflow.split("\n  checkers:\n", 1)[1].split("\n  rook:\n", 1)[0]
         self.assertIn("- target: checkers", show_job)
+        self.assertIn("- target: cronos", show_job)
+        self.assertIn("tater-echo-cronos-baseline-boot.img", show_job)
         self.assertIn("- target: crown", show_job)
         self.assertIn("tater-echo-crown-baseline-boot.img", show_job)
         self.assertIn("source.repository", show_job)
         self.assertIn("--platform /tmp/tater-echo-linux-show", show_job)
         self.assertIn("--target '${{ matrix.target }}'", show_job)
         self.assertIn("staging/crown/firmware-manifest.json", workflow)
+        self.assertIn("staging/cronos/firmware-manifest.json", workflow)
         show_build = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
         self.assertIn("-X main.target=$TATER_TARGET", show_build)
 
@@ -415,10 +418,20 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "linux/rook/build_linux.sh",
             ROOT / "device/tools/build_tools.sh",
             ROOT / "linux/checkers/build_camera_helper.sh",
+            ROOT / "linux/checkers/build_btbridge_helper.sh",
             ROOT / "linux/rook/build_camera_helper.sh",
         ):
             script = path.read_text(encoding="utf-8")
             self.assertIn("GOFLAGS=-buildvcs=false", script, path)
+
+    def test_show_rootfs_rebuilds_matching_bluetooth_bridge(self) -> None:
+        build_script = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
+        rootfs_builder = (ROOT / "linux/checkers/build_rootfs.py").read_text(encoding="utf-8")
+        helper = (ROOT / "linux/checkers/build_btbridge_helper.sh").read_text(encoding="utf-8")
+        self.assertIn('build_btbridge_helper.sh', build_script)
+        self.assertIn('--btbridge "$device/build/tater-btbridge"', build_script)
+        self.assertIn('root / "usr/local/bin/btbridge"', rootfs_builder)
+        self.assertIn('./cmd/btbridge', helper)
 
 
 if __name__ == "__main__":

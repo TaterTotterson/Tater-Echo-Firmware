@@ -35,7 +35,7 @@ func TestLinuxDotTargetsUseTheSharedDirectPlaybackPath(t *testing.T) {
 			t.Errorf("%q was not recognized as a Linux Dot playback target", target)
 		}
 	}
-	for _, target := range []string{"checkers", "crown", "athena", "rook", ""} {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook", ""} {
 		if isLinuxDotPlaybackTarget(target) {
 			t.Errorf("%q incorrectly entered the Linux Dot playback path", target)
 		}
@@ -48,7 +48,7 @@ func TestLinuxDotTargetsUseWholeMixerHardwarePeriods(t *testing.T) {
 			t.Errorf("%q playback period = %d, want %d", target, got, periodSize)
 		}
 	}
-	for _, target := range []string{"checkers", "crown", "athena", "rook", ""} {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook", ""} {
 		if got := linuxDotPlaybackPeriodFrames(target); got != alsaPeriodSize {
 			t.Errorf("%q fallback playback period = %d, want %d", target, got, alsaPeriodSize)
 		}

@@ -119,7 +119,7 @@ func TestCapabilityCatalogCoversEverySatelliteAndFailsClosed(t *testing.T) {
 		got = append(got, target)
 	}
 	sort.Strings(got)
-	want := []string{"athena", "biscuit", "checkers", "crown", "radar", "rook"}
+	want := []string{"athena", "biscuit", "checkers", "cronos", "crown", "radar", "rook"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("capability targets = %v, want %v", got, want)
 	}
@@ -255,6 +255,7 @@ func TestUnqualifiedDiagnosticsExplainTheHardwareGate(t *testing.T) {
 		detection string
 	}{
 		{target: "radar", backend: "mediatek-mchange-candidate", detection: "passive-until-role-qualified"},
+		{target: "cronos", backend: "mediatek-musb-hardware-otg-candidate", detection: "hardware-id-passive"},
 	}
 	for _, test := range tests {
 		t.Run(test.target, func(t *testing.T) {

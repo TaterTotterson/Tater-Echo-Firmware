@@ -319,12 +319,12 @@ func NewPcmSpeakerForTarget(target string, echoTap func([]byte), levelTap func(r
 
 func isLinuxScreenPlaybackTarget(target string) bool {
 	target = strings.ToLower(strings.TrimSpace(target))
-	return target == "checkers" || target == "crown" || target == "athena" || target == "rook"
+	return target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook"
 }
 
 func hasNoHeadphoneJack(target string) bool {
 	target = strings.ToLower(strings.TrimSpace(target))
-	return target == "checkers" || target == "crown" || target == "athena"
+	return target == "checkers" || target == "cronos" || target == "crown" || target == "athena"
 }
 
 func isRadarPlaybackTarget(target string) bool {

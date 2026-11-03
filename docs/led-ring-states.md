@@ -43,7 +43,7 @@ smoothed for readable movement and held for reply so the response remains
 oriented toward the speaker. Stereo reply targets use their front reference
 consistently when a shared physical bearing would look contradictory.
 
-Checkers, Crown, Athena, and Rook show voice state on their displays rather than
+Checkers, Cronos, Crown, Athena, and Rook show voice state on their displays rather than
 claiming a ring bearing.
 
 ## Audio Glow

@@ -203,6 +203,32 @@ func TestCrownMixerUsesRT5616AndBothMicrophoneADCs(t *testing.T) {
 	}
 }
 
+func TestCronosMixerUsesUnitAmplifierAndOneMicrophoneADC(t *testing.T) {
+	f := &fake{values: map[string]string{"Master TAS5805m Playback Volume A": "110"}}
+	Use(f)
+	ConfigureTarget("cronos")
+	defer func() { ConfigureTarget("biscuit"); Use(unavailable{}) }()
+	if err := SetPlaybackLevel(127, 127); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSpeakerEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if failed := SetADCMute(true); failed != 0 {
+		t.Fatalf("SetADCMute failed %d writes", failed)
+	}
+	want := [][]string{
+		{"Master TAS5805m Playback Volume A", "110"},
+		{"ADC_A Left Mute", "1"}, {"ADC_A Right Mute", "1"},
+	}
+	if !reflect.DeepEqual(f.sets, want) {
+		t.Fatalf("cronos mixer writes = %v, want %v", f.sets, want)
+	}
+	if got, err := GetPlaybackLevel(127); err != nil || got != 127 {
+		t.Fatalf("GetPlaybackLevel = %d, %v; want 127", got, err)
+	}
+}
+
 func TestAthenaMixerUsesMainlineTAS5805MVolume(t *testing.T) {
 	f := &fake{values: map[string]string{"Master Playback Volume": "110"}}
 	Use(f)

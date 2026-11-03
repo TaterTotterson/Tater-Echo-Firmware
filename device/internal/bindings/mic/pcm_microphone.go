@@ -54,7 +54,7 @@ func NewMicrophone() (*PcmMicrophone, error) {
 }
 
 // NewMicrophoneForTarget opens the measured raw capture endpoint for a board.
-// Checkers exposes four channels, Crown and Rook expose six (four microphones
+// Checkers and Cronos expose four channels, Crown and Rook expose six (four microphones
 // plus two loopback), Athena exposes four 96 kHz S32_LE microphones, and
 // Biscuit exposes nine. Each family uses its measured decoding front end.
 func NewMicrophoneForTarget(target string) (*PcmMicrophone, error) {
@@ -62,7 +62,7 @@ func NewMicrophoneForTarget(target string) (*PcmMicrophone, error) {
 	sampleRate, periodSize, periodCount := 16000, 512, 5
 	config := pcm.Config{Format: tinyalsa.PCM_FORMAT_S24_3LE}
 	normalized := strings.ToLower(strings.TrimSpace(target))
-	if normalized == "checkers" {
+	if normalized == "checkers" || normalized == "cronos" {
 		card, deviceNr, channels = 0, 22, 4
 	} else if normalized == "crown" || normalized == "rook" {
 		card, deviceNr, channels = 0, 22, 6

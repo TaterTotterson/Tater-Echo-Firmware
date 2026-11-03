@@ -30,11 +30,14 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 		"A3S5BH2HU6VAYF\n":   Biscuit,
 		"A4ZP7ZC4PI6TO\x00":  Checkers,
 		"A4ZP7ZC4PI6TO\n":    Checkers,
+		"A1XWJRHALS1REP\x00": Cronos,
+		"A1XWJRHALS1REP\n":   Cronos,
 		"A7WXQPH584YP\x00":   Radar,
 		"A7WXQPH584YP\n":     Radar,
 		"\x00A3S5BH2HU6VAYF": nil,
 		"A3S5BH2HU6VAYF":     Biscuit,
 		"A4ZP7ZC4PI6TO":      Checkers,
+		"A1XWJRHALS1REP":     Cronos,
 		"A7WXQPH584YP":       Radar,
 		"A3S5BH2HU6VAYFX":    nil,
 		"A4ZP7ZC4PI6TOX":     nil,
@@ -55,6 +58,12 @@ func TestDetectMatchesDeviceTypeExactly(t *testing.T) {
 func TestCheckersHasNoBorrowedThermalPolicy(t *testing.T) {
 	if Checkers.Tuning != nil {
 		t.Fatal("checkers must not inherit biscuit thermal tuning")
+	}
+}
+
+func TestCronosHasNoBorrowedThermalPolicy(t *testing.T) {
+	if Cronos.Tuning != nil {
+		t.Fatal("cronos must not inherit another enclosure's thermal tuning")
 	}
 }
 

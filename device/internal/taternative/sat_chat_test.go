@@ -10,7 +10,7 @@ import (
 )
 
 func TestSatChatCapabilitiesMatchHardwareRoles(t *testing.T) {
-	for _, target := range []string{"crown", "athena", "checkers", "rook"} {
+	for _, target := range []string{"crown", "athena", "checkers", "cronos", "rook"} {
 		capabilities := CapabilitiesForTarget(target)
 		if capabilities["sat_chat_audio"] != true || capabilities["sat_chat_ui"] != true {
 			t.Fatalf("%s did not advertise Sat Chat audio and UI: %#v", target, capabilities)

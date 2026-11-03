@@ -276,7 +276,7 @@ def patch_boot(root: Path, *, target: str = "checkers") -> None:
         "\t\tpid=$(pidof tater-echo | cut -d' ' -f1)\n"
         "\t\tif [ -n \"$pid\" ]; then"
     )
-    camera_health = " && pidof tater-camera >/dev/null" if target in ("checkers", "crown", "rook") else ""
+    camera_health = " && pidof tater-camera >/dev/null" if target in ("checkers", "cronos", "crown", "rook") else ""
     health_replacement = (
         "\t\tpid=$(pidof tater-echo | cut -d' ' -f1)\n"
         "\t\t# Commit only while the daemon is actually connected to Tater and\n"
@@ -294,7 +294,7 @@ def patch_boot(root: Path, *, target: str = "checkers") -> None:
         "# messages flood its consoles. FBIOPAN_DISPLAY waits on that lock and\n"
         "# the panel freezes. Keep messages in dmesg, but only print emergencies\n"
         "# to the consoles. Apply before the Wi-Fi module is loaded below.\n"
-        if target in ("checkers", "crown") else
+        if target in ("checkers", "cronos", "crown") else
         "# Keep verbose vendor messages out of the screen's console while\n"
         "# retaining them in dmesg.\n"
     )
@@ -625,6 +625,7 @@ def build(args: argparse.Namespace) -> None:
         copy(args.show, root / "usr/local/bin/tater-show", 0o755)
         copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
         copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
+        copy(args.btbridge, root / "usr/local/bin/btbridge", 0o755)
         copy(args.ffmpeg, root / "usr/local/bin/tater-ffmpeg", 0o755)
         if args.target == "athena":
             if args.kernelctl is None or args.kernel_image is None:
@@ -688,6 +689,7 @@ def build(args: argparse.Namespace) -> None:
 
         device_name = {
             "checkers": "Echo Show 5 (Checkers)",
+            "cronos": "Echo Show 5 Gen 2 (Cronos)",
             "crown": "Echo Show 8 (Crown)",
             "athena": "Echo Show 8 Gen 2 (Athena)",
         }[args.target]
@@ -919,12 +921,13 @@ APP_HEALTH = r'''# --- Tater application A/B health.
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", choices=("checkers", "crown", "athena"), default="checkers")
+    parser.add_argument("--target", choices=("checkers", "cronos", "crown", "athena"), default="checkers")
     parser.add_argument("--base-rootfs", type=Path, required=True)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--show", type=Path, required=True)
     parser.add_argument("--reboot", type=Path, required=True)
     parser.add_argument("--camera", type=Path, required=True)
+    parser.add_argument("--btbridge", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
     parser.add_argument("--kernelctl", type=Path)
     parser.add_argument("--kernel-image", type=Path)
