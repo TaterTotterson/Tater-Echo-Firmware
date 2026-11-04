@@ -417,22 +417,34 @@ BOOT_RING = r'''#!/bin/sh
 # Replace the inherited blue kernel spinner as soon as the LED sysfs nodes
 # exist. The application controller creates /run/tater-led-ready when it takes
 # ownership; until then this remains a visible, Tater-coloured boot heartbeat.
+# The stopped marker is the other half of that handoff: without it the daemon
+# can paint the restored mute state while this process is still completing one
+# final frame, leaving the ring showing the opposite of the real state.
 BB=/bin/busybox.static
 LED=/sys/devices/soc/11007000.i2c/i2c-0/0-003f
 FRAME=$LED/frame
+READY=/run/tater-led-ready
+STOPPED=/run/tater-led-boot-stopped
+rm -f "$STOPPED"
+boot_ring_stopped() { : > "$STOPPED"; }
+trap boot_ring_stopped EXIT
+trap 'exit 0' HUP INT TERM
 [ -e "$FRAME" ] || exit 0
 echo 0 > "$LED/boot_animation" 2>/dev/null || true
 echo 3 > "$LED/led_current" 2>/dev/null || true
 orange=601800
 white=FFFFFF
 position=0
-while [ ! -e /run/tater-led-ready ]; do
+while [ ! -e "$READY" ]; do
 	frame=
 	i=0
 	while [ "$i" -lt 12 ]; do
 		if [ "$i" -eq "$position" ]; then frame=${frame}${white}; else frame=${frame}${orange}; fi
 		i=$((i + 1))
 	done
+	# Ownership may have changed while the frame was being assembled. Do not
+	# perform the late write that originally raced mute-state restoration.
+	[ -e "$READY" ] && break
 	printf '%s' "$frame" > "$FRAME" 2>/dev/null || exit 0
 	position=$(((position + 1) % 12))
 	$BB usleep 88000

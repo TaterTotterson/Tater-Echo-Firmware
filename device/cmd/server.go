@@ -510,8 +510,30 @@ func main() {
 	// gif" and it is exactly that: a loop being restarted, not a loop.
 	var (
 		pulseCancel context.CancelFunc
+		pulseDone   <-chan struct{}
 		pulseKind   string
 	)
+	stopLinkPulse := func() {
+		cancel, done := pulseCancel, pulseDone
+		pulseCancel, pulseDone, pulseKind = nil, nil, ""
+		// Cancellation alone is not a paint barrier: the ticker case may have
+		// won the select already. Wait until that possible final frame is fully
+		// written before the authoritative mute/idle frame is restored.
+		cancelPulseAndWait(cancel, done)
+	}
+	startLinkPulse := func() {
+		if pulseKind == "orange" {
+			return
+		}
+		stopLinkPulse()
+		pulseCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		pulseCancel, pulseDone, pulseKind = cancel, done, "orange"
+		go func() {
+			defer close(done)
+			pulseOrange(pulseCtx, s)
+		}()
+	}
 	// Headphone jack. BOTH directions need work from us, and so does the
 	// state the device booted into — accdet acts only on a transition, and
 	// Init leaves the internal amp on regardless of what is plugged in.
@@ -1005,12 +1027,10 @@ func main() {
 					log.Printf("[ota] could not write Linux connection health marker: %v", err)
 				}
 			}
-			if pulseCancel != nil {
-				pulseCancel()
-				pulseCancel = nil
-			}
-			pulseKind = ""
+			// Revoke link-pulse ownership first, then wait until its writer is
+			// gone before restoring the real hardware mute visual.
 			s.SetLinkDown(false)
+			stopLinkPulse()
 			if err := s.ReconcileMuteHardware(); err != nil {
 				log.Printf("[tater-native] mute reconciliation on connect: %v", err)
 			}
@@ -1047,14 +1067,7 @@ func main() {
 			}
 			s.StopAnim()
 			s.SetLinkDown(true)
-			if pulseKind != "orange" {
-				if pulseCancel != nil {
-					pulseCancel()
-				}
-				pulseCtx, cancel := context.WithCancel(ctx)
-				pulseCancel, pulseKind = cancel, "orange"
-				go pulseOrange(pulseCtx, s)
-			}
+			startLinkPulse()
 			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
 				snapshot.Connected = false
 				snapshot.Phase = "offline"
@@ -1269,9 +1282,7 @@ func main() {
 	dataClient.OnPCMWithSpeech(nativeClient.PushAudioWithSpeech)
 	applyCurrentWake()
 	s.SetLinkDown(true)
-	pulseCtx, cancel := context.WithCancel(ctx)
-	pulseCancel, pulseKind = cancel, "orange"
-	go pulseOrange(pulseCtx, s)
+	startLinkPulse()
 
 	if err := startSendspinPlayer(
 		pcmSpeaker,
@@ -3508,6 +3519,19 @@ func pulsePhase(start time.Time, period time.Duration) float64 {
 	return math.Mod(float64(time.Since(start))/float64(period), 1.0)
 }
 
+// cancelPulseAndWait turns cancellation into a paint barrier. A context stops
+// future work, but a ticker case already selected by the pulse goroutine can
+// still be inside SetLEDs; waiting for done guarantees the next state paints
+// last.
+func cancelPulseAndWait(cancel context.CancelFunc, done <-chan struct{}) {
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
 // pulseOrange — sine-wave orange pulse while disconnected from server.
 //
 // Started ONCE per disconnection, not once per reconnect attempt — see
@@ -3528,6 +3552,9 @@ func pulseOrange(ctx context.Context, s *server.Server) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !s.LinkDown() {
+				return
+			}
 			t := pulsePhase(start, period)
 			br := minBr + (maxBr-minBr)*(0.5+0.5*math.Sin(2*math.Pi*t))
 			s.SetLEDs(allLEDs(uint8(255*br), uint8(40*br), 0), nil)

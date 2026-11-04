@@ -1,10 +1,24 @@
 package led
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	pkgled "github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
 )
+
+func TestWaitForBootRingStopWaitsForAcknowledgement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tater-led-boot-stopped")
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_ = os.WriteFile(path, []byte("1\n"), 0o644)
+	}()
+	if !waitForBootRingStop(path, 200*time.Millisecond) {
+		t.Fatal("boot-ring handoff did not observe the stop acknowledgement")
+	}
+}
 
 func TestCheckersUsesScreenOnlyController(t *testing.T) {
 	ConfigureTarget("checkers")

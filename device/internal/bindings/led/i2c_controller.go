@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/platform"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/led"
@@ -27,6 +28,13 @@ const ledFrame = "/sys/devices/soc/11007000.i2c/i2c-0/0-003f/frame"
 // 0 on stock.
 const bootAnimationPath = "/sys/devices/soc/11007000.i2c/i2c-0/0-003f/boot_animation"
 
+const (
+	bootRingReadyPath   = "/run/tater-led-ready"
+	bootRingStoppedPath = "/run/tater-led-boot-stopped"
+	bootRingStopTimeout = 250 * time.Millisecond
+	bootRingStopPoll    = 5 * time.Millisecond
+)
+
 // file permission we need to access the i2C device
 const perm = os.FileMode(0644)
 
@@ -36,6 +44,30 @@ type I2CController struct {
 	// handler, volume timer). Without this, concurrent SetLEDs calls produce
 	// torn frames written to the i2C device.
 	mu sync.Mutex
+}
+
+// handoffBootRing stops the early rootfs animator and waits until it can no
+// longer write the hardware frame. The bounded timeout keeps application-only
+// updates compatible with an older rootfs whose boot-ring script has no
+// acknowledgement marker; that script sleeps for only 88ms between frames.
+func handoffBootRing() {
+	if err := os.WriteFile(bootRingReadyPath, []byte("1\n"), perm); err != nil {
+		return
+	}
+	waitForBootRingStop(bootRingStoppedPath, bootRingStopTimeout)
+}
+
+func waitForBootRingStop(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(bootRingStopPoll)
+	}
 }
 
 var (
@@ -82,8 +114,9 @@ func (i *I2CController) Init() error {
 	}
 	if platform.Base() == platform.TaterLinux {
 		// Hand the ring from the early rootfs spinner to this controller. /run
-		// is a per-boot tmpfs, so a stale handoff cannot survive a restart.
-		_ = os.WriteFile("/run/tater-led-ready", []byte("1\n"), perm)
+		// is a per-boot tmpfs, so stale markers cannot survive a restart. Wait
+		// for the writer to stop before the server restores the mute visual.
+		handoffBootRing()
 	}
 
 	// privacy_brightness may not exist on all devices — ignore error

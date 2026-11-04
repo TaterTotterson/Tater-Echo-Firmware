@@ -289,6 +289,12 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("/usr/local/sbin/tater-boot-ring &", builder)
         self.assertIn("orange=601800", builder)
 
+    def test_dot_boot_ring_acknowledges_led_handoff(self) -> None:
+        builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")
+        self.assertIn("STOPPED=/run/tater-led-boot-stopped", builder)
+        self.assertIn("trap boot_ring_stopped EXIT", builder)
+        self.assertIn('[ -e "$READY" ] && break', builder)
+
     def test_dot_rootfs_includes_pinned_cpp_runtime_for_wake_engines(self) -> None:
         builder = DOT_ROOTFS_BUILDER.read_text(encoding="utf-8")
         build_script = DOT_BUILD_SCRIPT.read_text(encoding="utf-8")
