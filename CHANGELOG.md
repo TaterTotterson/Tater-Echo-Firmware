@@ -1,5 +1,38 @@
 # Changelog
 
+## v4.1.1
+
+Tater Echo Firmware v4.1.1 improves custom wake-word compatibility and keeps
+Biscuit and Radar LED mute state stable across boot and reconnects.
+
+### Wake words
+
+- Added compatibility with standard ESPHome microWakeWord manifests that omit
+  `model_format`, `quantization`, and `sample_rate`, covering V1-V3 and V8
+  bundle manifests while continuing to reject partial or incompatible
+  execution metadata.
+- Fixed MWW + OWW and MWW + NWW bundle installation on Echo satellites when
+  the bridge supplies the portable ESPHome manifest.
+- Reported the active custom model URL and a successful settings generation so
+  the controller no longer shows a working custom model as inactive or leaves
+  settings confirmation at generation 0.
+- Verified the compatibility parser against all 1,072 published wake-word
+  manifests in the current catalog.
+
+### LED reliability
+
+- Fixed Biscuit and Radar mute LEDs becoming stuck or flipping after a muted
+  reboot by waiting for the early Tater Linux boot-ring animation to release
+  the LED hardware before the firmware restores mute state.
+- Prevented a final stale orange disconnected frame from overwriting the
+  connected, idle, or mute ring after Tater reconnects.
+
+Thanks to [@MartyTremblay](https://github.com/MartyTremblay) and
+[@Kollisionskurs](https://github.com/Kollisionskurs) for the manifest
+compatibility reports and catalog analysis.
+
+**Full Changelog**: [v4.1.0...v4.1.1](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.1.0...v4.1.1)
+
 ## v4.1.0
 
 Tater Echo Firmware v4.1.0 adds hardware-tested support for the Amazon Echo
