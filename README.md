@@ -601,3 +601,7 @@ Tater-owned portions of Tater Echo Firmware are licensed under the
 components retain their original terms, recorded in [`NOTICE.md`](NOTICE.md)
 and [`LICENSES`](LICENSES). This project is independent and is not affiliated
 with or endorsed by Amazon.
+
+## Trademarks
+
+The Tater name and logo are governed by the [Tater Trademark Policy](TRADEMARKS.md).
