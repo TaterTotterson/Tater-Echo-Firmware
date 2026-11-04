@@ -187,9 +187,13 @@ type Client struct {
 
 	connected atomic.Bool
 	dndState  atomic.Bool
-	started   time.Time
-	out       chan outbound
-	videoOut  chan outbound
+	// settingsGeneration advances only after the hardware/settings hook
+	// accepts a settings frame. The controller uses it to distinguish a sent
+	// frame from one the satellite has actually applied.
+	settingsGeneration atomic.Uint64
+	started            time.Time
+	out                chan outbound
+	videoOut           chan outbound
 
 	connMu sync.Mutex
 	conn   *websocket.Conn
@@ -634,7 +638,8 @@ func (c *Client) heartbeat(ctx context.Context) error {
 			payload := map[string]any{
 				"state": c.State(), "uptime_s": int(time.Since(c.started).Seconds()),
 				"connected": true, "audio_tx_dropped": c.audioDropped.Load(),
-				"dnd_active": c.DNDActive(),
+				"dnd_active":          c.DNDActive(),
+				"settings_generation": c.settingsGeneration.Load(),
 			}
 			payload["wake_verifier"] = c.wakeVerifierStatus()
 			for key, value := range c.timers.Status() {

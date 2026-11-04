@@ -32,6 +32,7 @@ type Device struct {
 	MwwSlidingWindow int
 	MwwCloseMiss     float64
 	MwwModel         string
+	MwwModelURL      string
 	MwwSensitivity   string
 	MwwEnvironment   string
 	OwwEnabled       bool
@@ -137,6 +138,7 @@ func (d *Device) loadDefaults() {
 	d.MwwSlidingWindow = envInt("MWW_SLIDING_WINDOW", 0)
 	d.MwwCloseMiss = envFloat("MWW_CLOSE_MISS_THRESHOLD", 0)
 	d.MwwModel = envStr("MWW_MODEL", "hey_tater")
+	d.MwwModelURL = strings.TrimSpace(os.Getenv("MWW_MODEL_URL"))
 	d.MwwSensitivity = envStr("MWW_SENSITIVITY", "normal")
 	d.MwwEnvironment = envStr("MWW_ENVIRONMENT", "balanced")
 	d.OwwEnabled = envBool("OWW_ENABLED", false)
@@ -194,6 +196,9 @@ func (d *Device) Apply(msg ConfigMessage) {
 	}
 	if msg.MwwModel != "" {
 		d.MwwModel = msg.MwwModel
+	}
+	if msg.MwwModelURL != nil {
+		d.MwwModelURL = strings.TrimSpace(*msg.MwwModelURL)
 	}
 	if msg.MwwSensitivity != "" {
 		d.MwwSensitivity = msg.MwwSensitivity
@@ -304,6 +309,7 @@ func (d *Device) Snapshot() ConfigMessage {
 	mwwThreshold := d.MwwThreshold
 	mwwSlidingWindow := d.MwwSlidingWindow
 	mwwCloseMiss := d.MwwCloseMiss
+	mwwModelURL := d.MwwModelURL
 	owwEnabled := d.OwwEnabled
 	nwwEnabled := d.NwwEnabled
 	owwThreshold := d.OwwThreshold
@@ -323,6 +329,7 @@ func (d *Device) Snapshot() ConfigMessage {
 		MwwSlidingWindow:   &mwwSlidingWindow,
 		MwwCloseMiss:       &mwwCloseMiss,
 		MwwModel:           d.MwwModel,
+		MwwModelURL:        &mwwModelURL,
 		MwwSensitivity:     d.MwwSensitivity,
 		MwwEnvironment:     d.MwwEnvironment,
 		OwwEnabled:         &owwEnabled,
@@ -354,6 +361,7 @@ type ConfigMessage struct {
 	MwwSlidingWindow   *int     `json:"mwwSlidingWindow,omitempty"`
 	MwwCloseMiss       *float64 `json:"mwwCloseMissThreshold,omitempty"`
 	MwwModel           string   `json:"mwwModel,omitempty"`
+	MwwModelURL        *string  `json:"mwwModelUrl,omitempty"`
 	MwwSensitivity     string   `json:"mwwSensitivity,omitempty"`
 	MwwEnvironment     string   `json:"mwwEnvironment,omitempty"`
 	OwwEnabled         *bool    `json:"owwEnabled,omitempty"`

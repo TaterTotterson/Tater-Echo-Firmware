@@ -512,6 +512,7 @@ func TestHeartbeatQueuesWebSocketPingAndStatus(t *testing.T) {
 	}
 	defer c.Close()
 	c.connected.Store(true)
+	c.settingsGeneration.Store(7)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -534,6 +535,9 @@ func TestHeartbeatQueuesWebSocketPingAndStatus(t *testing.T) {
 					t.Fatal(err)
 				}
 				if message.Type == "status" {
+					if got := message.Payload["settings_generation"]; got != float64(7) {
+						t.Fatalf("settings_generation = %v, want 7", got)
+					}
 					seenStatus = true
 				}
 			}

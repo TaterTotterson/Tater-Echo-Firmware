@@ -2008,6 +2008,7 @@ var mwwShadowState struct {
 	wakeWord        string
 	label           string
 	source          string
+	modelURL        string
 	sensitivity     string
 	environment     string
 	threshold       float64
@@ -2145,7 +2146,7 @@ func setWakeDetectorSelection(mwwEnabled, owwEnabled, nwwEnabled bool, owwModel,
 	mwwShadowState.Unlock()
 }
 
-func setMWWState(enabled, ready bool, model, wakeWord, label, source, sensitivity, environment string,
+func setMWWState(enabled, ready bool, model, wakeWord, label, source, modelURL, sensitivity, environment string,
 	threshold float64, slidingWindow int, closeMiss float64, lastErr string) {
 	mwwShadowState.Lock()
 	mwwShadowState.enabled = enabled
@@ -2154,6 +2155,7 @@ func setMWWState(enabled, ready bool, model, wakeWord, label, source, sensitivit
 	mwwShadowState.wakeWord = wakeWord
 	mwwShadowState.label = label
 	mwwShadowState.source = source
+	mwwShadowState.modelURL = modelURL
 	mwwShadowState.sensitivity = sensitivity
 	mwwShadowState.environment = environment
 	mwwShadowState.threshold = threshold
@@ -2166,6 +2168,10 @@ func setMWWState(enabled, ready bool, model, wakeWord, label, source, sensitivit
 func mwwNativeStatus() map[string]any {
 	mwwShadowState.RLock()
 	defer mwwShadowState.RUnlock()
+	activeModelURL := ""
+	if mwwShadowState.ready && mwwShadowState.source == "url" {
+		activeModelURL = mwwShadowState.modelURL
+	}
 	return map[string]any{
 		"name":                 "micro_wake_word",
 		"mode":                 map[bool]string{true: "local", false: "disabled"}[mwwShadowState.enabled],
@@ -2180,6 +2186,7 @@ func mwwNativeStatus() map[string]any {
 		"active_wake_word":     mwwShadowState.wakeWord,
 		"active_wake_label":    mwwShadowState.label,
 		"active_model_source":  mwwShadowState.source,
+		"active_model_url":     activeModelURL,
 		"sensitivity":          mwwShadowState.sensitivity,
 		"environment":          mwwShadowState.environment,
 		"threshold":            mwwShadowState.threshold,
@@ -2206,6 +2213,10 @@ func applyMWWConfig(dc *client.DataClient,
 	}
 	enabled := mwwEnabled || owwEnabled || nwwEnabled
 	model := snap.MwwModel
+	modelURL := ""
+	if snap.MwwModelURL != nil {
+		modelURL = strings.TrimSpace(*snap.MwwModelURL)
+	}
 	owwModel := strings.TrimSpace(snap.OwwModel)
 	if owwModel == "" {
 		owwModel = microwakeword.DefaultPackage
@@ -2282,7 +2293,7 @@ func applyMWWConfig(dc *client.DataClient,
 			dc.SetMWWShadowScorer(nil)
 			log.Printf("[mww-shadow] disabled")
 		}
-		setMWWState(false, false, model, "", "", "", sensitivity, environment,
+		setMWWState(false, false, model, "", "", "", "", sensitivity, environment,
 			threshold, slidingWindow, closeMiss, "")
 		setWakeDetectorSelection(false, false, false, owwModel, nwwModel, nwwArchitecture, owwOverrides, nwwOverrides)
 		replaceWakeCompanion("", "", "", "disabled", false,
@@ -2292,6 +2303,7 @@ func applyMWWConfig(dc *client.DataClient,
 
 	mwwShadowState.RLock()
 	same := mwwShadowState.enabled && mwwShadowState.model == model &&
+		mwwShadowState.modelURL == modelURL &&
 		mwwShadowState.mwwEnabled == mwwEnabled && mwwShadowState.owwEnabled == owwEnabled &&
 		mwwShadowState.nwwEnabled == nwwEnabled && mwwShadowState.owwModel == owwModel &&
 		mwwShadowState.nwwModel == nwwModel && mwwShadowState.nwwArchitecture == nwwArchitecture &&
@@ -2321,6 +2333,9 @@ func applyMWWConfig(dc *client.DataClient,
 		}
 		if model != microwakeword.DefaultPackage {
 			source = "custom"
+			if modelURL != "" {
+				source = "url"
+			}
 		}
 	}
 
@@ -2473,7 +2488,7 @@ func applyMWWConfig(dc *client.DataClient,
 			log.Printf("[mww-shadow] not started: %v", openErr)
 		}
 		dc.SetMWWShadowScorer(nil)
-		setMWWState(true, false, model, wakeWord, label, source, sensitivity, environment,
+		setMWWState(true, false, model, wakeWord, label, source, modelURL, sensitivity, environment,
 			threshold, slidingWindow, closeMiss, openErr.Error())
 		setWakeDetectorSelection(mwwEnabled, owwEnabled, nwwEnabled, owwModel, nwwModel, nwwArchitecture, owwOverrides, nwwOverrides)
 		mode := "mww_only"
@@ -2509,7 +2524,7 @@ func applyMWWConfig(dc *client.DataClient,
 	replaceWakeCompanion(companionKind, companionModel, nwwArchitecture, detectorMode,
 		owwEnabled || nwwEnabled, activeOWWSettings, activeNanoSettings,
 		nil, agreement, activeCompanionScorers, nil)
-	setMWWState(true, true, model, wakeWord, label, source, sensitivity, environment,
+	setMWWState(true, true, model, wakeWord, label, source, modelURL, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
 	setWakeDetectorSelection(mwwEnabled, owwEnabled, nwwEnabled, owwModel, nwwModel, nwwArchitecture, owwOverrides, nwwOverrides)
 	activityMode := "shadow/report-only"
@@ -2574,7 +2589,7 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 		label = manifest.WakeWord
 	}
 	setMWWState(true, true, microwakeword.TimerStopPackage, manifest.WakeWord, label,
-		"timer", "", "", float64(settings.Threshold), settings.SlidingWindow, 0, "")
+		"timer", "", "", "", float64(settings.Threshold), settings.SlidingWindow, 0, "")
 	log.Printf("[mww] scoring %s — timer stop mode (%d continuous wake stream(s))", scorers[0].Info(), len(scorers))
 	return nil
 }
@@ -3055,22 +3070,26 @@ func applyTaterSettings(values map[string]any, srv *server.Server, canceller *ae
 			wakeWord = "hey_tater"
 		}
 		if wakeWord == "custom_url" {
+			modelURL := strings.TrimSpace(fmt.Sprint(values["wake_word_url"]))
 			packageName, err := microwakeword.InstallPackageURLRevision(
 				context.Background(),
-				strings.TrimSpace(fmt.Sprint(values["wake_word_url"])),
+				modelURL,
 				strings.TrimSpace(fmt.Sprint(values["wake_model_revision"])),
 			)
 			if err != nil {
 				return applied, err
 			}
 			msg.MwwModel = packageName
+			msg.MwwModelURL = &modelURL
 			selectedMWWPackage = packageName
 			applied["wake_word"] = "custom_url"
-			applied["wake_word_url"] = strings.TrimSpace(fmt.Sprint(values["wake_word_url"]))
+			applied["wake_word_url"] = modelURL
 		} else if wakeWord != "" && wakeWord != "hey_tater" {
 			return applied, fmt.Errorf("wake word %q is not installed on this Echo", wakeWord)
 		} else {
+			modelURL := ""
 			msg.MwwModel = "hey_tater"
+			msg.MwwModelURL = &modelURL
 			selectedMWWPackage = "hey_tater"
 			applied["wake_word"] = "hey_tater"
 		}

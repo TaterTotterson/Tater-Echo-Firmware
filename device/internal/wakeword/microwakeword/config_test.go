@@ -1,6 +1,7 @@
 package microwakeword
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,48 @@ func TestRuntimeConfigDefaultsForPortableManifest(t *testing.T) {
 		f.FeatureSize != 40 || f.InputFeatureFrames != 2 ||
 		f.LowerBandLimit != 125 || f.UpperBandLimit != 7500 {
 		t.Fatalf("unexpected default frontend: %+v", f)
+	}
+}
+
+func TestParseManifestAcceptsStandardESPHomeCompatibilityMetadata(t *testing.T) {
+	var portable map[string]any
+	if err := json.Unmarshal([]byte(validManifest), &portable); err != nil {
+		t.Fatal(err)
+	}
+	delete(portable, "model_format")
+	delete(portable, "quantization")
+	delete(portable, "sample_rate")
+	raw, err := json.Marshal(portable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("ParseManifest() rejected a standard ESPHome manifest: %v", err)
+	}
+	if got.ModelFormat != modelFormat || got.Quantization != quantization || got.SampleRate != SupportedSampleRate {
+		t.Fatalf("compatibility defaults = %q, %q, %d", got.ModelFormat, got.Quantization, got.SampleRate)
+	}
+}
+
+func TestManifestRejectsPartialCompatibilityMetadata(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*Manifest)
+	}{
+		{"missing model format", func(m *Manifest) { m.ModelFormat = "" }},
+		{"missing quantization", func(m *Manifest) { m.Quantization = "" }},
+		{"missing sample rate", func(m *Manifest) { m.SampleRate = 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mustManifest(t)
+			tc.edit(&m)
+			err := m.Validate()
+			if err == nil || !strings.Contains(err.Error(), "all be omitted or all be provided") {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
 	}
 }
 

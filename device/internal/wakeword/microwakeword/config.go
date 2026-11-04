@@ -105,16 +105,50 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		}
 		return Manifest{}, fmt.Errorf("microwakeword: trailing manifest data: %w", err)
 	}
+	if err := m.resolveCompatibilityDefaults(); err != nil {
+		return Manifest{}, err
+	}
 	if err := m.Validate(); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
 }
 
+// resolveCompatibilityDefaults recognizes the metadata shape used by standard
+// ESPHome microWakeWord manifests. Older catalog generations omit all three
+// execution-contract fields because ESPHome supplies these values implicitly.
+// A partial contract remains invalid: silently completing one would hide a
+// malformed or incompatible producer manifest.
+func (m *Manifest) resolveCompatibilityDefaults() error {
+	missingFormat := strings.TrimSpace(m.ModelFormat) == ""
+	missingQuantization := strings.TrimSpace(m.Quantization) == ""
+	missingSampleRate := m.SampleRate == 0
+	missing := 0
+	for _, value := range []bool{missingFormat, missingQuantization, missingSampleRate} {
+		if value {
+			missing++
+		}
+	}
+	switch missing {
+	case 0:
+		return nil
+	case 3:
+		m.ModelFormat = modelFormat
+		m.Quantization = quantization
+		m.SampleRate = SupportedSampleRate
+		return nil
+	default:
+		return fmt.Errorf("microwakeword: model_format, quantization, and sample_rate must either all be omitted or all be provided")
+	}
+}
+
 // Validate rejects packages the initial Tater runtime cannot execute safely.
 // Validation stays strict around the tensor/audio contract so an incompatible
 // model fails at install time rather than silently never detecting a wake.
 func (m Manifest) Validate() error {
+	if err := m.resolveCompatibilityDefaults(); err != nil {
+		return err
+	}
 	if m.Type != "micro" {
 		return fmt.Errorf("microwakeword: type must be %q, got %q", "micro", m.Type)
 	}

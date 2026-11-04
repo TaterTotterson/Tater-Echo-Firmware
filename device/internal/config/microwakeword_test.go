@@ -88,3 +88,20 @@ func TestMicroWakeWordConfigDefaultsAndSparseUpdates(t *testing.T) {
 		t.Fatalf("could not restore manifest threshold: %+v", got)
 	}
 }
+
+func TestMicroWakeWordModelURLCanBeSetAndCleared(t *testing.T) {
+	d := &Device{}
+	customURL := " https://wake.example/computer.json "
+	d.Apply(ConfigMessage{MwwModel: "tater_custom_computer", MwwModelURL: &customURL})
+	got := d.Snapshot()
+	if got.MwwModelURL == nil || *got.MwwModelURL != "https://wake.example/computer.json" {
+		t.Fatalf("MwwModelURL = %v", got.MwwModelURL)
+	}
+
+	empty := ""
+	d.Apply(ConfigMessage{MwwModel: "hey_tater", MwwModelURL: &empty})
+	got = d.Snapshot()
+	if got.MwwModelURL == nil || *got.MwwModelURL != "" {
+		t.Fatalf("cleared MwwModelURL = %v", got.MwwModelURL)
+	}
+}

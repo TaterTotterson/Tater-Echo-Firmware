@@ -85,10 +85,12 @@ func (c *Client) handle(message Envelope) {
 	case "settings":
 		applied := payload
 		result := map[string]any{"ok": true}
+		accepted := true
 		if hook := c.hooks.Settings; hook != nil {
 			var err error
 			applied, err = hook(payload)
 			if err != nil {
+				accepted = false
 				result["ok"] = false
 				result["error"] = err.Error()
 			}
@@ -97,6 +99,11 @@ func (c *Client) handle(message Envelope) {
 		c.settings = copyMap(applied)
 		c.stateMu.Unlock()
 		c.syncDNDState()
+		if accepted {
+			result["settings_generation"] = c.settingsGeneration.Add(1)
+		} else {
+			result["settings_generation"] = c.settingsGeneration.Load()
+		}
 		result["settings"] = applied
 		c.sendJSON("settings.changed", message.ID, result)
 	case "state":
