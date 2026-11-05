@@ -214,6 +214,35 @@ func (m *BlueZManager) deviceByAddress(objects bluezManagedObjects, addr string)
 	return "", false
 }
 
+// setDiscoveryFilter sets BlueZ's LE discovery filter, degrading gracefully
+// when a filter key isn't supported by the running BlueZ build. Some vendor
+// BlueZ images (observed on Radar/Crown) return NotSupported for the
+// DuplicateData key, so the filter is narrowed step by step rather than
+// failing the whole connect attempt outright.
+func (m *BlueZManager) setDiscoveryFilter(ctx context.Context, adapter dbus.BusObject) error {
+	attempts := []map[string]dbus.Variant{
+		{"Transport": dbus.MakeVariant("le"), "DuplicateData": dbus.MakeVariant(false)},
+		{"Transport": dbus.MakeVariant("le")},
+	}
+	var lastErr error
+	for _, filter := range attempts {
+		call := adapter.CallWithContext(ctx, bluezAdapter+".SetDiscoveryFilter", 0, filter)
+		if call.Err == nil {
+			return nil
+		}
+		lastErr = call.Err
+		if !bluezErrorNamed(call.Err, ".NotSupported") {
+			return fmt.Errorf("ble: set BlueZ discovery filter: %w", call.Err)
+		}
+	}
+	// Clearing the filter entirely still leaves BlueZ able to discover the
+	// device via StartDiscovery below, just without LE-only narrowing.
+	if call := adapter.CallWithContext(ctx, bluezAdapter+".SetDiscoveryFilter", 0, map[string]dbus.Variant{}); call.Err != nil {
+		return fmt.Errorf("ble: set BlueZ discovery filter: %w", lastErr)
+	}
+	return nil
+}
+
 func (m *BlueZManager) discoverDevice(ctx context.Context, addr string) (dbus.ObjectPath, error) {
 	if objects, err := m.managedObjects(ctx); err == nil {
 		if path, ok := m.deviceByAddress(objects, addr); ok {
@@ -221,12 +250,8 @@ func (m *BlueZManager) discoverDevice(ctx context.Context, addr string) (dbus.Ob
 		}
 	}
 	adapter := m.bus.Object(bluezBus, m.adapter)
-	filter := map[string]dbus.Variant{
-		"Transport":     dbus.MakeVariant("le"),
-		"DuplicateData": dbus.MakeVariant(false),
-	}
-	if call := adapter.CallWithContext(ctx, bluezAdapter+".SetDiscoveryFilter", 0, filter); call.Err != nil {
-		return "", fmt.Errorf("ble: set BlueZ discovery filter: %w", call.Err)
+	if err := m.setDiscoveryFilter(ctx, adapter); err != nil {
+		return "", err
 	}
 	started := false
 	if call := adapter.CallWithContext(ctx, bluezAdapter+".StartDiscovery", 0); call.Err == nil {
