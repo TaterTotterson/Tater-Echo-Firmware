@@ -1,5 +1,36 @@
 # Changelog
 
+## v4.1.2
+
+Tater Echo Firmware v4.1.2 improves Bluetooth proxy compatibility on older
+Echo Linux kernels and preserves command audio spoken immediately after the
+wake word.
+
+These fixes are delivered by the normal application OTA and do not require a
+Tater Linux system update.
+
+### Bluetooth reliability
+
+- Fixed Radar and Biscuit active GATT discovery on older kernels whose BlueZ
+  management layer rejects discovery filters by safely continuing with
+  unfiltered low-energy discovery.
+- Added bounded retries for transient connection failures, accurate negotiated
+  MTU and ATT handle reporting, reliable notification acquisition and fallback
+  tracking, and cleanup when adapters, devices, or `bluetoothd` disappear.
+- Kept direct-controller GATT paths and authenticated PIN pairing unchanged.
+
+### Wake audio
+
+- Timestamped batched wake-detection scores at the audio samples that produced
+  them instead of treating the end of the inference batch as the wake point.
+- Split the wake and command boundary at the detector-crossing sample so speech
+  immediately following the wake word is retained for command VAD and speech
+  recognition.
+- Added cadence and lag tracking for native microWakeWord, openWakeWord, and
+  NanoWakeWord detectors, plus race and regression coverage for the boundary.
+
+**Full Changelog**: [v4.1.1...v4.1.2](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.1.1...v4.1.2)
+
 ## v4.1.1
 
 Tater Echo Firmware v4.1.1 improves custom wake-word compatibility and keeps
