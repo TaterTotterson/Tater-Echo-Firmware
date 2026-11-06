@@ -1727,7 +1727,7 @@ func TestCachedCrownSpeakingFrameMatchesFullComposition(t *testing.T) {
 	}
 }
 
-func TestCrownCachedAnimationReportsOnlyMotionRegions(t *testing.T) {
+func TestCrownCachedAnimationKeepsEveryFramebufferPageCurrent(t *testing.T) {
 	faces, err := newFaceSet()
 	if err != nil {
 		t.Fatal(err)
@@ -1749,8 +1749,8 @@ func TestCrownCachedAnimationReportsOnlyMotionRegions(t *testing.T) {
 	canvas := image.NewRGBA(image.Rect(0, 0, 1280, 800))
 	r.render(canvas, now)
 	r.render(canvas, now.Add(time.Second/30))
-	if len(r.presentRegions) != 2 {
-		t.Fatalf("Crown motion regions = %v, want only fallback bars and spectrum between progress ticks", r.presentRegions)
+	if len(r.presentRegions) != 3 {
+		t.Fatalf("Crown motion regions = %v, want fallback bars, progress, and spectrum on every frame", r.presentRegions)
 	}
 	area := 0
 	for _, region := range r.presentRegions {
@@ -1764,7 +1764,7 @@ func TestCrownCachedAnimationReportsOnlyMotionRegions(t *testing.T) {
 	}
 	r.render(canvas, now.Add(1100*time.Millisecond))
 	if len(r.presentRegions) != 3 {
-		t.Fatalf("Crown progress-tick regions = %v, want fallback bars, progress, and spectrum", r.presentRegions)
+		t.Fatalf("Crown later motion regions = %v, want fallback bars, progress, and spectrum", r.presentRegions)
 	}
 }
 
@@ -2064,7 +2064,7 @@ func TestCheckersReplyRimFollowsAudioWithoutCoveringWeather(t *testing.T) {
 	}
 }
 
-func TestMusicSpectrumUsesFastAttackAndSmoothRelease(t *testing.T) {
+func TestMusicSpectrumUsesControlledAttackAndSmoothRelease(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	media := &show.Media{Active: true, Title: "Garden Song", Spectrum: []float64{.1}}
 	r := &renderer{state: show.Snapshot{Media: media}}
@@ -2076,8 +2076,8 @@ func TestMusicSpectrumUsesFastAttackAndSmoothRelease(t *testing.T) {
 	media.Spectrum[0] = .9
 	r.updateMusicLevels(now.Add(33*time.Millisecond), .033)
 	risen := r.musicBinLevel(0, .033)
-	if risen <= .55 || risen >= .9 {
-		t.Fatalf("attack level = %.3f, want a fast smoothed rise between .55 and .9", risen)
+	if risen <= .4 || risen >= .65 {
+		t.Fatalf("attack level = %.3f, want a controlled smoothed rise between .4 and .65", risen)
 	}
 
 	media.Spectrum[0] = .1

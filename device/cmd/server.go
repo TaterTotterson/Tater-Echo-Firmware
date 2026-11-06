@@ -1026,6 +1026,7 @@ func main() {
 				snapshot.Message = "Ready when you are"
 				snapshot.ToolName = ""
 				snapshot.ToolMessage = ""
+				snapshot.Conversation = nil
 			})
 		},
 		Disconnected: func(err error) {
@@ -1051,6 +1052,7 @@ func main() {
 				snapshot.Message = "Connecting to Tater"
 				snapshot.ToolName = ""
 				snapshot.ToolMessage = ""
+				snapshot.Conversation = nil
 				snapshot.AudioLevel = 0
 			})
 		},
@@ -1088,6 +1090,19 @@ func main() {
 				if state == "idle" || state == "error" {
 					snapshot.DirectionDegrees = nil
 					snapshot.AudioLevel = 0
+					snapshot.Conversation = nil
+				}
+			})
+		},
+		DisplayConversation: func(payload map[string]any) {
+			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+				if nativeBool(payload["clear"], false) {
+					snapshot.Conversation = nil
+					return
+				}
+				next := showConversation(payload)
+				if shouldReplaceConversation(snapshot.Conversation, next) {
+					snapshot.Conversation = next
 				}
 			})
 		},
@@ -3254,6 +3269,37 @@ func showMessage(state string, payload map[string]any) string {
 	default:
 		return "Ready when you are"
 	}
+}
+
+func showConversation(payload map[string]any) *show.Conversation {
+	phase := strings.ToLower(showPayloadText(payload, "phase"))
+	switch phase {
+	case "listening", "thinking", "replying":
+	default:
+		phase = "listening"
+	}
+	return &show.Conversation{
+		TurnID:         showPayloadText(payload, "turn_id"),
+		Phase:          phase,
+		UserText:       showPayloadText(payload, "user_text"),
+		UserFinal:      nativeBool(payload["user_final"], false),
+		AssistantText:  showPayloadText(payload, "assistant_text"),
+		AssistantFinal: nativeBool(payload["assistant_final"], false),
+		Revision:       int64(nativeNumber(payload["revision"], 0)),
+	}
+}
+
+func shouldReplaceConversation(current, next *show.Conversation) bool {
+	if current == nil || next == nil || current.TurnID == "" || next.TurnID == "" || current.TurnID != next.TurnID {
+		return true
+	}
+	// Display messages normally arrive in order, but partial STT updates are
+	// coalesced asynchronously. Never let a late listening snapshot replace a
+	// newer thinking, working, or reply snapshot from the same voice turn.
+	if current.Revision > 0 && next.Revision > 0 && next.Revision < current.Revision {
+		return false
+	}
+	return true
 }
 
 func showWeather(payload map[string]any) *show.Weather {

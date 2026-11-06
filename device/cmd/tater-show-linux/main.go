@@ -159,7 +159,7 @@ type faceSet struct {
 }
 
 // faceSizes lists every preloaded point size, smallest first.
-var faceSizes = []int{8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 28, 30, 34, 36, 42, 48, 64, 74, 82, 96}
+var faceSizes = []int{8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25, 26, 28, 30, 32, 34, 36, 42, 48, 64, 74, 82, 96}
 
 func newFaceSet() (*faceSet, error) {
 	regular, err := opentype.Parse(goregular.TTF)
@@ -196,6 +196,8 @@ type renderer struct {
 	clockSourceUnixMS       int64
 	clockReceived           time.Time
 	animationStart          time.Time
+	conversationTextStarted time.Time
+	conversationTextTurn    string
 	notificationID          string
 	notificationImage       image.Image
 	notificationDismissedID string
@@ -252,7 +254,6 @@ type renderer struct {
 	musicLevelsAt           time.Time
 	musicLevelsMedia        string
 	musicLevelsReady        bool
-	musicProgressDrawn      string
 	checkersBase            *image.RGBA
 	checkersBaseKey         string
 	checkersCanvas          *image.RGBA
@@ -543,7 +544,6 @@ func (r *renderer) renderBase(canvas *image.RGBA, now time.Time) {
 				r.spotFrameBase = image.NewRGBA(canvas.Rect)
 				r.renderSpotFrame(r.spotFrameBase, now, seconds, accent, false)
 				r.spotFrameBaseKey = key
-				r.musicProgressDrawn = ""
 			}
 			if rebuilt || r.spotFrameCanvas != canvas {
 				draw.Draw(canvas, canvas.Rect, r.spotFrameBase, canvas.Rect.Min, draw.Src)
@@ -568,7 +568,6 @@ func (r *renderer) renderBase(canvas *image.RGBA, now time.Time) {
 			r.crownBase = image.NewRGBA(canvas.Rect)
 			r.renderCheckers(r.crownBase, now, width, height, seconds, accent, false)
 			r.crownBaseKey = key
-			r.musicProgressDrawn = ""
 		}
 		if rebuilt || r.crownCanvas != canvas {
 			draw.Draw(canvas, canvas.Rect, r.crownBase, canvas.Rect.Min, draw.Src)
@@ -595,7 +594,6 @@ func (r *renderer) renderBase(canvas *image.RGBA, now time.Time) {
 			r.checkersBase = image.NewRGBA(canvas.Rect)
 			r.renderCheckers(r.checkersBase, now, width, height, seconds, accent, false)
 			r.checkersBaseKey = key
-			r.musicProgressDrawn = ""
 		}
 		if rebuilt || r.checkersCanvas != canvas {
 			draw.Draw(canvas, canvas.Rect, r.checkersBase, canvas.Rect.Min, draw.Src)
@@ -710,6 +708,11 @@ func (r *renderer) renderCheckers(canvas *image.RGBA, now time.Time, width, heig
 	}
 	if !r.state.Connected && (r.state.Phase == "offline" || r.state.Phase == "connecting") {
 		r.drawConnecting(canvas, seconds)
+		return
+	}
+	if r.conversationActive() {
+		r.drawShowConversation(canvas, seconds, accent, motion)
+		r.drawMutedBadge(canvas, width)
 		return
 	}
 	switch {
@@ -1072,8 +1075,8 @@ func (r *renderer) drawFullscreenMusicMotion(canvas *image.RGBA, now time.Time, 
 	if r.mediaImage == nil {
 		r.drawMusicVisualizerBars(canvas, art.Inset(max(22, art.Dx()/9)), seconds, musicColor)
 	}
-	if r.musicProgressNeedsRedraw(now) {
-		progress, duration := mediaProgress(r.state.Media, now)
+	progress, duration := mediaProgress(r.state.Media, now)
+	if duration > 0 {
 		barY := bars.Min.Y - 34
 		line(canvas, content.Min.X, barY, content.Max.X, barY, 4, color.RGBA{91, 103, 122, 120})
 		filled := int(float64(content.Dx()) * math.Min(1, float64(progress)/float64(duration)))
@@ -1082,7 +1085,6 @@ func (r *renderer) drawFullscreenMusicMotion(canvas *image.RGBA, now time.Time, 
 		end := formatMediaTime(duration)
 		endWidth := font.MeasureString(r.faces.bold[14], end).Round()
 		r.text(canvas, content.Max.X-endWidth, barY+25, end, 14, true, color.RGBA{153, 169, 190, 255})
-		r.musicProgressDrawn = musicProgressVisualKey(r.state.Media, now)
 	}
 	r.drawMusicBars(canvas, bars, seconds, musicColor)
 }
@@ -1170,6 +1172,7 @@ func (r *renderer) crownCacheKey(now time.Time, accent color.RGBA) string {
 		r.state.AssistantName,
 		fmt.Sprint(r.state.Connected), fmt.Sprint(r.state.Muted), fmt.Sprint(r.state.DisplayEdgeGlow), fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather), stableCacheValue(r.state.Climate), stableCacheValue(r.state.Cameras), stableCacheValue(r.state.Notification),
+		stableCacheValue(r.state.Conversation),
 		stableCacheValue(r.state.LastEvent), stableCacheValue(r.state.Timer),
 		mediaIdentity(r.state.Media), mediaPlaybackState(r.state.Media), mediaGroupName(r.state.Media),
 		fmt.Sprint(mediaPrimaryColor(r.state.Media)), fmt.Sprint(mediaAccentColor(r.state.Media)),
@@ -1248,6 +1251,7 @@ func (r *renderer) checkersCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(r.state.Connected, "|", r.state.Muted, "|", r.state.TimerActive),
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
+		stableCacheValue(r.state.Conversation),
 		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
@@ -1262,6 +1266,14 @@ func (r *renderer) checkersCacheKey(now time.Time, accent color.RGBA) string {
 }
 
 func (r *renderer) drawCheckersMotion(canvas *image.RGBA, now time.Time, width, height int, seconds float64, accent color.RGBA) {
+	if r.conversationActive() {
+		if _, transitioning := r.conversationPlaceholderFade(now); transitioning {
+			r.drawShowConversation(canvas, seconds, accent, true)
+		} else {
+			r.drawShowConversationMotion(canvas, seconds, accent)
+		}
+		return
+	}
 	speaking := r.state.Phase == "speaking"
 	if speaking && r.state.DisplayEdgeGlow {
 		r.drawCheckersReplyRim(canvas, accent)
@@ -1292,6 +1304,13 @@ func (r *renderer) drawCheckersMotion(canvas *image.RGBA, now time.Time, width, 
 }
 
 func (r *renderer) checkersMotionRegions(now time.Time, width, height int) []image.Rectangle {
+	if r.conversationActive() {
+		seconds := now.Sub(r.animationStart).Seconds()
+		if r.animationStart.IsZero() {
+			seconds = 0
+		}
+		return r.showConversationMotionRegions(width, height, seconds)
+	}
 	regions := make([]image.Rectangle, 0, 5)
 	if r.state.Phase == "speaking" && r.state.DisplayEdgeGlow {
 		regions = append(regions, image.Rect(0, 0, width, 24), image.Rect(0, height-24, width, height),
@@ -1309,7 +1328,7 @@ func (r *renderer) checkersMotionRegions(now time.Time, width, height int) []ima
 		if r.mediaImage == nil {
 			regions = append(regions, musicVisualizerMotionBounds(art.Inset(max(22, art.Dx()/9))))
 		}
-		if r.musicProgressNeedsRedraw(now) {
+		if _, duration := mediaProgress(media, now); duration > 0 {
 			regions = append(regions, image.Rect(content.Min.X, bars.Min.Y-42, content.Max.X, bars.Min.Y+30))
 		}
 		regions = append(regions, bars)
@@ -1772,13 +1791,14 @@ func (r *renderer) updateMusicLevels(now time.Time, seconds float64) {
 	if delta <= 0 {
 		return
 	}
-	// A fast attack keeps beats feeling immediate; the gentler release removes
-	// the jagged stepping between incoming Sendspin spectrum frames.
+	// Keep beats responsive without snapping directly between Sendspin's
+	// timestamped spectrum frames. The longer release gives the bottom bars a
+	// steady musical flow instead of a fast, twitchy shimmer.
 	for index := range r.musicLevels {
 		target := musicBinLevel(media, index, seconds, r.state.AudioLevel)
-		tau := 70 * time.Millisecond
+		tau := 150 * time.Millisecond
 		if target > r.musicLevels[index] {
-			tau = 22 * time.Millisecond
+			tau = 50 * time.Millisecond
 		}
 		alpha := 1 - math.Exp(-float64(delta)/float64(tau))
 		r.musicLevels[index] += (target - r.musicLevels[index]) * alpha
@@ -1799,7 +1819,7 @@ func musicBinLevel(media *show.Media, index int, seconds, fallback float64) floa
 		return math.Max(.04, math.Min(1, value))
 	}
 	level := math.Min(1, math.Max(.03, fallback*5))
-	wave := .48 + .52*math.Sin(seconds*3.4+float64(index)*.82)
+	wave := .48 + .52*math.Sin(seconds*2.2+float64(index)*.82)
 	return math.Max(.04, level*(.32+.68*wave))
 }
 
@@ -1842,19 +1862,6 @@ func mediaProgress(media *show.Media, now time.Time) (int64, int64) {
 		progress = min(progress, media.DurationMS)
 	}
 	return max(int64(0), progress), max(int64(0), media.DurationMS)
-}
-
-func musicProgressVisualKey(media *show.Media, now time.Time) string {
-	progress, duration := mediaProgress(media, now)
-	if duration <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%s|%d|%d", mediaIdentity(media), progress/1000, duration)
-}
-
-func (r *renderer) musicProgressNeedsRedraw(now time.Time) bool {
-	key := musicProgressVisualKey(r.state.Media, now)
-	return key != "" && key != r.musicProgressDrawn
 }
 
 func formatMediaTime(milliseconds int64) string {
@@ -2890,7 +2897,11 @@ func main() {
 			if notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) {
 				renderer.notificationDismissedID = ""
 			}
-			if state.Phase != renderer.state.Phase || notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) || notificationIdentity(state.LastEvent) != notificationIdentity(renderer.state.LastEvent) || timerIdentity(state.Timer) != timerIdentity(renderer.state.Timer) || mediaIdentity(state.Media) != mediaIdentity(renderer.state.Media) {
+			sameConversationTurn := state.Conversation != nil && renderer.state.Conversation != nil &&
+				state.Conversation.TurnID != "" && state.Conversation.TurnID == renderer.state.Conversation.TurnID
+			renderer.noteConversationTextTransition(renderer.state.Conversation, state.Conversation, received)
+			phaseChanged := state.Phase != renderer.state.Phase && !sameConversationTurn
+			if phaseChanged || conversationAnimationIdentity(state.Conversation) != conversationAnimationIdentity(renderer.state.Conversation) || notificationIdentity(state.Notification) != notificationIdentity(renderer.state.Notification) || notificationIdentity(state.LastEvent) != notificationIdentity(renderer.state.LastEvent) || timerIdentity(state.Timer) != timerIdentity(renderer.state.Timer) || mediaIdentity(state.Media) != mediaIdentity(renderer.state.Media) {
 				renderer.animationStart = time.Now()
 			}
 			renderer.state = state

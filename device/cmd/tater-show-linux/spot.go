@@ -40,6 +40,10 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 		r.drawSpotConnecting(canvas, seconds)
 		return
 	}
+	if r.conversationActive() {
+		r.drawSpotConversation(canvas, seconds, accent, motion)
+		return
+	}
 	if r.satChatVisible() {
 		palette := r.menuPalette()
 		if wallpaper := r.activeWallpaper(now); wallpaper != nil {
@@ -265,6 +269,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(r.state.Connected, "|", r.state.Muted, "|", r.state.TimerActive),
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
+		stableCacheValue(r.state.Conversation),
 		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
@@ -278,6 +283,14 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 }
 
 func (r *renderer) drawSpotMotion(canvas *image.RGBA, now time.Time, seconds float64, accent color.RGBA) {
+	if r.conversationActive() {
+		if _, transitioning := r.conversationPlaceholderFade(now); transitioning {
+			r.drawSpotConversation(canvas, seconds, accent, true)
+		} else {
+			r.drawSpotConversationMotion(canvas, seconds, accent)
+		}
+		return
+	}
 	if r.state.Phase == "speaking" && r.state.DisplayEdgeGlow {
 		r.drawSpotReplyRim(canvas, accent)
 		if r.state.Media != nil && r.state.Media.Active {
@@ -295,15 +308,35 @@ func (r *renderer) drawSpotMotion(canvas *image.RGBA, now time.Time, seconds flo
 		if r.mediaImage == nil {
 			r.drawMusicVisualizerBars(canvas, image.Rect(170, 190, 310, 330), seconds, ink)
 		}
-		if r.musicProgressNeedsRedraw(now) {
+		if _, duration := mediaProgress(media, now); duration > 0 {
 			r.drawSpotMediaProgress(canvas, now, media, ink)
-			r.musicProgressDrawn = musicProgressVisualKey(media, now)
 		}
 		return
 	}
 }
 
 func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
+	if r.conversationActive() {
+		seconds := now.Sub(r.animationStart).Seconds()
+		if r.animationStart.IsZero() {
+			seconds = 0
+		}
+		if conversationFadeNeedsFullFrame(seconds) {
+			return []image.Rectangle{image.Rect(0, 0, 480, 480)}
+		}
+		if _, transitioning := r.conversationPlaceholderFade(now); transitioning {
+			return []image.Rectangle{image.Rect(0, 0, 480, 480)}
+		}
+		if r.state.DisplayEdgeGlow {
+			return []image.Rectangle{image.Rect(0, 0, 480, 480)}
+		}
+		regions := make([]image.Rectangle, 0, 2)
+		phase := conversationVisualPhase(r.state.Conversation, r.state.Phase)
+		if phase == "thinking" || phase == "working" {
+			regions = append(regions, image.Rect(176, 324, 304, 384))
+		}
+		return regions
+	}
 	regions := make([]image.Rectangle, 0, 5)
 	if r.state.Phase == "speaking" && r.state.DisplayEdgeGlow {
 		// The round reply rim crosses the framebuffer diagonals, so its restore
@@ -321,7 +354,7 @@ func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
 		if r.mediaImage == nil {
 			regions = append(regions, musicVisualizerMotionBounds(image.Rect(170, 190, 310, 330)))
 		}
-		if r.musicProgressNeedsRedraw(now) {
+		if _, duration := mediaProgress(media, now); duration > 0 {
 			regions = append(regions, image.Rect(112, 388, 368, 432))
 		}
 		return regions
@@ -347,9 +380,8 @@ func (r *renderer) drawSpotNowPlaying(canvas *image.RGBA, now time.Time, seconds
 	r.centeredText(canvas, 240, 383, fitTextToWidth(firstNonEmpty(media.Artist, media.AlbumArtist, media.GroupName, "Tater Music"), r.faces.regular[15], 270), 15, false, color.RGBA{174, 190, 211, 255})
 	_, duration := mediaProgress(media, now)
 	if duration > 0 {
-		if motion && r.musicProgressNeedsRedraw(now) {
+		if motion {
 			r.drawSpotMediaProgress(canvas, now, media, ink)
-			r.musicProgressDrawn = musicProgressVisualKey(media, now)
 		}
 	} else if strings.TrimSpace(media.GroupName) != "" {
 		r.centeredText(canvas, 240, 416, fitTextToWidth(strings.ToUpper(media.GroupName), r.faces.bold[14], 230), 14, true, ink)
