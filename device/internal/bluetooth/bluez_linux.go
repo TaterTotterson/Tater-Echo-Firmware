@@ -2,8 +2,8 @@
 
 package bluetooth
 
-// Athena and Rook expose the controller as hci0,
-// which bluetoothd owns. Active GATT must therefore use BlueZ's D-Bus API;
+// Tater Linux targets expose the controller as hci0, which bluetoothd owns.
+// Active GATT must therefore use BlueZ's D-Bus API;
 // issuing LE Create Connection or ATT packets on the raw monitor socket would
 // race bluetoothd's connection and security state.
 
@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -36,6 +38,8 @@ const (
 	bluezDiscoverTimeout = 20 * time.Second
 	bluezCallTimeout     = 15 * time.Second
 	bluezDisconnect      = 0x13
+	bluezConnectTries    = 3
+	bluezConnectRetry    = 500 * time.Millisecond
 )
 
 type bluezManagedObjects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
@@ -48,11 +52,17 @@ type bluezAttribute struct {
 }
 
 type bluezLink struct {
-	address      string
-	device       dbus.ObjectPath
-	services     []Service
-	attributes   map[uint16]bluezAttribute
-	handleByPath map[dbus.ObjectPath]uint16
+	address       string
+	device        dbus.ObjectPath
+	services      []Service
+	attributes    map[uint16]bluezAttribute
+	handleByPath  map[dbus.ObjectPath]uint16
+	notifications map[uint16]*bluezNotification
+}
+
+type bluezNotification struct {
+	viaSignal bool
+	stop      func(unsubscribe bool)
 }
 
 type bluezPairing struct {
@@ -131,6 +141,21 @@ func NewBlueZGATTManager(hold func(bool)) (GATTManager, error) {
 	); err != nil {
 		return fail(fmt.Errorf("ble: subscribe to BlueZ properties: %w", err))
 	}
+	if err := bus.AddMatchSignal(
+		dbus.WithMatchSender(bluezBus),
+		dbus.WithMatchInterface(bluezObjectManager),
+		dbus.WithMatchMember("InterfacesRemoved"),
+	); err != nil {
+		return fail(fmt.Errorf("ble: subscribe to BlueZ object removal: %w", err))
+	}
+	if err := bus.AddMatchSignal(
+		dbus.WithMatchSender("org.freedesktop.DBus"),
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+		dbus.WithMatchArg(0, bluezBus),
+	); err != nil {
+		return fail(fmt.Errorf("ble: subscribe to BlueZ restarts: %w", err))
+	}
 	signals := make(chan *dbus.Signal, 128)
 	bus.Signal(signals)
 	go m.signalLoop(signals)
@@ -182,6 +207,15 @@ func bluezVariantBool(properties map[string]dbus.Variant, name string) bool {
 	return false
 }
 
+func bluezVariantUint16(properties map[string]dbus.Variant, name string) uint16 {
+	if value, ok := properties[name]; ok {
+		if number, ok := value.Value().(uint16); ok {
+			return number
+		}
+	}
+	return 0
+}
+
 func bluezVariantStrings(properties map[string]dbus.Variant, name string) []string {
 	if value, ok := properties[name]; ok {
 		if rows, ok := value.Value().([]string); ok {
@@ -193,15 +227,50 @@ func bluezVariantStrings(properties map[string]dbus.Variant, name string) []stri
 
 func bluezErrorNamed(err error, suffixes ...string) bool {
 	var dbusErr dbus.Error
-	if !errors.As(err, &dbusErr) {
-		return false
+	name := ""
+	if errors.As(err, &dbusErr) {
+		name = dbusErr.Name
+	} else {
+		var dbusErrPointer *dbus.Error
+		if errors.As(err, &dbusErrPointer) && dbusErrPointer != nil {
+			name = dbusErrPointer.Name
+		}
 	}
 	for _, suffix := range suffixes {
-		if strings.HasSuffix(dbusErr.Name, suffix) {
+		if strings.HasSuffix(name, suffix) {
 			return true
 		}
 	}
 	return false
+}
+
+func bluezPathHandle(path dbus.ObjectPath) (uint16, error) {
+	name := string(path)
+	if slash := strings.LastIndexByte(name, '/'); slash >= 0 {
+		name = name[slash+1:]
+	}
+	for _, prefix := range []string{"service", "char", "desc"} {
+		if strings.HasPrefix(name, prefix) {
+			hex := strings.TrimPrefix(name, prefix)
+			if len(hex) != 4 {
+				break
+			}
+			value, err := strconv.ParseUint(hex, 16, 16)
+			if err == nil && value != 0 {
+				return uint16(value), nil
+			}
+			break
+		}
+	}
+	return 0, fmt.Errorf("ble: BlueZ object %q has no ATT handle", path)
+}
+
+func bluezConnectRetryable(err error) bool {
+	return bluezErrorNamed(err, ".Failed")
+}
+
+func bluezDiscoveryFilterUnsupported(err error) bool {
+	return bluezErrorNamed(err, ".NotSupported")
 }
 
 func (m *BlueZManager) deviceByAddress(objects bluezManagedObjects, addr string) (dbus.ObjectPath, bool) {
@@ -226,7 +295,13 @@ func (m *BlueZManager) discoverDevice(ctx context.Context, addr string) (dbus.Ob
 		"DuplicateData": dbus.MakeVariant(false),
 	}
 	if call := adapter.CallWithContext(ctx, bluezAdapter+".SetDiscoveryFilter", 0, filter); call.Err != nil {
-		return "", fmt.Errorf("ble: set BlueZ discovery filter: %w", call.Err)
+		// BlueZ gates SetDiscoveryFilter on kernel management protocol 1.8.
+		// Older Radar/Biscuit kernels reject the method itself, regardless of
+		// which filter keys are present, but unfiltered discovery still works.
+		if !bluezDiscoveryFilterUnsupported(call.Err) {
+			return "", fmt.Errorf("ble: set BlueZ discovery filter: %w", call.Err)
+		}
+		log.Printf("ble: BlueZ discovery filters are unsupported; using unfiltered discovery")
 	}
 	started := false
 	if call := adapter.CallWithContext(ctx, bluezAdapter+".StartDiscovery", 0); call.Err == nil {
@@ -272,6 +347,51 @@ func (m *BlueZManager) boolProperty(ctx context.Context, path dbus.ObjectPath, i
 	return flag
 }
 
+func (m *BlueZManager) connectDevice(ctx context.Context, addr string) (dbus.ObjectPath, error) {
+	var lastErr error
+	for attempt := 1; attempt <= bluezConnectTries; attempt++ {
+		if m.hold != nil {
+			m.hold(true)
+		}
+		device, err := m.discoverDevice(ctx, addr)
+		if err == nil {
+			call := m.bus.Object(bluezBus, device).CallWithContext(ctx, bluezDevice+".Connect", 0)
+			err = call.Err
+			if bluezErrorNamed(err, ".AlreadyConnected", ".InProgress") {
+				err = nil
+			}
+		}
+		if m.hold != nil {
+			m.hold(false)
+		}
+		if err == nil {
+			return device, nil
+		}
+		lastErr = err
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", ErrConnectTimeout
+		}
+		if attempt == bluezConnectTries || !bluezConnectRetryable(err) {
+			break
+		}
+		log.Printf("ble: BlueZ connect attempt %d/%d failed transiently: %v", attempt, bluezConnectTries, err)
+		timer := time.NewTimer(bluezConnectRetry)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ErrConnectTimeout
+		case <-timer.C:
+		}
+	}
+	return "", fmt.Errorf("ble: BlueZ connect: %w", lastErr)
+}
+
+func (m *BlueZManager) disconnectDevice(path dbus.ObjectPath) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = m.bus.Object(bluezBus, path).CallWithContext(ctx, bluezDevice+".Disconnect", 0).Err
+}
+
 func (m *BlueZManager) Connect(addr string, addrType int) (ConnInfo, error) {
 	addr, ok := normaliseAddr(addr)
 	if !ok || addrType < 0 || addrType > 1 {
@@ -287,22 +407,11 @@ func (m *BlueZManager) Connect(addr string, addrType int) (ConnInfo, error) {
 		return ConnInfo{}, ErrNoSlots
 	}
 	m.mu.Unlock()
-	if m.hold != nil {
-		m.hold(true)
-		defer m.hold(false)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), bluezConnectTimeout)
 	defer cancel()
-	device, err := m.discoverDevice(ctx, addr)
+	device, err := m.connectDevice(ctx, addr)
 	if err != nil {
 		return ConnInfo{}, err
-	}
-	object := m.bus.Object(bluezBus, device)
-	if call := object.CallWithContext(ctx, bluezDevice+".Connect", 0); call.Err != nil && !bluezErrorNamed(call.Err, ".AlreadyConnected", ".InProgress") {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return ConnInfo{}, ErrConnectTimeout
-		}
-		return ConnInfo{}, fmt.Errorf("ble: BlueZ connect: %w", call.Err)
 	}
 	for !m.boolProperty(ctx, device, bluezDevice, "Connected") {
 		select {
@@ -311,14 +420,30 @@ func (m *BlueZManager) Connect(addr string, addrType int) (ConnInfo, error) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+	link := &bluezLink{address: addr, device: device, notifications: map[uint16]*bluezNotification{}}
+	objects, err := m.waitServicesContext(ctx, link)
+	if err != nil {
+		m.disconnectDevice(device)
+		return ConnInfo{}, err
+	}
+	link.services, link.attributes, link.handleByPath, err = bluezBuildServices(objects, device)
+	if err != nil {
+		m.disconnectDevice(device)
+		return ConnInfo{}, err
+	}
+	mtu := m.connectionMTU(ctx, objects, link)
+	if !m.boolProperty(ctx, device, bluezDevice, "Connected") {
+		return ConnInfo{}, ErrNotConnected
+	}
 	m.mu.Lock()
 	if _, exists := m.links[addr]; exists {
 		m.mu.Unlock()
+		m.disconnectDevice(device)
 		return ConnInfo{}, ErrAlreadyConnected
 	}
-	m.links[addr] = &bluezLink{address: addr, device: device}
+	m.links[addr] = link
 	m.mu.Unlock()
-	return ConnInfo{Addr: addr, MTU: attClientMTU}, nil
+	return ConnInfo{Addr: addr, MTU: mtu}, nil
 }
 
 func (m *BlueZManager) link(addr string) *bluezLink {
@@ -414,9 +539,7 @@ func (m *BlueZManager) ForgetBond(addr string) error {
 	return nil
 }
 
-func (m *BlueZManager) waitServices(link *bluezLink) (bluezManagedObjects, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), bluezDiscoverTimeout)
-	defer cancel()
+func (m *BlueZManager) waitServicesContext(ctx context.Context, link *bluezLink) (bluezManagedObjects, error) {
 	for {
 		if m.boolProperty(ctx, link.device, bluezDevice, "ServicesResolved") {
 			return m.managedObjects(ctx)
@@ -429,89 +552,233 @@ func (m *BlueZManager) waitServices(link *bluezLink) (bluezManagedObjects, error
 	}
 }
 
+func (m *BlueZManager) waitServices(link *bluezLink) (bluezManagedObjects, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bluezDiscoverTimeout)
+	defer cancel()
+	return m.waitServicesContext(ctx, link)
+}
+
+func bluezBuildServices(objects bluezManagedObjects, device dbus.ObjectPath) ([]Service, map[uint16]bluezAttribute, map[dbus.ObjectPath]uint16, error) {
+	serviceProperties := map[dbus.ObjectPath]map[string]dbus.Variant{}
+	for path, interfaces := range objects {
+		properties, ok := interfaces[bluezService]
+		if ok && bluezVariantPath(properties, "Device") == device {
+			serviceProperties[path] = properties
+		}
+	}
+	characteristicProperties := map[dbus.ObjectPath]map[string]dbus.Variant{}
+	for path, interfaces := range objects {
+		properties, ok := interfaces[bluezCharacteristic]
+		if !ok {
+			continue
+		}
+		if _, belongs := serviceProperties[bluezVariantPath(properties, "Service")]; belongs {
+			characteristicProperties[path] = properties
+		}
+	}
+	descriptorProperties := map[dbus.ObjectPath]map[string]dbus.Variant{}
+	for path, interfaces := range objects {
+		properties, ok := interfaces[bluezDescriptor]
+		if !ok {
+			continue
+		}
+		if _, belongs := characteristicProperties[bluezVariantPath(properties, "Characteristic")]; belongs {
+			descriptorProperties[path] = properties
+		}
+	}
+
+	occupied := map[uint16]bool{}
+	allServiceHandles := make([]uint16, 0, len(serviceProperties))
+	for path := range serviceProperties {
+		handle, err := bluezPathHandle(path)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		occupied[handle] = true
+		allServiceHandles = append(allServiceHandles, handle)
+	}
+	for path := range characteristicProperties {
+		handle, err := bluezPathHandle(path)
+		if err != nil || handle == 0xffff {
+			if err == nil {
+				err = fmt.Errorf("ble: BlueZ characteristic %q has invalid handle", path)
+			}
+			return nil, nil, nil, err
+		}
+		occupied[handle], occupied[handle+1] = true, true
+	}
+	for path := range descriptorProperties {
+		handle, err := bluezPathHandle(path)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		occupied[handle] = true
+	}
+	sort.Slice(allServiceHandles, func(i, j int) bool { return allServiceHandles[i] < allServiceHandles[j] })
+
+	servicePaths := make([]dbus.ObjectPath, 0, len(serviceProperties))
+	for path, properties := range serviceProperties {
+		if bluezVariantBool(properties, "Primary") {
+			servicePaths = append(servicePaths, path)
+		}
+	}
+	sort.Slice(servicePaths, func(i, j int) bool {
+		left, _ := bluezPathHandle(servicePaths[i])
+		right, _ := bluezPathHandle(servicePaths[j])
+		return left < right
+	})
+
+	services := make([]Service, 0, len(servicePaths))
+	attributes := map[uint16]bluezAttribute{}
+	handleByPath := map[dbus.ObjectPath]uint16{}
+	for _, servicePath := range servicePaths {
+		serviceHandle, _ := bluezPathHandle(servicePath)
+		serviceLimit := uint16(0xffff)
+		serviceEnd := serviceHandle
+		for _, next := range allServiceHandles {
+			if next > serviceHandle {
+				serviceLimit, serviceEnd = next-1, next-1
+				break
+			}
+		}
+		uuid, err := uuidFromString(bluezVariantString(serviceProperties[servicePath], "UUID"))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		service := Service{Start: serviceHandle, End: serviceEnd, UUID: uuid, Characteristics: []Characteristic{}}
+		charPaths := make([]dbus.ObjectPath, 0)
+		for path, properties := range characteristicProperties {
+			if bluezVariantPath(properties, "Service") == servicePath {
+				charPaths = append(charPaths, path)
+			}
+		}
+		sort.Slice(charPaths, func(i, j int) bool {
+			left, _ := bluezPathHandle(charPaths[i])
+			right, _ := bluezPathHandle(charPaths[j])
+			return left < right
+		})
+		for charIndex, charPath := range charPaths {
+			properties := characteristicProperties[charPath]
+			charUUID, err := uuidFromString(bluezVariantString(properties, "UUID"))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			charHandle, _ := bluezPathHandle(charPath)
+			valueHandle := charHandle + 1
+			flags := bluezVariantStrings(properties, "Flags")
+			props := bluezCharacteristicProperties(flags)
+			characteristic := Characteristic{Handle: charHandle, ValueHandle: valueHandle, UUID: charUUID, Properties: props, Descriptors: []Descriptor{}}
+			if _, duplicate := attributes[valueHandle]; duplicate {
+				return nil, nil, nil, fmt.Errorf("ble: duplicate BlueZ ATT handle 0x%04x", valueHandle)
+			}
+			attributes[valueHandle] = bluezAttribute{kind: "characteristic", path: charPath, charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
+			handleByPath[charPath] = valueHandle
+			descPaths := make([]dbus.ObjectPath, 0)
+			for path, properties := range descriptorProperties {
+				if bluezVariantPath(properties, "Characteristic") == charPath {
+					descPaths = append(descPaths, path)
+				}
+			}
+			sort.Slice(descPaths, func(i, j int) bool {
+				left, _ := bluezPathHandle(descPaths[i])
+				right, _ := bluezPathHandle(descPaths[j])
+				return left < right
+			})
+			hasCCCD := false
+			for _, descPath := range descPaths {
+				descUUID, err := uuidFromString(bluezVariantString(descriptorProperties[descPath], "UUID"))
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				descHandle, _ := bluezPathHandle(descPath)
+				kind := "descriptor"
+				if descUUID.Is16(gattCCCD) {
+					kind, hasCCCD = "cccd", true
+				}
+				if _, duplicate := attributes[descHandle]; duplicate {
+					return nil, nil, nil, fmt.Errorf("ble: duplicate BlueZ ATT handle 0x%04x", descHandle)
+				}
+				characteristic.Descriptors = append(characteristic.Descriptors, Descriptor{Handle: descHandle, UUID: descUUID})
+				attributes[descHandle] = bluezAttribute{kind: kind, path: descPath, charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
+				if descHandle > service.End {
+					service.End = descHandle
+				}
+			}
+			// BlueZ can consume CCCD internally without exposing Descriptor1.
+			// Infer its real handle from the gap between BlueZ ATT object paths.
+			if !hasCCCD && props&(0x10|0x20) != 0 {
+				candidate := valueHandle + 1
+				limit := serviceLimit
+				if charIndex+1 < len(charPaths) {
+					next, _ := bluezPathHandle(charPaths[charIndex+1])
+					limit = next - 1
+				}
+				for candidate != 0 && candidate <= limit && occupied[candidate] {
+					if candidate == limit {
+						candidate = 0
+						break
+					}
+					candidate++
+				}
+				if candidate == 0 || candidate > limit {
+					return nil, nil, nil, fmt.Errorf("ble: no ATT handle available for BlueZ CCCD after 0x%04x", valueHandle)
+				}
+				occupied[candidate] = true
+				characteristic.Descriptors = append(characteristic.Descriptors, Descriptor{Handle: candidate, UUID: UUID16(gattCCCD)})
+				attributes[candidate] = bluezAttribute{kind: "cccd", charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
+				if candidate > service.End {
+					service.End = candidate
+				}
+			}
+			if valueHandle > service.End {
+				service.End = valueHandle
+			}
+			service.Characteristics = append(service.Characteristics, characteristic)
+		}
+		services = append(services, service)
+	}
+	return services, attributes, handleByPath, nil
+}
+
+func (m *BlueZManager) connectionMTU(ctx context.Context, objects bluezManagedObjects, link *bluezLink) int {
+	var first dbus.ObjectPath
+	for path := range link.handleByPath {
+		if first == "" {
+			first = path
+		}
+		if mtu := bluezVariantUint16(objects[path][bluezCharacteristic], "MTU"); mtu >= attDefaultMTU && mtu <= 517 {
+			return int(mtu)
+		}
+	}
+	if first != "" {
+		if value, err := m.property(ctx, first, bluezCharacteristic, "MTU"); err == nil {
+			if mtu, ok := value.Value().(uint16); ok && mtu >= attDefaultMTU && mtu <= 517 {
+				return int(mtu)
+			}
+		}
+	}
+	return attDefaultMTU
+}
+
 func (m *BlueZManager) Services(addr string) ([]Service, error) {
 	link := m.link(addr)
 	if link == nil {
 		return nil, ErrNotConnected
 	}
+	m.mu.Lock()
+	if link.services != nil {
+		services := append([]Service(nil), link.services...)
+		m.mu.Unlock()
+		return services, nil
+	}
+	m.mu.Unlock()
 	objects, err := m.waitServices(link)
 	if err != nil {
 		return nil, err
 	}
-	servicePaths := make([]dbus.ObjectPath, 0)
-	for path, interfaces := range objects {
-		properties, ok := interfaces[bluezService]
-		if ok && bluezVariantPath(properties, "Device") == link.device && bluezVariantBool(properties, "Primary") {
-			servicePaths = append(servicePaths, path)
-		}
-	}
-	sort.Slice(servicePaths, func(i, j int) bool { return servicePaths[i] < servicePaths[j] })
-	handle := uint16(1)
-	services := make([]Service, 0, len(servicePaths))
-	attributes := map[uint16]bluezAttribute{}
-	handleByPath := map[dbus.ObjectPath]uint16{}
-	for _, servicePath := range servicePaths {
-		serviceProperties := objects[servicePath][bluezService]
-		uuid, err := uuidFromString(bluezVariantString(serviceProperties, "UUID"))
-		if err != nil {
-			return nil, err
-		}
-		service := Service{Start: handle, UUID: uuid, Characteristics: []Characteristic{}}
-		handle++ // synthetic primary-service declaration
-		charPaths := make([]dbus.ObjectPath, 0)
-		for path, interfaces := range objects {
-			properties, ok := interfaces[bluezCharacteristic]
-			if ok && bluezVariantPath(properties, "Service") == servicePath {
-				charPaths = append(charPaths, path)
-			}
-		}
-		sort.Slice(charPaths, func(i, j int) bool { return charPaths[i] < charPaths[j] })
-		for _, charPath := range charPaths {
-			properties := objects[charPath][bluezCharacteristic]
-			charUUID, err := uuidFromString(bluezVariantString(properties, "UUID"))
-			if err != nil {
-				return nil, err
-			}
-			flags := bluezVariantStrings(properties, "Flags")
-			props := bluezCharacteristicProperties(flags)
-			characteristic := Characteristic{Handle: handle, ValueHandle: handle + 1, UUID: charUUID, Properties: props, Descriptors: []Descriptor{}}
-			handle += 2
-			attributes[characteristic.ValueHandle] = bluezAttribute{kind: "characteristic", path: charPath, charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
-			handleByPath[charPath] = characteristic.ValueHandle
-			descPaths := make([]dbus.ObjectPath, 0)
-			for path, interfaces := range objects {
-				descProperties, ok := interfaces[bluezDescriptor]
-				if ok && bluezVariantPath(descProperties, "Characteristic") == charPath {
-					descPaths = append(descPaths, path)
-				}
-			}
-			sort.Slice(descPaths, func(i, j int) bool { return descPaths[i] < descPaths[j] })
-			hasCCCD := false
-			for _, descPath := range descPaths {
-				descUUID, err := uuidFromString(bluezVariantString(objects[descPath][bluezDescriptor], "UUID"))
-				if err != nil {
-					return nil, err
-				}
-				kind := "descriptor"
-				if descUUID.Is16(gattCCCD) {
-					kind, hasCCCD = "cccd", true
-				}
-				characteristic.Descriptors = append(characteristic.Descriptors, Descriptor{Handle: handle, UUID: descUUID})
-				attributes[handle] = bluezAttribute{kind: kind, path: descPath, charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
-				handle++
-			}
-			// BlueZ can consume CCCD internally without exposing Descriptor1.
-			// Publish a synthetic one so the transport-neutral caller can use the
-			// same subscribe-by-handle flow as the direct ATT backend.
-			if !hasCCCD && props&(0x10|0x20) != 0 {
-				characteristic.Descriptors = append(characteristic.Descriptors, Descriptor{Handle: handle, UUID: UUID16(gattCCCD)})
-				attributes[handle] = bluezAttribute{kind: "cccd", charPath: charPath, indication: props&0x20 != 0 && props&0x10 == 0}
-				handle++
-			}
-			service.Characteristics = append(service.Characteristics, characteristic)
-		}
-		service.End = handle - 1
-		services = append(services, service)
+	services, attributes, handleByPath, err := bluezBuildServices(objects, link.device)
+	if err != nil {
+		return nil, err
 	}
 	m.mu.Lock()
 	if current := m.links[link.address]; current == link {
@@ -535,14 +802,145 @@ func (m *BlueZManager) attribute(addr string, handle uint16) (*bluezLink, bluezA
 	return link, attribute, nil
 }
 
+func (m *BlueZManager) installNotification(link *bluezLink, handle uint16, notification *bluezNotification) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.links[link.address] != link {
+		return false
+	}
+	if link.notifications == nil {
+		link.notifications = map[uint16]*bluezNotification{}
+	}
+	if link.notifications[handle] != nil {
+		return false
+	}
+	link.notifications[handle] = notification
+	return true
+}
+
+func (m *BlueZManager) notificationEnabled(link *bluezLink, handle uint16) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.links[link.address] == link && link.notifications[handle] != nil
+}
+
+func (m *BlueZManager) dropNotification(link *bluezLink, handle uint16, notification *bluezNotification, unsubscribe bool) {
+	m.mu.Lock()
+	if m.links[link.address] == link && link.notifications[handle] == notification {
+		delete(link.notifications, handle)
+	}
+	m.mu.Unlock()
+	if notification != nil && notification.stop != nil {
+		notification.stop(unsubscribe)
+	}
+}
+
+func (m *BlueZManager) relayAcquiredNotifications(link *bluezLink, handle uint16, indication bool, notification *bluezNotification, file *os.File, mtu uint16) {
+	bufferSize := int(mtu)
+	if bufferSize < attDefaultMTU || bufferSize > 517 {
+		bufferSize = 512
+	}
+	buffer := make([]byte, bufferSize)
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			m.mu.Lock()
+			active := m.links[link.address] == link && link.notifications[handle] == notification
+			callback := m.onNotify
+			m.mu.Unlock()
+			if active && callback != nil {
+				callback(link.address, handle, append([]byte(nil), buffer[:n]...), indication)
+			}
+		}
+		if err != nil {
+			m.dropNotification(link, handle, notification, false)
+			return
+		}
+	}
+}
+
+func (m *BlueZManager) subscribe(link *bluezLink, handle uint16, attribute bluezAttribute) error {
+	if m.notificationEnabled(link, handle) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bluezCallTimeout)
+	defer cancel()
+	object := m.bus.Object(bluezBus, attribute.charPath)
+	call := object.CallWithContext(ctx, bluezCharacteristic+".AcquireNotify", 0, map[string]dbus.Variant{})
+	if call.Err == nil {
+		var fd dbus.UnixFD
+		var mtu uint16
+		if err := call.Store(&fd, &mtu); err != nil {
+			return fmt.Errorf("ble: decode BlueZ notification socket: %w", err)
+		}
+		rawFD := int(fd)
+		if err := unix.SetNonblock(rawFD, true); err != nil {
+			_ = unix.Close(rawFD)
+			return fmt.Errorf("ble: configure BlueZ notification socket: %w", err)
+		}
+		file := os.NewFile(uintptr(rawFD), "bluez-notify")
+		if file == nil {
+			_ = unix.Close(rawFD)
+			return errors.New("ble: open BlueZ notification socket")
+		}
+		notification := &bluezNotification{stop: func(bool) { _ = file.Close() }}
+		if !m.installNotification(link, handle, notification) {
+			_ = file.Close()
+			if m.notificationEnabled(link, handle) {
+				return nil
+			}
+			return ErrNotConnected
+		}
+		go m.relayAcquiredNotifications(link, handle, attribute.indication, notification, file, mtu)
+		return nil
+	}
+
+	// AcquireNotify is optional. StartNotify remains the compatible fallback
+	// and is tracked so ordinary ReadValue property updates are not mistaken
+	// for unsolicited notifications when no subscription exists.
+	notification := &bluezNotification{viaSignal: true}
+	notification.stop = func(unsubscribe bool) {
+		if !unsubscribe {
+			return
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), bluezCallTimeout)
+		defer stopCancel()
+		_ = object.CallWithContext(stopCtx, bluezCharacteristic+".StopNotify", 0).Err
+	}
+	if !m.installNotification(link, handle, notification) {
+		if m.notificationEnabled(link, handle) {
+			return nil
+		}
+		return ErrNotConnected
+	}
+	start := object.CallWithContext(ctx, bluezCharacteristic+".StartNotify", 0)
+	if start.Err != nil && !bluezErrorNamed(start.Err, ".InProgress") {
+		m.dropNotification(link, handle, notification, false)
+		return fmt.Errorf("ble: BlueZ StartNotify: %w", start.Err)
+	}
+	return nil
+}
+
+func (m *BlueZManager) unsubscribe(link *bluezLink, handle uint16) {
+	m.mu.Lock()
+	var notification *bluezNotification
+	if m.links[link.address] == link {
+		notification = link.notifications[handle]
+		delete(link.notifications, handle)
+	}
+	m.mu.Unlock()
+	if notification != nil && notification.stop != nil {
+		notification.stop(true)
+	}
+}
+
 func (m *BlueZManager) Read(addr string, handle uint16) ([]byte, error) {
-	_, attribute, err := m.attribute(addr, handle)
+	link, attribute, err := m.attribute(addr, handle)
 	if err != nil {
 		return nil, err
 	}
 	if attribute.kind == "cccd" {
-		notifying := m.boolProperty(context.Background(), attribute.charPath, bluezCharacteristic, "Notifying")
-		if notifying {
+		if m.notificationEnabled(link, handle) {
 			if attribute.indication {
 				return []byte{0x02, 0x00}, nil
 			}
@@ -568,24 +966,20 @@ func (m *BlueZManager) Read(addr string, handle uint16) ([]byte, error) {
 }
 
 func (m *BlueZManager) Write(addr string, handle uint16, value []byte, response bool) error {
-	_, attribute, err := m.attribute(addr, handle)
+	link, attribute, err := m.attribute(addr, handle)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), bluezCallTimeout)
-	defer cancel()
 	if attribute.kind == "cccd" {
 		enable := len(value) >= 2 && (value[0]&0x03) != 0
-		method := "StopNotify"
 		if enable {
-			method = "StartNotify"
+			return m.subscribe(link, handle, attribute)
 		}
-		call := m.bus.Object(bluezBus, attribute.charPath).CallWithContext(ctx, bluezCharacteristic+"."+method, 0)
-		if call.Err != nil && !(enable && bluezErrorNamed(call.Err, ".InProgress")) {
-			return fmt.Errorf("ble: BlueZ %s: %w", method, call.Err)
-		}
+		m.unsubscribe(link, handle)
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), bluezCallTimeout)
+	defer cancel()
 	iface := bluezCharacteristic
 	if attribute.kind == "descriptor" {
 		iface = bluezDescriptor
@@ -620,26 +1014,49 @@ func (m *BlueZManager) Slots() (free, limit int) {
 }
 
 func (m *BlueZManager) removeLink(path dbus.ObjectPath, reason byte) {
+	m.removeLinks(func(link *bluezLink) bool { return link.device == path }, reason)
+}
+
+func (m *BlueZManager) removeLinks(matches func(*bluezLink) bool, reason byte) {
+	type removedLink struct {
+		address       string
+		notifications []*bluezNotification
+	}
 	m.mu.Lock()
-	var address string
+	removed := make([]removedLink, 0)
 	for candidate, link := range m.links {
-		if link.device == path {
-			address = candidate
-			delete(m.links, candidate)
-			break
+		if !matches(link) {
+			continue
 		}
+		entry := removedLink{address: candidate}
+		for _, notification := range link.notifications {
+			entry.notifications = append(entry.notifications, notification)
+		}
+		removed = append(removed, entry)
+		delete(m.links, candidate)
 	}
 	callback := m.onDisconnect
 	m.mu.Unlock()
-	if address != "" && callback != nil {
-		callback(address, reason)
+	for _, link := range removed {
+		for _, notification := range link.notifications {
+			if notification != nil && notification.stop != nil {
+				notification.stop(false)
+			}
+		}
+		if callback != nil {
+			callback(link.address, reason)
+		}
 	}
 }
 
-func (m *BlueZManager) signalLoop(signals <-chan *dbus.Signal) {
-	for signal := range signals {
-		if signal == nil || signal.Name != bluezProperties+".PropertiesChanged" || len(signal.Body) < 2 {
-			continue
+func (m *BlueZManager) handleSignal(signal *dbus.Signal) {
+	if signal == nil {
+		return
+	}
+	switch signal.Name {
+	case bluezProperties + ".PropertiesChanged":
+		if len(signal.Body) < 2 {
+			return
 		}
 		iface, _ := signal.Body[0].(string)
 		changed, _ := signal.Body[1].(map[string]dbus.Variant)
@@ -654,11 +1071,11 @@ func (m *BlueZManager) signalLoop(signals <-chan *dbus.Signal) {
 		case bluezCharacteristic:
 			valueVariant, ok := changed["Value"]
 			if !ok {
-				continue
+				return
 			}
 			value, ok := valueVariant.Value().([]byte)
 			if !ok {
-				continue
+				return
 			}
 			m.mu.Lock()
 			var address string
@@ -666,8 +1083,11 @@ func (m *BlueZManager) signalLoop(signals <-chan *dbus.Signal) {
 			var indication bool
 			for candidate, link := range m.links {
 				if found, exists := link.handleByPath[signal.Path]; exists {
-					address, handle = candidate, found
-					indication = link.attributes[found].indication
+					notification := link.notifications[found]
+					if notification != nil && notification.viaSignal {
+						address, handle = candidate, found
+						indication = link.attributes[found].indication
+					}
 					break
 				}
 			}
@@ -677,6 +1097,37 @@ func (m *BlueZManager) signalLoop(signals <-chan *dbus.Signal) {
 				callback(address, handle, append([]byte(nil), value...), indication)
 			}
 		}
+	case bluezObjectManager + ".InterfacesRemoved":
+		if len(signal.Body) < 2 {
+			return
+		}
+		path, _ := signal.Body[0].(dbus.ObjectPath)
+		interfaces, _ := signal.Body[1].([]string)
+		adapterRemoved, deviceRemoved := false, false
+		for _, iface := range interfaces {
+			adapterRemoved = adapterRemoved || iface == bluezAdapter
+			deviceRemoved = deviceRemoved || iface == bluezDevice
+		}
+		if adapterRemoved && path == m.adapter {
+			m.removeLinks(func(*bluezLink) bool { return true }, bluezDisconnect)
+		} else if deviceRemoved {
+			m.removeLink(path, bluezDisconnect)
+		}
+	case "org.freedesktop.DBus.NameOwnerChanged":
+		if len(signal.Body) < 3 {
+			return
+		}
+		name, _ := signal.Body[0].(string)
+		oldOwner, _ := signal.Body[1].(string)
+		if name == bluezBus && oldOwner != "" {
+			m.removeLinks(func(*bluezLink) bool { return true }, bluezDisconnect)
+		}
+	}
+}
+
+func (m *BlueZManager) signalLoop(signals <-chan *dbus.Signal) {
+	for signal := range signals {
+		m.handleSignal(signal)
 	}
 }
 

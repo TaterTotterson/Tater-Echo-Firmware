@@ -69,9 +69,9 @@ type bridgeWorker struct {
 	q chan bridgeRequest
 }
 
-// GATTManager is the hardware-neutral active BLE contract. Biscuit and
-// Checkers implement it directly over their exclusively owned controller;
-// Rook implements it through BlueZ, which owns Linux hci0.
+// GATTManager is the hardware-neutral active BLE contract. Targets with an
+// exclusively owned controller implement it directly; Tater Linux targets use
+// BlueZ, which owns hci0.
 type GATTManager interface {
 	SetCallbacks(func(addr string, handle uint16, value []byte, indication bool), func(addr string, reason byte))
 	Connected() []string

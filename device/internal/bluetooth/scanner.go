@@ -122,7 +122,7 @@ func NewScanner(onBatch BatchCallback) *Scanner {
 func (s *Scanner) Conns() *ConnManager { return s.conns }
 
 // SetConnectionHold pauses raw passive scanning while another connection
-// manager (BlueZ on Athena and Rook) discovers or connects a peer. It uses the same
+// manager (BlueZ on Tater Linux) discovers or connects a peer. It uses the same
 // session signal as direct-HCI connection establishment.
 func (s *Scanner) SetConnectionHold(hold bool) {
 	if s.connHold.Swap(hold) != hold {
