@@ -48,9 +48,45 @@ const playbackThresholdDrop = 20 * wakeScoreStep
 var shadowClockStart = time.Now()
 
 type shadowChunk struct {
-	pcm        []int16
+	pcm []int16
+	// capturedAt is the end of pcm on the microphone timeline. Engines may
+	// return several chronological scores for one queued chunk; their score
+	// period places each result back at the audio that produced it.
 	capturedAt time.Time
 	generation uint64
+}
+
+type scorePeriodProvider interface {
+	scorePeriod() time.Duration
+}
+
+type scoreEndLagProvider interface {
+	scoreEndLag() time.Duration
+}
+
+func scoreCapturedAt(engine Engine, chunk shadowChunk, index, count int) time.Time {
+	if chunk.capturedAt.IsZero() || count <= 0 || index < 0 || index >= count {
+		return chunk.capturedAt
+	}
+	period := time.Duration(0)
+	if provider, ok := engine.(scorePeriodProvider); ok {
+		period = provider.scorePeriod()
+	}
+	if period <= 0 && len(chunk.pcm) > 0 {
+		// Test/custom engines may not expose a cadence. Evenly distributing
+		// their chronological outputs across the supplied PCM is safer than
+		// assigning every result to the end of the batch.
+		period = time.Duration(len(chunk.pcm)) * time.Second /
+			time.Duration(SupportedSampleRate*count)
+	}
+	if period <= 0 {
+		return chunk.capturedAt
+	}
+	endAt := chunk.capturedAt
+	if provider, ok := engine.(scoreEndLagProvider); ok {
+		endAt = endAt.Add(-provider.scoreEndLag())
+	}
+	return endAt.Add(-time.Duration(count-1-index) * period)
 }
 
 // ShadowStats describes one reporting window. Drain returns these counters and
@@ -522,7 +558,7 @@ func (s *ShadowScorer) run() {
 			continue
 		}
 
-		for _, raw := range out {
+		for scoreIndex, raw := range out {
 			if math.IsNaN(float64(raw)) || math.IsInf(float64(raw), 0) || raw < 0 || raw > 1 {
 				s.recordErr(fmt.Errorf("microwakeword: invalid probability %g", raw))
 				continue
@@ -591,11 +627,12 @@ func (s *ShadowScorer) run() {
 			s.ready = true
 			s.mu.Unlock()
 
+			scoreAt := scoreCapturedAt(s.engine, chunk, scoreIndex, len(out))
 			if crossed && s.onCross != nil {
-				s.onCross(mean, chunk.capturedAt)
+				s.onCross(mean, scoreAt)
 			}
 			if closeMissed && s.onCloseMiss != nil {
-				s.onCloseMiss(mean, chunk.capturedAt)
+				s.onCloseMiss(mean, scoreAt)
 			}
 		}
 	}

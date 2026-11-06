@@ -160,6 +160,27 @@ func TestWakeVerifierCaptureStaysAnchoredWhenAgreementArrivesLater(t *testing.T)
 	}
 }
 
+func TestWakeBoundarySplitsDetectorBatchAtCrossingSample(t *testing.T) {
+	batch := make([]byte, wakeChunkBytes)
+	for index := range batch {
+		batch[index] = byte(index % 251)
+	}
+	batchEnd := time.Now()
+	preRoll, postWake := splitWakeAudioAt([]wakeAudioFrame{{at: batchEnd, pcm: batch}},
+		batchEnd.Add(-40*time.Millisecond))
+	if len(preRoll) != 1 || len(postWake) != 1 {
+		t.Fatalf("split frame counts = %d/%d, want 1/1", len(preRoll), len(postWake))
+	}
+	if len(preRoll[0]) != wakeChunkBytes/2 || len(postWake[0]) != wakeChunkBytes/2 {
+		t.Fatalf("split byte counts = %d/%d, want %d/%d",
+			len(preRoll[0]), len(postWake[0]), wakeChunkBytes/2, wakeChunkBytes/2)
+	}
+	joined := append(append([]byte(nil), preRoll[0]...), postWake[0]...)
+	if string(joined) != string(batch) {
+		t.Fatal("sample-accurate wake split changed the detector audio")
+	}
+}
+
 func TestContinuousWakeAudioSurvivesDirectionChange(t *testing.T) {
 	d := NewDataClient("continuous-wake-test", nil, nil, aec.New())
 	base := time.Now()

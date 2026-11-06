@@ -170,9 +170,9 @@ func (c *Client) WakeWithCapture(wakeWord string, score float32, commandPreRoll,
 	return c.WakeWithBoundaryCapture(wakeWord, score, commandPreRoll, nil, verifierCapture)
 }
 
-// WakeWithBoundaryCapture separates audio through the detector-crossing frame
-// from command audio captured afterward. Tater can discard the former from
-// STT while retaining the latter even when model agreement delayed dispatch.
+// WakeWithBoundaryCapture separates audio through the detector-crossing sample
+// from command audio captured afterward. Tater can discard the former from STT
+// while retaining the latter even when model agreement delayed dispatch.
 func (c *Client) WakeWithBoundaryCapture(wakeWord string, score float32, wakePreRoll, commandPostWake, verifierCapture [][]byte) bool {
 	if !c.connected.Load() {
 		return false

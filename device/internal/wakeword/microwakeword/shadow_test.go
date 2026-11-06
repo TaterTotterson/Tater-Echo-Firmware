@@ -11,6 +11,8 @@ type fakeShadowEngine struct {
 	mu         sync.Mutex
 	batches    [][]float32
 	inputs     [][]int16
+	period     time.Duration
+	endLag     time.Duration
 	delay      time.Duration
 	fail       bool
 	resetCount int
@@ -51,6 +53,10 @@ func (f *fakeShadowEngine) Close() error {
 }
 
 func (f *fakeShadowEngine) Info() string { return "fake stride=2" }
+
+func (f *fakeShadowEngine) scorePeriod() time.Duration { return f.period }
+
+func (f *fakeShadowEngine) scoreEndLag() time.Duration { return f.endLag }
 
 func waitShadow(t *testing.T, what string, condition func() bool) {
 	t.Helper()
@@ -208,6 +214,59 @@ func TestShadowPushBytesAtPreservesCaptureIdentity(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for timestamped crossing")
+	}
+}
+
+func TestShadowCrossingUsesScorePositionInsideAudioBatch(t *testing.T) {
+	engine := &fakeShadowEngine{
+		batches: [][]float32{{0.1, 0.9, 0.1, 0.1}},
+		period:  20 * time.Millisecond,
+	}
+	crossed := make(chan time.Time, 1)
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, func(_ float32, at time.Time) {
+		crossed <- at
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	batchEnd := time.Now()
+	s.PushBytesAt(make([]byte, 1280*2), batchEnd)
+	select {
+	case got := <-crossed:
+		want := batchEnd.Add(-40 * time.Millisecond)
+		if !got.Equal(want) {
+			t.Fatalf("crossing timestamp = %v, want second score at %v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for score-positioned crossing")
+	}
+}
+
+func TestShadowCrossingHonorsModelCadenceRemainder(t *testing.T) {
+	engine := &fakeShadowEngine{
+		batches: [][]float32{{0.1, 0.9}},
+		period:  30 * time.Millisecond,
+		endLag:  20 * time.Millisecond,
+	}
+	crossed := make(chan time.Time, 1)
+	s, err := NewShadowScorer(engine, 0.5, 1, 0, func(_ float32, at time.Time) {
+		crossed <- at
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	batchEnd := time.Now()
+	s.PushBytesAt(make([]byte, 1280*2), batchEnd)
+	select {
+	case got := <-crossed:
+		want := batchEnd.Add(-20 * time.Millisecond)
+		if !got.Equal(want) {
+			t.Fatalf("crossing timestamp = %v, want cadence-aligned %v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cadence-aligned crossing")
 	}
 }
 

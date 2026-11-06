@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // NanoWakeWord uses the same 80 ms mel/embedding stream as openWakeWord. Its
@@ -25,6 +26,10 @@ type nanoORTEngine struct{ OWWEngine }
 
 func (engine *nanoORTEngine) Info() string {
 	return strings.Replace(engine.OWWEngine.Info(), "openWakeWord", "NanoWakeWord", 1)
+}
+
+func (engine *nanoORTEngine) scorePeriod() time.Duration {
+	return time.Duration(owwChunkSamples) * time.Second / owwSampleRate
 }
 
 func normalizeNanoArchitecture(value string) (string, error) {

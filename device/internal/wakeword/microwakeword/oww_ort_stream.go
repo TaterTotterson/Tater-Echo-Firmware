@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"time"
 )
 
 // These dimensions are the openWakeWord 0.6 streaming feature contract.
@@ -76,6 +77,10 @@ func newORTOWWEngine(dir, classifierPath string, settings OWWSettings) (OWWEngin
 }
 
 func (engine *ortOWWEngine) Info() string { return engine.info }
+
+func (engine *ortOWWEngine) scorePeriod() time.Duration {
+	return time.Duration(owwChunkSamples) * time.Second / owwSampleRate
+}
 
 func (engine *ortOWWEngine) Reset() error {
 	if engine.inferer == nil {

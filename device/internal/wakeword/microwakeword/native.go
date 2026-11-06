@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -116,6 +117,11 @@ func (r *NativeRuntime) NewEngine(model []byte, settings RuntimeSettings) (Engin
 	engine.info = C.GoString(C.em_mww_info(&r.runtime, handle))
 	engine.arenaUsed = int(C.em_mww_arena_used(&r.runtime, handle))
 	engine.inputStride = int(C.em_mww_input_stride(&r.runtime, handle))
+	engine.sampleRate = int64(frontend.SampleRate)
+	engine.firstScoreSample = int64(frontend.SampleRate) *
+		int64(frontend.FeatureDurationMS+(engine.inputStride-1)*frontend.FeatureStepMS) / 1000
+	engine.scorePeriodSamples = int64(frontend.SampleRate) *
+		int64(engine.inputStride*frontend.FeatureStepMS) / 1000
 	return engine, nil
 }
 
@@ -133,11 +139,16 @@ func OpenNativeEngine(runtimePath, modelPath string, settings RuntimeSettings) (
 }
 
 type nativeEngine struct {
-	runtime     *NativeRuntime
-	handle      unsafe.Pointer
-	info        string
-	arenaUsed   int
-	inputStride int
+	runtime            *NativeRuntime
+	handle             unsafe.Pointer
+	info               string
+	arenaUsed          int
+	inputStride        int
+	sampleRate         int64
+	processedSamples   int64
+	firstScoreSample   int64
+	scorePeriodSamples int64
+	lastScoreLag       time.Duration
 }
 
 func (e *nativeEngine) PushPCM(samples []int16) ([]float32, error) {
@@ -164,6 +175,15 @@ func (e *nativeEngine) PushPCM(samples []int16) ([]float32, error) {
 	)); err != nil {
 		return nil, fmt.Errorf("microwakeword: process PCM: %w", err)
 	}
+	e.processedSamples += int64(len(samples))
+	e.lastScoreLag = 0
+	if count > 0 && e.sampleRate > 0 && e.scorePeriodSamples > 0 &&
+		e.processedSamples >= e.firstScoreSample {
+		lastScoreSample := e.firstScoreSample +
+			(e.processedSamples-e.firstScoreSample)/e.scorePeriodSamples*e.scorePeriodSamples
+		lagSamples := e.processedSamples - lastScoreSample
+		e.lastScoreLag = time.Duration(lagSamples) * time.Second / time.Duration(e.sampleRate)
+	}
 	return scores[:int(count)], nil
 }
 
@@ -174,6 +194,8 @@ func (e *nativeEngine) Reset() error {
 	if err := nativeError(C.em_mww_reset(&e.runtime.runtime, e.handle)); err != nil {
 		return fmt.Errorf("microwakeword: reset native engine: %w", err)
 	}
+	e.processedSamples = 0
+	e.lastScoreLag = 0
 	return nil
 }
 
@@ -186,6 +208,15 @@ func (e *nativeEngine) Close() error {
 }
 
 func (e *nativeEngine) Info() string { return e.info }
+
+func (e *nativeEngine) scorePeriod() time.Duration {
+	if e.sampleRate <= 0 || e.scorePeriodSamples <= 0 {
+		return 0
+	}
+	return time.Duration(e.scorePeriodSamples) * time.Second / time.Duration(e.sampleRate)
+}
+
+func (e *nativeEngine) scoreEndLag() time.Duration { return e.lastScoreLag }
 
 // ArenaUsed reports the bytes actually reserved by TFLM after tensor
 // allocation. It is useful for setting a safe production arena with headroom.

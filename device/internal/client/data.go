@@ -182,8 +182,9 @@ type wakeAudioFrame struct {
 }
 
 // WakeAudioCapture keeps the detector-crossing boundary and phrase-aligned
-// verifier clip independent. PreRoll ends with the frame that crossed;
-// PostWake contains later audio captured while model agreement completed.
+// verifier clip independent. PreRoll ends at the detector crossing sample;
+// PostWake starts immediately after it and includes audio captured while model
+// agreement completed.
 type WakeAudioCapture struct {
 	PreRoll  [][]byte
 	PostWake [][]byte
@@ -488,18 +489,59 @@ func clonePCMFrames(frames [][]byte) [][]byte {
 	return result
 }
 
-// splitWakeAudioAt places the detector-crossing frame on the wake side of the
-// protocol boundary. Later frames may already contain an immediate command,
-// especially while a second wake model is completing agreement.
-func splitWakeAudioAt(frames []wakeAudioFrame, capturedAt time.Time) (preRoll, postWake [][]byte) {
-	boundary := len(frames)
-	if !capturedAt.IsZero() {
-		boundary = 0
-		for boundary < len(frames) && !frames[boundary].at.After(capturedAt) {
-			boundary++
-		}
+func wakePCMTime(pcm []byte) time.Duration {
+	const wakeSampleRate = 16000
+	return time.Duration(len(pcm)/2) * time.Second / wakeSampleRate
+}
+
+func splitWakeFrameAt(frame wakeAudioFrame, capturedAt time.Time) (before, after []byte) {
+	if len(frame.pcm) == 0 {
+		return nil, nil
 	}
-	return cloneWakeAudioFrames(frames[:boundary]), cloneWakeAudioFrames(frames[boundary:])
+	frameStart := frame.at.Add(-wakePCMTime(frame.pcm))
+	if !capturedAt.After(frameStart) {
+		return nil, append([]byte(nil), frame.pcm...)
+	}
+	if !capturedAt.Before(frame.at) {
+		return append([]byte(nil), frame.pcm...), nil
+	}
+
+	const wakeSampleRate = 16000
+	samplesBefore := capturedAt.Sub(frameStart).Nanoseconds() * wakeSampleRate / int64(time.Second)
+	byteOffset := int(samplesBefore) * 2
+	if byteOffset < 0 {
+		byteOffset = 0
+	}
+	if byteOffset > len(frame.pcm) {
+		byteOffset = len(frame.pcm)
+	}
+	return append([]byte(nil), frame.pcm[:byteOffset]...),
+		append([]byte(nil), frame.pcm[byteOffset:]...)
+}
+
+// splitWakeAudioAt cuts the detector's 80ms inference batch at its actual
+// crossing sample. The detector remains efficiently batched, while immediate
+// command audio in the rest of that batch stays after the protocol boundary.
+func splitWakeAudioAt(frames []wakeAudioFrame, capturedAt time.Time) (preRoll, postWake [][]byte) {
+	if capturedAt.IsZero() {
+		return cloneWakeAudioFrames(frames), nil
+	}
+	for index, frame := range frames {
+		if !frame.at.After(capturedAt) {
+			preRoll = append(preRoll, append([]byte(nil), frame.pcm...))
+			continue
+		}
+		before, after := splitWakeFrameAt(frame, capturedAt)
+		if len(before) > 0 {
+			preRoll = append(preRoll, before)
+		}
+		if len(after) > 0 {
+			postWake = append(postWake, after)
+		}
+		postWake = append(postWake, cloneWakeAudioFrames(frames[index+1:])...)
+		return preRoll, postWake
+	}
+	return preRoll, postWake
 }
 
 // verifierWakeAudio selects at most two seconds ending no later than 200ms
