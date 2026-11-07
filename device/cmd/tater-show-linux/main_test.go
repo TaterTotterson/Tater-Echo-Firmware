@@ -800,6 +800,21 @@ func TestNotificationCategorySupportsFutureDisplayKinds(t *testing.T) {
 	}
 }
 
+func TestNotificationArtworkUsesPrimaryTaterLogoWhenImageIsMissing(t *testing.T) {
+	artwork, fit := notificationArtwork(nil, "cover")
+	if artwork == nil || artwork.Bounds().Empty() {
+		t.Fatal("missing notification image did not use the embedded Tater artwork")
+	}
+	if fit != "contain" {
+		t.Fatalf("default notification artwork fit = %q, want contain", fit)
+	}
+	uploaded := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	artwork, fit = notificationArtwork(uploaded, "cover")
+	if artwork != uploaded || fit != "cover" {
+		t.Fatalf("uploaded artwork was replaced: artwork=%T fit=%q", artwork, fit)
+	}
+}
+
 func TestScreenTapOpensActionMenuAndHoldStartsIntercom(t *testing.T) {
 	var commands bytes.Buffer
 	client := &socketClient{writer: bufio.NewWriter(&commands)}

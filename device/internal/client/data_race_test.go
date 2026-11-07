@@ -160,6 +160,32 @@ func TestWakeVerifierCaptureStaysAnchoredWhenAgreementArrivesLater(t *testing.T)
 	}
 }
 
+func TestWakeCommandBoundaryCanPrecedeVerifierDetectionAnchor(t *testing.T) {
+	d := NewDataClient("command-boundary-test", nil, nil, aec.New())
+	base := time.Now()
+	for index := 0; index < wakeLaneCaptureFrames; index++ {
+		d.recordWakeLaneAudio(0, base.Add(time.Duration(index)*80*time.Millisecond), []byte{byte(index), 0})
+	}
+	detectedAt := base.Add(30 * 80 * time.Millisecond)
+	commandBoundaryAt := detectedAt.Add(-80 * time.Millisecond)
+	if !d.ClaimWakeLaneWithBoundary(0, detectedAt, commandBoundaryAt) {
+		t.Fatal("wake lane with an earlier command boundary was not accepted")
+	}
+	d.ExtendWinningWakeAudioWithBoundary(0, detectedAt, commandBoundaryAt)
+	capture := d.TakeWinningWakeCapture()
+
+	if len(capture.PreRoll) != 30 || capture.PreRoll[len(capture.PreRoll)-1][0] != 29 {
+		t.Fatalf("wake pre-roll did not end at adjusted boundary: frames=%d last=%d",
+			len(capture.PreRoll), capture.PreRoll[len(capture.PreRoll)-1][0])
+	}
+	if len(capture.PostWake) == 0 || capture.PostWake[0][0] != 30 {
+		t.Fatalf("command audio did not begin at retained score window: %v", capture.PostWake)
+	}
+	if first, last := capture.Verifier[0][0], capture.Verifier[len(capture.Verifier)-1][0]; first != 8 || last != 32 {
+		t.Fatalf("verifier moved with command boundary: range=%d..%d, want 8..32", first, last)
+	}
+}
+
 func TestWakeBoundarySplitsDetectorBatchAtCrossingSample(t *testing.T) {
 	batch := make([]byte, wakeChunkBytes)
 	for index := range batch {

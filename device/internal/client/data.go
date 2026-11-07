@@ -181,8 +181,8 @@ type wakeAudioFrame struct {
 	pcm []byte
 }
 
-// WakeAudioCapture keeps the detector-crossing boundary and phrase-aligned
-// verifier clip independent. PreRoll ends at the detector crossing sample;
+// WakeAudioCapture keeps the command boundary and phrase-aligned verifier clip
+// independent. PreRoll ends at the detector's command-boundary estimate;
 // PostWake starts immediately after it and includes audio captured while model
 // agreement completed.
 type WakeAudioCapture struct {
@@ -421,6 +421,23 @@ func (d *DataClient) WakeScorerCount() int {
 // detector timestamp, not callback time, also selects the bearing carried into
 // the subsequent voice turn.
 func (d *DataClient) ClaimWakeLane(lane int, capturedAt time.Time) bool {
+	return d.ClaimWakeLaneWithBoundary(lane, capturedAt, capturedAt)
+}
+
+// ClaimWakeLaneWithBoundary preserves the accepted detector timestamp for
+// direction selection and wake verification while allowing the accepted score
+// window to retain immediate command audio before that final crossing.
+func (d *DataClient) ClaimWakeLaneWithBoundary(lane int, detectedAt, commandBoundaryAt time.Time) bool {
+	return d.claimWakeLaneWithBoundary(lane, detectedAt, commandBoundaryAt, false)
+}
+
+// ClaimWakeLaneWithExactBoundary accepts a hash-verified boundary model's
+// acoustic endpoint without applying the legacy heuristic rewind cap.
+func (d *DataClient) ClaimWakeLaneWithExactBoundary(lane int, detectedAt, commandBoundaryAt time.Time) bool {
+	return d.claimWakeLaneWithBoundary(lane, detectedAt, commandBoundaryAt, true)
+}
+
+func (d *DataClient) claimWakeLaneWithBoundary(lane int, detectedAt, commandBoundaryAt time.Time, exact bool) bool {
 	if lane < 0 || lane >= len(d.wakeLaneDir) {
 		lane = 0
 	}
@@ -436,11 +453,11 @@ func (d *DataClient) ClaimWakeLane(lane int, capturedAt time.Time) bool {
 	}
 	direction := -1
 	if _, ok := d.beam.(beamformer.WakeArray); ok {
-		direction = d.WakeLaneDirectionAt(lane, capturedAt)
+		direction = d.WakeLaneDirectionAt(lane, detectedAt)
 		d.wakeWinnerDir.Store(int32(direction))
 		d.wakeWinnerValid.Store(true)
 	}
-	d.snapshotWinningWakeAudio(lane, capturedAt)
+	d.snapshotWinningWakeAudio(lane, detectedAt, commandBoundaryAt, exact)
 	return true
 }
 
@@ -569,15 +586,18 @@ func verifierWakeAudio(frames []wakeAudioFrame, capturedAt time.Time) [][]byte {
 	return cloneWakeAudioFrames(frames[start:end])
 }
 
-func (d *DataClient) snapshotWinningWakeAudio(lane int, capturedAt time.Time) {
+func (d *DataClient) snapshotWinningWakeAudio(lane int, detectedAt, commandBoundaryAt time.Time, exact bool) {
 	d.wakeAudioMu.Lock()
 	d.wakeWinnerAudio = nil
 	d.wakeWinnerPostWake = nil
 	d.wakeVerifierAudio = nil
 	if lane >= 0 && lane < len(d.wakeLaneAudio) {
 		frames := d.wakeLaneAudio[lane]
-		d.wakeWinnerAudio, d.wakeWinnerPostWake = splitWakeAudioAt(frames, capturedAt)
-		d.wakeVerifierAudio = verifierWakeAudio(frames, capturedAt)
+		if !exact {
+			commandBoundaryAt = microwakeword.NormalizeCommandBoundary(detectedAt, commandBoundaryAt)
+		}
+		d.wakeWinnerAudio, d.wakeWinnerPostWake = splitWakeAudioAt(frames, commandBoundaryAt)
+		d.wakeVerifierAudio = verifierWakeAudio(frames, detectedAt)
 	}
 	d.wakeAudioMu.Unlock()
 }
@@ -631,14 +651,54 @@ func (d *DataClient) CopyWinningWakeVerifierAudio() [][]byte {
 // detector crossing. Callback-delay audio can therefore help command pre-roll
 // without pushing the first wake word out of STT verification.
 func (d *DataClient) ExtendWinningWakeAudio(lane int, capturedAt time.Time) {
+	d.ExtendWinningWakeAudioWithBoundary(lane, capturedAt, capturedAt)
+}
+
+// ExtendWinningWakeAudioWithBoundary refreshes the winning ring after dual
+// agreement without moving either the command boundary or verifier anchor to
+// the later callback time.
+func (d *DataClient) ExtendWinningWakeAudioWithBoundary(lane int, detectedAt, commandBoundaryAt time.Time) {
+	d.extendWinningWakeAudioWithBoundary(lane, detectedAt, commandBoundaryAt, false)
+}
+
+func (d *DataClient) ExtendWinningWakeAudioWithExactBoundary(lane int, detectedAt, commandBoundaryAt time.Time) {
+	d.extendWinningWakeAudioWithBoundary(lane, detectedAt, commandBoundaryAt, true)
+}
+
+func (d *DataClient) extendWinningWakeAudioWithBoundary(lane int, detectedAt, commandBoundaryAt time.Time, exact bool) {
 	if lane < 0 || lane >= len(d.wakeLaneAudio) {
 		return
 	}
 	d.wakeAudioMu.Lock()
 	defer d.wakeAudioMu.Unlock()
 	frames := d.wakeLaneAudio[lane]
-	d.wakeWinnerAudio, d.wakeWinnerPostWake = splitWakeAudioAt(frames, capturedAt)
-	d.wakeVerifierAudio = verifierWakeAudio(frames, capturedAt)
+	if !exact {
+		commandBoundaryAt = microwakeword.NormalizeCommandBoundary(detectedAt, commandBoundaryAt)
+	}
+	d.wakeWinnerAudio, d.wakeWinnerPostWake = splitWakeAudioAt(frames, commandBoundaryAt)
+	d.wakeVerifierAudio = verifierWakeAudio(frames, detectedAt)
+}
+
+// CopyWakeLaneBoundaryAudio returns an immutable causal replay window for the
+// resident boundary model. capturedAt is the end timestamp of the final PCM
+// byte, allowing model scores to be mapped back to microphone time.
+func (d *DataClient) CopyWakeLaneBoundaryAudio(lane int, detectedAt time.Time) (pcm []byte, capturedAt time.Time) {
+	if lane < 0 || lane >= len(d.wakeLaneAudio) || detectedAt.IsZero() {
+		return nil, time.Time{}
+	}
+	windowStart := detectedAt.Add(-1600 * time.Millisecond)
+	windowEnd := detectedAt.Add(500 * time.Millisecond)
+	d.wakeAudioMu.Lock()
+	defer d.wakeAudioMu.Unlock()
+	for _, frame := range d.wakeLaneAudio[lane] {
+		frameStart := frame.at.Add(-wakePCMTime(frame.pcm))
+		if !frame.at.After(windowStart) || !frameStart.Before(windowEnd) {
+			continue
+		}
+		pcm = append(pcm, frame.pcm...)
+		capturedAt = frame.at
+	}
+	return pcm, capturedAt
 }
 
 func (d *DataClient) resetWakeLaneAudio() {

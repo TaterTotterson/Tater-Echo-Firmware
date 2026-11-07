@@ -211,6 +211,67 @@ func TestInstallPackageURLInstallsVerifiedOWWCompanion(t *testing.T) {
 	}
 }
 
+func TestInstallPackageURLInstallsBoundaryWithoutOWW(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TATER_MWW_DIR", dir)
+	manifestBody, err := os.ReadFile(filepath.Join("models", "hey_tater.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest["model"] = "wake.tflite"
+	manifestBody, _ = json.Marshal(manifest)
+	modelBody := []byte{8, 0, 0, 0, 'T', 'F', 'L', '3', 1, 2, 3, 4}
+	boundaryBody := []byte{8, 0, 0, 0, 'T', 'F', 'L', '3', 5, 6, 7, 8}
+	bundle := WakeBundle{
+		SchemaVersion: 4, Type: "tater_wake_word_bundle", WakeWord: "hey tater", Key: "hey_tater",
+		MicroWakeWord: BundleMicroWakeWord{
+			Manifest: "wake.json", Model: "wake.tflite",
+			ManifestSHA256: companionDigest(manifestBody), ModelSHA256: companionDigest(modelBody),
+		},
+		WakeBoundary: BundleWakeBoundary{
+			Type: "wake_word_end", Model: "wake.boundary.tflite",
+			ModelSHA256: companionDigest(boundaryBody), ModelSizeBytes: int64(len(boundaryBody)),
+			ModelFormat: modelFormat, Quantization: quantization, SampleRate: SupportedSampleRate,
+			Threshold: 0.8, TensorArenaSize: MinimumNativeArenaSize,
+			SearchBeforeMS: 700, SearchAfterMS: 120,
+		},
+	}
+	bundleBody, _ := json.Marshal(bundle)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		files := map[string][]byte{
+			"/wake.json": manifestBody, "/wake.tflite": modelBody,
+			"/wake.wake-bundle.json": bundleBody, "/wake.boundary.tflite": boundaryBody,
+		}
+		body, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	packageName, err := InstallPackageURL(context.Background(), server.URL+"/wake.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cachedBoundaryValid(packageName) {
+		t.Fatal("boundary-only bundle was not installed as a verified cache entry")
+	}
+	if _, err := InstallPackageURL(context.Background(), server.URL+"/wake.json"); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 4 {
+		t.Fatalf("network requests = %d, want four initial files and a fully cached second install", requests)
+	}
+}
+
 func TestInstallCompanionURLRevisionDoesNotRequireInstalledMWW(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TATER_MWW_DIR", dir)

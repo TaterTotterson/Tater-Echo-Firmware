@@ -173,6 +173,36 @@ func TestParseWakeBundleRejectsUnsupportedNanoArchitecture(t *testing.T) {
 	}
 }
 
+func TestParseWakeBundleAcceptsSchemaFourBoundaryModel(t *testing.T) {
+	bundle := WakeBundle{
+		SchemaVersion: 4, Type: "tater_wake_word_bundle", WakeWord: "hey tater", Key: "hey_tater",
+		WakeBoundary: BundleWakeBoundary{
+			Type: "wake_word_end", Model: "hey_tater.boundary.tflite",
+			ModelSHA256: companionDigest([]byte("boundary")), ModelSizeBytes: 8,
+			ModelFormat: modelFormat, Quantization: quantization, SampleRate: SupportedSampleRate,
+			Threshold: 0.8, TensorArenaSize: MinimumNativeArenaSize,
+			SearchBeforeMS: 700, SearchAfterMS: 120,
+			Frontend: FrontendConfig{
+				Name: "tflm_microfrontend", SampleRate: SupportedSampleRate,
+				FeatureDurationMS: SupportedFeatureMS, FeatureStepMS: SupportedStepMS,
+				FeatureSize: SupportedFeatureSize, InputFeatureFrames: DefaultInputFeatureFrames,
+				LowerBandLimit: DefaultLowerBandLimit, UpperBandLimit: DefaultUpperBandLimit,
+			},
+		},
+	}
+	raw, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseWakeBundle(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.WakeBoundary.Model != "hey_tater.boundary.tflite" || parsed.WakeBoundary.Threshold != 0.8 {
+		t.Fatalf("unexpected wake boundary: %+v", parsed.WakeBoundary)
+	}
+}
+
 type fakeOWWEngine struct {
 	got    []int16
 	result OWWResult

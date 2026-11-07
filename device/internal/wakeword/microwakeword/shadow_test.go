@@ -270,6 +270,66 @@ func TestShadowCrossingHonorsModelCadenceRemainder(t *testing.T) {
 	}
 }
 
+func TestShadowCrossEventRetainsBeginningOfAcceptedWindow(t *testing.T) {
+	engine := &fakeShadowEngine{
+		batches: [][]float32{{0.1, 0.95, 0.96}},
+		period:  80 * time.Millisecond,
+	}
+	crossed := make(chan WakeDetection, 1)
+	s, err := NewShadowScorerWithPolicy(engine, 2, 0, DetectionPolicy{
+		Threshold: 0.90, PeakThreshold: 0.90, MinimumRiseScore: -1,
+		MinimumActiveWindow: 2, Refractory: DefaultShadowRefractory,
+	}, ShadowHooks{CrossEvent: func(event WakeDetection) { crossed <- event }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	batchEnd := time.Now()
+	s.PushBytesAt(make([]byte, 1280*2), batchEnd)
+	select {
+	case event := <-crossed:
+		if !event.DetectedAt.Equal(batchEnd) {
+			t.Fatalf("detection timestamp = %v, want %v", event.DetectedAt, batchEnd)
+		}
+		wantBoundary := batchEnd.Add(-80*time.Millisecond - CommandBoundaryGuard)
+		if !event.CommandBoundaryAt.Equal(wantBoundary) {
+			t.Fatalf("command boundary = %v, want guarded first accepted score at %v",
+				event.CommandBoundaryAt, wantBoundary)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for boundary-aware crossing")
+	}
+}
+
+func TestShadowCrossEventBoundsCommandRewind(t *testing.T) {
+	engine := &fakeShadowEngine{
+		batches: [][]float32{{0.9, 0.9, 0.9, 0.9, 0.9, 0.9}},
+		period:  80 * time.Millisecond,
+	}
+	crossed := make(chan WakeDetection, 1)
+	s, err := NewShadowScorerWithHooks(engine, 0.5, 6, 0, ShadowHooks{
+		CrossEvent: func(event WakeDetection) { crossed <- event },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	batchEnd := time.Now()
+	s.PushBytesAt(make([]byte, 1280*2), batchEnd)
+	select {
+	case event := <-crossed:
+		wantBoundary := event.DetectedAt.Add(-MaxCommandBoundaryRewind)
+		if !event.CommandBoundaryAt.Equal(wantBoundary) {
+			t.Fatalf("bounded command boundary = %v, want %v",
+				event.CommandBoundaryAt, wantBoundary)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bounded crossing")
+	}
+}
+
 func TestShadowPushNeverBlocksAndCountsDrops(t *testing.T) {
 	engine := &fakeShadowEngine{delay: 200 * time.Millisecond}
 	s, err := NewShadowScorer(engine, 0.5, 1, 0, nil)

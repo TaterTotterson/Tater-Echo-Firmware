@@ -19,12 +19,15 @@ const (
 )
 
 type AgreementMatch struct {
-	Lane     int
-	At       time.Time
-	MWWAt    time.Time
-	OWWAt    time.Time
-	MWWScore float32
-	OWWScore float32
+	Lane              int
+	At                time.Time
+	MWWAt             time.Time
+	OWWAt             time.Time
+	MWWBoundaryAt     time.Time
+	OWWBoundaryAt     time.Time
+	CommandBoundaryAt time.Time
+	MWWScore          float32
+	OWWScore          float32
 }
 
 type AgreementStats struct {
@@ -38,8 +41,9 @@ type AgreementStats struct {
 }
 
 type agreementEvent struct {
-	at    time.Time
-	score float32
+	at         time.Time
+	boundaryAt time.Time
+	score      float32
 }
 
 // AgreementMatcher correlates independently streaming MWW and OWW crossings.
@@ -65,23 +69,35 @@ func NewAgreementMatcher(window time.Duration) *AgreementMatcher {
 }
 
 func (matcher *AgreementMatcher) Observe(source AgreementSource, lane int, score float32, at time.Time) (AgreementMatch, bool) {
+	return matcher.ObserveDetection(source, lane, WakeDetection{
+		Score: score, DetectedAt: at, CommandBoundaryAt: at,
+	})
+}
+
+// ObserveDetection correlates independently accepted wake events while
+// retaining each detector's command-boundary estimate. Agreement still uses
+// the unadjusted detection timestamps. Once both models agree, the earlier
+// safe boundary wins so a later companion callback cannot clip fast speech.
+func (matcher *AgreementMatcher) ObserveDetection(source AgreementSource, lane int, detection WakeDetection) (AgreementMatch, bool) {
 	if matcher == nil || (source != AgreementMWW && source != AgreementOWW) {
 		return AgreementMatch{}, false
 	}
+	at := detection.DetectedAt
 	if at.IsZero() {
 		at = time.Now()
 	}
+	boundaryAt := NormalizeCommandBoundary(at, detection.CommandBoundaryAt)
 	matcher.mu.Lock()
 	defer matcher.mu.Unlock()
 
-	event := agreementEvent{at: at, score: score}
+	event := agreementEvent{at: at, boundaryAt: boundaryAt, score: detection.Score}
 	current, other := matcher.mww, matcher.oww
 	if source == AgreementMWW {
 		matcher.stats.MWWCrossings++
-		matcher.stats.LastMWWScore = score
+		matcher.stats.LastMWWScore = detection.Score
 	} else {
 		matcher.stats.OWWCrossings++
-		matcher.stats.LastOWWScore = score
+		matcher.stats.LastOWWScore = detection.Score
 		current, other = matcher.oww, matcher.mww
 	}
 	current[lane] = event
@@ -115,9 +131,21 @@ func (matcher *AgreementMatcher) Observe(source AgreementSource, lane int, score
 	if owwEvent.at.After(matchedAt) {
 		matchedAt = owwEvent.at
 	}
+	commandBoundaryAt := mwwEvent.boundaryAt
+	if commandBoundaryAt.IsZero() || (!owwEvent.boundaryAt.IsZero() && owwEvent.boundaryAt.Before(commandBoundaryAt)) {
+		commandBoundaryAt = owwEvent.boundaryAt
+	}
+	// The companion may improve the boundary but must not rewind an unbounded
+	// portion of the wake phrase relative to the primary MWW detection.
+	earliestBoundaryAt := mwwEvent.at.Add(-MaxCommandBoundaryRewind)
+	if commandBoundaryAt.Before(earliestBoundaryAt) {
+		commandBoundaryAt = earliestBoundaryAt
+	}
 	return AgreementMatch{
 		Lane: lane, At: matchedAt, MWWAt: mwwEvent.at, OWWAt: owwEvent.at,
-		MWWScore: mwwEvent.score, OWWScore: owwEvent.score,
+		MWWBoundaryAt: mwwEvent.boundaryAt, OWWBoundaryAt: owwEvent.boundaryAt,
+		CommandBoundaryAt: commandBoundaryAt,
+		MWWScore:          mwwEvent.score, OWWScore: owwEvent.score,
 	}, true
 }
 

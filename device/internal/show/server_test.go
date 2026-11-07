@@ -240,6 +240,57 @@ func TestMediaArtworkUsesLoopbackSideChannelAndClears(t *testing.T) {
 	}
 }
 
+func TestTaterTubeArtworkUsesLoopbackSideChannelAndSurvivesMetadataRefresh(t *testing.T) {
+	s := New("127.0.0.1:0", Snapshot{Phase: "idle"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for s.Address() == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.Address() == "" {
+		t.Fatal("server did not bind")
+	}
+
+	art := []byte{0xff, 0xd8, 0x44, 0xff, 0xd9}
+	s.SetTaterTube(&TaterTubeMedia{Active: true, EventID: "event-1", Title: "The Big Lebowski"}, art, "image/jpeg")
+	media := s.Snapshot().TaterTube
+	if media == nil || media.ArtworkURL == "" {
+		t.Fatalf("Tater Tube snapshot = %#v", media)
+	}
+	artworkURL := media.ArtworkURL
+	s.SetTaterTube(&TaterTubeMedia{Active: true, EventID: "event-1", Title: "The Big Lebowski", ProgressMS: 42000}, nil, "")
+	media = s.Snapshot().TaterTube
+	if media == nil || media.ArtworkURL != artworkURL || media.ProgressMS != 42000 {
+		t.Fatalf("metadata refresh lost artwork: %#v", media)
+	}
+	response, err := http.Get(media.ArtworkURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(got) != string(art) {
+		t.Fatalf("Tater Tube image status=%d body=%x err=%v", response.StatusCode, got, err)
+	}
+
+	s.SetTaterTube(nil, nil, "")
+	if s.Snapshot().TaterTube != nil {
+		t.Fatal("Tater Tube state did not clear")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
 func TestSatChatVideoUsesLoopbackSideChannelAndClears(t *testing.T) {
 	s := New("127.0.0.1:0", Snapshot{Phase: "idle", SatChat: &SatChat{}}, nil)
 	ctx, cancel := context.WithCancel(context.Background())

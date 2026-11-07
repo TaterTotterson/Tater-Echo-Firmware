@@ -81,6 +81,9 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 	case r.state.Media != nil && r.state.Media.Active:
 		r.drawSpotLegacyBackdrop(canvas, now, accent)
 		r.drawSpotNowPlaying(canvas, now, seconds, accent, motion)
+	case r.taterTubeActive(now):
+		legacyContext = false
+		r.drawSpotTaterTube(canvas, now, accent, motion)
 	default:
 		legacyContext = false
 		r.drawSpotPhotoHome(canvas, now, accent)
@@ -260,6 +263,8 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		r.state.ToolName,
 		r.state.ToolMessage,
 		mediaCacheIdentity(media),
+		stableCacheValue(r.state.TaterTube),
+		fmt.Sprint(r.taterTubeActive(now)),
 		r.state.Room,
 		r.state.DisplayTheme,
 		fmt.Sprint(r.state.DisplayEdgeGlow),
@@ -276,6 +281,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(duration > 0),
 		r.clockKey(now),
 		fmt.Sprint(r.mediaImage != nil),
+		fmt.Sprint(r.taterTubeImage != nil),
 		r.wallpaperID,
 		fmt.Sprint(r.wallpaperImage != nil),
 		fmt.Sprint(r.state.WallpaperURLs),
@@ -311,6 +317,10 @@ func (r *renderer) drawSpotMotion(canvas *image.RGBA, now time.Time, seconds flo
 		if _, duration := mediaProgress(media, now); duration > 0 {
 			r.drawSpotMediaProgress(canvas, now, media, ink)
 		}
+		return
+	}
+	if media := r.state.TaterTube; r.taterTubeActive(now) {
+		r.drawSpotTaterTubeProgress(canvas, now, media, color.RGBA{247, 151, 68, 255})
 		return
 	}
 }
@@ -359,7 +369,66 @@ func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
 		}
 		return regions
 	}
+	if media := r.state.TaterTube; r.taterTubeActive(now) {
+		if _, duration := taterTubeProgress(media, now); duration > 0 {
+			regions = append(regions, image.Rect(106, 394, 374, 438))
+		}
+		return regions
+	}
 	return regions
+}
+
+func (r *renderer) drawSpotTaterTube(canvas *image.RGBA, now time.Time, accent color.RGBA, motion bool) {
+	media := r.state.TaterTube
+	if media == nil {
+		return
+	}
+	ink := color.RGBA{247, 151, 68, 255}
+	if accent.R > 180 && accent.G > 80 {
+		ink = mix(ink, accent, .24)
+	}
+	fillGradient(canvas, mix(color.RGBA{5, 9, 16, 255}, ink, .10), color.RGBA{3, 7, 13, 255})
+	circleOutline(canvas, 240, 240, 232, 2, color.RGBA{ink.R, ink.G, ink.B, 48})
+	heading := "PLAYING ON " + strings.ToUpper(firstNonEmpty(media.PlayerName, "MEDIA PLAYER"))
+	r.centeredText(canvas, 240, 66, fitTextToWidth(heading, r.faces.bold[13], 310), 13, true, ink)
+
+	art := image.Rect(172, 82, 308, 286)
+	roundedRect(canvas, art, 18, color.RGBA{11, 17, 27, 255})
+	if r.taterTubeImage != nil {
+		drawContain(canvas, art, r.taterTubeImage)
+	} else {
+		r.drawTaterTubeArtworkPlaceholder(canvas, art, ink)
+	}
+	roundedRectOutline(canvas, art, 18, 2, color.RGBA{255, 255, 255, 28})
+
+	r.centeredText(canvas, 240, 322, fitTextToWidth(firstNonEmpty(media.Title, "Now Playing"), r.faces.bold[22], 330), 22, true, color.White)
+	r.centeredText(canvas, 240, 350, fitTextToWidth(firstNonEmpty(media.Subtitle, media.SeriesTitle, "Tater Tube"), r.faces.regular[15], 300), 15, false, color.RGBA{181, 196, 216, 255})
+	stateLabel := strings.ToUpper(strings.TrimSpace(media.MediaType))
+	if strings.EqualFold(media.PlaybackState, "paused") {
+		stateLabel = firstNonEmpty(stateLabel+" · PAUSED", "PAUSED")
+	}
+	if stateLabel != "" {
+		r.centeredText(canvas, 240, 377, fitTextToWidth(stateLabel, r.faces.bold[12], 240), 12, true, ink)
+	}
+	if motion {
+		r.drawSpotTaterTubeProgress(canvas, now, media, ink)
+	}
+	maskOutsideSpotCircle(canvas, 236)
+}
+
+func (r *renderer) drawSpotTaterTubeProgress(canvas *image.RGBA, now time.Time, media *show.TaterTubeMedia, ink color.RGBA) {
+	progress, duration := taterTubeProgress(media, now)
+	if duration <= 0 {
+		return
+	}
+	left, right, barY := 116, 364, 405
+	line(canvas, left, barY, right, barY, 4, color.RGBA{95, 108, 128, 85})
+	filled := int(float64(right-left) * math.Min(1, float64(progress)/float64(duration)))
+	line(canvas, left, barY, left+filled, barY, 4, ink)
+	r.text(canvas, left, 431, formatMediaTime(progress), 13, true, color.RGBA{190, 203, 220, 255})
+	end := formatMediaTime(duration)
+	endWidth := font.MeasureString(r.faces.bold[13], end).Round()
+	r.text(canvas, right-endWidth, 431, end, 13, true, color.RGBA{139, 155, 177, 255})
 }
 
 func (r *renderer) drawSpotNowPlaying(canvas *image.RGBA, now time.Time, seconds float64, accent color.RGBA, motion bool) {
@@ -740,8 +809,9 @@ func (r *renderer) drawSpotNotification(canvas *image.RGBA, now time.Time, secon
 	r.centeredText(canvas, 240, 203, title, titleSize, true, ink)
 	panel := image.Rect(107, 213, 373, 311)
 	roundedRect(canvas, panel, 14, color.RGBA{25, 31, 43, 255})
-	if r.notificationImage != nil {
-		drawNotificationImage(canvas, panel, r.notificationImage, notificationImageFit(item, "cover"))
+	notificationImage, imageFit := notificationArtwork(r.notificationImage, notificationImageFit(item, "cover"))
+	if notificationImage != nil {
+		drawNotificationImage(canvas, panel, notificationImage, imageFit)
 	} else {
 		pulse := .5 + .5*math.Sin(seconds*2.2)
 		circleOutline(canvas, 240, 261, int(20+pulse*8), 3, ink)

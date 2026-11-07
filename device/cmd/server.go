@@ -138,7 +138,7 @@ func main() {
 	if updated, err := microwakeword.EnsureEmbeddedDefaultPackage(); err != nil {
 		log.Printf("[wake] embedded Hey Tater package could not be installed: %v", err)
 	} else if updated {
-		log.Printf("[wake] installed the verified built-in Hey Tater MWW/OWW/NWW package")
+		log.Printf("[wake] installed the verified built-in Hey Tater MWW/OWW/NWW/boundary package")
 	}
 	if updated, err := microwakeword.EnsureReleaseCompanionRuntime(
 		context.Background(), client.FirmwareTarget, client.Version); err != nil {
@@ -788,6 +788,7 @@ func main() {
 	if detectedBoard == "unknown" {
 		detectedBoard = client.FirmwareTarget
 	}
+	startCompanionDisplay(ctx, showServerPtr.Load(), deviceID, deviceName, room, detectedBoard, client.Version)
 	var nativeErr error
 	nativeCapabilities := taternative.CapabilitiesForTarget(client.FirmwareTarget)
 	if systemVersion := platform.Release(""); systemVersion != "" {
@@ -2047,6 +2048,39 @@ var owwCompanionState struct {
 	scorers      []*microwakeword.ShadowScorer
 }
 
+var wakeBoundaryState struct {
+	sync.RWMutex
+	model     string
+	ready     bool
+	lastErr   string
+	estimator *microwakeword.BoundaryEstimator
+}
+
+func replaceWakeBoundary(model string, estimator *microwakeword.BoundaryEstimator, err error) {
+	wakeBoundaryState.Lock()
+	old := wakeBoundaryState.estimator
+	wakeBoundaryState.model = model
+	wakeBoundaryState.ready = estimator != nil
+	wakeBoundaryState.estimator = estimator
+	wakeBoundaryState.lastErr = ""
+	if err != nil && !errors.Is(err, microwakeword.ErrBoundaryUnavailable) {
+		wakeBoundaryState.lastErr = err.Error()
+	}
+	wakeBoundaryState.Unlock()
+	if old != nil && old != estimator {
+		_ = old.Close()
+	}
+}
+
+func wakeBoundaryStatus() map[string]any {
+	wakeBoundaryState.RLock()
+	defer wakeBoundaryState.RUnlock()
+	return map[string]any{
+		"ready": wakeBoundaryState.ready, "model": wakeBoundaryState.model,
+		"mode": "resident_replay", "last_error": wakeBoundaryState.lastErr,
+	}
+}
+
 // CPU 1 is kept online by the Echo platform core floor where hot-plugging is
 // present. Only the selected OWW or NWW inference thread is pinned there; the microphone,
 // MWW, audio, networking, and UI remain under the normal Go/kernel scheduler.
@@ -2205,6 +2239,7 @@ func mwwNativeStatus() map[string]any {
 		"close_miss_threshold": mwwShadowState.closeMiss,
 		"last_error":           mwwShadowState.lastErr,
 		"confirmation":         owwCompanionStatus(),
+		"wake_boundary":        wakeBoundaryStatus(),
 	}
 }
 
@@ -2309,6 +2344,7 @@ func applyMWWConfig(dc *client.DataClient,
 		setWakeDetectorSelection(false, false, false, owwModel, nwwModel, nwwArchitecture, owwOverrides, nwwOverrides)
 		replaceWakeCompanion("", "", "", "disabled", false,
 			microwakeword.OWWSettings{}, microwakeword.NanoSettings{}, nil, nil, nil, nil)
+		replaceWakeBoundary("", nil, nil)
 		return
 	}
 
@@ -2331,6 +2367,16 @@ func applyMWWConfig(dc *client.DataClient,
 	banksReady := len(dc.MWWShadowScorers()) == expectedScorers
 	if dualEnabled {
 		banksReady = banksReady && len(dc.OWWShadowScorers()) == expectedScorers
+	}
+	boundaryPackageForConfig := model
+	if !mwwEnabled {
+		boundaryPackageForConfig = companionModel
+	}
+	wakeBoundaryState.RLock()
+	boundaryActive := wakeBoundaryState.ready && wakeBoundaryState.model == boundaryPackageForConfig
+	wakeBoundaryState.RUnlock()
+	if microwakeword.BoundaryReady(boundaryPackageForConfig) {
+		banksReady = banksReady && boundaryActive
 	}
 	if banksReady && same {
 		return
@@ -2358,43 +2404,84 @@ func applyMWWConfig(dc *client.DataClient,
 	if dualEnabled {
 		agreement = microwakeword.NewAgreementMatcher(microwakeword.DualWakeAgreementWindow)
 	}
-	dispatch := func(lane int, detectedWord string, score float32, at time.Time) {
-		dc.ExtendWinningWakeAudio(lane, at)
-		ageMs := time.Since(at).Milliseconds()
-		if onWake != nil && onWake(detectedWord, score, at) {
-			log.Printf("[wake] local wake lane=%d score=%.3f age=%dms — native wake claimed", lane, score, ageMs)
+	boundaryPackage := boundaryPackageForConfig
+	boundaryEstimator, boundaryErr := microwakeword.OpenBoundaryEstimator(boundaryPackage)
+	resolveBoundary := func(lane int, detection microwakeword.WakeDetection) (microwakeword.WakeDetection, bool) {
+		if boundaryEstimator == nil {
+			return detection, false
+		}
+		pcm, audioEndAt := dc.CopyWakeLaneBoundaryAudio(lane, detection.DetectedAt)
+		estimate, ok, err := boundaryEstimator.Estimate(pcm, audioEndAt, detection.DetectedAt)
+		if err != nil {
+			log.Printf("[wake-boundary] inference failed; using detector fallback: %v", err)
+			return detection, false
+		}
+		if !ok {
+			log.Printf("[wake-boundary] no endpoint score crossed threshold; using detector fallback")
+			return detection, false
+		}
+		detection.CommandBoundaryAt = estimate.At
+		log.Printf("[wake-boundary] exact endpoint score=%.3f detector_delta=%dms",
+			estimate.Score, detection.DetectedAt.Sub(estimate.At).Milliseconds())
+		return detection, true
+	}
+	claimBoundary := func(lane int, detection microwakeword.WakeDetection, exact bool) bool {
+		if exact {
+			return dc.ClaimWakeLaneWithExactBoundary(lane, detection.DetectedAt, detection.CommandBoundaryAt)
+		}
+		return dc.ClaimWakeLaneWithBoundary(lane, detection.DetectedAt, detection.CommandBoundaryAt)
+	}
+	dispatch := func(lane int, detectedWord string, detection microwakeword.WakeDetection, exact bool) {
+		if exact {
+			dc.ExtendWinningWakeAudioWithExactBoundary(lane, detection.DetectedAt, detection.CommandBoundaryAt)
+		} else {
+			dc.ExtendWinningWakeAudioWithBoundary(lane, detection.DetectedAt, detection.CommandBoundaryAt)
+		}
+		ageMs := time.Since(detection.DetectedAt).Milliseconds()
+		if onWake != nil && onWake(detectedWord, detection.Score, detection.DetectedAt) {
+			log.Printf("[wake] local wake lane=%d score=%.3f age=%dms boundary_lead=%dms — native wake claimed",
+				lane, detection.Score, ageMs, detection.DetectedAt.Sub(detection.CommandBoundaryAt).Milliseconds())
 			return
 		}
-		log.Printf("[wake] lane=%d crossing score=%.3f age=%dms was not claimed", lane, score, ageMs)
+		log.Printf("[wake] lane=%d crossing score=%.3f age=%dms was not claimed", lane, detection.Score, ageMs)
 	}
 	dispatchAgreement := func(match microwakeword.AgreementMatch) {
-		// MWW marks the phrase boundary used by the verifier. The companion may agree on
-		// a later frame, but that scheduling/model delta must not slide the
-		// verifier window forward and crop the first wake word.
+		// MWW remains the phrase anchor used by the verifier. The companion may
+		// contribute an earlier command boundary, but its later callback must not
+		// slide verification forward or clip immediate speech.
 		phraseAt := match.MWWAt
 		if phraseAt.IsZero() {
 			phraseAt = match.At
 		}
-		if !dc.ClaimWakeLane(match.Lane, phraseAt) {
+		commandBoundaryAt := match.CommandBoundaryAt
+		if commandBoundaryAt.IsZero() {
+			commandBoundaryAt = phraseAt
+		}
+		detection, exact := resolveBoundary(match.Lane, microwakeword.WakeDetection{
+			Score: match.MWWScore, DetectedAt: phraseAt, CommandBoundaryAt: commandBoundaryAt,
+		})
+		if !claimBoundary(match.Lane, detection, exact) {
 			return
 		}
-		log.Printf("[%s] parallel agreement lane=%d mww=%.3f companion=%.3f delta=%dms", companionKind,
-			match.Lane, match.MWWScore, match.OWWScore, match.MWWAt.Sub(match.OWWAt).Abs().Milliseconds())
-		dispatch(match.Lane, wakeWord, match.MWWScore, phraseAt)
+		log.Printf("[%s] parallel agreement lane=%d mww=%.3f companion=%.3f delta=%dms boundary_lead=%dms", companionKind,
+			match.Lane, match.MWWScore, match.OWWScore, match.MWWAt.Sub(match.OWWAt).Abs().Milliseconds(),
+			phraseAt.Sub(commandBoundaryAt).Milliseconds())
+		dispatch(match.Lane, wakeWord, detection, exact)
 	}
 	openCompanion := func(lane int, confirmationMode bool) (*microwakeword.ShadowScorer, microwakeword.WakeBundle, error) {
 		cpu := companionInferenceCPU
 		hooks := microwakeword.ShadowHooks{
 			AffinityCPU: &cpu,
-			Cross: func(score float32, at time.Time) {
+			CrossEvent: func(detection microwakeword.WakeDetection) {
 				if agreement != nil {
-					if match, ok := agreement.Observe(microwakeword.AgreementOWW, lane, score, at); ok {
+					if match, ok := agreement.ObserveDetection(microwakeword.AgreementOWW, lane, detection); ok {
 						dispatchAgreement(match)
 					}
 					return
 				}
-				if dc.ClaimWakeLane(lane, at) {
-					dispatch(lane, wakeWord, score, at)
+				detection, exact := resolveBoundary(lane, detection)
+				if claimBoundary(lane, detection, exact) {
+					dispatch(lane, wakeWord, detection, exact)
 				}
 			},
 		}
@@ -2434,14 +2521,15 @@ func applyMWWConfig(dc *client.DataClient,
 		for lane := 0; lane < expectedScorers; lane++ {
 			lane := lane
 			sc, err := microwakeword.OpenShadowTunedWithHooks(model, scorerOverrides, microwakeword.ShadowHooks{
-				Cross: func(score float32, at time.Time) {
+				CrossEvent: func(detection microwakeword.WakeDetection) {
 					if agreement == nil {
-						if dc.ClaimWakeLane(lane, at) {
-							dispatch(lane, wakeWord, score, at)
+						detection, exact := resolveBoundary(lane, detection)
+						if claimBoundary(lane, detection, exact) {
+							dispatch(lane, wakeWord, detection, exact)
 						}
 						return
 					}
-					if match, ok := agreement.Observe(microwakeword.AgreementMWW, lane, score, at); ok {
+					if match, ok := agreement.ObserveDetection(microwakeword.AgreementMWW, lane, detection); ok {
 						dispatchAgreement(match)
 					}
 				},
@@ -2492,6 +2580,10 @@ func applyMWWConfig(dc *client.DataClient,
 		}
 	}
 	if openErr != nil {
+		if boundaryEstimator != nil {
+			_ = boundaryEstimator.Close()
+		}
+		replaceWakeBoundary(boundaryPackage, nil, boundaryErr)
 		for _, scorer := range append(scorers, companionScorers...) {
 			scorer.Close()
 		}
@@ -2535,6 +2627,7 @@ func applyMWWConfig(dc *client.DataClient,
 	replaceWakeCompanion(companionKind, companionModel, nwwArchitecture, detectorMode,
 		owwEnabled || nwwEnabled, activeOWWSettings, activeNanoSettings,
 		nil, agreement, activeCompanionScorers, nil)
+	replaceWakeBoundary(boundaryPackage, boundaryEstimator, boundaryErr)
 	setMWWState(true, true, model, wakeWord, label, source, modelURL, sensitivity, environment,
 		threshold, slidingWindow, closeMiss, "")
 	setWakeDetectorSelection(mwwEnabled, owwEnabled, nwwEnabled, owwModel, nwwModel, nwwArchitecture, owwOverrides, nwwOverrides)

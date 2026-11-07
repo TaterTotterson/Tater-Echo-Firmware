@@ -45,6 +45,19 @@ const DefaultShadowRefractory = 1500 * time.Millisecond
 // thresholds (for example the timer-stop model) are deliberately unchanged.
 const playbackThresholdDrop = 20 * wakeScoreStep
 
+const (
+	// CommandBoundaryGuard retains a small amount of audio immediately before
+	// the first threshold-active score. Host speech synthesis shows that MWW's
+	// five-score acceptance window alone recovers 40 ms, while a fast command can
+	// already be 50-135 ms old when the final crossing arrives.
+	CommandBoundaryGuard = 80 * time.Millisecond
+
+	// MaxCommandBoundaryRewind bounds the accepted score history plus guard. It
+	// prevents a long or malformed window from replaying a substantial part of
+	// the wake phrase to STT.
+	MaxCommandBoundaryRewind = 320 * time.Millisecond
+)
+
 var shadowClockStart = time.Now()
 
 type shadowChunk struct {
@@ -62,6 +75,33 @@ type scorePeriodProvider interface {
 
 type scoreEndLagProvider interface {
 	scoreEndLag() time.Duration
+}
+
+// WakeDetection separates the model's accepted detection time from the guarded
+// first threshold-active score in the accepted window. Agreement, arbitration,
+// verification, and beam selection use DetectedAt. Only the wake/command audio
+// split uses CommandBoundaryAt.
+type WakeDetection struct {
+	Score             float32
+	DetectedAt        time.Time
+	CommandBoundaryAt time.Time
+}
+
+// NormalizeCommandBoundary validates a detector-provided command boundary and
+// applies the shared rewind cap. Callers outside the scorer use it defensively
+// when refreshing buffered audio after agreement callbacks.
+func NormalizeCommandBoundary(detectedAt, boundaryAt time.Time) time.Time {
+	if detectedAt.IsZero() {
+		return boundaryAt
+	}
+	if boundaryAt.IsZero() || boundaryAt.After(detectedAt) {
+		return detectedAt
+	}
+	earliest := detectedAt.Add(-MaxCommandBoundaryRewind)
+	if boundaryAt.Before(earliest) {
+		return earliest
+	}
+	return boundaryAt
 }
 
 func scoreCapturedAt(engine Engine, chunk shadowChunk, index, count int) time.Time {
@@ -155,6 +195,7 @@ type ShadowScorer struct {
 	profile               string
 	refract               time.Duration
 	onCross               func(score float32, at time.Time)
+	onCrossEvent          func(WakeDetection)
 	onCloseMiss           func(score float32, at time.Time)
 	info                  string
 	affinityCPU           int
@@ -199,8 +240,12 @@ func NewShadowScorer(engine Engine, threshold float32, windowSize int,
 // transport. CloseMiss may be called for several adjacent probability windows;
 // consumers are responsible for collapsing one utterance into one report.
 type ShadowHooks struct {
-	Cross     func(score float32, at time.Time)
-	CloseMiss func(score float32, at time.Time)
+	// Cross preserves the legacy accepted-detection callback. CrossEvent adds
+	// the command boundary derived from the accepted score window. If both are
+	// set, both callbacks are invoked for the same crossing.
+	Cross      func(score float32, at time.Time)
+	CrossEvent func(WakeDetection)
+	CloseMiss  func(score float32, at time.Time)
 	// AffinityCPU pins only the native inference worker. A nil value leaves
 	// scheduling unchanged. Pin failures are reported but never stop scoring.
 	AffinityCPU *int
@@ -262,6 +307,7 @@ func newShadowScorer(engine Engine, windowSize int, closeMiss float32,
 		profile:               policy.Profile,
 		refract:               policy.Refractory,
 		onCross:               hooks.Cross,
+		onCrossEvent:          hooks.CrossEvent,
 		onCloseMiss:           hooks.CloseMiss,
 		info:                  engine.Info(),
 		affinityCPU:           -1,
@@ -482,7 +528,10 @@ func (s *ShadowScorer) run() {
 	}
 	var (
 		generation uint64
-		scores     = make([]float32, 0, s.window)
+		scores     = make([]struct {
+			value float32
+			at    time.Time
+		}, 0, s.window)
 	)
 	reset := func(nextGeneration uint64) bool {
 		if err := s.engine.Reset(); err != nil {
@@ -563,7 +612,11 @@ func (s *ShadowScorer) run() {
 				s.recordErr(fmt.Errorf("microwakeword: invalid probability %g", raw))
 				continue
 			}
-			scores = append(scores, raw)
+			scoreAt := scoreCapturedAt(s.engine, chunk, scoreIndex, len(out))
+			scores = append(scores, struct {
+				value float32
+				at    time.Time
+			}{value: raw, at: scoreAt})
 			if len(scores) > s.window {
 				copy(scores, scores[len(scores)-s.window:])
 				scores = scores[:s.window]
@@ -588,11 +641,11 @@ func (s *ShadowScorer) run() {
 			var sum, peak float32
 			activeWindows := 0
 			for _, score := range scores {
-				sum += score
-				if score > peak {
-					peak = score
+				sum += score.value
+				if score.value > peak {
+					peak = score.value
 				}
-				if score >= threshold {
+				if score.value >= threshold {
 					activeWindows++
 				}
 			}
@@ -606,8 +659,8 @@ func (s *ShadowScorer) run() {
 			if edgeCount > 0 {
 				var early, late float32
 				for index := 0; index < edgeCount; index++ {
-					early += scores[index]
-					late += scores[len(scores)-edgeCount+index]
+					early += scores[index].value
+					late += scores[len(scores)-edgeCount+index].value
 				}
 				rise = late/float32(edgeCount) - early/float32(edgeCount)
 			}
@@ -627,9 +680,24 @@ func (s *ShadowScorer) run() {
 			s.ready = true
 			s.mu.Unlock()
 
-			scoreAt := scoreCapturedAt(s.engine, chunk, scoreIndex, len(out))
+			boundaryAt := scoreAt
+			if crossed {
+				for _, score := range scores {
+					if score.value >= threshold {
+						boundaryAt = score.at
+						break
+					}
+				}
+				boundaryAt = boundaryAt.Add(-CommandBoundaryGuard)
+				boundaryAt = NormalizeCommandBoundary(scoreAt, boundaryAt)
+			}
 			if crossed && s.onCross != nil {
 				s.onCross(mean, scoreAt)
+			}
+			if crossed && s.onCrossEvent != nil {
+				s.onCrossEvent(WakeDetection{
+					Score: mean, DetectedAt: scoreAt, CommandBoundaryAt: boundaryAt,
+				})
 			}
 			if closeMissed && s.onCloseMiss != nil {
 				s.onCloseMiss(mean, scoreAt)

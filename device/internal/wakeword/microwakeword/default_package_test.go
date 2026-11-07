@@ -21,6 +21,7 @@ func TestEnsureEmbeddedDefaultPackageInstallsPairedModelsAndRepairsDamage(t *tes
 		defaultOWWONNXFilename,
 		defaultNanoCNNFilename,
 		defaultNanoGRUFilename,
+		defaultBoundaryFilename,
 		defaultBundleFilename,
 	} {
 		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || info.Size() == 0 {
@@ -64,6 +65,9 @@ func TestEnsureEmbeddedDefaultPackageInstallsPairedModelsAndRepairsDamage(t *tes
 				architecture, variant, cachedNanoValid(DefaultPackage, architecture), err)
 		}
 	}
+	if !BoundaryReady(DefaultPackage) || bundle.WakeBoundary.Threshold != 0.82 {
+		t.Fatalf("embedded boundary ready=%v settings=%+v", BoundaryReady(DefaultPackage), bundle.WakeBoundary)
+	}
 	updated, err = EnsureEmbeddedDefaultPackage()
 	if err != nil || updated {
 		t.Fatalf("cached install updated=%v err=%v", updated, err)
@@ -81,5 +85,12 @@ func TestEnsureEmbeddedDefaultPackageInstallsPairedModelsAndRepairsDamage(t *tes
 	updated, err = EnsureEmbeddedDefaultPackage()
 	if err != nil || !updated || !cachedNanoValid(DefaultPackage, "gru") {
 		t.Fatalf("NWW repair updated=%v ready=%v err=%v", updated, cachedNanoValid(DefaultPackage, "gru"), err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, defaultBoundaryFilename), []byte("damaged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = EnsureEmbeddedDefaultPackage()
+	if err != nil || !updated || !BoundaryReady(DefaultPackage) {
+		t.Fatalf("boundary repair updated=%v ready=%v err=%v", updated, BoundaryReady(DefaultPackage), err)
 	}
 }

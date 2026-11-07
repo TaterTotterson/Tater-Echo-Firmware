@@ -42,6 +42,12 @@ func CompanionReady(packageName string) bool {
 	return cachedCompanionValid(packageName)
 }
 
+// BoundaryReady reports whether a package has a complete, hash-verified
+// wake-end model ready to be kept resident.
+func BoundaryReady(packageName string) bool {
+	return cachedBoundaryValid(packageName)
+}
+
 // PairedCompanionPackage returns packageName only when its MWW package and
 // OWW companion are both present and verified under the same cache identity.
 // An OWW-only package is deliberately rejected even if its companion is valid.
@@ -106,7 +112,7 @@ func InstallPackageURLRevision(parent context.Context, manifestURL, revision str
 	defer cancel()
 	client := packageHTTPClient(packageDownloadTimeout)
 	if cachedPackageValid(manifestPath, modelPath) {
-		if !cachedCompanionValid(packageName) {
+		if !cachedPackageExtrasValid(packageName) {
 			setCompanionInstallError(packageName,
 				installCompanion(ctx, client, parsed, packageName, nil, nil))
 		}
@@ -227,6 +233,25 @@ func installCompanion(ctx context.Context, client *http.Client, manifestURL *url
 
 func installCompanionArtifacts(ctx context.Context, client *http.Client, finalBundleURL *url.URL,
 	packageName string, bundle WakeBundle) error {
+	var boundaryModel []byte
+	if bundle.WakeBoundary.Model != "" {
+		boundaryRef, err := url.Parse(bundle.WakeBoundary.Model)
+		if err != nil {
+			return fmt.Errorf("microwakeword: invalid wake boundary model URL: %w", err)
+		}
+		boundaryModel, _, err = downloadPackageFile(ctx, client,
+			finalBundleURL.ResolveReference(boundaryRef).String(), maxBoundaryModelBytes)
+		if err != nil {
+			return err
+		}
+		if int64(len(boundaryModel)) != bundle.WakeBoundary.ModelSizeBytes ||
+			!digestMatches(boundaryModel, bundle.WakeBoundary.ModelSHA256) {
+			return fmt.Errorf("microwakeword: wake boundary model size or SHA-256 mismatch")
+		}
+		if len(boundaryModel) < 8 || string(boundaryModel[4:8]) != "TFL3" {
+			return fmt.Errorf("microwakeword: downloaded wake boundary model is not a TFLite FlatBuffer")
+		}
+	}
 	var metadata []byte
 	if bundle.OpenWakeWord.Metadata != "" {
 		metadataRef, err := url.Parse(bundle.OpenWakeWord.Metadata)
@@ -242,24 +267,31 @@ func installCompanionArtifacts(ctx context.Context, client *http.Client, finalBu
 			return fmt.Errorf("microwakeword: OWW metadata SHA-256 mismatch")
 		}
 	}
-	artifact, err := companionONNXArtifact(bundle.OpenWakeWord.Artifacts)
-	if err != nil {
-		return err
-	}
-	modelRef, err := url.Parse(artifact.File)
-	if err != nil {
-		return fmt.Errorf("microwakeword: invalid OWW model URL: %w", err)
-	}
-	model, _, err := downloadPackageFile(ctx, client,
-		finalBundleURL.ResolveReference(modelRef).String(), maxCompanionModelBytes)
-	if err != nil {
-		return err
-	}
-	if int64(len(model)) != artifact.SizeBytes || !digestMatches(model, artifact.SHA256) {
-		return fmt.Errorf("microwakeword: OWW model size or SHA-256 mismatch")
-	}
-	if len(model) < 2 || model[0] != 0x08 {
-		return fmt.Errorf("microwakeword: downloaded OWW model is not an ONNX ModelProto")
+	var artifact BundleArtifact
+	var model []byte
+	if len(bundle.OpenWakeWord.Artifacts) > 0 {
+		var err error
+		artifact, err = companionONNXArtifact(bundle.OpenWakeWord.Artifacts)
+		if err != nil {
+			return err
+		}
+		modelRef, err := url.Parse(artifact.File)
+		if err != nil {
+			return fmt.Errorf("microwakeword: invalid OWW model URL: %w", err)
+		}
+		model, _, err = downloadPackageFile(ctx, client,
+			finalBundleURL.ResolveReference(modelRef).String(), maxCompanionModelBytes)
+		if err != nil {
+			return err
+		}
+		if int64(len(model)) != artifact.SizeBytes || !digestMatches(model, artifact.SHA256) {
+			return fmt.Errorf("microwakeword: OWW model size or SHA-256 mismatch")
+		}
+		if len(model) < 2 || model[0] != 0x08 {
+			return fmt.Errorf("microwakeword: downloaded OWW model is not an ONNX ModelProto")
+		}
+	} else if len(boundaryModel) == 0 {
+		return ErrCompanionUnavailable
 	}
 
 	dir := PackageDir()
@@ -268,11 +300,21 @@ func installCompanionArtifacts(ctx context.Context, client *http.Client, finalBu
 	if len(metadata) > 0 {
 		metadataName = prefix + CompanionMetadataSuffix
 	}
-	modelName := prefix + CompanionONNXModelSuffix
+	modelName := ""
+	if len(model) > 0 {
+		modelName = prefix + CompanionONNXModelSuffix
+	}
+	boundaryName := ""
+	if len(boundaryModel) > 0 {
+		boundaryName = prefix + BoundaryTFLiteModelSuffix
+		bundle.WakeBoundary.Model = boundaryName
+	}
 	bundleName := prefix + CompanionBundleSuffix
-	bundle.OpenWakeWord.Metadata = metadataName
-	bundle.OpenWakeWord.Artifacts = map[string]BundleArtifact{
-		"onnx": {File: modelName, SHA256: artifact.SHA256, SizeBytes: int64(len(model))},
+	if modelName != "" {
+		bundle.OpenWakeWord.Metadata = metadataName
+		bundle.OpenWakeWord.Artifacts = map[string]BundleArtifact{
+			"onnx": {File: modelName, SHA256: artifact.SHA256, SizeBytes: int64(len(model))},
+		}
 	}
 	bundleBody, err := json.MarshalIndent(bundle, "", "  ")
 	if err != nil {
@@ -282,8 +324,15 @@ func installCompanionArtifacts(ctx context.Context, client *http.Client, finalBu
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("microwakeword: create package directory: %w", err)
 	}
-	if err := atomicPackageWrite(filepath.Join(dir, modelName), model, 0o644); err != nil {
-		return err
+	if modelName != "" {
+		if err := atomicPackageWrite(filepath.Join(dir, modelName), model, 0o644); err != nil {
+			return err
+		}
+	}
+	if boundaryName != "" {
+		if err := atomicPackageWrite(filepath.Join(dir, boundaryName), boundaryModel, 0o644); err != nil {
+			return err
+		}
 	}
 	if metadataName != "" {
 		if err := atomicPackageWrite(filepath.Join(dir, metadataName), metadata, 0o644); err != nil {
@@ -344,6 +393,15 @@ func cachedCompanionValid(packageName string) bool {
 	if err != nil {
 		return false
 	}
+	if bundle.WakeBoundary.Model != "" {
+		if _, err = readVerifiedFile(
+			filepath.Join(PackageDir(), bundle.WakeBoundary.Model),
+			maxBoundaryModelBytes,
+			bundle.WakeBoundary.ModelSHA256,
+		); err != nil {
+			return false
+		}
+	}
 	artifact, err := companionONNXArtifact(bundle.OpenWakeWord.Artifacts)
 	if err != nil {
 		return false
@@ -363,6 +421,56 @@ func cachedCompanionValid(packageName string) bool {
 		artifact.SHA256,
 	)
 	return err == nil
+}
+
+func cachedBoundaryValid(packageName string) bool {
+	prefix, err := companionPrefix(packageName)
+	if err != nil {
+		return false
+	}
+	raw, err := readLimited(filepath.Join(PackageDir(), prefix+CompanionBundleSuffix), maxCompanionBundleBytes)
+	if err != nil {
+		return false
+	}
+	bundle, err := ParseWakeBundle(raw)
+	if err != nil || bundle.WakeBoundary.Model == "" {
+		return false
+	}
+	_, err = readVerifiedFile(
+		filepath.Join(PackageDir(), bundle.WakeBoundary.Model),
+		maxBoundaryModelBytes,
+		bundle.WakeBoundary.ModelSHA256,
+	)
+	return err == nil
+}
+
+func cachedPackageExtrasValid(packageName string) bool {
+	prefix, err := companionPrefix(packageName)
+	if err != nil {
+		return false
+	}
+	raw, err := readLimited(filepath.Join(PackageDir(), prefix+CompanionBundleSuffix), maxCompanionBundleBytes)
+	if err != nil {
+		return false
+	}
+	bundle, err := ParseWakeBundle(raw)
+	if err != nil {
+		return false
+	}
+	hasExtras := false
+	if len(bundle.OpenWakeWord.Artifacts) > 0 {
+		hasExtras = true
+		if !cachedCompanionValid(packageName) {
+			return false
+		}
+	}
+	if bundle.WakeBoundary.Model != "" {
+		hasExtras = true
+		if !cachedBoundaryValid(packageName) {
+			return false
+		}
+	}
+	return hasExtras
 }
 
 func packageHTTPClient(timeout time.Duration) *http.Client {

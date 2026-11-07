@@ -20,12 +20,14 @@ const (
 	CompanionMetadataSuffix       = ".oww.json"
 	CompanionONNXModelSuffix      = ".oww.onnx"
 	NanoONNXModelSuffix           = ".nww.onnx"
+	BoundaryTFLiteModelSuffix     = ".boundary.tflite"
 	OWWORTRuntimeFilename         = "libonnxruntime.so"
 	OWWMelspectrogramONNXFilename = "melspectrogram.onnx"
 	OWWEmbeddingONNXFilename      = "embedding_model.onnx"
 	maxCompanionBundleBytes       = 512 * 1024
 	maxCompanionMetadataBytes     = 256 * 1024
 	maxCompanionModelBytes        = 16 * 1024 * 1024
+	maxBoundaryModelBytes         = 200 * 1024
 	// MWW has already located the phrase near the end of its continuous wake
 	// history. Replaying the full three-second trainer buffer makes bounded
 	// OWW confirmation needlessly expensive on the Echo CPUs. Twenty-four
@@ -86,6 +88,22 @@ type BundleNanoWakeWord struct {
 	Variants            map[string]BundleNanoWakeWordVariant `json:"variants"`
 }
 
+type BundleWakeBoundary struct {
+	Type             string         `json:"type"`
+	Model            string         `json:"model"`
+	ModelSHA256      string         `json:"model_sha256"`
+	ModelSizeBytes   int64          `json:"model_size_bytes"`
+	ModelFormat      string         `json:"model_format"`
+	Quantization     string         `json:"quantization"`
+	SampleRate       int            `json:"sample_rate"`
+	Threshold        float32        `json:"threshold"`
+	TensorArenaSize  int            `json:"tensor_arena_size"`
+	Frontend         FrontendConfig `json:"frontend"`
+	SearchBeforeMS   int            `json:"search_before_ms"`
+	SearchAfterMS    int            `json:"search_after_ms"`
+	EndpointOffsetMS int            `json:"endpoint_offset_ms"`
+}
+
 type WakeBundle struct {
 	SchemaVersion int                 `json:"schema_version"`
 	Type          string              `json:"type"`
@@ -94,6 +112,7 @@ type WakeBundle struct {
 	MicroWakeWord BundleMicroWakeWord `json:"micro_wake_word"`
 	OpenWakeWord  BundleOpenWakeWord  `json:"open_wake_word"`
 	NanoWakeWord  BundleNanoWakeWord  `json:"nano_wake_word"`
+	WakeBoundary  BundleWakeBoundary  `json:"wake_boundary"`
 }
 
 func ParseWakeBundle(raw []byte) (WakeBundle, error) {
@@ -101,7 +120,7 @@ func ParseWakeBundle(raw []byte) (WakeBundle, error) {
 	if err := json.Unmarshal(raw, &bundle); err != nil {
 		return WakeBundle{}, fmt.Errorf("microwakeword: decode wake bundle: %w", err)
 	}
-	if bundle.SchemaVersion < 1 || bundle.SchemaVersion > 3 || bundle.Type != "tater_wake_word_bundle" {
+	if bundle.SchemaVersion < 1 || bundle.SchemaVersion > 4 || bundle.Type != "tater_wake_word_bundle" {
 		return WakeBundle{}, fmt.Errorf("microwakeword: unsupported wake bundle schema")
 	}
 	if strings.TrimSpace(bundle.WakeWord) == "" {
@@ -191,6 +210,42 @@ func ParseWakeBundle(raw []byte) (WakeBundle, error) {
 			return WakeBundle{}, fmt.Errorf("microwakeword: NanoWakeWord default architecture is unavailable")
 		}
 		bundle.NanoWakeWord.DefaultArchitecture = architecture
+	}
+	boundary := bundle.WakeBoundary
+	if boundary.Model != "" || boundary.Type != "" {
+		if bundle.SchemaVersion < 4 || boundary.Type != "wake_word_end" {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary type")
+		}
+		if err := validateBareBundleName(boundary.Model, ".tflite"); err != nil {
+			return WakeBundle{}, err
+		}
+		if err := validateSHA256(boundary.ModelSHA256); err != nil {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary digest: %w", err)
+		}
+		if boundary.ModelSizeBytes <= 0 || boundary.ModelSizeBytes > maxBoundaryModelBytes {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary model size")
+		}
+		if boundary.ModelFormat != modelFormat || boundary.Quantization != quantization || boundary.SampleRate != SupportedSampleRate {
+			return WakeBundle{}, fmt.Errorf("microwakeword: unsupported wake boundary model contract")
+		}
+		if boundary.Threshold <= 0 || boundary.Threshold > 1 {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary threshold")
+		}
+		if boundary.TensorArenaSize < MinimumNativeArenaSize || boundary.TensorArenaSize > 256*1024 {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary tensor arena")
+		}
+		if boundary.SearchBeforeMS <= 0 || boundary.SearchBeforeMS > 2000 || boundary.SearchAfterMS < 0 || boundary.SearchAfterMS > 500 {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary search window")
+		}
+		probe := Manifest{
+			Type: "micro", WakeWord: bundle.WakeWord, Model: boundary.Model, Version: 1,
+			ModelFormat: boundary.ModelFormat, Quantization: boundary.Quantization, SampleRate: boundary.SampleRate,
+			Micro:       MicroConfig{ProbabilityCutoff: boundary.Threshold, SlidingWindowSize: 1, FeatureStepSize: SupportedStepMS, TensorArenaSize: boundary.TensorArenaSize},
+			TaterNative: TaterNativeConfig{FormatVersion: 1, WakeThreshold: boundary.Threshold, WakeSlidingWindow: 1, Frontend: boundary.Frontend},
+		}
+		if err := probe.Validate(); err != nil {
+			return WakeBundle{}, fmt.Errorf("microwakeword: invalid wake boundary runtime: %w", err)
+		}
 	}
 	return bundle, nil
 }

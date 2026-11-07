@@ -195,10 +195,34 @@ func InstallNanoURLRevision(parent context.Context, bundleURL, revision, request
 	if len(model) < 2 || model[0] != 0x08 {
 		return "", fmt.Errorf("microwakeword: downloaded NanoWakeWord model is not an ONNX ModelProto")
 	}
+	var boundaryModel []byte
+	if bundle.WakeBoundary.Model != "" {
+		boundaryRef, parseErr := url.Parse(bundle.WakeBoundary.Model)
+		if parseErr != nil {
+			return "", fmt.Errorf("microwakeword: invalid wake boundary model URL: %w", parseErr)
+		}
+		boundaryModel, _, err = downloadPackageFile(ctx, client,
+			finalBundleURL.ResolveReference(boundaryRef).String(), maxBoundaryModelBytes)
+		if err != nil {
+			return "", err
+		}
+		if int64(len(boundaryModel)) != bundle.WakeBoundary.ModelSizeBytes ||
+			!digestMatches(boundaryModel, bundle.WakeBoundary.ModelSHA256) {
+			return "", fmt.Errorf("microwakeword: wake boundary model size or SHA-256 mismatch")
+		}
+		if len(boundaryModel) < 8 || string(boundaryModel[4:8]) != "TFL3" {
+			return "", fmt.Errorf("microwakeword: downloaded wake boundary model is not a TFLite FlatBuffer")
+		}
+	}
 
 	dir := PackageDir()
 	prefix, _ := companionPrefix(packageName)
 	modelName := prefix + "." + architecture + NanoONNXModelSuffix
+	boundaryName := ""
+	if len(boundaryModel) > 0 {
+		boundaryName = prefix + BoundaryTFLiteModelSuffix
+		bundle.WakeBoundary.Model = boundaryName
+	}
 	bundleName := prefix + CompanionBundleSuffix
 	variant.Model = modelName
 	variant.ModelSHA256 = artifact.SHA256
@@ -216,6 +240,11 @@ func InstallNanoURLRevision(parent context.Context, bundleURL, revision, request
 	}
 	if err := atomicPackageWrite(filepath.Join(dir, modelName), model, 0o644); err != nil {
 		return "", err
+	}
+	if boundaryName != "" {
+		if err := atomicPackageWrite(filepath.Join(dir, boundaryName), boundaryModel, 0o644); err != nil {
+			return "", err
+		}
 	}
 	if err := atomicPackageWrite(filepath.Join(dir, bundleName), bundleBody, 0o644); err != nil {
 		_ = os.Remove(filepath.Join(dir, modelName))
@@ -246,5 +275,8 @@ func cachedNanoValid(packageName, architecture string) bool {
 		return false
 	}
 	_, err = readVerifiedFile(filepath.Join(PackageDir(), artifact.File), maxCompanionModelBytes, artifact.SHA256)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	return bundle.WakeBoundary.Model == "" || cachedBoundaryValid(packageName)
 }

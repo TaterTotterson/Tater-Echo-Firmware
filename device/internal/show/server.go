@@ -49,6 +49,30 @@ type Media struct {
 	BeatSequence            uint64    `json:"beat_sequence,omitempty"`
 }
 
+// TaterTubeMedia is the display-only companion state supplied by a LAN media
+// system. It is intentionally separate from Sendspin media because the source
+// is another playback device; the satellite only presents its now-playing state.
+type TaterTubeMedia struct {
+	Active                  bool   `json:"active"`
+	PlayerID                string `json:"player_id,omitempty"`
+	PlayerName              string `json:"player_name,omitempty"`
+	EventID                 string `json:"event_id,omitempty"`
+	PlaybackState           string `json:"playback_state,omitempty"`
+	MediaType               string `json:"media_type,omitempty"`
+	Title                   string `json:"title,omitempty"`
+	SeriesTitle             string `json:"series_title,omitempty"`
+	Season                  int    `json:"season,omitempty"`
+	Episode                 int    `json:"episode,omitempty"`
+	Subtitle                string `json:"subtitle,omitempty"`
+	ArtworkURL              string `json:"artwork_url,omitempty"`
+	ProgressMS              int64  `json:"progress_ms,omitempty"`
+	DurationMS              int64  `json:"duration_ms,omitempty"`
+	PlaybackSpeed           int    `json:"playback_speed,omitempty"`
+	ProgressUpdatedAtUnixMS int64  `json:"progress_updated_at_unix_ms,omitempty"`
+	ExpiresAtUnixMS         int64  `json:"expires_at_unix_ms,omitempty"`
+	Revision                int64  `json:"revision,omitempty"`
+}
+
 // Weather is the compact Environment Core summary rendered by screen targets.
 // It deliberately contains display-ready values only; provider credentials and
 // the full sensor feed never leave Tater.
@@ -218,48 +242,49 @@ type Conversation struct {
 // Snapshot is the complete screen state. Complete snapshots make reconnects
 // deterministic: the renderer never has to replay a missed transition.
 type Snapshot struct {
-	Protocol                    int           `json:"protocol"`
-	Type                        string        `json:"type"`
-	Phase                       string        `json:"phase"`
-	Connected                   bool          `json:"connected"`
-	DeviceName                  string        `json:"device_name"`
-	AssistantName               string        `json:"assistant_name,omitempty"`
-	Room                        string        `json:"room"`
-	DisplayTheme                string        `json:"display_theme,omitempty"`
-	DisplayEdgeGlow             bool          `json:"display_edge_glow"`
-	WallpaperURLs               []string      `json:"wallpaper_urls,omitempty"`
-	WallpaperIntervalMinutes    int           `json:"wallpaper_interval_minutes,omitempty"`
-	ScreenBrightness            int           `json:"screen_brightness"`
-	ScreenAutoBrightness        bool          `json:"screen_auto_brightness_enabled"`
-	ScreenAutoBrightnessMinimum int           `json:"screen_auto_brightness_minimum"`
-	ScreenNightMode             bool          `json:"screen_night_mode_enabled"`
-	ScreenNightBrightness       int           `json:"screen_night_brightness"`
-	ScreenNightStart            string        `json:"screen_night_start,omitempty"`
-	ScreenNightEnd              string        `json:"screen_night_end,omitempty"`
-	ScreenNightDisplay          string        `json:"screen_night_display,omitempty"`
-	ScreenClockFormat           string        `json:"screen_clock_format,omitempty"`
-	Message                     string        `json:"message,omitempty"`
-	ToolName                    string        `json:"tool_name,omitempty"`
-	ToolMessage                 string        `json:"tool_message,omitempty"`
-	Conversation                *Conversation `json:"conversation,omitempty"`
-	Muted                       bool          `json:"muted"`
-	VolumePercent               int           `json:"volume_percent"`
-	AudioLevel                  float64       `json:"audio_level"`
-	DirectionDegrees            *float64      `json:"direction_degrees,omitempty"`
-	TimerActive                 bool          `json:"timer_active"`
-	Timer                       *Timer        `json:"timer,omitempty"`
-	Media                       *Media        `json:"media,omitempty"`
-	Weather                     *Weather      `json:"weather,omitempty"`
-	Climate                     *Climate      `json:"climate,omitempty"`
-	Notification                *Notification `json:"notification,omitempty"`
-	LastEvent                   *Notification `json:"last_event,omitempty"`
-	SatChat                     *SatChat      `json:"sat_chat,omitempty"`
-	Cameras                     *Cameras      `json:"cameras,omitempty"`
-	Video                       *Video        `json:"video,omitempty"`
-	TaterTimeUnixMS             int64         `json:"tater_time_unix_ms,omitempty"`
-	TaterUTCOffset              int           `json:"tater_utc_offset_seconds,omitempty"`
-	TaterTimezone               string        `json:"tater_timezone,omitempty"`
-	UpdatedAtUnixMS             int64         `json:"updated_at_unix_ms"`
+	Protocol                    int             `json:"protocol"`
+	Type                        string          `json:"type"`
+	Phase                       string          `json:"phase"`
+	Connected                   bool            `json:"connected"`
+	DeviceName                  string          `json:"device_name"`
+	AssistantName               string          `json:"assistant_name,omitempty"`
+	Room                        string          `json:"room"`
+	DisplayTheme                string          `json:"display_theme,omitempty"`
+	DisplayEdgeGlow             bool            `json:"display_edge_glow"`
+	WallpaperURLs               []string        `json:"wallpaper_urls,omitempty"`
+	WallpaperIntervalMinutes    int             `json:"wallpaper_interval_minutes,omitempty"`
+	ScreenBrightness            int             `json:"screen_brightness"`
+	ScreenAutoBrightness        bool            `json:"screen_auto_brightness_enabled"`
+	ScreenAutoBrightnessMinimum int             `json:"screen_auto_brightness_minimum"`
+	ScreenNightMode             bool            `json:"screen_night_mode_enabled"`
+	ScreenNightBrightness       int             `json:"screen_night_brightness"`
+	ScreenNightStart            string          `json:"screen_night_start,omitempty"`
+	ScreenNightEnd              string          `json:"screen_night_end,omitempty"`
+	ScreenNightDisplay          string          `json:"screen_night_display,omitempty"`
+	ScreenClockFormat           string          `json:"screen_clock_format,omitempty"`
+	Message                     string          `json:"message,omitempty"`
+	ToolName                    string          `json:"tool_name,omitempty"`
+	ToolMessage                 string          `json:"tool_message,omitempty"`
+	Conversation                *Conversation   `json:"conversation,omitempty"`
+	Muted                       bool            `json:"muted"`
+	VolumePercent               int             `json:"volume_percent"`
+	AudioLevel                  float64         `json:"audio_level"`
+	DirectionDegrees            *float64        `json:"direction_degrees,omitempty"`
+	TimerActive                 bool            `json:"timer_active"`
+	Timer                       *Timer          `json:"timer,omitempty"`
+	Media                       *Media          `json:"media,omitempty"`
+	TaterTube                   *TaterTubeMedia `json:"tater_tube,omitempty"`
+	Weather                     *Weather        `json:"weather,omitempty"`
+	Climate                     *Climate        `json:"climate,omitempty"`
+	Notification                *Notification   `json:"notification,omitempty"`
+	LastEvent                   *Notification   `json:"last_event,omitempty"`
+	SatChat                     *SatChat        `json:"sat_chat,omitempty"`
+	Cameras                     *Cameras        `json:"cameras,omitempty"`
+	Video                       *Video          `json:"video,omitempty"`
+	TaterTimeUnixMS             int64           `json:"tater_time_unix_ms,omitempty"`
+	TaterUTCOffset              int             `json:"tater_utc_offset_seconds,omitempty"`
+	TaterTimezone               string          `json:"tater_timezone,omitempty"`
+	UpdatedAtUnixMS             int64           `json:"updated_at_unix_ms"`
 }
 
 // Command is a bounded request from the local screen. Only actions explicitly
@@ -340,6 +365,9 @@ type Server struct {
 	mediaImage               []byte
 	mediaImageType           string
 	mediaImageVersion        uint64
+	taterTubeImage           []byte
+	taterTubeImageType       string
+	taterTubeImageVersion    uint64
 	satChatVideoImage        []byte
 	satChatVideoVersion      uint64
 	cameraFrameImage         []byte
@@ -393,6 +421,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/notification-image", s.serveNotificationImage)
 	mux.HandleFunc("/last-event-image", s.serveLastEventImage)
 	mux.HandleFunc("/media-image", s.serveMediaImage)
+	mux.HandleFunc("/tater-tube-image", s.serveTaterTubeImage)
 	mux.HandleFunc("/sat-chat-video", s.serveSatChatVideo)
 	mux.HandleFunc("/camera-frame", s.serveCameraFrame)
 	mux.HandleFunc("/video-audio", s.serveVideoAudio)
@@ -418,6 +447,12 @@ func (s *Server) Run(ctx context.Context) error {
 		s.mediaImageVersion++
 		next.ArtworkURL = fmt.Sprintf("http://%s/media-image?v=%d", imageListener.Addr().String(), s.mediaImageVersion)
 		s.state.Media = &next
+	}
+	if s.state.TaterTube != nil && len(s.taterTubeImage) > 0 && s.state.TaterTube.ArtworkURL == "" {
+		next := *s.state.TaterTube
+		s.taterTubeImageVersion++
+		next.ArtworkURL = fmt.Sprintf("http://%s/tater-tube-image?v=%d", imageListener.Addr().String(), s.taterTubeImageVersion)
+		s.state.TaterTube = &next
 	}
 	if s.state.Cameras != nil && len(s.cameraFrameImage) > 0 && s.state.Cameras.FrameURL == "" {
 		next := *s.state.Cameras
@@ -496,6 +531,46 @@ func (s *Server) SetMedia(media *Media, image []byte, contentType string) {
 			next.ArtworkURL = ""
 		}
 		s.state.Media = &next
+	}
+	s.state.Protocol = ProtocolVersion
+	s.state.Type = "snapshot"
+	s.state.UpdatedAtUnixMS = time.Now().UnixMilli()
+	s.mu.Unlock()
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+// SetTaterTube updates the LAN companion screen. A metadata refresh
+// without image bytes retains artwork for the same event, which makes periodic
+// lease renewals cheap while still clearing stale art when playback changes.
+func (s *Server) SetTaterTube(media *TaterTubeMedia, image []byte, contentType string) {
+	s.mu.Lock()
+	if media == nil || !media.Active {
+		s.state.TaterTube = nil
+		s.taterTubeImage = nil
+		s.taterTubeImageType = ""
+	} else {
+		next := *media
+		sameEvent := s.state.TaterTube != nil && s.state.TaterTube.EventID != "" && s.state.TaterTube.EventID == media.EventID
+		if len(image) > 0 {
+			s.taterTubeImage = append(s.taterTubeImage[:0], image...)
+			s.taterTubeImageType = strings.TrimSpace(contentType)
+			if !strings.HasPrefix(s.taterTubeImageType, "image/") {
+				s.taterTubeImageType = "image/jpeg"
+			}
+			s.taterTubeImageVersion++
+		} else if !sameEvent {
+			s.taterTubeImage = nil
+			s.taterTubeImageType = ""
+		}
+		if len(s.taterTubeImage) > 0 && s.imageListener != nil {
+			next.ArtworkURL = fmt.Sprintf("http://%s/tater-tube-image?v=%d", s.imageListener.Addr().String(), s.taterTubeImageVersion)
+		} else {
+			next.ArtworkURL = ""
+		}
+		s.state.TaterTube = &next
 	}
 	s.state.Protocol = ProtocolVersion
 	s.state.Type = "snapshot"
@@ -726,6 +801,21 @@ func (s *Server) serveMediaImage(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	image := append([]byte(nil), s.mediaImage...)
 	contentType := s.mediaImageType
+	s.mu.RUnlock()
+	if len(image) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(image)
+}
+
+func (s *Server) serveTaterTubeImage(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	image := append([]byte(nil), s.taterTubeImage...)
+	contentType := s.taterTubeImageType
 	s.mu.RUnlock()
 	if len(image) == 0 {
 		http.NotFound(w, r)

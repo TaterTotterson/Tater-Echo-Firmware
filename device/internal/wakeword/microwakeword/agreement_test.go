@@ -48,3 +48,63 @@ func TestAgreementMatcherResetLaneDropsHalfMatch(t *testing.T) {
 		t.Fatal("event survived a directional lane reset")
 	}
 }
+
+func TestAgreementMatcherUsesEarlierDetectorCommandBoundary(t *testing.T) {
+	base := time.Now()
+	matcher := NewAgreementMatcher(time.Second)
+	mww := WakeDetection{
+		Score: 0.96, DetectedAt: base.Add(200 * time.Millisecond),
+		CommandBoundaryAt: base.Add(120 * time.Millisecond),
+	}
+	companion := WakeDetection{
+		Score: 0.98, DetectedAt: base.Add(160 * time.Millisecond),
+		CommandBoundaryAt: base.Add(40 * time.Millisecond),
+	}
+	if _, ok := matcher.ObserveDetection(AgreementMWW, 0, mww); ok {
+		t.Fatal("one detector produced an agreement")
+	}
+	match, ok := matcher.ObserveDetection(AgreementOWW, 0, companion)
+	if !ok {
+		t.Fatal("matching detector events did not agree")
+	}
+	if !match.CommandBoundaryAt.Equal(companion.CommandBoundaryAt) {
+		t.Fatalf("combined boundary = %v, want earlier companion boundary %v",
+			match.CommandBoundaryAt, companion.CommandBoundaryAt)
+	}
+	if !match.MWWBoundaryAt.Equal(mww.CommandBoundaryAt) ||
+		!match.OWWBoundaryAt.Equal(companion.CommandBoundaryAt) {
+		t.Fatalf("per-detector boundaries were not preserved: %+v", match)
+	}
+}
+
+func TestAgreementMatcherCompanionCannotDelayOrOverRewindBoundary(t *testing.T) {
+	base := time.Now()
+
+	delayMatcher := NewAgreementMatcher(time.Second)
+	mww := WakeDetection{
+		Score: 0.96, DetectedAt: base.Add(500 * time.Millisecond),
+		CommandBoundaryAt: base.Add(420 * time.Millisecond),
+	}
+	laterCompanion := WakeDetection{
+		Score: 0.98, DetectedAt: base.Add(600 * time.Millisecond),
+		CommandBoundaryAt: base.Add(520 * time.Millisecond),
+	}
+	delayMatcher.ObserveDetection(AgreementMWW, 0, mww)
+	match, ok := delayMatcher.ObserveDetection(AgreementOWW, 0, laterCompanion)
+	if !ok || !match.CommandBoundaryAt.Equal(mww.CommandBoundaryAt) {
+		t.Fatalf("later companion changed boundary: match=%+v ok=%t", match, ok)
+	}
+
+	rewindMatcher := NewAgreementMatcher(time.Second)
+	earlyCompanion := WakeDetection{
+		Score: 0.98, DetectedAt: base,
+		CommandBoundaryAt: base.Add(-MaxCommandBoundaryRewind),
+	}
+	rewindMatcher.ObserveDetection(AgreementOWW, 0, earlyCompanion)
+	match, ok = rewindMatcher.ObserveDetection(AgreementMWW, 0, mww)
+	wantBoundary := mww.DetectedAt.Add(-MaxCommandBoundaryRewind)
+	if !ok || !match.CommandBoundaryAt.Equal(wantBoundary) {
+		t.Fatalf("combined boundary = %v, want bounded rewind %v (ok=%t)",
+			match.CommandBoundaryAt, wantBoundary, ok)
+	}
+}
