@@ -56,6 +56,32 @@ class BootPatchTests(unittest.TestCase):
             self.assertEqual(1, (root / "etc/group").read_text().count("techo5-video:x:89:"))
             self.assertIn("inet:x:3003:avahi,techo5-video", (root / "etc/group").read_text())
 
+    def test_patch_firewall_allows_companion_display_idempotently(self):
+        source = """#!/bin/sh
+# Sendspin audio (8928/tcp), and other services.
+for T in iptables-legacy ip6tables-legacy; do
+	if ! {
+		$T -A $CHAIN -p tcp --dport 8928 -j ACCEPT &&
+		$T -A $CHAIN -p tcp --dport 8181 -j ACCEPT
+	}; then
+		exit 1
+	fi
+done
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            firewall = root / "usr/local/sbin/techo5-firewall"
+            firewall.parent.mkdir(parents=True)
+            firewall.write_text(source)
+            build_rootfs.patch_firewall(root)
+            build_rootfs.patch_firewall(root)
+            patched = firewall.read_text()
+
+        self.assertEqual(1, patched.count("-p tcp --dport 8930"))
+        self.assertEqual(1, patched.count("-p udp --dport 8930"))
+        self.assertIn("Companion Display (8930/tcp+udp)", patched)
+        self.assertLess(patched.index("--dport 8930"), patched.index("--dport 8181"))
+
     def test_network_keeper_yields_to_active_usb_ethernet(self):
         source = """(
 \tdown=0; lost=0

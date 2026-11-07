@@ -1,5 +1,30 @@
 # Changelog
 
+## v4.2.1
+
+Tater Echo Firmware v4.2.1 restores the trusted-LAN connection used by
+Companion Display media presentations and notifications on screen-capable
+Tater Linux Echo satellites.
+
+This fix is delivered by the normal application OTA and does not require a
+Tater Linux system update.
+
+### Companion display connectivity
+
+- Fixed the fail-closed Tater Linux firewall silently dropping Companion
+  Display traffic even though the Echo successfully advertised the service
+  over mDNS.
+- Added an idempotent startup repair that permits TCP and UDP port 8930 only
+  after the Companion Display listeners bind successfully, immediately fixing
+  already-installed screen devices through the normal firmware update.
+- Added the same allowlist entries to future Tater Linux system images while
+  leaving platforms without the managed firewall unchanged.
+- Restored the capabilities endpoint, active UDP discovery, now-playing media
+  presentations, and notification cards through the shared Companion Display
+  service.
+
+**Full Changelog**: [v4.2.0...v4.2.1](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.2.0...v4.2.1)
+
 ## v4.2.0
 
 Tater Echo Firmware v4.2.0 adds model-driven wake-word boundaries for fast

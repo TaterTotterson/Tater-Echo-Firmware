@@ -165,6 +165,13 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.discovery = discovery
 
+	// Tater Linux screen images use a fail-closed inbound firewall. Older
+	// images predate Companion Display and therefore do not include this port
+	// in their allowlist. Repair that allowlist only after both listeners have
+	// been claimed, allowing the normal application OTA to enable the service
+	// without requiring a system-image update.
+	ensureTaterLinuxFirewallPort(s.cfg.Port)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/capabilities", s.handleCapabilities)
 	mux.HandleFunc("/v1/now-playing", s.handleNowPlaying)

@@ -167,6 +167,30 @@ def ensure_video_decoder_user(root: Path) -> None:
     write(group, "\n".join(rewritten) + "\n")
 
 
+def patch_firewall(root: Path) -> None:
+    """Permanently allow Companion Display on future Tater Linux images."""
+    firewall = root / "usr/local/sbin/techo5-firewall"
+    if not firewall.is_file():
+        return
+    contents = firewall.read_text()
+    tcp_rule = "$T -A $CHAIN -p tcp --dport 8930 -j ACCEPT"
+    udp_rule = "$T -A $CHAIN -p udp --dport 8930 -j ACCEPT"
+    if tcp_rule in contents and udp_rule in contents:
+        return
+    anchor = "$T -A $CHAIN -p tcp --dport 8928 -j ACCEPT &&"
+    if contents.count(anchor) != 1:
+        raise SystemExit("base rootfs has an unexpected firewall allowlist")
+    contents = contents.replace(
+        anchor,
+        anchor + "\n\t\t" + tcp_rule + " &&\n\t\t" + udp_rule + " &&",
+    )
+    contents = contents.replace(
+        "Sendspin audio (8928/tcp),",
+        "Sendspin audio (8928/tcp), Companion Display (8930/tcp+udp),",
+    )
+    write(firewall, contents, 0o755)
+
+
 def setup_binary(cache: Path, name: str, digest: str, member: str, destination: Path) -> None:
     """Install only the pinned APK's executable, not its post-install scripts."""
     cache.mkdir(parents=True, exist_ok=True)
@@ -709,6 +733,7 @@ def build(args: argparse.Namespace) -> None:
         write(root / "usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt",
               args.ffmpeg_license.read_text())
         write(root / "usr/share/licenses/tater-linux/NOTICE", ATTRIBUTION)
+        patch_firewall(root)
         patch_boot(root, target=args.target)
         if args.target != "athena":
             patch_slotctl(root)

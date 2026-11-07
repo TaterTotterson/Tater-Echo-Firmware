@@ -126,6 +126,7 @@ def build(args: argparse.Namespace) -> None:
                      "The Rook camera driver derives from TECHO5 by HuskerMinion under the MIT License.\n"
                      "https://github.com/HuskerMinion/techo5\n\n"
                      + common.ATTRIBUTION)
+        common.patch_firewall(root)
         common.patch_rook_wifi_mac(root)
         common.patch_boot(root, target="rook")
         common.patch_slotctl(root)
