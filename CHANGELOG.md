@@ -1,5 +1,53 @@
 # Changelog
 
+## v4.2.0
+
+Tater Echo Firmware v4.2.0 adds model-driven wake-word boundaries for fast
+speakers and a trusted-LAN companion display service for screen-capable Echo
+satellites.
+
+These features are delivered by the normal application OTA and do not require
+a Tater Linux system update.
+
+### Wake-word command capture
+
+- Added schema-v4 wake bundles with a small, hash-verified `wake_boundary`
+  TFLite model. Echo keeps it resident and replays buffered wake audio after
+  any MWW, OWW, NanoWakeWord, or dual-model acceptance to locate the acoustic
+  end of the wake phrase before command audio is sent to speech recognition.
+- Added the boundary model to the built-in Hey Tater package so existing Echo
+  satellites receive it through the normal firmware update without retraining
+  or changing their selected detector mode.
+- Retained audio from the first threshold-active score in each accepted wake
+  window plus an 80 ms bounded safety guard, independently of the final
+  detection timestamp, so detector patience and sliding-window confirmation do
+  not clip the first word spoken immediately after the wake phrase.
+- Let MWW + OWW and MWW + NWW use the earlier bounded command boundary from
+  either agreeing detector while keeping MWW's original timestamp for wake
+  verification, beam selection, and room arbitration.
+- Kept older bundles compatible: a valid acoustic endpoint is authoritative,
+  while missing models or inference failures safely retain the guarded detector
+  estimate. Added synthetic coverage for every supported single and dual-model
+  mode plus installation, hash, timing, and concurrent audio-ring regressions.
+
+### Companion displays
+
+- Added Companion Display v1 on screen-capable Echo satellites, with mDNS and
+  UDP discovery, a capabilities endpoint, and a documented trusted-LAN HTTP API
+  on port 8930 that works independently of Tater and Home Assistant.
+- Added leased now-playing presentations with uploaded JPEG, PNG, or WebP
+  artwork, locally interpolated progress, pause state, automatic expiry, and
+  source ownership so stale clients cannot clear another active presentation.
+- Added bounded temporary notifications with priority, TTL, uploaded artwork,
+  touch dismissal, and optional Crown Last Event retention. Notifications
+  without artwork use the embedded Tater artwork instead of an anonymous
+  placeholder.
+- Added responsive now-playing layouts and efficient progress-only redraws for
+  the rectangular and round Echo Show renderers, including artwork retention
+  across same-event lease renewals and automatic return to the home screen.
+
+**Full Changelog**: [v4.1.2...v4.2.0](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.1.2...v4.2.0)
+
 ## v4.1.2
 
 Tater Echo Firmware v4.1.2 improves Bluetooth proxy compatibility on older
