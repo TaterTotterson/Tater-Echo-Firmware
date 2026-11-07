@@ -1107,6 +1107,88 @@ func (r *renderer) taterTubeLayout(width, height int) (image.Rectangle, image.Re
 	return art, content
 }
 
+func drawTaterTubeBackdrop(canvas *image.RGBA, artwork image.Image, ink color.RGBA) {
+	if artwork != nil {
+		drawCover(canvas, canvas.Bounds(), artwork)
+	} else {
+		fillGradient(canvas, mix(color.RGBA{5, 9, 16, 255}, ink, .11), color.RGBA{3, 7, 13, 255})
+	}
+	// The poster remains visible as atmosphere while the dark navy veil keeps
+	// large white metadata legible across both bright and dark artwork.
+	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{R: 2, G: 8, B: 17, A: 158}), image.Point{}, draw.Over)
+	for y := canvas.Bounds().Min.Y; y < canvas.Bounds().Max.Y; y++ {
+		position := float64(y-canvas.Bounds().Min.Y) / float64(max(1, canvas.Bounds().Dy()-1))
+		alpha := uint8(12 + 70*position*position)
+		row := image.Rect(canvas.Bounds().Min.X, y, canvas.Bounds().Max.X, y+1)
+		draw.Draw(canvas, row, image.NewUniform(color.NRGBA{R: 0, G: 5, B: 13, A: alpha}), image.Point{}, draw.Over)
+	}
+}
+
+func drawTaterTubePoster(canvas *image.RGBA, bounds image.Rectangle, artwork image.Image, radius int) {
+	if artwork == nil || bounds.Empty() {
+		return
+	}
+	prepared := prepareCoverImage(artwork, bounds.Size())
+	mask := menuRoundedMask(bounds.Size(), radius)
+	draw.DrawMask(canvas, bounds, prepared, prepared.Bounds().Min, mask, image.Point{}, draw.Over)
+}
+
+func taterTubeDisplayTitle(media *show.TaterTubeMedia) string {
+	if media == nil {
+		return "Now Playing"
+	}
+	if strings.TrimSpace(media.SeriesTitle) != "" {
+		return strings.TrimSpace(media.SeriesTitle)
+	}
+	return firstNonEmpty(media.Title, "Now Playing")
+}
+
+func taterTubeDetail(media *show.TaterTubeMedia) string {
+	if media == nil {
+		return "TATER TUBE"
+	}
+	parts := make([]string, 0, 3)
+	seasonEpisode := ""
+	if media.Season > 0 || media.Episode > 0 {
+		seasonEpisode = fmt.Sprintf("S%d E%d", media.Season, media.Episode)
+		parts = append(parts, seasonEpisode)
+	}
+	displayTitle := taterTubeDisplayTitle(media)
+	if title := strings.TrimSpace(media.Title); title != "" && !strings.EqualFold(title, displayTitle) {
+		parts = append(parts, title)
+	}
+	for _, candidate := range strings.Split(media.Subtitle, "·") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.EqualFold(candidate, displayTitle) || strings.EqualFold(candidate, media.SeriesTitle) || strings.EqualFold(candidate, seasonEpisode) {
+			continue
+		}
+		duplicate := false
+		for _, existing := range parts {
+			if strings.EqualFold(candidate, existing) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			parts = append(parts, candidate)
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, firstNonEmpty(strings.ReplaceAll(media.MediaType, "_", " "), "Tater Tube"))
+	}
+	return strings.ToUpper(strings.Join(parts, "  ·  "))
+}
+
+func drawTaterTubeProgressBar(canvas *image.RGBA, left, right, y, thickness int, progress float64, track, ink color.RGBA) {
+	trackBounds := image.Rect(left, y-thickness/2, right, y+(thickness+1)/2)
+	roundedRect(canvas, trackBounds, thickness/2, track)
+	filled := int(math.Round(float64(right-left) * math.Max(0, math.Min(1, progress))))
+	if filled > 0 {
+		filled = max(filled, thickness)
+		roundedRect(canvas, image.Rect(left, trackBounds.Min.Y, min(right, left+filled), trackBounds.Max.Y), thickness/2, ink)
+	}
+}
+
 func (r *renderer) drawTaterTubeArtworkPlaceholder(canvas *image.RGBA, art image.Rectangle, ink color.RGBA) {
 	roundedRect(canvas, art, max(18, art.Dx()/18), mix(color.RGBA{13, 20, 31, 255}, ink, .13))
 	cx, cy := (art.Min.X+art.Max.X)/2, (art.Min.Y+art.Max.Y)/2-12
@@ -1131,42 +1213,34 @@ func (r *renderer) drawFullscreenTaterTube(canvas *image.RGBA, now time.Time, ac
 	if accent.R > 180 && accent.G > 80 {
 		ink = mix(ink, accent, .24)
 	}
-	fillGradient(canvas, mix(color.RGBA{5, 9, 16, 255}, ink, .11), color.RGBA{3, 7, 13, 255})
+	drawTaterTubeBackdrop(canvas, r.taterTubeImage, ink)
 	art, content := r.taterTubeLayout(canvas.Rect.Dx(), canvas.Rect.Dy())
 	roundedRect(canvas, art, max(20, art.Dx()/18), color.RGBA{11, 17, 27, 255})
 	if r.taterTubeImage != nil {
-		drawContain(canvas, art, r.taterTubeImage)
+		drawTaterTubePoster(canvas, art, r.taterTubeImage, max(20, art.Dx()/18))
 	} else {
 		r.drawTaterTubeArtworkPlaceholder(canvas, art, ink)
 	}
 	roundedRectOutline(canvas, art, max(20, art.Dx()/18), 2, color.RGBA{255, 255, 255, 28})
-	headingSize, titleSize, subtitleSize := 15, 34, 19
+	brandSize, eyebrowSize, preferredTitleSize, minimumTitleSize, detailSize := 16, 18, 48, 24, 20
 	if r.isCrown() {
-		headingSize, titleSize, subtitleSize = 20, 48, 25
+		brandSize, eyebrowSize, preferredTitleSize, minimumTitleSize, detailSize = 22, 25, 64, 32, 28
 	}
-	heading := "PLAYING ON " + strings.ToUpper(firstNonEmpty(media.PlayerName, "MEDIA PLAYER"))
-	r.text(canvas, content.Min.X, content.Min.Y+headingSize, fitTextToWidth(heading, r.faces.bold[headingSize], content.Dx()), headingSize, true, ink)
-	titleY := content.Min.Y + headingSize + titleSize + 36
-	lines := wrapTextToWidth(firstNonEmpty(media.Title, "Now Playing"), r.faces.bold[titleSize], content.Dx())
-	for index, value := range lines {
-		if index >= 3 {
-			break
-		}
-		r.text(canvas, content.Min.X, titleY+index*(titleSize+7), fitTextToWidth(value, r.faces.bold[titleSize], content.Dx()), titleSize, true, color.White)
-	}
-	metadataY := titleY + min(3, len(lines))*(titleSize+7) + 15
-	r.text(canvas, content.Min.X, metadataY, fitTextToWidth(firstNonEmpty(media.Subtitle, media.SeriesTitle, "Tater Tube"), r.faces.regular[subtitleSize], content.Dx()), subtitleSize, false, color.RGBA{184, 198, 218, 255})
-	badgeText := strings.ToUpper(strings.TrimSpace(media.MediaType))
+	brand := "TATER TUBE  ·  " + strings.ToUpper(firstNonEmpty(media.PlayerName, "MEDIA PLAYER"))
+	brandBaseline := content.Min.Y + brandSize + 2
+	r.text(canvas, content.Min.X, brandBaseline, fitTextToWidth(brand, r.faces.bold[brandSize], content.Dx()), brandSize, true, ink)
+	eyebrow := "NOW PLAYING"
 	if strings.EqualFold(media.PlaybackState, "paused") {
-		badgeText = firstNonEmpty(badgeText+" · PAUSED", "PAUSED")
+		eyebrow += "  ·  PAUSED"
 	}
-	if badgeText != "" {
-		badgeY := metadataY + subtitleSize + 22
-		badgeWidth := min(content.Dx(), font.MeasureString(r.faces.bold[14], badgeText).Round()+30)
-		badge := image.Rect(content.Min.X, badgeY, content.Min.X+badgeWidth, badgeY+31)
-		roundedRect(canvas, badge, 15, color.RGBA{ink.R, ink.G, ink.B, 32})
-		r.centeredText(canvas, (badge.Min.X+badge.Max.X)/2, badge.Min.Y+21, badgeText, 14, true, ink)
-	}
+	eyebrowBaseline := brandBaseline + eyebrowSize + 25
+	r.text(canvas, content.Min.X, eyebrowBaseline, eyebrow, eyebrowSize, true, color.RGBA{192, 201, 214, 255})
+	title := strings.ToUpper(taterTubeDisplayTitle(media))
+	titleSize := fittingTextSize(title, r.faces.bold, preferredTitleSize, minimumTitleSize, content.Dx())
+	titleBaseline := eyebrowBaseline + titleSize + max(18, titleSize/3)
+	r.text(canvas, content.Min.X, titleBaseline, fitTextToWidth(title, r.faces.bold[titleSize], content.Dx()), titleSize, true, color.White)
+	detailBaseline := titleBaseline + detailSize + max(14, detailSize/2)
+	r.text(canvas, content.Min.X, detailBaseline, fitTextToWidth(taterTubeDetail(media), r.faces.bold[detailSize], content.Dx()), detailSize, true, color.RGBA{190, 199, 212, 255})
 	if motion {
 		r.drawFullscreenTaterTubeProgress(canvas, now, media, ink, content)
 	}
@@ -1185,14 +1259,15 @@ func (r *renderer) drawFullscreenTaterTubeProgress(canvas *image.RGBA, now time.
 	if duration <= 0 {
 		return
 	}
-	barY := content.Max.Y - 56
-	line(canvas, content.Min.X, barY, content.Max.X, barY, 5, color.RGBA{99, 112, 132, 85})
-	filled := int(float64(content.Dx()) * math.Min(1, float64(progress)/float64(duration)))
-	line(canvas, content.Min.X, barY, content.Min.X+filled, barY, 5, ink)
-	r.text(canvas, content.Min.X, barY+30, formatMediaTime(progress), 14, true, color.RGBA{211, 222, 237, 255})
+	barY, thickness, timeSize, timeBaseline := content.Max.Y-56, 8, 17, content.Max.Y-14
+	if r.isCrown() {
+		barY, thickness, timeSize, timeBaseline = content.Max.Y-72, 10, 22, content.Max.Y-21
+	}
+	drawTaterTubeProgressBar(canvas, content.Min.X, content.Max.X, barY, thickness, float64(progress)/float64(duration), color.RGBA{120, 132, 150, 115}, ink)
+	r.text(canvas, content.Min.X, timeBaseline, formatMediaTime(progress), timeSize, true, color.RGBA{238, 243, 250, 255})
 	end := formatMediaTime(duration)
-	endWidth := font.MeasureString(r.faces.bold[14], end).Round()
-	r.text(canvas, content.Max.X-endWidth, barY+30, end, 14, true, color.RGBA{146, 161, 182, 255})
+	endWidth := font.MeasureString(r.faces.bold[timeSize], end).Round()
+	r.text(canvas, content.Max.X-endWidth, timeBaseline, end, timeSize, true, color.RGBA{225, 232, 242, 255})
 }
 
 func (r *renderer) drawFullscreenTimer(canvas *image.RGBA, now time.Time, seconds float64, accent color.RGBA) {
@@ -1282,7 +1357,7 @@ func (r *renderer) crownCacheKey(now time.Time, accent color.RGBA) string {
 		stableCacheValue(r.state.LastEvent), stableCacheValue(r.state.Timer),
 		mediaIdentity(r.state.Media), mediaPlaybackState(r.state.Media), mediaGroupName(r.state.Media),
 		fmt.Sprint(mediaPrimaryColor(r.state.Media)), fmt.Sprint(mediaAccentColor(r.state.Media)),
-		stableCacheValue(r.state.TaterTube), fmt.Sprint(r.taterTubeActive(now)), fmt.Sprint(r.taterTubeImage != nil),
+		taterTubeIdentity(r.state.TaterTube), fmt.Sprint(r.taterTubeActive(now)), fmt.Sprint(r.taterTubeImage != nil),
 		fmt.Sprint(timerSecond),
 		r.notificationID, r.lastEventID, fmt.Sprint(r.notificationImage != nil), fmt.Sprint(r.lastEventImage != nil),
 		r.clockKey(now), fmt.Sprint(r.mediaImage != nil), r.wallpaperID,
@@ -1349,7 +1424,7 @@ func (r *renderer) checkersCacheKey(now time.Time, accent color.RGBA) string {
 		r.state.ToolName,
 		r.state.ToolMessage,
 		mediaCacheIdentity(media),
-		stableCacheValue(r.state.TaterTube),
+		taterTubeIdentity(r.state.TaterTube),
 		fmt.Sprint(r.taterTubeActive(now)),
 		r.state.Room,
 		r.state.DisplayTheme,
@@ -1452,7 +1527,7 @@ func (r *renderer) checkersMotionRegions(now time.Time, width, height int) []ima
 	if media := r.state.TaterTube; r.taterTubeActive(now) {
 		if _, duration := taterTubeProgress(media, now); duration > 0 {
 			_, content := r.taterTubeLayout(width, height)
-			regions = append(regions, image.Rect(content.Min.X, content.Max.Y-65, content.Max.X, content.Max.Y))
+			regions = append(regions, image.Rect(content.Min.X, content.Max.Y-82, content.Max.X, content.Max.Y))
 		}
 		return regions
 	}
@@ -1996,7 +2071,14 @@ func taterTubeProgress(media *show.TaterTubeMedia, now time.Time) (int64, int64)
 	progress := media.ProgressMS
 	if media.PlaybackSpeed > 0 && media.ProgressUpdatedAtUnixMS > 0 {
 		elapsed := max(int64(0), now.UnixMilli()-media.ProgressUpdatedAtUnixMS)
-		progress += elapsed * int64(media.PlaybackSpeed) / 1000
+		speed := int64(media.PlaybackSpeed)
+		if speed <= 10 {
+			// The companion-display contract uses a natural multiplier (1 is
+			// real time). Retain support for the older 1000-based media scale.
+			progress += elapsed * speed
+		} else {
+			progress += elapsed * speed / 1000
+		}
 	}
 	if media.DurationMS > 0 {
 		progress = min(progress, media.DurationMS)
@@ -3873,7 +3955,7 @@ func (r *renderer) queueTaterTubeImage(ctx context.Context, results chan<- scree
 		r.taterTubeID, r.taterTubeImage = "", nil
 		return
 	}
-	identity := taterTubeIdentity(r.state.TaterTube)
+	identity := taterTubeArtworkIdentity(r.state.TaterTube)
 	if r.taterTubeID == identity {
 		return
 	}
@@ -4655,7 +4737,22 @@ func taterTubeIdentity(media *show.TaterTubeMedia) string {
 	if media == nil || !media.Active {
 		return ""
 	}
-	return strings.Join([]string{media.EventID, media.ArtworkURL, media.Title, media.Subtitle, fmt.Sprint(media.Revision)}, "\x00")
+	// Progress, lease expiry, and revision update frequently. None of them alter
+	// the static composition, so including them here made the framebuffer cache
+	// and transition animation restart on every server poll.
+	return strings.Join([]string{
+		media.PlayerID, media.PlayerName, media.EventID, media.PlaybackState,
+		media.MediaType, media.Title, media.SeriesTitle,
+		fmt.Sprint(media.Season), fmt.Sprint(media.Episode), media.Subtitle,
+		media.ArtworkURL, fmt.Sprint(media.DurationMS),
+	}, "\x00")
+}
+
+func taterTubeArtworkIdentity(media *show.TaterTubeMedia) string {
+	if media == nil || !media.Active {
+		return ""
+	}
+	return strings.Join([]string{media.EventID, media.ArtworkURL}, "\x00")
 }
 
 func inCircle(x, y, centerX, centerY, radius int) bool {

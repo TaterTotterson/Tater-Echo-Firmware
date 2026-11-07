@@ -2496,6 +2496,105 @@ func TestConnectingScreenUsesPrimaryTaterLogo(t *testing.T) {
 	}
 }
 
+func TestTaterTubeProgressRefreshKeepsArtworkAndStaticFrameStable(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	first := &show.TaterTubeMedia{
+		Active: true, PlayerID: "family-room", PlayerName: "Family Room TV",
+		EventID: "episode-1", PlaybackState: "playing", MediaType: "episode",
+		Title: "Into the Storm", SeriesTitle: "The Last Horizon", Season: 2, Episode: 4,
+		Subtitle: "The Last Horizon · S2 E4", ArtworkURL: "http://127.0.0.1/artwork/tater-tube?v=7",
+		ProgressMS: 1_397_000, DurationMS: 3_242_000, PlaybackSpeed: 1,
+		ProgressUpdatedAtUnixMS: now.UnixMilli(), ExpiresAtUnixMS: now.Add(20 * time.Second).UnixMilli(), Revision: 10,
+	}
+	second := *first
+	second.ProgressMS += 5_000
+	second.ProgressUpdatedAtUnixMS += 5_000
+	second.ExpiresAtUnixMS += 5_000
+	second.Revision++
+
+	if taterTubeIdentity(first) != taterTubeIdentity(&second) {
+		t.Fatal("progress-only refresh changed the Tater Tube presentation identity")
+	}
+	if taterTubeArtworkIdentity(first) != taterTubeArtworkIdentity(&second) {
+		t.Fatal("progress-only refresh changed the Tater Tube artwork identity")
+	}
+	firstRenderer := &renderer{state: show.Snapshot{Connected: true, Phase: "idle", TaterTube: first}}
+	secondRenderer := &renderer{state: show.Snapshot{Connected: true, Phase: "idle", TaterTube: &second}}
+	accent := color.RGBA{255, 132, 48, 255}
+	if firstRenderer.checkersCacheKey(now, accent) != secondRenderer.checkersCacheKey(now, accent) {
+		t.Fatal("progress-only refresh invalidated the static Checkers framebuffer")
+	}
+	if firstRenderer.crownCacheKey(now, accent) != secondRenderer.crownCacheKey(now, accent) {
+		t.Fatal("progress-only refresh invalidated the static Crown framebuffer")
+	}
+	if firstRenderer.spotFrameCacheKey(now, accent) != secondRenderer.spotFrameCacheKey(now, accent) {
+		t.Fatal("progress-only refresh invalidated the static Rook framebuffer")
+	}
+	residentImage := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	residentRenderer := &renderer{
+		state:          show.Snapshot{TaterTube: &second},
+		taterTubeID:    taterTubeArtworkIdentity(first),
+		taterTubeImage: residentImage,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	residentRenderer.queueTaterTubeImage(ctx, make(chan screenImageResult, 1))
+	if residentRenderer.taterTubeImage != residentImage {
+		t.Fatal("progress-only refresh discarded the resident Tater Tube artwork")
+	}
+
+	changedArtwork := second
+	changedArtwork.ArtworkURL = "http://127.0.0.1/artwork/tater-tube?v=8"
+	if taterTubeArtworkIdentity(first) == taterTubeArtworkIdentity(&changedArtwork) {
+		t.Fatal("new artwork did not change its image-loading identity")
+	}
+}
+
+func TestTaterTubeProgressSupportsCompanionAndLegacySpeedScales(t *testing.T) {
+	updated := time.Unix(1_800_000_000, 0)
+	for name, speed := range map[string]int{"companion multiplier": 1, "legacy thousandths": 1000} {
+		t.Run(name, func(t *testing.T) {
+			media := &show.TaterTubeMedia{
+				ProgressMS: 42_000, DurationMS: 120_000, PlaybackSpeed: speed,
+				ProgressUpdatedAtUnixMS: updated.UnixMilli(),
+			}
+			progress, duration := taterTubeProgress(media, updated.Add(5*time.Second))
+			if progress != 47_000 || duration != 120_000 {
+				t.Fatalf("progress=%d duration=%d, want 47000/120000", progress, duration)
+			}
+		})
+	}
+}
+
+func TestTaterTubeEpisodeCopyMatchesNowPlayingMockup(t *testing.T) {
+	media := &show.TaterTubeMedia{
+		Title: "Into the Storm", SeriesTitle: "The Last Horizon", Season: 2, Episode: 4,
+		Subtitle: "The Last Horizon · S2 E4", MediaType: "episode",
+	}
+	if got := taterTubeDisplayTitle(media); got != "The Last Horizon" {
+		t.Fatalf("display title=%q", got)
+	}
+	if got := taterTubeDetail(media); got != "S2 E4  ·  INTO THE STORM" {
+		t.Fatalf("detail=%q", got)
+	}
+}
+
+func previewTaterTubeArtwork() image.Image {
+	art := image.NewRGBA(image.Rect(0, 0, 360, 540))
+	fillGradient(art, color.RGBA{8, 23, 42, 255}, color.RGBA{203, 76, 29, 255})
+	circle(art, 265, 310, 76, color.RGBA{255, 137, 55, 255})
+	for y := 330; y < 540; y++ {
+		shade := uint8(24 + (y-330)*28/210)
+		line(art, 0, y, 359, y, 1, color.RGBA{9, 18, shade, 255})
+	}
+	for offset := 0; offset < 7; offset++ {
+		line(art, 0, 360+offset*18, 150+offset*26, 315+offset*5, 4, color.RGBA{17, 27, 42, 235})
+	}
+	circle(art, 145, 337, 23, color.RGBA{11, 16, 24, 255})
+	line(art, 145, 360, 145, 458, 24, color.RGBA{11, 16, 24, 255})
+	return art
+}
+
 // Set TATER_SHOW_PREVIEW to inspect one representative composed screen without
 // opening the hardware framebuffer. Ordinary test runs skip this artifact.
 func TestRenderPreview(t *testing.T) {
@@ -2628,6 +2727,17 @@ func TestRenderPreview(t *testing.T) {
 			ProgressUpdatedAtUnixMS: now.UnixMilli(),
 			Spectrum:                []float64{.12, .28, .72, .55, .9, .38, .61, .22, .48, .77, .34, .18},
 		}
+	case "tater-tube":
+		state.Phase = "idle"
+		state.Weather = nil
+		state.TaterTube = &show.TaterTubeMedia{
+			Active: true, PlayerID: "family-room", PlayerName: "Family Room TV",
+			EventID: "the-last-horizon-s02e04", PlaybackState: "playing", MediaType: "episode",
+			Title: "Into the Storm", SeriesTitle: "The Last Horizon", Season: 2, Episode: 4,
+			Subtitle: "The Last Horizon · S2 E4", ArtworkURL: "preview://poster",
+			ProgressMS: 1_397_000, DurationMS: 3_242_000, PlaybackSpeed: 1,
+			ProgressUpdatedAtUnixMS: now.UnixMilli(), ExpiresAtUnixMS: now.Add(time.Minute).UnixMilli(), Revision: 7,
+		}
 	case "last-event":
 		state.Phase = "idle"
 		state.Message = "Ready when you are"
@@ -2671,6 +2781,9 @@ func TestRenderPreview(t *testing.T) {
 		climateOpen: os.Getenv("TATER_SHOW_PREVIEW_STATE") == "climate",
 		menuOpen:    os.Getenv("TATER_SHOW_PREVIEW_STATE") == "menu",
 		cameraOpen:  strings.HasPrefix(os.Getenv("TATER_SHOW_PREVIEW_STATE"), "camera"),
+	}
+	if os.Getenv("TATER_SHOW_PREVIEW_STATE") == "tater-tube" {
+		r.taterTubeImage = previewTaterTubeArtwork()
 	}
 	if os.Getenv("TATER_SHOW_PREVIEW_STATE") == "camera-view" {
 		frame := image.NewRGBA(r.cameraVideoBounds())

@@ -1,5 +1,40 @@
 # Changelog
 
+## v4.2.2
+
+Tater Echo Firmware v4.2.2 redesigns Tater Tube now-playing screens and keeps
+poster artwork stable while linked players report playback progress.
+
+This release is delivered by the normal application OTA and does not require a
+Tater Linux system update.
+
+### Tater Tube now playing
+
+- Rebuilt the rectangular and round now-playing presentations around a
+  darkened full-screen poster backdrop, prominent foreground artwork, larger
+  series titles, season and episode details, linked-player labeling, and a
+  clearer progress bar and elapsed/total times.
+- Fixed artwork flashing on every Tater Tube Server activity poll by separating
+  static presentation and artwork identities from frequently changing
+  progress, lease, and revision fields.
+- Kept decoded poster artwork resident across same-event progress refreshes and
+  limited animation work to the progress region on Checkers, Crown, Athena,
+  Cronos, and Rook displays.
+- Fixed smooth local progress interpolation for Companion Display's natural
+  playback-speed multiplier while retaining compatibility with the older
+  thousandths-based scale.
+
+### Release compatibility
+
+- Added per-target minimum Tater Linux system versions to release manifests so
+  Tater can distinguish ordinary application updates from releases that truly
+  require a newer root system.
+- Preserved the existing v4 system baselines for this application-only release,
+  avoiding unnecessary System OTA prompts while keeping cumulative System OTA
+  artifacts available for satellites that are genuinely behind.
+
+**Full Changelog**: [v4.2.1...v4.2.2](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.2.1...v4.2.2)
+
 ## v4.2.1
 
 Tater Echo Firmware v4.2.1 restores the trusted-LAN connection used by
