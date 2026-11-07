@@ -211,12 +211,35 @@ def verify_rook_factory_inputs(rootfs: Path, boot: Path, version: str) -> None:
                 "STORE_DEV=/dev/mmcblk0p11" not in board_file.read().decode():
             raise SystemExit("Rook rootfs target, version, or slot partition is wrong")
 
+
+def minimum_system_version(target: str, definition: dict, release_version: str) -> str:
+    """Return the oldest Tater Linux release that satisfies this app release."""
+    value = str(definition.get("minimum_system_version") or release_version).strip()
+    pattern = r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?"
+    if not re.fullmatch(pattern, value):
+        raise SystemExit(f"target {target!r} has an invalid minimum_system_version")
+
+    def core(version: str) -> tuple[int, int, int]:
+        match = re.match(r"v([0-9]+\.[0-9]+\.[0-9]+)", version)
+        if match is None:
+            raise SystemExit(f"release version {version!r} is invalid")
+        major, minor, patch = match.group(1).split(".")
+        return int(major), int(minor), int(patch)
+
+    if core(value) > core(release_version):
+        raise SystemExit(
+            f"target {target!r} minimum_system_version {value} is newer than {release_version}"
+        )
+    return value
+
+
 def build(version: str, target: str, output: Path) -> list[Path]:
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
         raise SystemExit("version must look like v0.1.0")
     targets = json.loads(TARGETS.read_text())["targets"]
     if target not in targets:
         raise SystemExit(f"unknown target {target!r}")
+    required_system_version = minimum_system_version(target, targets[target], version)
     output.mkdir(parents=True, exist_ok=True)
     stem = f"tater-echo-{target}-{version}"
     artifacts: dict[str, Path] = {}
@@ -558,6 +581,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             for kind, path in artifacts.items()
         },
     }
+    target_manifest.pop("minimum_system_version", None)
     if target in LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
         target_manifest["ota_migrations"] = [{
             "id": "linux-app-components-v2",
@@ -569,6 +593,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     target_manifest["system_ota"] = {
         "required_capability": "system_ota_version",
         "minimum_capability_version": 1,
+        "minimum_system_version": required_system_version,
         "boot_policy": "inactive-rootfs-trial",
     }
     target_manifest["platform"] = platform_provenance(target)

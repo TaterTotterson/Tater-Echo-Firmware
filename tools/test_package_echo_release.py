@@ -69,6 +69,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
         targets.parent.mkdir(parents=True)
         targets.write_text(json.dumps({"targets": {target: {
             "display_name": target.title(), "native_base_os": "tater-linux",
+            "minimum_system_version": "v9.0.0",
             "factory_install": True, "ota": True, "status": "hardware-tested",
         }}}))
         for relative in (
@@ -225,11 +226,30 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 self.assertIn("Repair an installed Tater Echo", repair_help.stdout)
                 release_manifest = json.loads((output / "firmware-manifest.json").read_text())
                 self.assertNotIn("ota_migrations", release_manifest["targets"][target])
+                self.assertNotIn("minimum_system_version", release_manifest["targets"][target])
                 self.assertEqual(
                     "inactive-rootfs-trial",
                     release_manifest["targets"][target]["system_ota"]["boot_policy"],
                 )
+                self.assertEqual(
+                    "v9.0.0",
+                    release_manifest["targets"][target]["system_ota"]["minimum_system_version"],
+                )
                 self.assertIn("system", release_manifest["targets"][target]["artifacts"])
+
+    def test_minimum_system_version_defaults_and_validates(self) -> None:
+        self.assertEqual(
+            "v4.2.1",
+            package_echo_release.minimum_system_version("biscuit", {}, "v4.2.1"),
+        )
+        with self.assertRaisesRegex(SystemExit, "invalid minimum_system_version"):
+            package_echo_release.minimum_system_version(
+                "biscuit", {"minimum_system_version": "current"}, "v4.2.1"
+            )
+        with self.assertRaisesRegex(SystemExit, "newer than"):
+            package_echo_release.minimum_system_version(
+                "biscuit", {"minimum_system_version": "v4.3.0"}, "v4.2.1"
+            )
 
     def test_rejects_a_host_binary_when_arm_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

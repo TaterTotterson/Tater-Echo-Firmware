@@ -21,9 +21,12 @@ class MergeReleaseManifestTests(unittest.TestCase):
             "schema": 1,
             "product": "Tater Echo Firmware",
             "version": "v1.2.3",
-            "targets": {target: {"artifacts": {"factory": {
-                "name": filename, "size": len(content), "sha256": sha(artifact),
-            }}}},
+            "targets": {target: {
+                "system_ota": {"minimum_system_version": "v1.0.0"},
+                "artifacts": {"factory": {
+                    "name": filename, "size": len(content), "sha256": sha(artifact),
+                }},
+            }},
         }))
         return manifest
 
@@ -37,6 +40,10 @@ class MergeReleaseManifestTests(unittest.TestCase):
             merge("v1.2.3", [first, second, third], output)
             result = json.loads((output / "firmware-manifest.json").read_text())
             self.assertEqual(set(result["targets"]), {"biscuit", "checkers", "rook"})
+            self.assertEqual(
+                "v1.0.0",
+                result["targets"]["biscuit"]["system_ota"]["minimum_system_version"],
+            )
             self.assertEqual((output / "biscuit.bin").read_bytes(), b"a")
             self.assertEqual((output / "checkers-ota.tar.gz").read_bytes(), b"b")
             self.assertEqual((output / "rook-ota.tar.gz").read_bytes(), b"c")

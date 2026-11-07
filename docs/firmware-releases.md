@@ -102,6 +102,16 @@ unlock chain. Its factory-built system store paints the Tater mark at the first
 safe Linux framebuffer stage, so a brief Amazon frame can remain immediately
 after power-on. Biscuit and Radar have no screen.
 
+Each target's manifest policy includes `minimum_system_version`, the oldest
+Tater Linux rootfs that satisfies the current application release. Tater
+compares the satellite's separately reported `system_version` against this
+minimum. App-only releases retain the previous minimum, while a release that
+requires rootfs changes advances it for only the affected targets. The latest
+system artifact is cumulative, so a satellite that skipped a required system
+release can install the current rootfs directly. Manifests created before this
+field existed retain the conservative behavior of matching the system to the
+overall firmware release version.
+
 Each target also publishes target-specific `wake-runtime.so` and
 `onnxruntime.so` sidecars. Every target receives the reduced Linux/musl ARMv7
 build. A firmware OTA that first introduces either runtime verifies and
@@ -178,6 +188,7 @@ records:
 
 - unlock compatibility and support status;
 - whether factory and OTA are available;
+- the minimum compatible Tater Linux system version;
 - the application, System OTA, and factory artifacts;
 - the exact asset names;
 - byte sizes; and
