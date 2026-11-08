@@ -37,6 +37,11 @@ Target metadata used by Tater and the release builds lives in
 
 ## Features
 
+- Model-driven wake-word boundary detection for every supported wake engine
+  and confirmation mode. A small TFLite model supplied by the wake bundle
+  finds the acoustic end of the wake phrase in buffered audio, preserving words
+  spoken immediately afterward for command VAD and speech recognition while
+  keeping the wake phrase itself out of the command audio.
 - Automatic USB Ethernet with Wi-Fi fallback on supported satellites. Biscuit
   can use the tested powered adapter for a single-cable PoE-style power and
   network connection.
