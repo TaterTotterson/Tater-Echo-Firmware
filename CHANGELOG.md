@@ -1,5 +1,51 @@
 # Changelog
 
+## v4.2.3
+
+Tater Echo Firmware v4.2.3 makes wake and command capture resilient to Linux
+microphone stalls, preserves directional wake pickup during playback, and
+protects the first word spoken immediately after a wake phrase.
+
+This release is delivered by the normal application OTA and does not require a
+Tater Linux system update.
+
+### Wake and command capture
+
+- Corrected sample timestamps when splitting microphone capture into 80 ms
+  wake chunks, preserving the wake/command boundary through capture queuing.
+- Added a tested 80 ms command guard to verified boundary-model endpoints so
+  the first consonant is retained when speech begins immediately after a wake.
+- Carried capture generations through asynchronous wake inference and
+  dual-model agreement, preventing detections from audio before a capture loss
+  or microphone restart from opening a new command turn.
+
+### Microphone reliability
+
+- Added capture sequence and producer-generation tracking so subscriber drops,
+  ALSA restarts, and sample discontinuities cannot splice unrelated audio into
+  wake detection or speech recognition.
+- Added a complete-batch progress watchdog and fatal ALSA error handling so a
+  stalled Linux microphone is restarted instead of remaining silently deaf.
+- Reset partial audio, beamforming history, gain state, and streaming detector
+  state after a real capture discontinuity while preserving learned AEC filter
+  coefficients.
+
+### Playback and barge-in
+
+- Preserved Biscuit and Radar directional wake pickup during playback by
+  selecting the primary array beam before the single shared AEC pass.
+- Accelerated near-end speech recovery after assistant replies, music, and
+  alarms while retaining correlated-echo attenuation and conservative
+  closed-call feedback protection.
+
+### Documentation
+
+- Documented the wake boundary model in the feature overview and updated the
+  Biscuit and Tater Native audio-path notes for the continuous primary wake
+  beam and capture-recovery design.
+
+**Full Changelog**: [v4.2.2...v4.2.3](https://github.com/TaterTotterson/Tater-Echo-Firmware/compare/v4.2.2...v4.2.3)
+
 ## v4.2.2
 
 Tater Echo Firmware v4.2.2 redesigns Tater Tube now-playing screens and keeps

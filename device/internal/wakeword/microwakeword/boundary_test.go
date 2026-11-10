@@ -43,3 +43,13 @@ func TestBoundaryEstimatorSelectsHighestEndpointScore(t *testing.T) {
 		t.Fatalf("estimate=%+v want at=%v score=.96", estimate, want)
 	}
 }
+
+func TestGuardExactCommandBoundaryRetainsCommandLead(t *testing.T) {
+	endpointAt := time.Unix(100, 0)
+	if got, want := GuardExactCommandBoundary(endpointAt), endpointAt.Add(-80*time.Millisecond); !got.Equal(want) {
+		t.Fatalf("guarded boundary = %v, want %v", got, want)
+	}
+	if got := GuardExactCommandBoundary(time.Time{}); !got.IsZero() {
+		t.Fatalf("zero endpoint became %v", got)
+	}
+}

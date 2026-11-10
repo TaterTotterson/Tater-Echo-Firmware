@@ -20,6 +20,9 @@ import (
 
 const doaActivityPreGainThreshold = 0.0001
 
+// Keep liveness and refractory timing on CLOCK_MONOTONIC across clock sync.
+var captureProgressStart = time.Now()
+
 // doaActivity uses the minimum calibrated pre-gain RMS rather than a fraction
 // of the turn VAD threshold. Its 0.004 boot default is far above the
 // measured 0.0001–0.0006 FS speech range. Scaling this floor by the current
@@ -60,20 +63,15 @@ func vadPeriodRMS(mono []byte) float64 {
 	return math.Sqrt(sum / float64(n))
 }
 
-// prepareWakeLanePCM keeps the continuous wake detector off the real-time
-// playback critical path. During playback, mainPCM has already passed through
-// the target's one AEC path; running the directional wake candidate through a
-// second retained hardware-reference filter caused Biscuit/Radar and the
-// hardware-loopback displays to switch AEC paths twice per mic batch and
-// starve ALSA. The software-reference targets already needed this same reuse
-// because their far-end ring can only be consumed once. With no playback there
-// is no echo to cancel, so the directional candidate remains the better wake
-// signal. A missing candidate always falls back to the main stream.
-func prepareWakeLanePCM(candidate, mainPCM []byte, playbackActive bool) []byte {
+// prepareWakeLanePCM copies the shared post-AEC signal when a board selects
+// its wake beam before cancellation (Biscuit/Radar), or while other boards play
+// audio. This keeps one cancellation pass and one software-reference consumer.
+// Other targets retain their independent directional candidate while quiet.
+func prepareWakeLanePCM(candidate, mainPCM []byte, reuseMain bool) []byte {
 	if len(candidate) == 0 {
 		return append([]byte(nil), mainPCM...)
 	}
-	if playbackActive {
+	if reuseMain {
 		return append(candidate[:0], mainPCM...)
 	}
 	return candidate
@@ -93,9 +91,11 @@ type DataClient struct {
 	mic mic.Subscribable
 	spk speaker.Speaker
 
-	micMu     sync.Mutex
-	micActive bool
-	micStopCh chan struct{}
+	micMu                sync.Mutex
+	micActive            bool
+	micStopCh            chan struct{}
+	lastCaptureNS        atomic.Int64
+	wakeStreamGeneration atomic.Uint64
 
 	// beamReq carries a pending beam lock/unlock request from the native
 	// state callback to the mic goroutine. Beamformer methods are not safe
@@ -441,7 +441,7 @@ func (d *DataClient) claimWakeLaneWithBoundary(lane int, detectedAt, commandBoun
 	if lane < 0 || lane >= len(d.wakeLaneDir) {
 		lane = 0
 	}
-	now := time.Now().UnixNano()
+	now := 1 + time.Since(captureProgressStart).Nanoseconds()
 	for {
 		last := d.wakeLastClaimNS.Load()
 		if last > 0 && now-last < int64(microwakeword.DefaultShadowRefractory) {
@@ -823,8 +823,10 @@ func (d *DataClient) StartLocalMic() {
 		return
 	}
 	d.micActive = true
+	d.lastCaptureNS.Store(0)
 	d.micStopCh = make(chan struct{})
-	go d.streamMic(d.micStopCh)
+	generation := d.wakeStreamGeneration.Add(1)
+	go d.streamMic(d.micStopCh, generation)
 	log.Println("[data] local microphone pipeline started")
 }
 
@@ -839,7 +841,8 @@ func (d *DataClient) StopMic() {
 func (d *DataClient) MicrophonePipelineActive() bool {
 	d.micMu.Lock()
 	defer d.micMu.Unlock()
-	return d.micActive
+	last := d.lastCaptureNS.Load()
+	return d.micActive && last != 0 && time.Since(captureProgressStart)-time.Duration(last-1) < 3*time.Second
 }
 
 func (d *DataClient) stopMic() {
@@ -849,6 +852,7 @@ func (d *DataClient) stopMic() {
 		return
 	}
 	close(d.micStopCh)
+	d.wakeStreamGeneration.Add(1)
 	d.micActive = false
 	// beam.Unlock() is deferred inside streamMic — always runs on the mic
 	// goroutine, eliminating the data race with Process() and Lock().
@@ -856,7 +860,7 @@ func (d *DataClient) stopMic() {
 }
 
 // streamMic owns the permanent local wake and Tater-native voice pipeline.
-func (d *DataClient) streamMic(stopCh <-chan struct{}) {
+func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) {
 	if d.mic == nil {
 		log.Println("[data] streamMic: no mic")
 		return
@@ -887,8 +891,15 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 	d.wakeProc.ResetAGC()
 	d.pipeMu.Unlock()
 
-	ch := d.mic.Subscribe()
-	defer d.mic.Unsubscribe(ch)
+	var ch chan []byte
+	var captures chan mic.Capture
+	if timed, ok := d.mic.(mic.CaptureSubscribable); ok {
+		captures = timed.SubscribeCapture()
+		defer timed.UnsubscribeCapture(captures)
+	} else {
+		ch = d.mic.Subscribe()
+		defer d.mic.Unsubscribe(ch)
+	}
 
 	cfg := config.Get()
 
@@ -902,6 +913,10 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 	var periodCount uint64 // periodic RMS diagnostic
 	var lastClipped uint64 // clip count at last diag line
 	lockOnSpeech := false
+	turnBeamRequested := false
+	previousWakeActive := false
+	var lastCapture mic.Capture
+	legacyClock := mic.NewCaptureClock(16000)
 
 	// Memoized linear mic gain — recomputed only when the config dB value
 	// changes (config push mid-stream). Sentinel forces computation on the
@@ -925,23 +940,69 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 	}
 
 	for {
+		var capture mic.Capture
 		select {
 		case <-stopCh:
 			return
-
+		case batch, ok := <-captures:
+			if !ok {
+				return
+			}
+			capture = batch
 		case raw, ok := <-ch:
 			if !ok {
 				return
 			}
-			// Stop has priority: select picks randomly among ready cases,
-			// so without this a closed stopCh racing a ready mic channel
-			// keeps this goroutine draining periods alongside its
-			// replacement stream.
+			capture = mic.Capture{PCM: raw, CapturedAt: time.Now()}
+		}
+		{
 			select {
 			case <-stopCh:
 				return
 			default:
 			}
+			raw := capture.PCM
+			if len(raw) == 0 {
+				continue
+			}
+			d.lastCaptureNS.Store(1 + capture.CapturedAt.Sub(captureProgressStart).Nanoseconds())
+			discontinuous := lastCapture.Sequence != 0 &&
+				(capture.Generation != lastCapture.Generation || capture.Sequence != lastCapture.Sequence+1)
+			if discontinuous {
+				buf, wakeBuf = buf[:0], wakeBuf[:0]
+				wakeLatch.reset()
+				previousWakeActive = false
+				if !d.wakeStreamGeneration.CompareAndSwap(streamGeneration, streamGeneration+1) {
+					return
+				}
+				streamGeneration++
+				d.pipeMu.Lock()
+				d.beam.ResetCapture()
+				if turnBeamRequested {
+					d.beam.PrepareSpeechLock()
+					lockOnSpeech = true
+				}
+				d.proc.ResetAGC()
+				d.wakeProc.ResetAGC()
+				d.aec.CaptureDiscontinuity()
+				d.pipeMu.Unlock()
+				d.resetWakeLaneAudio()
+				d.wakeAssignmentMu.Lock()
+				d.wakeAssignments = [2][]wakeLaneAssignment{}
+				d.wakeAssignmentMu.Unlock()
+				for lane := range d.wakeLaneDir {
+					d.wakeLaneDir[lane].Store(-1)
+				}
+				d.wakeWinnerDir.Store(-1)
+				d.wakeWinnerValid.Store(false)
+				wakeLaneDirection = [2]int{-2, -2}
+				mww, companion := d.WakeShadowScorers()
+				for _, sc := range append(mww, companion...) {
+					sc.Reset()
+				}
+				log.Printf("[mic] capture discontinuity: generation=%d sequence=%d; streaming history cleared", capture.Generation, capture.Sequence)
+			}
+			lastCapture = capture
 
 			snap := cfg.Snapshot()
 			musicActive := false
@@ -981,14 +1042,17 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 			// if beamforming is disabled in config.
 			switch atomic.SwapInt32(&d.beamReq, beamReqNone) {
 			case beamReqLock:
+				turnBeamRequested = true
 				lockOnSpeech = false
 				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
 				d.lockWakeOrBest(turnBeam)
 			case beamReqUnlock:
+				turnBeamRequested = false
 				lockOnSpeech = false
 				d.beam.Unlock()
 				wakeLatch.reset()
 			case beamReqLockOnSpeech:
+				turnBeamRequested = true
 				lockOnSpeech = true
 				d.beam.PrepareSpeechLock()
 			}
@@ -997,6 +1061,55 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 			clipped := d.beam.ClippedSamples()
 			beamDiag := d.beam.Diagnostics()
 			mainPath := d.beam.OutputChannel()
+			// Acquire freely while idle, then hold one direction once two active
+			// batches agree. This stabilises the complete wake utterance without
+			// creating another neural scorer or resetting either model. The latch
+			// spans model agreement and verifier latency; the claimed historical
+			// direction is still what the command turn locks. Uncertain/degraded
+			// arrays fall through to safe omni.
+			var wakePCM []byte
+			wakePath := -1
+			observedDirection, observedOK := -1, false
+			if hasWakeDirection && hasWakeArray {
+				observedDirection, observedOK = wakeDirection.WakeDirection()
+			}
+			batchAt := capture.CapturedAt
+			wakeActive := doaActivity(vadPeriodRMS(mono), gainLin, false)
+			if beamDiag.PlaybackActive || musicActive {
+				wakeActive = previousWakeActive
+			}
+			selectedDirection, _, _ := wakeLatch.selectDirection(
+				observedDirection,
+				observedOK,
+				wakeActive,
+				batchAt,
+			)
+			if hasWakeArray && selectedDirection >= 0 {
+				candidate := wakeArray.WakeBeam(raw, selectedDirection, gainLin)
+				wakePCM = candidate.PCM
+				wakePath = candidate.Direction
+			}
+			sharedWake := false
+			if turnBeamRequested && (snap.BeamformingEnabled == nil || !*snap.BeamformingEnabled) {
+				// An explicitly unsteered voice turn keeps its centre path.
+				wakePCM, wakePath = nil, -1
+			}
+			if shared, ok := d.beam.(interface {
+				UseWakeBeam(beamformer.WakeBeam) ([]byte, int)
+			}); ok {
+				selected, direction := shared.UseWakeBeam(beamformer.WakeBeam{PCM: wakePCM, Direction: wakePath})
+				if selected != nil {
+					mono = selected
+				}
+				wakePath = direction
+				mainPath = d.beam.OutputChannel()
+				sharedWake = true
+			}
+			if wakeLaneDirection[0] != wakePath {
+				wakeLaneDirection[0] = wakePath
+				d.assignWakeLane(0, wakePath, batchAt.Add(-wakePCMTime(mono)))
+			}
+			beamDiag = d.beam.Diagnostics()
 			d.aec.SelectPath(mainPath)
 
 			// AEC — subtract the speaker's own output before anything
@@ -1029,43 +1142,13 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 				mono = d.aec.ProcessInPlace(mono)
 			}
 
-			// Acquire freely while idle, then hold one direction once two active
-			// batches agree. This stabilises the complete wake utterance without
-			// creating another neural scorer or resetting either model. The latch
-			// spans model agreement and verifier latency; the claimed historical
-			// direction is still what the command turn locks. Uncertain/degraded
-			// arrays fall through to safe omni.
-			var wakePCM []byte
-			wakePath := -1
-			observedDirection, observedOK := -1, false
-			if hasWakeDirection && hasWakeArray {
-				observedDirection, observedOK = wakeDirection.WakeDirection()
-			}
-			batchAt := time.Now()
-			wakeActive := doaActivity(vadPeriodRMS(mono), gainLin, false)
-			selectedDirection, _, _ := wakeLatch.selectDirection(
-				observedDirection,
-				observedOK,
-				wakeActive,
-				batchAt,
-			)
-			if hasWakeArray && selectedDirection >= 0 {
-				candidate := wakeArray.WakeBeam(raw, selectedDirection, gainLin)
-				wakePCM = candidate.PCM
-				wakePath = candidate.Direction
-			}
-			if wakePath >= 0 && wakeLaneDirection[0] != wakePath {
-				wakeLaneDirection[0] = wakePath
-				d.assignWakeLane(0, wakePath, batchAt)
-			}
-
 			// A single AEC pass serves both the command and continuous-wake lanes
 			// while the speaker is active. Besides keeping the software reference
 			// sample-ordered, this prevents the hardware-reference targets from
 			// running a second filter and switching retained acoustic paths twice
 			// per mic batch — the measured cause of recurring ALSA xruns on Biscuit.
 			wakePCM = prepareWakeLanePCM(wakePCM, mono,
-				aecEnabled && (beamDiag.PlaybackActive || musicActive))
+				sharedWake || (aecEnabled && (beamDiag.PlaybackActive || musicActive)))
 			wakePCM = d.wakeProc.HighPass(wakePCM)
 
 			// Remove DC and sub-speech rumble before either VAD or AGC sees it.
@@ -1085,6 +1168,7 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 			// rather than requiring every stored config to be retuned in
 			// lockstep with micGainDb.
 			rms := vadPeriodRMS(mono)
+			previousWakeActive = doaActivity(rms, gainLin, false)
 			speech := rms >= threshold*gainLin
 			if lockOnSpeech && speech {
 				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
@@ -1139,6 +1223,9 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 			// The continuous stream feeds both local wake scorers and the native
 			// transport. There is no socket framing or remote listen gate.
 			mwwScorers, owwScorers := d.WakeShadowScorers()
+			if captures == nil {
+				capture = legacyClock.Stamp(raw, len(mono)/2, capture.CapturedAt)
+			}
 			buf = append(buf, mono...)
 			wakeBuf = append(wakeBuf, wakePCM...)
 			for len(buf) >= wakeChunkBytes && len(wakeBuf) >= wakeChunkBytes {
@@ -1148,18 +1235,24 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}) {
 				wakeChunk := make([]byte, wakeChunkBytes)
 				copy(wakeChunk, wakeBuf[:wakeChunkBytes])
 				wakeBuf = wakeBuf[wakeChunkBytes:]
-				at := time.Now()
+				at := capture.CapturedAt.Add(-wakePCMTime(buf))
 				if len(mwwScorers) > 0 || len(owwScorers) > 0 {
 					d.recordWakeLaneAudio(0, at, wakeChunk)
 					if len(mwwScorers) > 0 {
-						mwwScorers[0].PushBytesAt(wakeChunk, at)
+						mwwScorers[0].PushBytesAtStream(wakeChunk, at, streamGeneration)
 					}
 					if len(owwScorers) > 0 {
-						owwScorers[0].PushBytesAt(wakeChunk, at)
+						owwScorers[0].PushBytesAtStream(wakeChunk, at, streamGeneration)
 					}
 				}
 				d.observePCM(chunk, speech)
 			}
 		}
 	}
+}
+
+// WakeStreamCurrent rejects an inference callback captured before a microphone
+// discontinuity or mute/unmute replacement. Zero preserves legacy callers.
+func (d *DataClient) WakeStreamCurrent(generation uint64) bool {
+	return generation == 0 || generation == d.wakeStreamGeneration.Load()
 }

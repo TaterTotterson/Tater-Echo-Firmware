@@ -5,6 +5,22 @@ import (
 	"time"
 )
 
+func TestAgreementCannotJoinDetectionsAcrossCaptureRestart(t *testing.T) {
+	matcher := NewAgreementMatcher(time.Second)
+	base := time.Now()
+	event := func(generation uint64) WakeDetection {
+		return WakeDetection{Score: .99, DetectedAt: base, StreamGeneration: generation}
+	}
+	matcher.ObserveDetection(AgreementMWW, 0, event(1))
+	if _, ok := matcher.ObserveDetection(AgreementOWW, 0, event(2)); ok {
+		t.Fatal("models agreed across capture restart")
+	}
+	match, ok := matcher.ObserveDetection(AgreementMWW, 0, event(2))
+	if !ok || match.StreamGeneration != 2 {
+		t.Fatalf("new capture failed to agree: %+v %t", match, ok)
+	}
+}
+
 func TestAgreementMatcherAcceptsEitherArrivalOrder(t *testing.T) {
 	base := time.Now()
 	for _, first := range []AgreementSource{AgreementMWW, AgreementOWW} {

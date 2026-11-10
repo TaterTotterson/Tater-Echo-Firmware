@@ -12,6 +12,7 @@ import (
 // Athena arrives as four 96 kHz S32_LE microphones and is filtered down to
 // the common 16 kHz mono stream before the rest of the pipeline sees it.
 type FrontEnd interface {
+	ResetCapture()
 	Lock(enabled bool)
 	PrepareSpeechLock()
 	LockCurrent(enabled bool)
@@ -22,6 +23,29 @@ type FrontEnd interface {
 	ClippedByChannel() [7]uint64
 	OutputChannel() int
 	Diagnostics() Diagnostics
+}
+
+// ResetCapture drops temporal/interpolation history after actual capture loss.
+// Cumulative clipping counters remain useful across producer recovery.
+func (b *Beamformer) ResetCapture() {
+	clips, byChannel := b.clippedSamples, b.clippedByChannel
+	*b = *New()
+	b.clippedSamples, b.clippedByChannel = clips, byChannel
+}
+func (c *CheckersFrontEnd) ResetCapture() {
+	clips, byChannel := c.clipped, c.clippedByChannel
+	*c = *NewCheckers()
+	c.clipped, c.clippedByChannel = clips, byChannel
+}
+func (r *RookFrontEnd) ResetCapture() {
+	clips, byChannel := r.clipped, r.clippedByChannel
+	*r = *NewRook()
+	r.clipped, r.clippedByChannel = clips, byChannel
+}
+func (a *AthenaFrontEnd) ResetCapture() {
+	clips, byChannel := a.clipped, a.clippedByChannel
+	*a = *NewAthena()
+	a.clipped, a.clippedByChannel = clips, byChannel
 }
 
 // WakeBeam is one independently scored wake-word view of the same raw array

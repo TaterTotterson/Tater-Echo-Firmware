@@ -105,8 +105,9 @@ type Canceller struct {
 	activePath int
 	stTailMs   int // the length st was built with: hwTailMs or tailMs
 
-	statePath   string              // saved echo path (persist.go); empty = off
-	lastSaveTry [aecPaths]time.Time // monotonic, rate-limits maybeSaveLocked
+	captureDiscontinuous bool
+	statePath            string              // saved echo path (persist.go); empty = off
+	lastSaveTry          [aecPaths]time.Time // monotonic, rate-limits maybeSaveLocked
 
 	// Far-end reference ring (16kHz mono), plus the 3:1 decimator carry.
 	ring  [ringCap]int16
@@ -518,6 +519,22 @@ func (c *Canceller) SelectPath(id int) {
 	log.Printf("[aec] acoustic path ch%d → ch%d", old, id)
 }
 
+// CaptureDiscontinuity retains learned acoustic coefficients while discarding
+// signal history that belongs to audio before an ALSA restart or lost batch.
+// The next software-reference batch discards any stale reference prefix before
+// cancellation resumes.
+func (c *Canceller) CaptureDiscontinuity() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.captureDiscontinuous = true
+	for _, state := range c.states {
+		if state != nil {
+			C.tater_echo_state_clear_history(state)
+		}
+	}
+	c.resetStatsLocked()
+}
+
 // SetParams applies config. On the software tap, any change to delay or tail
 // rebuilds the echo state and re-seeds the ring — adaptive filter state is
 // worthless across a timing change anyway. Called from the control goroutine
@@ -840,6 +857,21 @@ func (c *Canceller) process(mono, hwref []byte, inPlace bool) []byte {
 		return mono
 	}
 
+	if c.captureDiscontinuous {
+		if !useHW {
+			// Before the first resumed frame, discard only the stale prefix.
+			// Keep the freshest batch plus configured bulk delay as reference.
+			c.refMu.Lock()
+			keep := c.delayMs*sampleRate/1000 + len(mono)/2
+			if drop := c.count - keep; drop > 0 {
+				c.tail = (c.tail + drop) % ringCap
+				c.count -= drop
+				c.resyncs++
+			}
+			c.refMu.Unlock()
+		}
+		c.captureDiscontinuous = false
+	}
 	out := mono
 	if !inPlace {
 		out = make([]byte, len(mono))
@@ -1040,6 +1072,12 @@ func (c *Canceller) suppressResidualLocked(out, ref []int16) float64 {
 	coefficient := release
 	if target < gain {
 		coefficient = attack
+	} else if !c.callMode && corr < 0.25 && frameRMS(out) > 32 {
+		// Near-end onset after sustained suppression must recover in the first
+		// 32ms frame (~0.9dB worst-case loss), rather than swallowing seconds
+		// of a wake phrase. Correlated echo retains its strong suppression.
+		// Calls keep the conservative release plus their closed-loop limiter.
+		coefficient = 0.9
 	}
 	gain += coefficient * (target - gain)
 	if gain < floor {

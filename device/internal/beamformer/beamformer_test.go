@@ -600,6 +600,41 @@ func BenchmarkHardwareBatch(b *testing.B) {
 	}
 }
 
+func TestSharedWakeBeamKeepsArrayGainAndAECPathDuringPlayback(t *testing.T) {
+	b := New()
+	raw := planeWaveRaw(2, periodFrames*5, 0x12345678, 0x180000)
+	// Nonzero playback reference makes this the music/barge-in path.
+	for frame := 0; frame < len(raw)/frameSize; frame++ {
+		offset := frame*frameSize + echoRefCh*byteSample
+		raw[offset+1] = 0x10
+	}
+	for i := 0; i < 20; i++ {
+		b.Process(raw, -1, 1)
+	}
+	candidate := b.WakeBeam(raw, 2, 1)
+	pcm, direction := b.UseWakeBeam(candidate)
+	if len(pcm) == 0 || &pcm[0] != &candidate.PCM[0] || direction != 2 || b.OutputChannel() != directionToChannel[2] {
+		t.Fatalf("directional playback signal lost: direction=%d path=%d", direction, b.OutputChannel())
+	}
+	b.LockWakeDirection(4, true)
+	b.Process(raw, -1, 1)
+	pcm, direction = b.UseWakeBeam(candidate)
+	if pcm != nil || direction != 4 || b.OutputChannel() != directionToChannel[4] {
+		t.Fatal("idle candidate replaced locked voice beam")
+	}
+	b.Process(raw, candidateAngles[1], 1)
+	_, direction = b.UseWakeBeam(candidate)
+	if direction != 1 {
+		t.Fatal("fixed steering reported the stored lock instead of the active beam")
+	}
+	b.ResetCapture()
+	b.Process(make([]byte, len(raw)), -1, 1)
+	pcm, direction = b.UseWakeBeam(candidate)
+	if pcm != nil || direction != -1 {
+		t.Fatal("unhealthy array claimed a directional beam")
+	}
+}
+
 func BenchmarkPreparedSpatialHardwareBatch(b *testing.B) {
 	beam := New()
 	beam.PrepareSpeechLock()

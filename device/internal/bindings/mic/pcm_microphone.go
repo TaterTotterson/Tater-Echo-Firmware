@@ -3,11 +3,9 @@
 package mic
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os/exec"
 	"strconv"
@@ -38,13 +36,15 @@ type PcmMicrophone struct {
 	linuxCapture bool
 	mu           sync.Mutex
 	subs         []chan []byte
+	captureSubs  []chan pkgmic.Capture
 	ready        chan struct{}
 	readyOnce    sync.Once
 }
 
 const (
-	micStartupTimeout = 12 * time.Second
-	micRestartDelay   = 500 * time.Millisecond
+	micStartupTimeout  = 12 * time.Second
+	micRestartDelay    = 500 * time.Millisecond
+	micProgressTimeout = 2 * time.Second
 )
 
 // NewMicrophone returns the pre-configured microphone alsa device and starts
@@ -170,22 +170,37 @@ func (p *PcmMicrophone) readLoop() {
 		restarts     uint64
 	)
 
+	clock := pkgmic.NewCaptureClock(int(rate))
 	for {
-		stream := make(chan []byte, 16)
+		clock.Restart()
+		stream := make(chan pkgmic.Capture, 16)
 		ended := make(chan error, 1)
 		go func() {
 			if p.linuxCapture {
 				ended <- p.getLinuxAudioStream(stream)
 				return
 			}
-			ended <- p.device.GetAudioStream(p.device.DeviceConfig, stream)
+			// Retain the diagnostic Fire OS backend's byte API. Current release
+			// targets use the cancellable Linux reader below.
+			legacy := make(chan []byte)
+			done := make(chan error, 1)
+			go func() { done <- p.device.GetAudioStream(p.device.DeviceConfig, legacy) }()
+			for {
+				select {
+				case pcm := <-legacy:
+					stream <- pkgmic.Capture{PCM: pcm, CapturedAt: time.Now()}
+				case err := <-done:
+					ended <- err
+					return
+				}
+			}
 		}()
 
 	capture:
 		for {
-			var audio []byte
+			var capture pkgmic.Capture
 			select {
-			case audio = <-stream:
+			case capture = <-stream:
 				p.readyOnce.Do(func() { close(p.ready) })
 			case err := <-ended:
 				restarts++
@@ -200,8 +215,10 @@ func (p *PcmMicrophone) readLoop() {
 				break capture
 			}
 
-			now := time.Now()
+			audio := capture.PCM
+			now := capture.CapturedAt
 			frames := int64(len(audio) / bytesPerFrame)
+			capture = clock.Stamp(audio, int(frames), now)
 			batchDur := time.Duration(frames) * time.Second / time.Duration(rate)
 			if firstArrival.IsZero() {
 				firstArrival, lastReport = now, now
@@ -237,19 +254,7 @@ func (p *PcmMicrophone) readLoop() {
 				rawTap(buf)
 			}
 
-			p.mu.Lock()
-			for _, ch := range p.subs {
-				select {
-				case ch <- buf:
-				default:
-					// Subscriber too slow — drop this period rather than block
-					subDrops++
-					if subDrops == 1 || subDrops%64 == 0 {
-						log.Printf("[mic] subscriber channel full — batch dropped (sub_drops=%d)", subDrops)
-					}
-				}
-			}
-			p.mu.Unlock()
+			subDrops += p.publishCapture(capture)
 		}
 	}
 }
@@ -259,7 +264,7 @@ func (p *PcmMicrophone) readLoop() {
 // DMA pointer advances, which turns minutes of duplicate samples into seconds
 // of wall time. The same hardware endpoints are correctly clocked by
 // alsa-lib. Android/Fire OS builds retain their established tinyalsa path.
-func (p *PcmMicrophone) getLinuxAudioStream(audioData chan []byte) error {
+func (p *PcmMicrophone) getLinuxAudioStream(audioData chan pkgmic.Capture) error {
 	config := p.device.DeviceConfig
 	formatName, bytesPerSample := "S24_3LE", 3
 	if config.Format == tinyalsa.PCM_FORMAT_S32_LE {
@@ -269,20 +274,23 @@ func (p *PcmMicrophone) getLinuxAudioStream(audioData chan []byte) error {
 	}
 	device := fmt.Sprintf("hw:%d,%d", p.device.Card, p.device.Device)
 	bufferFrames := config.PeriodSize * config.PeriodCount
-	cmd := exec.Command("arecord",
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "arecord",
 		"-q", "-D", device,
 		"-f", formatName,
 		"-r", strconv.Itoa(config.SampleRate),
 		"-c", strconv.Itoa(config.Channels),
 		"--period-size", strconv.Itoa(config.PeriodSize),
 		"--buffer-size", strconv.Itoa(bufferFrames),
+		"--fatal-errors",
 		"-t", "raw", "-",
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("open arecord output: %w", err)
 	}
-	var stderr bytes.Buffer
+	var stderr captureErrorBuffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start arecord: %w", err)
@@ -301,21 +309,11 @@ func (p *PcmMicrophone) getLinuxAudioStream(audioData chan []byte) error {
 		batchFrames = 3072
 	}
 	batchBytes := batchFrames * config.Channels * bytesPerSample
-	for {
-		buffer := make([]byte, batchBytes)
-		if _, err := io.ReadFull(stdout, buffer); err != nil {
-			detail := strings.TrimSpace(stderr.String())
-			if detail != "" {
-				return fmt.Errorf("arecord capture: %w (%s)", err, detail)
-			}
-			return fmt.Errorf("arecord capture: %w", err)
-		}
-		select {
-		case audioData <- buffer:
-		case <-time.After(5 * time.Second):
-			return errors.New("arecord consumer stopped")
-		}
+	err = readCaptureBatches(stdout, batchBytes, audioData, micStartupTimeout, micProgressTimeout, cancel)
+	if detail := strings.TrimSpace(stderr.String()); detail != "" {
+		return fmt.Errorf("arecord capture: %w (%s)", err, detail)
 	}
+	return fmt.Errorf("arecord capture: %w", err)
 }
 
 // subscribe registers a new subscriber and returns its channel.
@@ -362,4 +360,73 @@ func (p *PcmMicrophone) Listen(callback pkgmic.AudioCallback, ctx context.Contex
 			callback(audio)
 		}
 	}
+}
+
+// SubscribeCapture is the live pipeline's timestamped subscription.
+func (p *PcmMicrophone) SubscribeCapture() chan pkgmic.Capture {
+	ch := make(chan pkgmic.Capture, 8)
+	p.mu.Lock()
+	p.captureSubs = append(p.captureSubs, ch)
+	p.mu.Unlock()
+	return ch
+}
+
+func (p *PcmMicrophone) UnsubscribeCapture(ch chan pkgmic.Capture) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, sub := range p.captureSubs {
+		if sub == ch {
+			p.captureSubs = append(p.captureSubs[:i], p.captureSubs[i+1:]...)
+			close(ch)
+			return
+		}
+	}
+}
+
+// arecord writes stderr concurrently with capture. Bound its retained error
+// text and synchronize access, including when the watchdog interrupts a read.
+type captureErrorBuffer struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (b *captureErrorBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = append(b.data, data...)
+	if len(b.data) > 4096 {
+		b.data = b.data[len(b.data)-4096:]
+	}
+	return len(data), nil
+}
+func (b *captureErrorBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.data)
+}
+
+// publishCapture never blocks a producer on a subscriber. A dropped batch
+// remains visible in the next Capture.Sequence delivered to that subscriber.
+func (p *PcmMicrophone) publishCapture(capture pkgmic.Capture) uint64 {
+	var drops uint64
+	p.mu.Lock()
+	for _, ch := range p.subs {
+		select {
+		case ch <- capture.PCM:
+		default:
+			// Subscriber too slow — drop this period rather than block
+			drops++
+		}
+	}
+	for _, ch := range p.captureSubs {
+		select {
+		case ch <- capture:
+		default:
+			// Sequence advances even on drops; the consumer resets at
+			// the next delivered batch instead of splicing the gap.
+			drops++
+		}
+	}
+	p.mu.Unlock()
+	return drops
 }

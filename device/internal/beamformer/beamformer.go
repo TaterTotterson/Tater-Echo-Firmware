@@ -26,13 +26,13 @@
 // every time constant five times slower than its name and comment.
 //
 // Output is determined by lock state, not by the config flag:
-//   - Unlocked: ch6 remains the continuous transport/pre-roll and local wake
-//     signal while the array estimator tracks direction as metadata.
+//   - Unlocked: Process supplies ch6 while the estimator tracks direction.
+//     DataClient selects the primary wake beam before the shared AEC pass.
 //   - Locked: a fractional-delay sum of all seven microphones aimed
 //     at the direction selected at Lock() time, or at BeamAngle when fixed.
 //
-// BeamformingEnabled only gates Lock() — if false, Lock() is a no-op and
-// the device stays on ch6 for both OWW and voice turns.
+// BeamformingEnabled gates voice-turn Lock(); independent wake pickup still
+// uses its continuously tracked primary array beam.
 //
 // # Direction estimation
 //
@@ -190,10 +190,9 @@ type Beamformer struct {
 	chanBuf [7][]float32
 	hfBuf   [nDirections][]float32
 
-	// Two stable wake candidates cover the strongest source bearings without
-	// running six neural models. They only retarget on convincing acoustic
-	// evidence; DataClient resets that lane and replays raw-array pre-roll when
-	// either identity changes.
+	// Keep a stable primary bearing plus a runner-up for compatibility helpers
+	// and diagnostics. The live DataClient follows only the primary through its
+	// speech-activity latch, without resetting or replaying a neural model.
 	wakeDirections [2]int
 	wakeReady      bool
 	healthyMics    [7]bool
@@ -707,11 +706,11 @@ func (b *Beamformer) Process(raw []byte, steerAngle float64, gain float64) (mono
 	return b.extractSteered(beamDirection, gain), angle
 }
 
-// updateWakeDirections maintains two scorer lanes. The first follows the
-// strongest source; the second keeps the runner-up so an ambiguous bearing or
-// a source between fixed steering angles does not lose the wake phrase. Once
-// established, a lane only moves on clear evidence, preventing background
-// noise from repeatedly resetting the neural model.
+// updateWakeDirections maintains a primary bearing and a ranked runner-up.
+// The live wake stream follows the primary through DataClient's activity latch;
+// the runner-up remains available to compatibility helpers and diagnostics.
+// Direction changes require clear evidence so stationary room noise does not
+// churn the primary beam.
 func (b *Beamformer) updateWakeDirections() {
 	scores := b.batchScores
 	best, _, confidence := bestDirection(scores)
@@ -734,7 +733,7 @@ func (b *Beamformer) updateWakeDirections() {
 	}
 	// A new primary must be substantially clearer than the general lock
 	// threshold. Speech onsets clear this immediately; stationary room noise
-	// and silence do not churn the scorer lanes.
+	// and silence do not churn the primary wake beam.
 	if confidence >= 0.12 {
 		b.wakeDirections = [2]int{best, second}
 	}
@@ -985,9 +984,8 @@ func (b *Beamformer) extractSteered(direction int, gain float64) []byte {
 	return out
 }
 
-// WakeBeamCount reports the bounded number of neural scorer lanes used for
-// Biscuit. Six simultaneous models cost materially more CPU and memory while
-// the strongest and runner-up beams retain the useful array gain.
+// WakeBeamCount reports the bounded number of ranked beams exposed through the
+// compatibility WakeArray surface. The live path consumes the primary only.
 func (b *Beamformer) WakeBeamCount() int { return 2 }
 
 // WakeDirection reports the primary direction maintained by the continuous
@@ -999,10 +997,9 @@ func (b *Beamformer) WakeDirection() (int, bool) {
 	return b.wakeDirections[0], b.wakeReady
 }
 
-// WakeBeams forms the two currently selected wake views. A raw batch in which
-// any array channel is bit-exact dead falls back to the centre microphone;
-// this is deliberately conservative so a wiring/ADC fault cannot turn a
-// seven-way average into a permanently deaf wake path.
+// WakeBeams forms the two ranked compatibility views. The live path uses
+// WakeDirection and WakeBeam for its continuous primary stream. A raw batch in
+// which any array channel is bit-exact dead falls back to the centre microphone.
 func (b *Beamformer) WakeBeams(raw []byte, gain float64) []WakeBeam {
 	if b.healthyCount < len(b.healthyMics) {
 		fallback := centreCh
@@ -1027,10 +1024,9 @@ func (b *Beamformer) WakeBeams(raw []byte, gain float64) []WakeBeam {
 	return out
 }
 
-// WakeBeam forms one stateless beam from arbitrary raw-array history. It is
-// stateless on purpose: DataClient can concatenate its short raw pre-roll and
-// replay it through a retargeted scorer without disturbing live DOA or the
-// locked voice beam's interpolation history.
+// WakeBeam forms one stateless beam from the current raw array capture without
+// disturbing live direction estimation or the locked voice beam's interpolation
+// history.
 func (b *Beamformer) WakeBeam(raw []byte, direction int, gain float64) WakeBeam {
 	if direction < 0 || direction >= nDirections {
 		return WakeBeam{Direction: centreCh, Angle: -1, PCM: b.extractChannel(raw, centreCh, gain)}
@@ -1238,10 +1234,28 @@ func (b *Beamformer) ClippedSamples() uint64 {
 func (b *Beamformer) ClippedByChannel() [7]uint64 { return b.clippedByChannel }
 
 // OutputChannel identifies the acoustic path used for the most recent Process
-// result. Unlocked audio is physical centre mic ch6; locked audio uses the
-// path index of its seven-mic steering direction. DataClient selects the matching
+// result or UseWakeBeam selection. Uncertain idle audio is physical centre
+// mic ch6; directional audio uses the path index of its steering direction. DataClient selects the matching
 // retained AEC state before cancellation.
 func (b *Beamformer) OutputChannel() int { return b.outputChannel }
+
+// UseWakeBeam makes the idle Biscuit/Radar wake beam the input to the one AEC
+// pass, preserving array gain during playback. Locked voice turns keep their
+// existing beam, and continued-chat acquisition retains its onset-lock path.
+// Direction and AEC path describe the same signal; fallback has no bearing.
+func (b *Beamformer) UseWakeBeam(candidate WakeBeam) ([]byte, int) {
+	if b.lockedChannel >= 0 {
+		// Process may apply a configured fixed angle instead of the stored
+		// lock bearing. Report the path that actually produced this batch.
+		return nil, nearestDirection(micAngles[b.outputChannel])
+	}
+	if b.trackSpeech || b.healthyCount < len(b.healthyMics) ||
+		candidate.Direction < 0 || candidate.Direction >= nDirections || len(candidate.PCM) == 0 {
+		return nil, -1
+	}
+	b.outputChannel = directionToChannel[candidate.Direction]
+	return candidate.PCM, candidate.Direction
+}
 
 // Diagnostics is a cheap snapshot read on the mic goroutine for periodic
 // field logs. Confidence is the best-vs-second separation in [0,1].

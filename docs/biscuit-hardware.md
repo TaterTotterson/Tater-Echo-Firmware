@@ -22,19 +22,22 @@ S24_3LE channels at 16 kHz.
 | 8 | Right playback loopback/reference |
 
 The six perimeter microphones are approximately 36 mm from the center. Tater
-continuously estimates direction from channels 0–5 and forms the two strongest
-candidate beams from all seven microphones. Each beam has independent state for
-the selected MWW, OWW, or NWW engines. If a candidate retargets, Tater replays
-640 ms of raw nine-channel pre-roll so the detector keeps the beginning of the phrase. The
-winning lane's timestamped audio is used for STT wake verification, trainer
-uploads, dual-model agreement, and the initial STT pre-roll
-before that same beam is held for the voice turn. This gives the complete wake
-pipeline coherent array gain without running a detector on every microphone. A
-dead array channel automatically falls back to one healthy capsule, preferring
-direction-neutral channel 6. In dual-model mode, both engines remain continuously warm on both
-candidate lanes. A wake is accepted only when MWW and its selected OWW or NWW
-companion cross within the bounded agreement window on the same lane and
-physical beam direction.
+continuously estimates direction from channels 0–5 and forms one primary beam
+from all seven microphones. A speech-activity latch stabilizes the direction
+through a wake phrase. MWW and the selected OWW or NWW companion consume the
+same uninterrupted stream; direction changes do not replay or reset a model.
+The primary beam is selected before the single SpeexDSP AEC pass, including
+while music plays. The same cleaned signal feeds wake inference and transport,
+and the accepted direction is held for the voice turn. Uncertain or unhealthy
+arrays retain the center fallback. Continued-chat acquisition keeps its own
+speech-onset lock.
+
+Raw capture batches carry their sample-end timestamp, sequence, and producer
+generation. The two 80 ms chunks in a 160 ms batch have sample-correct timestamps.
+A capture restart or subscriber drop clears partial audio, detector state,
+beam history, and obsolete wake candidates while preserving learned AEC
+coefficients. A watchdog restarts stalled ALSA capture, and ALSA overruns end
+the producer rather than silently splicing audio across the loss.
 
 Channels 7 and 8 are playback loopbacks, not microphones. Measurements show
 that the internal speaker path emits the right channel, so production echo
@@ -49,13 +52,14 @@ and 6/7. All four share the TDM data bus.
 
 ## Audio path
 
-- Wake detection scores two independent seven-microphone candidate beams
-  without adaptive gain; a healthy channel 6 is the preferred degraded fallback.
+- Wake detection scores one seven-microphone primary beam without adaptive
+  gain; channel 6 is the fallback when the array has no reliable direction.
 - Direction estimators remain warm while idle and carry the winning wake
   bearing and audio directly into verification, training, STT pre-roll, and
   the seven-microphone voice beam.
-- SpeexDSP AEC consumes the centre fallback or locked steered-array path and
-  channel 8 reference.
+- SpeexDSP AEC consumes the selected primary wake beam, center fallback, or
+  locked voice beam together with the channel 8 reference. Only one AEC path
+  runs per batch; directional playback pickup adds no second canceller.
 - Playback uses ALSA card 0, device 22 and drives the right channel.
 - Mixer controls are addressed by name because numeric ALSA control IDs are not
   stable across target and kernel builds.

@@ -68,6 +68,24 @@ func TestLoadedStateCancelsFromTheFirstFrame(t *testing.T) {
 	}
 }
 
+func TestCaptureDiscontinuityKeepsLearnedEchoCoefficients(t *testing.T) {
+	c := hwCanceller(64)
+	defer c.SetParams(false, 0, 64)
+	firstFramesAttenuation(c, synth(160*FrameSize), 160)
+	before, err := c.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.CaptureDiscontinuity()
+	after, err := c.ExportState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("capture recovery discarded learned echo coefficients")
+	}
+}
+
 func TestImportRefusesAMismatchedFilter(t *testing.T) {
 	saved, _ := hwCanceller(300).ExportState()
 	sw := New()

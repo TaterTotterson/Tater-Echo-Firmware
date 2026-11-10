@@ -2420,12 +2420,17 @@ func applyMWWConfig(dc *client.DataClient,
 			log.Printf("[wake-boundary] no endpoint score crossed threshold; using detector fallback")
 			return detection, false
 		}
-		detection.CommandBoundaryAt = estimate.At
-		log.Printf("[wake-boundary] exact endpoint score=%.3f detector_delta=%dms",
-			estimate.Score, detection.DetectedAt.Sub(estimate.At).Milliseconds())
+		detection.CommandBoundaryAt = microwakeword.GuardExactCommandBoundary(estimate.At)
+		log.Printf("[wake-boundary] exact endpoint score=%.3f detector_delta=%dms command_guard=%dms boundary_lead=%dms",
+			estimate.Score, detection.DetectedAt.Sub(estimate.At).Milliseconds(),
+			microwakeword.CommandBoundaryGuard.Milliseconds(),
+			detection.DetectedAt.Sub(detection.CommandBoundaryAt).Milliseconds())
 		return detection, true
 	}
 	claimBoundary := func(lane int, detection microwakeword.WakeDetection, exact bool) bool {
+		if !dc.WakeStreamCurrent(detection.StreamGeneration) {
+			return false
+		}
 		if exact {
 			return dc.ClaimWakeLaneWithExactBoundary(lane, detection.DetectedAt, detection.CommandBoundaryAt)
 		}
@@ -2458,7 +2463,7 @@ func applyMWWConfig(dc *client.DataClient,
 			commandBoundaryAt = phraseAt
 		}
 		detection, exact := resolveBoundary(match.Lane, microwakeword.WakeDetection{
-			Score: match.MWWScore, DetectedAt: phraseAt, CommandBoundaryAt: commandBoundaryAt,
+			Score: match.MWWScore, DetectedAt: phraseAt, CommandBoundaryAt: commandBoundaryAt, StreamGeneration: match.StreamGeneration,
 		})
 		if !claimBoundary(match.Lane, detection, exact) {
 			return
@@ -2473,6 +2478,9 @@ func applyMWWConfig(dc *client.DataClient,
 		hooks := microwakeword.ShadowHooks{
 			AffinityCPU: &cpu,
 			CrossEvent: func(detection microwakeword.WakeDetection) {
+				if !dc.WakeStreamCurrent(detection.StreamGeneration) {
+					return
+				}
 				if agreement != nil {
 					if match, ok := agreement.ObserveDetection(microwakeword.AgreementOWW, lane, detection); ok {
 						dispatchAgreement(match)
@@ -2522,6 +2530,9 @@ func applyMWWConfig(dc *client.DataClient,
 			lane := lane
 			sc, err := microwakeword.OpenShadowTunedWithHooks(model, scorerOverrides, microwakeword.ShadowHooks{
 				CrossEvent: func(detection microwakeword.WakeDetection) {
+					if !dc.WakeStreamCurrent(detection.StreamGeneration) {
+						return
+					}
 					if agreement == nil {
 						detection, exact := resolveBoundary(lane, detection)
 						if claimBoundary(lane, detection, exact) {
@@ -2667,7 +2678,11 @@ func applyMWWTimerStopConfig(dc *client.DataClient, onStop func(float32, time.Ti
 	for lane := 0; lane < expectedScorers; lane++ {
 		lane := lane
 		scorer, openErr := microwakeword.OpenTimerStopWithHooks(
-			microwakeword.ShadowHooks{Cross: func(score float32, at time.Time) {
+			microwakeword.ShadowHooks{CrossEvent: func(detection microwakeword.WakeDetection) {
+				if !dc.WakeStreamCurrent(detection.StreamGeneration) {
+					return
+				}
+				score, at := detection.Score, detection.DetectedAt
 				if !dc.ClaimWakeLane(lane, at) {
 					return
 				}

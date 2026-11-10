@@ -544,8 +544,8 @@ func checkersPathName(path int) string {
 	}
 }
 
-// WakeBeamCount uses one persistent neural scorer for each physically measured
-// side of the array.  Centre/front speech remains coherent in both broad beams.
+// WakeBeamCount reports the two measured compatibility views. The live wake
+// path follows one continuously measured side through WakeDirection.
 func (*CheckersFrontEnd) WakeBeamCount() int { return 2 }
 
 // WakeDirection reports the current measured side of arrival without forming

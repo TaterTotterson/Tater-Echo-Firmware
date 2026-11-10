@@ -19,6 +19,7 @@ const (
 )
 
 type AgreementMatch struct {
+	StreamGeneration  uint64
 	Lane              int
 	At                time.Time
 	MWWAt             time.Time
@@ -41,6 +42,7 @@ type AgreementStats struct {
 }
 
 type agreementEvent struct {
+	generation uint64
 	at         time.Time
 	boundaryAt time.Time
 	score      float32
@@ -90,7 +92,7 @@ func (matcher *AgreementMatcher) ObserveDetection(source AgreementSource, lane i
 	matcher.mu.Lock()
 	defer matcher.mu.Unlock()
 
-	event := agreementEvent{at: at, boundaryAt: boundaryAt, score: detection.Score}
+	event := agreementEvent{at: at, boundaryAt: boundaryAt, score: detection.Score, generation: detection.StreamGeneration}
 	current, other := matcher.mww, matcher.oww
 	if source == AgreementMWW {
 		matcher.stats.MWWCrossings++
@@ -100,9 +102,20 @@ func (matcher *AgreementMatcher) ObserveDetection(source AgreementSource, lane i
 		matcher.stats.LastOWWScore = detection.Score
 		current, other = matcher.oww, matcher.mww
 	}
+	if previous, ok := current[lane]; ok && previous.generation > event.generation {
+		return AgreementMatch{}, false
+	}
 	current[lane] = event
 	counterpart, ok := other[lane]
 	if !ok {
+		return AgreementMatch{}, false
+	}
+	if event.generation != counterpart.generation {
+		if counterpart.generation < event.generation {
+			delete(other, lane)
+		} else {
+			delete(current, lane)
+		}
 		return AgreementMatch{}, false
 	}
 	delta := at.Sub(counterpart.at)
@@ -142,7 +155,7 @@ func (matcher *AgreementMatcher) ObserveDetection(source AgreementSource, lane i
 		commandBoundaryAt = earliestBoundaryAt
 	}
 	return AgreementMatch{
-		Lane: lane, At: matchedAt, MWWAt: mwwEvent.at, OWWAt: owwEvent.at,
+		Lane: lane, At: matchedAt, StreamGeneration: mwwEvent.generation, MWWAt: mwwEvent.at, OWWAt: owwEvent.at,
 		MWWBoundaryAt: mwwEvent.boundaryAt, OWWBoundaryAt: owwEvent.boundaryAt,
 		CommandBoundaryAt: commandBoundaryAt,
 		MWWScore:          mwwEvent.score, OWWScore: owwEvent.score,

@@ -827,6 +827,61 @@ func TestMusicResidualGuardMatchesCallCleanupWithoutLoopLimiter(t *testing.T) {
 	}
 }
 
+func TestResidualGuardRecoversSpeechAfterSustainedPlayback(t *testing.T) {
+	for _, mode := range []string{"music", "alarm", "reply"} {
+		t.Run(mode, func(t *testing.T) {
+			c := New()
+			c.SetMusicMode(mode == "music")
+			c.SetAlarmMode(mode == "alarm")
+			ref := synth(FrameSize)
+			for i := 0; i < 16; i++ {
+				c.suppressResidualLocked(append([]int16(nil), ref...), ref)
+			}
+			if c.residualGain[defaultPathID] > .51 {
+				t.Fatal("fixture did not establish suppression")
+			}
+			near := synth(FrameSize + 97)[97:]
+			for i := range near {
+				if i%2 == 0 {
+					near[i] = -near[i]
+				}
+			}
+			before := frameRMS(near)
+			corr := c.suppressResidualLocked(near, ref)
+			if corr >= .25 {
+				t.Fatalf("near-end fixture correlation=%f", corr)
+			}
+			if gain := frameRMS(near) / before; gain < .89 {
+				t.Fatalf("first speech frame gain=%f; wake onset was swallowed", gain)
+			}
+			// Echo returning after speech must promptly re-engage the guard.
+			for i := 0; i < 8; i++ {
+				c.suppressResidualLocked(append([]int16(nil), ref...), ref)
+			}
+			if c.residualGain[defaultPathID] > .6 {
+				t.Fatal("echo suppression did not re-engage")
+			}
+		})
+	}
+}
+
+func TestResidualSpeechRecoveryKeepsClosedCallProtection(t *testing.T) {
+	c := New()
+	c.SetCallMode(true)
+	c.residualGain[defaultPathID] = .06
+	ref := synth(FrameSize)
+	near := synth(FrameSize + 97)[97:]
+	for i := range near {
+		if i%2 == 0 {
+			near[i] = -near[i]
+		}
+	}
+	c.suppressResidualLocked(near, ref)
+	if c.residualGain[defaultPathID] > .1 {
+		t.Fatal("music recovery weakened closed-call feedback protection")
+	}
+}
+
 func TestAlarmResidualGuardCleansChimeWithoutLoopLimiter(t *testing.T) {
 	c := New()
 	c.SetAlarmMode(true)

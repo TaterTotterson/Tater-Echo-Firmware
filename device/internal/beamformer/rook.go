@@ -592,9 +592,9 @@ func (r *RookFrontEnd) updateWakeDirections(best int, score, confidence float64)
 		r.wakeDirections[1] = second
 		return
 	}
-	// A speech-like energy rise may move a lane immediately. In steady room
-	// sound require stronger directional evidence so the model is not reset
-	// repeatedly by a fan or television.
+	// A speech-like energy rise may move the primary immediately. In steady room
+	// sound require stronger directional evidence so a fan or television does
+	// not churn the live wake beam.
 	if (r.batchActivity >= 1.20 && confidence >= 0.10) || confidence >= 0.22 {
 		r.wakeDirections = [2]int{best, second}
 	}
@@ -748,9 +748,8 @@ func (r *RookFrontEnd) writeSample(out []byte, frame int, sample float64, path i
 	binary.LittleEndian.PutUint16(out[frame*2:], uint16(int16(value)))
 }
 
-// WakeBeamCount keeps CPU and model memory bounded while covering the two
-// strongest bearings. Rook's compact aperture gives both beams broad enough
-// pickup that an in-between source is present in both views.
+// WakeBeamCount reports the two ranked compatibility views. The live wake path
+// consumes the primary bearing through WakeDirection and WakeBeam.
 func (*RookFrontEnd) WakeBeamCount() int { return 2 }
 
 // WakeDirection reports the primary direction maintained by the array

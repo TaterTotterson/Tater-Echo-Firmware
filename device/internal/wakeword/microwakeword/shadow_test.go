@@ -217,6 +217,25 @@ func TestShadowPushBytesAtPreservesCaptureIdentity(t *testing.T) {
 	}
 }
 
+func TestShadowCrossingCarriesCaptureGeneration(t *testing.T) {
+	engine := &fakeShadowEngine{batches: [][]float32{{.99}}}
+	crossed := make(chan WakeDetection, 1)
+	scorer, err := NewShadowScorerWithHooks(engine, .5, 1, 0, ShadowHooks{CrossEvent: func(detection WakeDetection) { crossed <- detection }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scorer.Close()
+	scorer.PushBytesAtStream(make([]byte, 2560), time.Now(), 42)
+	select {
+	case detection := <-crossed:
+		if detection.StreamGeneration != 42 {
+			t.Fatalf("generation=%d", detection.StreamGeneration)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no detection")
+	}
+}
+
 func TestShadowCrossingUsesScorePositionInsideAudioBatch(t *testing.T) {
 	engine := &fakeShadowEngine{
 		batches: [][]float32{{0.1, 0.9, 0.1, 0.1}},

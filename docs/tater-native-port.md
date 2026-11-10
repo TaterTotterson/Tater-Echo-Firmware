@@ -25,7 +25,12 @@ Tater
 
 Microphone capture never waits on inference or networking. Wake inference runs
 on its own bounded queue; a discontinuity resets the streaming frontend before
-scoring continues. Each array lane retains a bounded timestamped audio ring.
+scoring continues. Capture batches carry source timestamps, sequence numbers, and producer
+generations. Chunk timestamps follow sample position within each batch, with a
+bounded clock correction for hardware drift. Lost batches and producer restarts
+clear streaming history and invalidate old detector agreement; a sample-progress
+watchdog restarts stalled Linux capture. Each array lane retains a bounded
+timestamped audio ring.
 When a lane crosses, its exact post-AEC/high-pass audio is frozen and used by
 the optional STT wake verifier and wake-audio trainer upload. Audio through the
 detector's command-boundary estimate is identified as wake pre-roll; audio from

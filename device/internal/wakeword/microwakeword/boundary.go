@@ -24,6 +24,17 @@ type BoundaryEstimate struct {
 	Score float32
 }
 
+// GuardExactCommandBoundary keeps a small overlap ahead of a verified
+// acoustic wake endpoint. The endpoint model can land a few samples into an
+// immediately spoken command; retaining the same guard as the detector
+// fallback prevents that first consonant from being assigned to wake pre-roll.
+func GuardExactCommandBoundary(endpointAt time.Time) time.Time {
+	if endpointAt.IsZero() {
+		return endpointAt
+	}
+	return endpointAt.Add(-CommandBoundaryGuard)
+}
+
 func OpenBoundaryEstimator(packageName string) (*BoundaryEstimator, error) {
 	prefix, err := companionPrefix(packageName)
 	if err != nil {

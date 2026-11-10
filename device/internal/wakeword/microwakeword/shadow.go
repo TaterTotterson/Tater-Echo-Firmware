@@ -65,8 +65,9 @@ type shadowChunk struct {
 	// capturedAt is the end of pcm on the microphone timeline. Engines may
 	// return several chronological scores for one queued chunk; their score
 	// period places each result back at the audio that produced it.
-	capturedAt time.Time
-	generation uint64
+	capturedAt       time.Time
+	generation       uint64
+	streamGeneration uint64
 }
 
 type scorePeriodProvider interface {
@@ -82,6 +83,7 @@ type scoreEndLagProvider interface {
 // verification, and beam selection use DetectedAt. Only the wake/command audio
 // split uses CommandBoundaryAt.
 type WakeDetection struct {
+	StreamGeneration  uint64
 	Score             float32
 	DetectedAt        time.Time
 	CommandBoundaryAt time.Time
@@ -356,6 +358,11 @@ func (s *ShadowScorer) PushBytes(raw []byte) {
 // carry one time identity even though their inference goroutines run
 // independently.
 func (s *ShadowScorer) PushBytesAt(raw []byte, capturedAt time.Time) {
+	s.PushBytesAtStream(raw, capturedAt, 0)
+}
+
+// PushBytesAtStream carries the capture epoch through asynchronous inference.
+func (s *ShadowScorer) PushBytesAtStream(raw []byte, capturedAt time.Time, streamGeneration uint64) {
 	if len(raw) < 2 || s.closed.Load() {
 		return
 	}
@@ -363,10 +370,14 @@ func (s *ShadowScorer) PushBytesAt(raw []byte, capturedAt time.Time) {
 	for i := range pcm {
 		pcm[i] = int16(binary.LittleEndian.Uint16(raw[i*2:]))
 	}
-	s.enqueue(pcm, capturedAt)
+	s.enqueueStream(pcm, capturedAt, streamGeneration)
 }
 
 func (s *ShadowScorer) enqueue(pcm []int16, capturedAt time.Time) {
+	s.enqueueStream(pcm, capturedAt, 0)
+}
+
+func (s *ShadowScorer) enqueueStream(pcm []int16, capturedAt time.Time, streamGeneration uint64) {
 	if capturedAt.IsZero() {
 		capturedAt = time.Now()
 	}
@@ -406,9 +417,10 @@ func (s *ShadowScorer) enqueue(pcm []int16, capturedAt time.Time) {
 		s.mu.Unlock()
 	}
 	chunk := shadowChunk{
-		pcm:        pcm,
-		capturedAt: capturedAt,
-		generation: s.generation.Load(),
+		pcm:              pcm,
+		capturedAt:       capturedAt,
+		generation:       s.generation.Load(),
+		streamGeneration: streamGeneration,
 	}
 	select {
 	case s.ch <- chunk:
@@ -696,7 +708,7 @@ func (s *ShadowScorer) run() {
 			}
 			if crossed && s.onCrossEvent != nil {
 				s.onCrossEvent(WakeDetection{
-					Score: mean, DetectedAt: scoreAt, CommandBoundaryAt: boundaryAt,
+					Score: mean, DetectedAt: scoreAt, CommandBoundaryAt: boundaryAt, StreamGeneration: chunk.streamGeneration,
 				})
 			}
 			if closeMissed && s.onCloseMiss != nil {
