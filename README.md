@@ -44,7 +44,8 @@ Target metadata used by Tater and the release builds lives in
 - **Sat Chat:** Satellite and phone audio/video calls; Biscuit and Radar support
   audio, while screen-equipped satellites also support video.
 - **Wake engines:** On-device microWakeWord, openWakeWord, and NanoWakeWord with
-  confirmation modes, custom bundles, sensitivity, and room profiles.
+  MWW + OWW and MWW + NWW dual wake-word modes, custom bundles, sensitivity,
+  and room profiles.
 - **Microphone processing:** Per-device beamforming and echo cancellation for
   each supported microphone array.
 - **Voice features:** Continued conversation, playback barge-in, intercom,
