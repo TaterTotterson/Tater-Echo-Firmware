@@ -37,49 +37,34 @@ Target metadata used by Tater and the release builds lives in
 
 ## Features
 
-- Model-driven wake-word boundary detection for every supported wake engine
-  and confirmation mode. A small TFLite model supplied by the wake bundle
-  finds the acoustic end of the wake phrase in buffered audio, preserving words
-  spoken immediately afterward for command VAD and speech recognition while
-  keeping the wake phrase itself out of the command audio.
-- Automatic USB Ethernet with Wi-Fi fallback on supported satellites. Biscuit
-  can use the tested powered adapter for a single-cable PoE-style power and
-  network connection.
-- Sat Chat audio and video calls from satellite to satellite and from Tater on
-  a phone to a satellite. Checkers, Cronos, Crown, Athena, and Rook support
-  audio and video; Biscuit and Radar participate in audio calls.
-- On-device microWakeWord, openWakeWord, or NanoWakeWord CNN/GRU detection,
-  including MWW + OWW and MWW + NWW confirmation modes, built-in or custom
-  wake bundles, live sensitivity, and room-environment profiles managed from
-  Tater.
-- Hardware-appropriate microphone processing, echo cancellation, and
-  beamforming: seven microphones on Biscuit and Radar, two on Checkers and
-  Cronos, and four on Crown, Athena, and Rook.
-- Continued conversation, playback barge-in, room intercom, announcements,
-  wake sounds, mute, volume, and wake-audio training samples.
-- Per-satellite Do Not Disturb with an immediate toggle and daily local-time
-  schedule. DND stops music, announcements, wake sounds, and other remote
-  playback while leaving wake detection and safety-critical timers/alarms active.
-- Local timers and alarms with spoken `Stop`, physical action-button controls,
-  and on-screen Stop controls on Checkers, Cronos, Crown, Athena, and Rook.
-- Sendspin multi-room and stereo-pair playback with synchronized PCM/FLAC,
-  native TTS overlays, audio scenes, music ducking, and persistent output
-  channel selection.
-- Native Checkers, Cronos, Crown, Athena, and Rook photo dashboards with bundled landscapes or
-  user wallpapers, weather and room sensors, music, timers, Awareness
-  notifications, configurable themes, and live assistant status.
-- Touch access on Checkers, Cronos, Crown, Athena, and Rook to Sat Chat, integration-backed
-  thermostat controls, and Room Vision camera and doorbell feeds. Integration
-  HLS and UniFi Protect RTSPS use the pinned FFmpeg decoder, Tater Echo cameras
-  use the native MJPEG relay, and all retain automatic JPEG fallback and optional
-  push-to-talk audio.
-- Tater-controlled Biscuit and Radar LED animations for wake, voice, music,
-  volume, mute, timer, setup, connection, and update states.
-- Passive BLE advertisement forwarding for room-level presence, plus secure
-  active BLE GATT connections for services such as Meshtastic Core with PIN
-  pairing, persistent bonds, notifications, and unpairing.
-- Captive-portal Wi-Fi and Tater pairing, followed by verified A/B OTA updates
-  with automatic rollback.
+- **Wake boundaries:** Model-driven endpoints preserve speech immediately after
+  the wake phrase without sending the wake phrase to speech recognition.
+- **USB Ethernet:** Automatic wired networking with Wi-Fi fallback, including a
+  tested single-cable powered setup for Biscuit.
+- **Sat Chat:** Satellite and phone audio/video calls; Biscuit and Radar support
+  audio, while screen-equipped satellites also support video.
+- **Wake engines:** On-device microWakeWord, openWakeWord, and NanoWakeWord with
+  confirmation modes, custom bundles, sensitivity, and room profiles.
+- **Microphone processing:** Per-device beamforming and echo cancellation for
+  each supported microphone array.
+- **Voice features:** Continued conversation, playback barge-in, intercom,
+  announcements, wake sounds, controls, and wake-audio training samples.
+- **Do Not Disturb:** Immediate or scheduled blocking of remote playback while
+  wake detection and safety-critical timers and alarms remain active.
+- **Timers and alarms:** Local alerts with spoken, physical-button, and on-screen
+  Stop controls where supported.
+- **Sendspin:** Synchronized multi-room and stereo PCM/FLAC playback with TTS
+  overlays, audio scenes, ducking, and selectable output channels.
+- **Dashboards:** Photos, weather, room sensors, music, timers, Awareness
+  notifications, themes, and assistant status on screen-equipped satellites.
+- **Touch controls:** Sat Chat, thermostats, and Room Vision camera or doorbell
+  feeds with automatic fallback and optional push-to-talk.
+- **LED feedback:** Biscuit and Radar animations for wake, voice, music, volume,
+  mute, timers, setup, connection, and updates.
+- **Bluetooth:** BLE presence forwarding and secure GATT connections for
+  services such as Meshtastic Core.
+- **Setup and updates:** Captive-portal pairing and verified A/B OTA updates with
+  automatic rollback.
 
 ## USB Ethernet adapters
 
