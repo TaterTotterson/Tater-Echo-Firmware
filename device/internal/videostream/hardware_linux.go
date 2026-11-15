@@ -42,11 +42,14 @@ const (
 	cronosVDECComponentHash   = "812cd2a56b50e994fee60cdb92d3b0c82ff339d25b55c55d31ac9233f7b6ee89"
 	crownVDECHelperSHA256     = "abb64de71075441c32f43a7c8336bacc6364a34958f50028df5884ca2cc84d30"
 	rookVDECHelperSHA256      = "c103fcf7ed2e492ead281ed3c86847f502417abbbc2b2e2387b8001e20046cbd"
+	checkersLineageVDECHelper = "247f414fd971554227ae422357062b5ed691836b8f66516c0884fc1c0ff7cae2"
+	checkersLineageRoot       = "/data/tater-vdec-lineage-1"
 )
 
 type hardwareDecoderConfig struct {
 	helper, component, gralloc, libraryPath, manifest string
 	target                                            string
+	lineage                                           bool
 }
 
 func environmentValue(name, fallback string) string {
@@ -76,6 +79,15 @@ func hardwareDecoderConfigFromEnvironment() (hardwareDecoderConfig, bool) {
 		// No Android 5 GraphicBuffer ABI and no unqualified /vendor fallback.
 		config.libraryPath = environmentValue("TATER_VDEC_LIBRARY_PATH", "/data/tater-vdec/lib")
 	}
+	if target == "checkers" && os.Getenv("TATER_CHECKERS_LINEAGE_ENABLE") == "1" {
+		// The new USB platform owns a versioned Lineage ABI. Never substitute
+		// the old FireOS GraphicBuffer runtime, including after app rollback.
+		config.lineage = true
+		config.component = checkersLineageRoot + "/lib/libMtkOmxVdecEx.so"
+		config.manifest = checkersLineageRoot + "/runtime.json"
+		config.libraryPath = checkersLineageRoot + "/lib"
+		config.gralloc = ""
+	}
 	return config, true
 }
 
@@ -90,6 +102,9 @@ func (config hardwareDecoderConfig) environment() []string {
 	}
 	if config.target == "cronos" || config.target == "crown" || config.target == "rook" {
 		environment = append(environment, "LD_PRELOAD=/data/tater-vdec/lib/libbionic28compat.so")
+	}
+	if config.lineage {
+		environment = append(environment, "LD_PRELOAD="+checkersLineageRoot+"/lib/libbionic28compat.so")
 	}
 	return environment
 }
@@ -139,9 +154,13 @@ func validateVDECRuntimeManifestForTarget(value []byte, target string) error {
 	}
 	validHelper := (manifest.Schema == 1 && allowlistedVDECHelper(manifest.HelperSHA256)) ||
 		(manifest.Schema == 2 && manifest.HelperSHA256 == "")
-	if target == "cronos" || target == "crown" || target == "rook" {
+	if target == "cronos" || target == "crown" || target == "rook" || target == "checkers-lineage" {
+		runtimeID := target + "-mt8163-vdec-stock-1"
+		if target == "checkers-lineage" {
+			runtimeID = "checkers-mt8163-vdec-lineage-1"
+		}
 		if manifest.Schema != 2 || manifest.HelperSHA256 != "" ||
-			manifest.RuntimeID != target+"-mt8163-vdec-stock-1" || manifest.TreeSHA256 != cronosVDECTreeSHA256 ||
+			manifest.RuntimeID != runtimeID || manifest.TreeSHA256 != cronosVDECTreeSHA256 ||
 			manifest.FileCount != 66 || manifest.RuntimeBytes != 41_926_684 {
 			return errors.New("Cronos decoder runtime identity is not allowlisted")
 		}
@@ -196,25 +215,37 @@ func validateVDECRuntime(config hardwareDecoderConfig) error {
 	if target == "" {
 		target = "checkers"
 	}
+	if config.lineage {
+		if target != "checkers" {
+			return errors.New("Checkers Lineage runtime cannot be borrowed by another target")
+		}
+		target = "checkers-lineage"
+	}
 	if err := validateVDECRuntimeManifestForTarget(manifest, target); err != nil {
 		return err
 	}
 	checks := map[string]string{
 		config.helper: neonVDECHelperSHA256, config.component: expectedVDECComponentHash, config.gralloc: expectedVDECGrallocHash,
 	}
-	if target == "cronos" || target == "crown" || target == "rook" {
+	if target == "cronos" || target == "crown" || target == "rook" || target == "checkers-lineage" {
+		runtimeRoot := "/data/tater-vdec"
+		if target == "checkers-lineage" {
+			runtimeRoot = checkersLineageRoot
+		}
 		checks = map[string]string{
 			config.helper: cronosVDECHelperSHA256, config.component: cronosVDECComponentHash,
-			"/data/tater-vdec/linker":                   "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
-			"/data/tater-vdec/lib/libbionic28compat.so": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
-			"/data/tater-vdec/lib/libion_ulit.so":       "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
-			"/data/tater-vdec/lib/libvcodecdrv.so":      "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
-			"/data/tater-vdec/lib/libvcodec_utility.so": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
+			runtimeRoot + "/linker":                   "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+			runtimeRoot + "/lib/libbionic28compat.so": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+			runtimeRoot + "/lib/libion_ulit.so":       "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+			runtimeRoot + "/lib/libvcodecdrv.so":      "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
+			runtimeRoot + "/lib/libvcodec_utility.so": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
 		}
 		if target == "crown" {
 			checks[config.helper] = crownVDECHelperSHA256
 		} else if target == "rook" {
 			checks[config.helper] = rookVDECHelperSHA256
+		} else if target == "checkers-lineage" {
+			checks[config.helper] = checkersLineageVDECHelper
 		}
 	}
 	for path, expected := range checks {

@@ -190,6 +190,16 @@ class RookInstallerTests(unittest.TestCase):
             with self.assertRaises(installer.Fail):
                 installer.verify_reinstall_boot(FakeReinstallAdb('TYPE="ext4"', "0" * 64), boot)
 
+    def test_released_423_boot_is_accepted_without_relaxing_identity(self):
+        released = (13150208, "f31551fceef66cc173d5bb486cecd5a2596d2c0dc9db24186531cf02b7ee9829")
+        self.assertIn(released, installer.KNOWN_PREVIOUS_TATER_BOOTS)
+        with tempfile.TemporaryDirectory() as temporary:
+            boot = Path(temporary) / "boot.img"
+            boot.write_bytes(b"new candidate boot")
+            installer.verify_reinstall_boot(FakeReinstallAdb('TYPE="ext4"', digests={released[0]: released[1]}), boot)
+            with self.assertRaises(installer.Fail):
+                installer.verify_reinstall_boot(FakeReinstallAdb('TYPE="ext4"', digests={released[0]: "0" * 64}), boot)
+
     def test_bundle_is_hash_checked_and_target_locked(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

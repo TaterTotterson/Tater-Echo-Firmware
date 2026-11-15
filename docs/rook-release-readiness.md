@@ -1,5 +1,10 @@
 # Rook hardware/UI development qualification
 
+Current USB-candidate status (2026-11-15): the automatic library installer and
+exact 4.2.3 boot allowlist are prepared. Full USB/OTA qualification is pending;
+see [the fleet test plan](echo-5-build-inputs.md). Earlier sections below are
+development evidence, not approval of the assembled 5.0.0 factory image.
+
 Date: 2026-11-14. Unpublished owner-device development, not release approval.
 
 ## Scope and rollback

@@ -47,6 +47,7 @@ jobs:
             tools.test_extract_platform_member \
             tools.test_merge_release_manifests \
             tools.test_package_echo_release \
+            tools.test_runtime_compat \
             tools.test_release_notes
           python3 -m unittest discover -s linux/checkers -p 'test_*.py'
           python3 -m unittest discover -s linux/dot -p 'test_*.py'
@@ -56,10 +57,12 @@ jobs:
             factory.test_to_recovery \
             factory.test_recovery_install \
             factory.test_provision_hardware \
+            factory.test_hardware_runtime \
             linux.common.test_recovery_router
           python3 -m unittest discover -s factory/dot-linux -p 'test_*.py'
           python3 -m unittest discover -s linux/rook -p 'test_*.py'
           python3 -m unittest discover -s factory/rook-linux -p 'test_*.py'
+          python3 -m unittest discover -s factory/athena-linux -p 'test_*.py'
           python3 -m py_compile \
             linux/dot/build_kernel.py \
             linux/dot/early_boot.py \
@@ -72,6 +75,8 @@ jobs:
             tools/check_legacy_ota.py \
             tools/hardware_bundle.py \
             factory/provision_hardware.py \
+            factory/hardware_runtime.py \
+            tools/runtime_compat.py \
             tools/fetch_platform_input.py \
             tools/extract_platform_member.py \
             tools/platform_lock.py \
@@ -86,6 +91,7 @@ jobs:
           sh -n linux/dot/build_linux.sh
           sh -n linux/dot/tater-early-recovery
           sh -n linux/checkers/build_linux.sh
+          sh -n linux/athena/store-tools/du
           sh -n linux/checkers/build_btbridge_helper.sh
           sh -n linux/rook/build_linux.sh
           sh -n linux/dot/setup-ap.sh
@@ -130,4 +136,6 @@ jobs:
             tools/package_echo_release.py \
             tools/check_legacy_ota.py \
             tools/hardware_bundle.py \
-            factory/provision_hardware.py
+            factory/provision_hardware.py \
+            factory/hardware_runtime.py \
+            tools/runtime_compat.py

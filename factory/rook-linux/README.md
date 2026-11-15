@@ -5,10 +5,10 @@ Spot (`rook`). It is not for Show 5 (`checkers`), Show 8 (`crown`), newer Spot m
 Echo devices. The device must already be unlocked with amonet-rook v2.0.0 and
 booted into TWRP over USB.
 
-Every Rook running Tater firmware earlier than v4.0.0 must use this USB/TWRP
+Every Rook running Tater firmware earlier than v5.0.0 must use this USB/TWRP
 factory bundle once. Add `--reinstall-existing-tater` to both the preflight and
-install commands for that upgrade. The v4 transition itself is not an OTA
-update; compatible releases after v4.0.0 use verified application and System
+install commands for that upgrade. The v5 transition is not an OTA
+update; compatible later releases use verified application and System
 OTA.
 
 The computer needs Python 3, `adb`, and `fastboot`. The installer supports
@@ -34,6 +34,13 @@ The pinned LineageOS ZIP is downloaded on demand or can be supplied with
 `2755428c124df88ffd3bc6a9c36db16bbe3b7e639883fd1092dc839ac5ae9d13`.
 No device-specific vendor binaries are included in this bundle.
 
+Echo 5 requires a full USB install once, including upgrades from 4.2.3.
+The installer prepares hash-pinned public runtime inputs before flashing, then
+assembles GPU/video libraries with this device's retained vendor files after
+first boot. Keep power and USB connected through the final restart. No FireOS
+backup, NDK, extra filesystem tools, or separately prepared runtime is needed;
+allow roughly 3 GB of free host disk space for extraction.
+
 From inside the extracted bundle, first run `./install.sh --verify-bundle`,
 then `./install.sh --preflight-only --serial YOUR_SERIAL`. The preflight also
 checks or creates the private backups, but does not write to the Spot. For the
@@ -57,7 +64,7 @@ the saved Tater setup and settings are then restored unless
 `--factory-reset` is also supplied. Do not use this option on a
 newly unlocked device.
 
-For an existing Tater installation earlier than v4.0.0, the commands are:
+For an existing Tater installation earlier than v5.0.0, including v4.2.3, run:
 
 ```sh
 ./install.sh --preflight-only --reinstall-existing-tater

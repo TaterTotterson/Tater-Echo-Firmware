@@ -31,7 +31,7 @@ func classicHomeFixture(t *testing.T, target string, extras bool) (*renderer, *i
 		r.state.Weather.IndoorHumidityText, r.state.Weather.HumidityText = "42%", "55%"
 		r.state.Weather.WindText, r.state.Weather.RainText, r.state.Weather.LightningText = "NW 5 mph", "0.02 in", "0"
 	}
-	art, _, err := readDefaultWallpaper(target, 7)
+	art, _, err := readDefaultWallpaper(target, 6) // alpine-sunset
 	if err != nil {
 		t.Fatal(err)
 	}

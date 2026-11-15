@@ -2,8 +2,8 @@
 
 ## v5.0.0 — release candidate
 
-This source candidate is not a published firmware release. Public helper/kernel
-delivery and final USB, OTA, recovery and rollback qualification remain required;
+This source candidate is not a published firmware release. Final physical USB,
+OTA, recovery and rollback qualification remain required;
 the release packer intentionally refuses unqualified platform inputs.
 
 ### Highlights
@@ -23,6 +23,22 @@ the release packer intentionally refuses unqualified platform inputs.
 - Public source roles documented in Tater Echo Linux and Tater Echo Hardware.
 
 ### Development and qualification notes
+
+- Prepare hash-pinned public Android inputs automatically before screen-device
+  USB installation, then assemble GPU/video runtimes with this unit's retained
+  vendor files after first boot. No FireOS backup, NDK, mounted images or extra
+  filesystem tools are needed. Verify complete staged/existing directories,
+  refuse changed vendor files and unsafe links, support interrupted-root retry,
+  and confirm a new target-verified boot after installation. Vendor binaries
+  remain device-local and are never included in public Tater archives.
+- Isolate Checkers' retained-Lineage decoder/encoder ABI in new versioned runtime
+  paths, preserving its camera conversion and keeping the old FireOS ABI separate.
+  Add Rook's exact published 4.2.3 boot to the guarded USB reinstall allowlist.
+  Produce unqualified USB-only candidate bundles without any OTA/feed artifacts.
+  Physical fleet qualification, including Checkers' corrected microphone kernel,
+  is still required before the final release.
+- Keep Athena's pinned store builder compatible with Alpine's disk-size tools
+  without changing the upstream platform source or installing floating tools.
 
 - Require a one-time full USB upgrade for the new hardware platform on every
   Echo target. Publish schema-2 app, bridge and system packages that v4.2.3
@@ -274,7 +290,9 @@ the release packer intentionally refuses unqualified platform inputs.
 ### Screen backgrounds
 
 - Added alpine sunset, misty lake, and desert dusk to the bundled photo
-  rotation, alongside the existing seven landscapes. Both native display
+  rotation, alongside the six retained landscapes. Removed Meadow from both
+  embedded display-size sets and the rotation; nine backgrounds remain.
+  Both native display
   families are included, with the existing centered cover layout for Rook.
 - Preserved configured rotation timing, uploaded-photo precedence, and the
   single active decoded-image cache. The charcoal settings-menu redesign is

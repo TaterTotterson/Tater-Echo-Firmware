@@ -5,9 +5,9 @@ This USB factory bundle installs Tater Linux on an unlocked Echo Show 5
 Linux boot image, and creates the A/B rootfs store. Existing Tater identity and
 setup are preserved by default; a new device or `--factory-reset` starts fresh.
 
-Every Checkers running Tater firmware earlier than v4.0.0 must use this USB/TWRP
-factory bundle once. The v4 transition itself is not an OTA update. Compatible
-releases after v4.0.0 can update both the application and inactive root-system
+Every Checkers running Tater firmware earlier than v5.0.0 must use this USB/TWRP
+factory bundle once, including v4.2.3. The v5 transition is not an OTA update.
+Compatible later releases can update both the application and inactive root-system
 slot through Tater's verified A/B updater.
 
 The conversion reformats userdata and the former system partition, but first
@@ -20,13 +20,16 @@ remain USB recovery operations.
 
 ## Before you start
 
-The unpublished hardware-enabled installer also supports a separately prepared
-owner-local library directory with `--hardware-runtime DIRECTORY`. These private
-files are never bundled in a public release. See
-[the hardware build/provisioning guide](../../docs/checkers-hardware-build.md)
-in the source repository for preparation, target/kernel guards, rollback
-behavior, and the remaining kernel migration/release gates. Do not use this
-option as a substitute for that required kernel migration.
+Echo 5 requires this full USB installation once, including upgrades from 4.2.3.
+Before flashing, the installer downloads and verifies pinned public Android
+runtime inputs. After the new system boots, it combines those with hash-verified
+vendor libraries retained on this device and restarts it to load GPU/video
+support. Keep USB and normal power connected until setup completes.
+No FireOS backup, separately assembled library directory, NDK, or separate
+LineageOS installation is needed; `--hardware-runtime` is obsolete. Vendor
+libraries are never included in Tater's public firmware archives. Preparation
+uses standard Python only, without mounting filesystem images or requiring
+administrator privileges. Allow roughly 3 GB of free space for extraction.
 
 - Confirm the device is a **2019 first-generation Echo Show 5** (`checkers`),
   unlocked with amonet-checkers 2.0.1 or newer and able to boot TWRP. Do not

@@ -5,10 +5,16 @@ first-generation Echo Show 8**, model **C7H6N3**, codename `crown`. It
 preserves TWRP, flashes the pinned Crown Linux boot image, and creates the A/B
 rootfs store. It preserves an existing Tater pairing by default.
 
-Every Crown running Tater firmware earlier than v4.0.0 must use this USB/TWRP
-factory bundle once. The v4 transition itself is not an OTA update. Compatible
-releases after v4.0.0 can update both the application and inactive root-system
+Every Crown running Tater firmware earlier than v5.0.0 must use this USB/TWRP
+factory bundle once, including v4.2.3. The v5 transition is not an OTA update.
+Compatible later releases can update both the application and inactive root-system
 slot through Tater's verified A/B updater.
+
+Before flashing, the installer prepares hash-pinned public runtime inputs.
+After first boot, it assembles GPU/video libraries with this unit's retained
+vendor files and restarts the satellite. Keep power and USB attached until
+setup finishes. No FireOS backup, NDK, extra filesystem tools, or separately
+assembled runtime is needed. Allow roughly 3 GB of free host space.
 
 > **Do not use this bundle on an Echo Show 8 2nd Gen (`A8H3N2`) or any other
 > model.** The installer also reads `ro.product.device` in TWRP and refuses to

@@ -5,8 +5,9 @@ release approval. No satellite was flashed or rebooted in this work.
 
 ## Published and pinned inputs
 
-- [Open GPU/video helpers and Athena AP modules](https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/tag/hardware-inputs-v1.0.0-rc.1):
-  six exact, deterministic public archives. All five helper sets and both AP
+- [Open GPU/video helpers, Athena AP modules and compatibility DSOs](https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/tag/hardware-inputs-v1.0.0-rc.2):
+  seven exact, deterministic binary-input archives plus corresponding source.
+  All five helper sets and both AP
   executables reproduce from their locked sources. The separate Athena kernel
   rebuild now also reproduces all five module binaries.
 - [Kernel/boot candidates](https://github.com/TaterTotterson/Tater-Echo-Linux/releases/tag/hardware-kernels-v1.0.0-rc.1):
@@ -24,8 +25,9 @@ release approval. No satellite was flashed or rebooted in this work.
   Both the cached-input and actual network-download paths were checked. The
   preparer has its own source pin at Hardware commit
   `23d62e186915dbe55dc9b426ac0f18aa8020700e`, including native-Linux Docker staging
-  ownership cleanup; the helper/module archives retain their original source
-  pin and byte identities.
+  ownership cleanup. RC.2 helper provenance is pinned to Hardware commit
+  `a918c6d69eef3b9c12c3bd51268ac5919903e8b1`; only Checkers' codec executables
+  change. RC.1 archives remain unchanged.
 
 `platforms/hardware-release-inputs.json` pins helper archive sizes/hashes as well
 as their source commit. `platforms/tater-echo-linux-lock.json` pins platform
@@ -34,35 +36,69 @@ variables are needed. The isolated **Verify public hardware release inputs**
 workflow verifies public downloads and recreates Mesa without approving a
 firmware build for installation.
 
-## Installer audit: still required before release
+## Automatic device-local library setup
 
-Public helpers are not the proprietary libraries they load. Existing hardware
-trials used separately prepared owner-local runtimes; the public factory
-artifacts must not contain an owner's private runtime or device backup.
+All five screen-target factory installers prepare hash-pinned public Android
+inputs **before flashing**. The bundled Python reader extracts only bounded
+ordinary files from two pinned images, without mounts, administrator privileges,
+filesystem tools, or an NDK. Source-built compatibility libraries travel with
+their source packet and upstream notice. Each installer then waits for its
+selected device's new kernel/platform to boot, assembles libraries using that
+unit's retained vendor files, verifies every output, and restarts it. Completion
+requires a different boot identity and a successful target/kernel check.
 
-The current private-runtime preparation/provisioning tools support Checkers,
-Cronos and Rook only, and require exact, already assembled compatible local
-library trees. They are not an automatic extractor for arbitrary FireOS,
-Lineage or old Tater installations. Their checks refuse mismatches instead of
-substituting another target's libraries.
+No proprietary library, prepared owner runtime, device identity, recording or
+backup is included in public firmware. No FireOS backup is required. MT8163
+installers use pinned Lineage ZIPs only to restore vendor files; Android is not
+booted. Athena retains its existing vendor partition. The AP-controlled codec
+startup keeps SCP offline and requires no experimental SCP firmware.
 
-The shared Checkers/Cronos factory path accepts and verifies a target-matched
-`--hardware-runtime` before flashing. Rook's standalone provisioner is present,
-but is not wired into its factory installer. Crown and Athena still need their
-target-specific private-runtime preparation/install workflow completed.
-Athena's public Mesa and AP module packaging do not supply its private codec
-libraries or SCP runtime.
+Checkers now has a separately versioned retained-Lineage codec profile at
+`/data/tater-vdec-lineage-1` and `/data/tater-venc-lineage-1`. Its old FireOS
+GraphicBuffer ABI is never silently substituted. The original GPU helpers and
+other targets' codec output hashes are unchanged. Checkers' new codec helpers
+must still pass physical qualification alongside its separate-microphone kernel.
 
-Consequently, **a full USB flash alone is not yet a complete general-user
-hardware migration**. Before 5.0.0, finish a reproducible owner-local acquisition
-and installation path for each target, including users already on Tater who
-do not have the original FireOS files. Exercise a clean install, settings-
-preserving reinstall and failure/retry paths; do not distribute the research
-device's prepared libraries as a shortcut.
+Offline checks reproduced all 101 runtime files per MT8163 target and all 79
+Athena runtime files using the production shell assembly logic, including a
+second verified installation. Linux tests also cover interrupted-root commit
+and retry, changed vendor inputs, wrong existing destinations, unsafe links,
+download hash/size errors, and a responding old shell during delayed reboot.
+These are software tests, not physical USB or codec qualification.
+
+See [the detailed supply-chain audit](https://github.com/TaterTotterson/Tater-Echo-Hardware/blob/main/docs/findings/owner-runtime-supply-chain.md).
+
+## USB-only test candidates
+
+`tools/package_echo_release.py --usb-test-candidate` requires a separate empty
+output directory and produces only a factory archive, checksum list and
+`usb-test-candidate.json` receipt. Both manifests explicitly mark it unqualified.
+It creates no OTA archives or `firmware-manifest.json` feed. The mode defers
+only physical approval: actual rootfs/helper/kernel/source identity checks
+still apply. Normal release packaging remains blocked by all seven false
+qualification flags.
 
 ## Part 2: installed-candidate qualification
 
-Once runtime delivery is complete, install the exact public candidate through
+All seven complete USB test bundles were built locally on 2026-11-15. Each
+extracted installer passes `--verify-bundle`; payloads/checksums and target-
+specific helpers were checked. Athena's complete store passes read-only fsck,
+board/version/platform checks, and contains no rescue SSH authorized keys.
+The exact Rook boot from the published 4.2.3 factory archive was independently
+matched to its bundle manifest and added to the strict reinstall allowlist.
+All five screen binaries omit Meadow while retaining the other artwork.
+No satellite has been accessed or modified during this preparation.
+
+Begin with the older Biscuit and Rook for real pre-v5 settings-preserving USB
+upgrades, then full USB reinstalls on Checkers, Cronos, Crown, Athena and Radar.
+Use normal power plus USB data and identify the exact unit before entering
+recovery. Preserve verified private backups/settings; do not use factory reset
+unless explicitly requested. Rook's existing-install path needs
+`--reinstall-existing-tater`. Keep USB connected through device-local library
+setup and its final reboot. On a stopped install, keep the private work/backups
+and record the failing step; do not bypass an identity/hash failure.
+
+Install the exact candidate through
 the end-user workflow. Retest immediate first words, wake/reply interruption,
 touch/volume/mute and camera privacy; verify the actual negotiated codecs in
 both call directions, sustained motion/colors, normal reboot, recovery,

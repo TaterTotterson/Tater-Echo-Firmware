@@ -1,5 +1,11 @@
 # Athena GPU/UI development checkpoint
 
+Current USB-candidate status (2026-11-15): the matched AP codec/kernel/Mesa
+factory image and automatic device-local library installer are assembled and
+software-verified. Full USB/OTA qualification is pending; see
+[the fleet test plan](echo-5-build-inputs.md). Earlier entries below are a
+development history and do not describe the final candidate's codec inventory.
+
 Unpublished owner-device work, 2026-11-14; not full release qualification.
 
 Athena now has the shared grey GPU workspace and approved lower-right home

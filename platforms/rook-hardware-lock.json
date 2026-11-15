@@ -15,7 +15,7 @@
   },
   "link_libraries": {},
   "sources": {
-    "scripts/build_tater_hardware.py": "f31678e41b1b4977050fc95c833be5300da92bd86a450dce5bd254b72df96c98",
+    "scripts/build_tater_hardware.py": "30ff11018a220366a17ae3390e33f3881e28315e4be1fc007cfb46d787a3fbd8",
     "probes/mt8163-gpu/Makefile": "b9026fd0abebfedcaf57e2f36458eb286fd677ccfd9f0ef6079966abc5be334a",
     "probes/mt8163-gpu/rgba_rotate_stream_android.c": "a7a181aced8f31f91dbafd35dd777393bbb68a9cef65876d9de086e5f656ccc9",
     "probes/mt8163-vcodec/Makefile": "e247dba378190246caae2df73e210a052329abd2a1e33a2c97da3981c5050049",

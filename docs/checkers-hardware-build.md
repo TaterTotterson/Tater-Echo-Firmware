@@ -1,18 +1,29 @@
-# Checkers hardware helper build and private runtime provisioning
+# Checkers hardware helpers and device-local runtime setup
 
 The open helper inputs are published separately from installable firmware.
 They do not constitute kernel migration or release qualification. Do not flash
 or release firmware until the remaining
 [release gates](checkers-release-readiness.md) pass. The current cross-target
 [build-input and installer audit](echo-5-build-inputs.md) distinguishes published
-inputs from the remaining end-user runtime delivery and physical checks.
+inputs and automatic runtime delivery from the remaining physical checks.
+
+Echo 5's factory installer now performs runtime preparation and installation
+automatically. It downloads verified public inputs before flashing, then combines
+them with this unit's retained vendor libraries after first boot. Users do not
+need an old FireOS backup, NDK or separately assembled runtime. The revised
+Checkers codec ABI uses versioned `tater-vdec-lineage-1` / `tater-venc-lineage-1`
+directories, never the old FireOS tree. Its helper/kernel hardware trial remains
+part of the fleet USB qualification, not a prerequisite for producing USB-only
+test candidates. The manual provisioners below document the earlier research
+workflow and are **not** shipped or required by the Echo 5 factory installer.
 
 ## Source and artifact ownership
 
 - `Tater-Echo-Hardware` contains the original helper sources and clean build
   recipe. `platforms/checkers-hardware-lock.json` pins every source file actually
-  used, the public Android header revisions, NDK r21e identity, owner-local link
-  inputs, and the three hardware-qualified output hashes. This is a content pin,
+  used, the public Android header revisions, NDK r21e identity, and the three
+  pinned output hashes. The retained-Lineage profile has no private link-library
+  inputs. This is a content pin,
   not a fabricated Git commit or a reference to an unpublished GitHub repository.
 - `Tater-Echo-Firmware` verifies that lock **before running** the research build
   recipe. Builds happen in a new temporary tree without old object files.
@@ -29,7 +40,7 @@ python3 tools/hardware_bundle.py build \
   --source /path/to/Tater-Echo-Hardware \
   --ndk /path/to/android-ndk-r21e \
   --headers /path/to/public-header-checkouts \
-  --link-libraries /path/to/owner-private-vdec/lib \
+  --link-libraries /path/to/Tater-Echo-Hardware \
   --output /path/to/new-public-helper-directory
 python3 tools/hardware_bundle.py verify /path/to/new-public-helper-directory
 python3 tools/hardware_bundle.py pack /path/to/new-public-helper-directory \
@@ -57,7 +68,7 @@ metadata and executable hashes. Paths, duplicates, links, non-ARM32 helpers,
 private extra files and mismatches are refused. The separate **Verify public
 hardware release inputs** workflow exercises downloads without waiving physical
 qualification. Source/license details accompany the
-[input prerelease](https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/tag/hardware-inputs-v1.0.0-rc.1).
+[input prerelease](https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/tag/hardware-inputs-v1.0.0-rc.2).
 
 The Checkers packer also requires an explicitly reviewed, `release_qualified`
 true
@@ -91,7 +102,8 @@ daemon/renderer-only so an old updater can learn the extended archive format
 before installing a full bundle. Their temporary absence of acceleration is
 not an acceleration qualification.
 
-The current private library ABI/tree identities are unchanged. Version 2
+The new factory profile deliberately separates the retained-Lineage Checkers
+ABI from the historical FireOS tree. Version 2
 private manifests describe **libraries only**, not a mutable shared helper.
 Valid legacy version 1 manifests remain accepted for their library identity;
 the running firmware independently checks its own exact helper hash. Future
@@ -100,7 +112,7 @@ path rather than overwriting an existing `/data` runtime. This work does not
 retrofit old released firmware with new manifests or promise accelerated
 rollback into an older build that never supported these sidecars.
 
-## Prepare private libraries on the owner's computer
+## Historical research-only manual preparation
 
 From `Tater-Echo-Hardware`:
 
@@ -123,8 +135,10 @@ private and contains no helpers, credentials, calibration, or recording files.
 
 ## Verify or explicitly provision by USB
 
-The shared Checkers/Cronos factory archive includes `provision_hardware.py`.
-The examples below select Checkers; pass `--target cronos` for Cronos:
+The historical standalone `provision_hardware.py` is a research tool, not part
+of the new factory archive. These examples select the earlier Checkers runtime;
+pass `--target cronos` for Cronos. Do not use these old Checkers trees with the
+new retained-Lineage helper profile:
 
 ```sh
 # Local verification only; no device is opened.

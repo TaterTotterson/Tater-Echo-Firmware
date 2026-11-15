@@ -27,6 +27,11 @@ class PackageEchoReleaseTests(unittest.TestCase):
         patcher = mock.patch.object(package_echo_release, 'verify_rootfs_ota_platform')
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Public compatibility archives have their own exact-identity tests;
+        # archive-layout fixtures must not download binary inputs.
+        patcher = mock.patch.object(package_echo_release.runtime_compat, 'factory_inputs', return_value={})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_rootfs_profile_is_required_and_target_specific(self):
         import io
@@ -49,6 +54,11 @@ class PackageEchoReleaseTests(unittest.TestCase):
         target = root / (destination or relative)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+        if relative in {"factory/checkers-linux/install.py", "factory/rook-linux/install.py", "factory/athena-linux/install.py"}:
+            for name in ("hardware_runtime.py", "hardware-runtime-sources.json"):
+                common = root / "factory" / name
+                common.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(REAL_REPO / "factory" / name, common)
 
     @staticmethod
     def _write(path: Path, contents: bytes = b"fixture") -> None:
@@ -308,6 +318,47 @@ class PackageEchoReleaseTests(unittest.TestCase):
         for target in ("biscuit", "radar"):
             with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio release is blocked"):
                 package_echo_release.require_dot_audio_platform(target)
+
+    def test_usb_candidate_has_no_ota_files_or_publishable_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, output = Path(temporary) / "repo", Path(temporary) / "usb-candidate"
+            targets, env = self.dot_fixture(root, "biscuit", "v9.8.7")
+            with (
+                mock.patch.object(package_echo_release, "REPO", root),
+                mock.patch.object(package_echo_release, "TARGETS", targets),
+                mock.patch.object(package_echo_release.subprocess, "check_output", return_value=package_echo_release.DOT_PLATFORM_COMMIT + "\n"),
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch.object(package_echo_release, "require_dot_audio_platform", side_effect=SystemExit("qualification gate")) as gate,
+            ):
+                with self.assertRaisesRegex(SystemExit, "qualification gate"):
+                    package_echo_release.build("v9.8.7", "biscuit", output)
+                artifacts = package_echo_release.build("v9.8.7", "biscuit", output, usb_test_candidate=True)
+                self.assertEqual(gate.call_count, 1)
+                self.assertEqual({p.name for p in artifacts}, {"tater-echo-biscuit-v9.8.7-usb-candidate-factory.tar.gz", "usb-test-candidate.json", "SHA256SUMS"})
+                receipt = json.loads((output / "usb-test-candidate.json").read_text())
+                self.assertFalse(receipt["release_qualified"])
+                with tarfile.open(artifacts[0]) as archive:
+                    manifest = json.load(archive.extractfile("tater-echo-biscuit-v9.8.7-usb-candidate-factory/bundle-manifest.json"))
+                    self.assertFalse(manifest["release_qualified"])
+                    self.assertEqual(manifest["purpose"], "usb-test-candidate")
+                with self.assertRaisesRegex(SystemExit, "separate empty"):
+                    package_echo_release.build("v9.8.7", "biscuit", output, usb_test_candidate=True)
+                with self.assertRaisesRegex(SystemExit, "separate empty"):
+                    package_echo_release.build("v9.8.7", "biscuit", root / "release", usb_test_candidate=True)
+
+    def test_usb_candidate_does_not_bypass_kernel_or_rootfs_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            targets, env = self.dot_fixture(root, "biscuit", "v9.8.7")
+            with (
+                mock.patch.object(package_echo_release, "REPO", root),
+                mock.patch.object(package_echo_release, "TARGETS", targets),
+                mock.patch.object(package_echo_release.subprocess, "check_output", return_value=package_echo_release.DOT_PLATFORM_COMMIT + "\n"),
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch.object(package_echo_release, "verify_dot_audio_kernel", side_effect=SystemExit("wrong actual kernel")),
+                self.assertRaisesRegex(SystemExit, "wrong actual kernel"),
+            ):
+                package_echo_release.build("v9.8.7", "biscuit", Path(temporary) / "usb-candidate", usb_test_candidate=True)
 
     def test_old_or_wrong_dot_audio_kernel_cannot_be_packaged(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

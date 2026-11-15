@@ -34,6 +34,7 @@ const (
 	cronosCodecTree         = "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a"
 	crownVencHelperHash     = "6b0ea3d6d44f9f75b266b3cad352f2924c60f1aab096254df6c58d1548b3131c"
 	rookVencHelperHash      = "6dbecd9c9d673af97a2c860bc095a406ab967ae7ca0d2240f2af87fb00c56bf5"
+	checkersLineageVencHash = "2d5ad722019a6744568a4b445e2108242dafe5d20d2f1a6913e04cb0ba99b4ea"
 )
 
 type encoderProfile struct {
@@ -44,6 +45,9 @@ type encoderProfile struct {
 func encoderProfileForTarget(target string) (encoderProfile, bool) {
 	switch target {
 	case "checkers":
+		if os.Getenv("TATER_CHECKERS_LINEAGE_ENABLE") == "1" {
+			return encoderProfile{target, "checkers-mt8163-venc-lineage-1", checkersLineageVencHash, cronosVencComponentHash, cronosCodecTree, 1280, 720}, true
+		}
 		return encoderProfile{target, "checkers-mt8163-venc-stock-1", vencHelperHash, vencComponentHash, "490a3c771d1c6f979828e60b93c363ec42403ca9bd3c98b12f8c5cd0761f2cc4", 1280, 720}, true
 	case "cronos":
 		return encoderProfile{target, "cronos-mt8163-venc-stock-1", cronosVencHelperHash, cronosVencComponentHash, cronosCodecTree, 1280, 960}, true
@@ -142,6 +146,9 @@ func encoderPaths() (helper, component, libraries string, err error) {
 	root := strings.TrimSpace(os.Getenv("TATER_VENC_RUNTIME"))
 	if root == "" {
 		root = "/data/tater-venc"
+		if profile.id == "checkers-mt8163-venc-lineage-1" {
+			root = "/data/tater-venc-lineage-1"
+		}
 	}
 	manifest, readErr := readEncoderManifest(filepath.Join(root, "runtime.json"))
 	if readErr != nil || validateEncoderManifestForTarget(manifest, profile.target) != nil {
@@ -154,12 +161,15 @@ func encoderPaths() (helper, component, libraries string, err error) {
 	// Camera and its helper follow the same system/application slot. Never
 	// fall through to a newer shared /data helper after a rollback.
 	helper, component, libraries = filepath.Join(filepath.Dir(executable), "tater-hw-venc"), filepath.Join(root, "libMtkOmxVenc.so"), "/data/tater-vdec/lib"
+	if profile.id == "checkers-mt8163-venc-lineage-1" {
+		libraries = "/data/tater-vdec-lineage-1/lib"
+	}
 	checks := map[string]string{
 		helper: profile.helper, component: profile.component,
 		filepath.Join(libraries, "libvcodecdrv.so"):      "cfe53dae4fde4ef786a570e10c935e5b6bee2834914770b79c83002b756c8cd8",
 		filepath.Join(libraries, "libvcodec_utility.so"): "cef2ec6ede502ceb3eb75e86e3d169f970427bda67eaaee34a8f6f277e070d84",
 	}
-	if profile.target == "cronos" || profile.target == "crown" || profile.target == "rook" {
+	if profile.target == "cronos" || profile.target == "crown" || profile.target == "rook" || profile.id == "checkers-mt8163-venc-lineage-1" {
 		checks[filepath.Join(libraries, "libvcodecdrv.so")] = "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e"
 		checks[filepath.Join(libraries, "libvcodec_utility.so")] = "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313"
 		checks[filepath.Join(libraries, "libion_ulit.so")] = "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713"
@@ -218,6 +228,9 @@ func validateEncoderManifestForTarget(value []byte, target string) error {
 		legacyHelper = "920bf4a08373566478c8913e5ab6e3cf161cce835137ae513164bada2fc52709"
 	}
 	validHelper := (m.Schema == 1 && (m.Helper == profile.helper || m.Helper == legacyHelper)) || (m.Schema == 2 && m.Helper == "")
+	if profile.id == "checkers-mt8163-venc-lineage-1" {
+		validHelper = m.Schema == 2 && m.Helper == ""
+	}
 	if decoder.Decode(&trailing) != io.EOF || !validHelper || m.ID != profile.id ||
 		m.Component != profile.component || m.Base != profile.tree {
 		return errors.New("encoder manifest identity is not qualified")
@@ -355,7 +368,7 @@ func streamH264(response http.ResponseWriter, request *http.Request) {
 	defer stopWorker()
 	command := exec.CommandContext(workerContext, helper, encoderProcessArguments(profile, component)...)
 	command.Env = []string{"PATH=/usr/bin:/bin", "ANDROID_ROOT=/system", "ANDROID_DATA=/data", "LD_LIBRARY_PATH=" + libraries}
-	if profile.target == "cronos" || profile.target == "crown" || profile.target == "rook" {
+	if profile.target == "cronos" || profile.target == "crown" || profile.target == "rook" || profile.id == "checkers-mt8163-venc-lineage-1" {
 		command.Env = append(command.Env, "LD_PRELOAD="+filepath.Join(libraries, "libbionic28compat.so"))
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}

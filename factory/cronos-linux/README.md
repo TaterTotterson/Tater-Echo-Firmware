@@ -16,6 +16,13 @@ The installer downloads and verifies the pinned Cronos LineageOS 18.1 v0.4
 image. It is used as the tested vendor-driver baseline; Tater Linux replaces
 the Android userspace.
 
+Echo 5 requires a full USB install once, including upgrades from 4.2.3.
+The installer prepares hash-pinned public runtime inputs before flashing,
+then installs GPU/video libraries assembled from those inputs and this unit's
+retained vendor files. Keep USB and normal power connected until the final
+restart completes. No FireOS backup, NDK, extra filesystem tools, or separately
+prepared runtime is needed. Allow roughly 3 GB of free host disk space.
+
 ## Install
 
 Extract the factory archive, open a terminal in the extracted folder, and run:

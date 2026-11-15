@@ -235,6 +235,7 @@ class InstallerTests(unittest.TestCase):
                  mock.patch.object(install, "verify_bundle"), \
                  mock.patch.object(install, "select_device", return_value=("SERIAL", "recovery")), \
                  mock.patch.object(install, "adb_text", return_value="checkers"), \
+                 mock.patch.object(install, "prepare_hardware", return_value=(SimpleNamespace(finish_factory=mock.Mock()), {})), \
                  mock.patch.object(install, "download_lineage_zip", side_effect=lambda *_: (order.append("download"), image)[1]), \
                  mock.patch.object(install, "run_platform_installer", side_effect=lambda *_: order.append("flash")), \
                  mock.patch.object(install, "finish_tater_provisioning"):
@@ -262,24 +263,19 @@ class InstallerTests(unittest.TestCase):
                     install.main()
             flash.assert_not_called()
 
-    def test_private_runtime_is_verified_before_flash_and_keeps_its_target(self):
-        for target in ("checkers", "cronos"):
+    def test_runtime_is_prepared_before_flash_and_keeps_its_target(self):
+        for target in ("checkers", "cronos", "crown"):
             with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 args = SimpleNamespace(
                     verify_bundle=False, lineage_zip=root / "lineage.zip", adb="adb",
-                    serial=None, name=None, work=root / "work", hardware_runtime=root / "private",
+                    serial=None, name=None, work=root / "work", hardware_runtime=None,
                 )
                 events = []
                 hardware = SimpleNamespace(
-                    verify=mock.Mock(side_effect=lambda *a, **k: events.append("verify")),
-                    install=mock.Mock(side_effect=lambda *a, **k: events.append("install")),
+                    finish_factory=mock.Mock(side_effect=lambda *a, **k: events.append("install")),
                 )
-                console = SimpleNamespace(port="FAKE_PORT")
-                library = SimpleNamespace(Console=mock.Mock(return_value=console), CONSOLE_TECHO5="fake")
-                provision = SimpleNamespace(load_techo5lib=mock.Mock(return_value=library),
-                                            wait_for_console=mock.Mock())
-                modules = {"tater_private_hardware": hardware, "tater_checkers_console": provision}
+                plan = {"target": target}
                 with mock.patch.object(install, "parse_args", return_value=args), \
                      mock.patch.object(install, "load_manifest", return_value={
                          "version": "v5.0.0-rc.1", "target": target, "base_os": "tater-linux",
@@ -287,13 +283,27 @@ class InstallerTests(unittest.TestCase):
                      mock.patch.object(install, "verify_lineage_zip"), \
                      mock.patch.object(install, "select_device", return_value=("SERIAL", "recovery")), \
                      mock.patch.object(install, "adb_text", return_value=target), \
-                     mock.patch.object(install, "load_module", side_effect=lambda name, path: modules[name]), \
+                     mock.patch.object(install, "prepare_hardware", side_effect=lambda *a: (events.append("prepare"), (hardware, plan))[1]) as prepare, \
                      mock.patch.object(install, "run_platform_installer", side_effect=lambda *a: events.append("flash")), \
                      mock.patch.object(install, "finish_tater_provisioning"):
                     self.assertEqual(0, install.main())
-                self.assertEqual(events, ["verify", "flash", "install"])
-                hardware.verify.assert_called_once_with(args.hardware_runtime, target=target)
-                hardware.install.assert_called_once_with(args.hardware_runtime, library, "FAKE_PORT", target=target)
+                self.assertEqual(events, ["prepare", "flash", "install"])
+                prepare.assert_called_once_with(args, target)
+                hardware.finish_factory.assert_called_once_with(plan, install.TECHO_TOOLS, "SERIAL")
+
+    def test_runtime_preparation_failure_never_starts_flash(self):
+        args = SimpleNamespace(verify_bundle=False, lineage_zip=None, adb="adb", serial=None,
+                               name=None, work=Path("work"), hardware_runtime=None)
+        with mock.patch.object(install, "parse_args", return_value=args), \
+             mock.patch.object(install, "load_manifest", return_value={"version": "v5.0.0", "target": "checkers"}), \
+             mock.patch.object(install, "verify_bundle"), \
+             mock.patch.object(install, "select_device", return_value=("SERIAL", "recovery")), \
+             mock.patch.object(install, "adb_text", return_value="checkers"), \
+             mock.patch.object(install, "prepare_hardware", side_effect=install.InstallError("public input corrupt")), \
+             mock.patch.object(install, "run_platform_installer") as flash:
+            with self.assertRaisesRegex(install.InstallError, "corrupt"):
+                install.main()
+            flash.assert_not_called()
 
     def test_bad_or_unsupported_private_runtime_never_opens_a_device(self):
         for target in ("checkers", "cronos", "crown"):

@@ -253,6 +253,20 @@ def load_module(name: str, path: Path):
     return module
 
 
+def prepare_hardware(args, target):
+    if getattr(args, "hardware_runtime", None) is not None:
+        raise InstallError("--hardware-runtime is obsolete for Echo 5; verified device-local libraries are now prepared automatically")
+    path = ROOT / "hardware_runtime.py"
+    if not path.is_file():
+        path = ROOT.parent / "hardware_runtime.py"
+    hardware = load_module("tater_factory_runtime", path)
+    try:
+        plan = hardware.prepare(target, args.work / "hardware-inputs", ROOT / "runtime-compat")
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise InstallError("hardware input preparation failed before flashing: %s" % error) from error
+    return hardware, plan
+
+
 def run_platform_installer(args, manifest: dict, serial: str) -> bool:
     sys.path.insert(0, str(TECHO_TOOLS))
     techo5lib = importlib.import_module("techo5lib")
@@ -340,7 +354,7 @@ def parse_args():
     parser.add_argument("--lineage-zip", type=Path,
                         help="use the target's pinned LineageOS 18.1 ZIP instead of downloading it")
     parser.add_argument("--hardware-runtime", type=Path,
-                        help="separately prepared target-specific owner-local runtime; never included in the factory bundle")
+                        help="obsolete: Echo 5 prepares verified device-local libraries automatically")
     parser.add_argument("--name")
     parser.add_argument("--room")
     parser.add_argument("--wifi")
@@ -370,12 +384,8 @@ def main() -> int:
         print("Bundle verified: %s Tater Linux %s" % (profile["label"], manifest["version"]))
         return 0
     verify_lineage_zip(args.lineage_zip, profile)
-    hardware = None
     if getattr(args, "hardware_runtime", None) is not None:
-        if target not in ("checkers", "cronos"):
-            raise InstallError("this target's private hardware runtime installer is not yet qualified")
-        hardware = load_module("tater_private_hardware", ROOT / "provision_hardware.py")
-        hardware.verify(args.hardware_runtime, target=target)
+        raise InstallError("--hardware-runtime is obsolete; Echo 5 prepares device-local libraries automatically")
 
     serial, _state = select_device(args.adb, args.serial)
     if not args.name:
@@ -383,19 +393,14 @@ def main() -> int:
     product = adb_text(args.adb, serial, "shell", "getprop", "ro.product.device").lower()
     if product != target:
         raise InstallError("connected device reports %r, not %s" % (product, target))
+    hardware, hardware_plan = prepare_hardware(args, target)
     if args.lineage_zip is None:
         args.lineage_zip = download_lineage_zip(args.work, profile)
     preserved_pairing = run_platform_installer(args, manifest, serial)
-    if hardware is not None:
-        provision = load_module("tater_checkers_console", PROVISION)
-        library = provision.load_techo5lib(str(TECHO_TOOLS))
-        console = library.Console(serial, library.CONSOLE_TECHO5)
-        provision.wait_for_console(console)
-        port = console.port or console.find()
-        if not port:
-            raise InstallError("the installed target's USB console did not appear")
-        hardware.install(args.hardware_runtime, library, port, target=target)
-        print("Owner-local hardware libraries verified/provisioned; reboot normally to enable them.")
+    try:
+        hardware.finish_factory(hardware_plan, TECHO_TOOLS, serial)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise InstallError("factory image installed, but hardware-library setup needs attention: %s" % error) from error
     finish_tater_provisioning(args, serial, preserved_pairing)
     print(
         "\n%s now runs Tater Linux %s; TWRP remains in recovery."

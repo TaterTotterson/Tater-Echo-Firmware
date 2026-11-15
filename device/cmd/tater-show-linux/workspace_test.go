@@ -378,7 +378,7 @@ func TestWorkspaceOfflinePreviews(t *testing.T) {
 			r.state.Settings = show.ScreenSettingDefaults()
 			r.state.VolumePercent = 65
 			r.state.Weather = &show.Weather{TemperatureText: "68°", Condition: "Partly cloudy", ConditionKind: "partly", FeelsLikeText: "Feels like 66°"}
-			art, _, err := readDefaultWallpaper(target, 7)
+			art, _, err := readDefaultWallpaper(target, 6) // alpine-sunset
 			if err != nil {
 				t.Fatal(err)
 			}

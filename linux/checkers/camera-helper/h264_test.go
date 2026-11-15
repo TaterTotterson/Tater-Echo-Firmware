@@ -55,6 +55,30 @@ func TestEncoderLibraryOnlyManifest(t *testing.T) {
 	}
 }
 
+func TestCheckersLineageEncoderHasIsolatedRuntime(t *testing.T) {
+	t.Setenv("TATER_CHECKERS_LINEAGE_ENABLE", "1")
+	profile, ok := encoderProfileForTarget("checkers")
+	if !ok || profile.id != "checkers-mt8163-venc-lineage-1" || profile.helper != checkersLineageVencHash || profile.component != cronosVencComponentHash || profile.tree != cronosCodecTree {
+		t.Fatal("wrong retained-Lineage encoder profile", profile)
+	}
+	valid := []byte(`{"schema":2,"runtime_id":"` + profile.id + `","component_sha256":"` + profile.component + `","base_tree_sha256":"` + profile.tree + `"}`)
+	if err := validateEncoderManifestForTarget(valid, "checkers"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"cronos", "crown", "rook", "athena"} {
+		if validateEncoderManifestForTarget(valid, target) == nil {
+			t.Fatal("accepted Checkers runtime for another device", target)
+		}
+	}
+	if validateEncoderManifestForTarget(bytes.Replace(valid, []byte(`"schema":2`), []byte(`"schema":1`), 1), "checkers") == nil {
+		t.Fatal("accepted old runtime metadata")
+	}
+	t.Setenv("TATER_CHECKERS_LINEAGE_ENABLE", "")
+	if validateEncoderManifestForTarget(valid, "checkers") == nil {
+		t.Fatal("accepted new runtime in the old FireOS profile")
+	}
+}
+
 func TestLegacyRuntimeManifestDoesNotPinTheApplicationHelper(t *testing.T) {
 	for target, legacy := range map[string]string{
 		"checkers": "5431a4fb2b32378313307b4550e71842df23fb155acf04e3a816662312df2e7d",

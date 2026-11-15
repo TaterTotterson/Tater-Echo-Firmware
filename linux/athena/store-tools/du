@@ -1,0 +1,11 @@
+#!/bin/sh
+# The pinned upstream store script uses GNU du's MiB spelling. Keep its
+# source unchanged and translate its two invocations for the pinned Alpine
+# builder's BusyBox; pass all other invocations through unchanged.
+if [ "$#" -eq 3 ] && [ "$1" = -s ] && [ "$2" = --block-size=1M ]; then
+    exec /bin/busybox du -sm "$3"
+fi
+if [ "$#" -eq 3 ] && [ "$1" = -h ] && [ "$2" = --apparent-size ]; then
+    exec /bin/busybox du -bh "$3"
+fi
+exec /bin/busybox du "$@"

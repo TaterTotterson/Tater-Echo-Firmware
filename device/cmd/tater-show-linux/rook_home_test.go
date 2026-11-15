@@ -23,7 +23,7 @@ func rookQuietHomeFixture(t *testing.T) (*renderer, *image.RGBA, time.Time) {
 	r.state.Room, r.state.DisplayTheme = "Game Room", "tater"
 	r.state.Weather = &show.Weather{TemperatureText: "68°", Condition: "Partly cloudy", ConditionKind: "partly",
 		Daylight: "day", FeelsLikeText: "66°", IndoorTemperatureText: "72°", IndoorHumidityText: "42%", WindText: "NW 5 mph"}
-	art, _, err := readDefaultWallpaper("rook", 7)
+	art, _, err := readDefaultWallpaper("rook", 6) // alpine-sunset
 	if err != nil {
 		t.Fatal(err)
 	}

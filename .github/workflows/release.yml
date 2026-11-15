@@ -636,6 +636,7 @@ jobs:
           builder=$(python3 tools/platform_lock.py builder-reference --platform linux/amd64)
           docker run --rm --platform linux/amd64 \
             -e APK=/opt/tater/bin/apk.static \
+            -e PATH=/src/linux/athena/store-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e E2FSPROGS_FAKE_TIME="$source_date_epoch" \
             -e SOURCE_DATE_EPOCH="$source_date_epoch" \
             -v "$PWD:/src" -v /tmp/tater-echo-linux-show/platforms/show:/tater-platform:ro -w /src \

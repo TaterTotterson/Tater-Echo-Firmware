@@ -88,6 +88,7 @@ class BuildScriptTests(unittest.TestCase):
             ROOT / "linux/dot/tater-early-recovery",
             ROOT / "linux/checkers/build_linux.sh",
             ROOT / "linux/rook/build_linux.sh",
+            ROOT / "linux/athena/store-tools/du",
             ROOT / "device/tools/build_tools.sh",
             ROOT / "linux/dot/setup-ap.sh",
             ROOT / "linux/dot/tater-net",
@@ -490,6 +491,13 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn('--btbridge "$device/build/tater-btbridge"', build_script)
         self.assertIn('root / "usr/local/bin/btbridge"', rootfs_builder)
         self.assertIn('./cmd/btbridge', helper)
+
+    def test_athena_store_uses_portable_du_without_changing_upstream_source(self) -> None:
+        wrapper = (ROOT / "linux/athena/store-tools/du").read_text()
+        self.assertIn('exec /bin/busybox du -sm "$3"', wrapper)
+        self.assertIn('exec /bin/busybox du -bh "$3"', wrapper)
+        self.assertIn('exec /bin/busybox du "$@"', wrapper)
+        self.assertIn('-e PATH=/src/linux/athena/store-tools:', RELEASE_WORKFLOW.read_text())
 
 
 if __name__ == "__main__":

@@ -255,7 +255,7 @@ func TestPopupRefreshOfflinePreviews(t *testing.T) {
 	for _, target := range []string{"checkers", "cronos", "crown", "athena"} {
 		for _, view := range []string{"notification", "notification-default", "video-paused", "video-loading", "now-playing", "thinking", "thinking-matrix"} {
 			r, canvas, now := popupFixture(t, target)
-			art, _, err := readDefaultWallpaper(target, 7)
+			art, _, err := readDefaultWallpaper(target, 6) // alpine-sunset
 			if err != nil {
 				t.Fatal(err)
 			}

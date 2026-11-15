@@ -61,7 +61,7 @@ class BootPatchTests(unittest.TestCase):
         self.assertIn("export TATER_VDEC_ENABLE=1", build_rootfs.TATER_SHOW_RUN)
         self.assertIn("/data/tater-gpu/runtime.json", build_rootfs.TATER_SHOW_RUN)
         self.assertIn("export TATER_GPU_ENABLE=1", build_rootfs.TATER_SHOW_RUN)
-        self.assertEqual(2, build_rootfs.TATER_SHOW_RUN.count(
+        self.assertEqual(3, build_rootfs.TATER_SHOW_RUN.count(
             '[ "$TATER_FIRMWARE_TARGET" = checkers ]'))
 
     def test_tater_run_refreshes_stale_builtin_wake_assets(self):

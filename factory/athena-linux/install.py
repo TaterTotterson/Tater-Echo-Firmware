@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -81,8 +82,37 @@ def main(argv: list[str]) -> int:
                 "--no-watch",
                 *argv,
             ]
-        return subprocess.call(command, cwd=ROOT)
-    except (Fail, OSError, KeyError) as error:
+        if "--repair" in argv:
+            return subprocess.call(command, cwd=ROOT)
+        def option(name, default=None):
+            for index, argument in enumerate(argv):
+                if argument.startswith(name + "="):
+                    return argument.split("=", 1)[1]
+                if argument == name and index + 1 < len(argv):
+                    return argv[index + 1]
+            return default
+        path = ROOT / "hardware_runtime.py"
+        if not path.is_file():
+            path = ROOT.parent / "hardware_runtime.py"
+        spec = importlib.util.spec_from_file_location("tater_athena_runtime", path)
+        if spec is None or spec.loader is None:
+            raise Fail("factory bundle is missing hardware_runtime.py")
+        hardware = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hardware)
+        plan = hardware.prepare("athena", Path(option("--work", str(ROOT / "build"))) / "hardware-inputs", ROOT / "runtime-compat")
+        serial = option("--serial")
+        if not serial:
+            listing = subprocess.check_output([option("--adb", "adb"), "devices"], text=True)
+            candidates = [line.split()[0] for line in listing.splitlines()[1:]
+                          if len(line.split()) >= 2 and line.split()[1] == "recovery"]
+            if len(candidates) != 1:
+                raise Fail("expected exactly one Athena in TWRP; use --serial")
+            serial = candidates[0]
+        status = subprocess.call(command, cwd=ROOT)
+        if status == 0 and "--dry-run" not in argv:
+            hardware.finish_factory(plan, ROOT / "tools", serial)
+        return status
+    except (Fail, OSError, KeyError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 

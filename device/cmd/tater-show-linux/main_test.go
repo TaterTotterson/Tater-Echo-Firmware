@@ -246,9 +246,9 @@ func TestReducedSensorRowsKeepFullProfileSpacing(t *testing.T) {
 	}
 }
 
-func TestDefaultWallpaperCatalogPreservesScenes(t *testing.T) {
+func TestDefaultWallpaperCatalogPreservesRemainingScenes(t *testing.T) {
 	want := []string{
-		"mountains", "forest", "ocean", "desert", "meadow", "waterfall", "night",
+		"mountains", "forest", "ocean", "desert", "waterfall", "night",
 		"alpine-sunset", "misty-lake", "desert-dusk",
 	}
 	if defaultWallpaperCount() != len(want) {
@@ -257,6 +257,15 @@ func TestDefaultWallpaperCatalogPreservesScenes(t *testing.T) {
 	for index, name := range want {
 		if got := defaultWallpaperNames[index]; got != name {
 			t.Errorf("wallpaper %d=%q, want %q", index, got, name)
+		}
+	}
+}
+
+func TestRemovedMeadowWallpaperIsNotEmbedded(t *testing.T) {
+	for _, family := range []string{"checkers", "crown"} {
+		path := "assets/wallpapers/" + family + "/meadow.jpg"
+		if _, err := wallpaperFiles.ReadFile(path); !os.IsNotExist(err) {
+			t.Fatalf("removed wallpaper %s is still embedded or unreadable: %v", path, err)
 		}
 	}
 }
@@ -272,7 +281,7 @@ func TestNewWallpapersReuseActiveSceneCache(t *testing.T) {
 			for hour := 0; hour < defaultWallpaperCount(); hour++ {
 				now := start.Add(time.Duration(hour) * time.Hour)
 				index := wallpaperRotationIndex(now, defaultWallpaperCount(), 60)
-				if index < 7 {
+				if index < 6 {
 					continue // Exercise each appended scene without changing rotation policy.
 				}
 				picture := r.activeWallpaper(now)

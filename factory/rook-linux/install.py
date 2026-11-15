@@ -50,10 +50,12 @@ MAX_LINEAGE_BYTES = 1024 * 1024 * 1024
 # the release image; only fbprobe's Go toolchain/build metadata differs. The
 # third entry is the exact boot image published in the v3.1.2 Rook factory
 # archive, retained so that released installations can be upgraded safely.
+# The fourth is verified against the v4.2.3 factory bundle's file manifest.
 KNOWN_PREVIOUS_TATER_BOOTS = (
     (13012992, "2496456df296db59349ce8cdc43778fbdb670d92279bb169d76907d8ca7719c7"),
     (13121536, "5c2da30a18b4b3cc6b670bec9d2f08f7ab985453c7179aae4e8d4c9f14f38c6a"),
     (13121536, "91c8a0a84867b4055594c1d150ea31951f0fc49a05da63ef51217ae1769c2e5c"),
+    (13150208, "f31551fceef66cc173d5bb486cecd5a2596d2c0dc9db24186531cf02b7ee9829"),
 )
 # A failed reinstall can stop after the installer has written the exact pinned
 # Lineage boot image used to recover Rook's vendor files. Accept that one
@@ -80,6 +82,21 @@ def load_tater_settings():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def prepare_hardware(args):
+    path = ROOT / "hardware_runtime.py"
+    if not path.is_file():
+        path = ROOT.parent / "hardware_runtime.py"
+    spec = importlib.util.spec_from_file_location("tater_rook_runtime", path)
+    if spec is None or spec.loader is None:
+        raise Fail("the factory bundle is missing hardware_runtime.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        return module, module.prepare("rook", args.work / "hardware-inputs", ROOT / "runtime-compat")
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise Fail("hardware input preparation failed before flashing: " + str(error)) from error
 
 
 def sha256(path: Path) -> str:
@@ -390,6 +407,7 @@ def install(args: argparse.Namespace) -> None:
         verify_reinstall_boot(adb, boot)
     zip_path = args.lineage_zip or download_lineage(args.work)
     verify_lineage(zip_path)
+    hardware, hardware_plan = prepare_hardware(args)
     # Never replace the original factory backups with images of an installed
     # Tater system. Reinstalls get their own pre-reinstall recovery set.
     backup = args.backups / serial / "pre-reinstall" if existing_store else args.backups / serial
@@ -524,6 +542,7 @@ def install(args: argparse.Namespace) -> None:
     status = console.run("STORE=/store slotctl status; ip -4 addr show wlan0; tail -8 /data/tater-linux/tater-echo.log", 12)
     if status:
         print(status)
+    hardware.finish_factory(hardware_plan, TOOLS, serial)
     if saved_settings and saved_settings.paired:
         print("\nFactory boot complete. The Spot kept its Tater pairing, Wi-Fi, SSH, and settings.")
     else:
@@ -551,7 +570,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     try:
         install(parse_args())
-    except (Fail, OSError, subprocess.CalledProcessError) as error:
+    except (Fail, OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     return 0

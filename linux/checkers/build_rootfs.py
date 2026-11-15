@@ -827,6 +827,10 @@ TATER_RUN = """#!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 export TATER_NATIVE_CONFIG=/data/local/etc/tater/native.json
+if [ "$TATER_FIRMWARE_TARGET" = checkers ]; then
+    export TATER_CHECKERS_LINEAGE_ENABLE=1
+    [ ! -s /data/tater-vdec-lineage-1/runtime.json ] || export TATER_VDEC_ENABLE=1
+fi
 if { [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; } && [ -s /data/tater-vdec/runtime.json ]; then
     export TATER_VDEC_ENABLE=1
 fi
@@ -877,6 +881,10 @@ done
 TATER_SHOW_RUN = """#!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+if [ "$TATER_FIRMWARE_TARGET" = checkers ]; then
+    export TATER_CHECKERS_LINEAGE_ENABLE=1
+    [ ! -s /data/tater-vdec-lineage-1/runtime.json ] || export TATER_VDEC_ENABLE=1
+fi
 # The owner-local MT8163 decoder runtime is installed separately under /data;
 # it is never part of a public rootfs. The Go preflight verifies its complete
 # identity before touching Vcodec. Only separately qualified Show 5 targets
@@ -923,6 +931,9 @@ export PATH
 # The camera helper independently checks its target, runtime and helper hashes.
 # Keep other targets on JPEG without changing decoding or GPU policy.
 export TATER_VENC_ENABLE=0
+if [ "$TATER_FIRMWARE_TARGET" = checkers ]; then
+    export TATER_CHECKERS_LINEAGE_ENABLE=1
+fi
 if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then
     export TATER_VENC_ENABLE=1
 fi

@@ -1,0 +1,2357 @@
+{
+  "schema": 1,
+  "public_files": {
+    "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa": {
+      "kind": "sdk24",
+      "path": "/bin/linker"
+    },
+    "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/android.hardware.graphics.common@1.0.so?format=TEXT"
+    },
+    "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libbacktrace.so?format=TEXT"
+    },
+    "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libbase.so?format=TEXT",
+      "transform": "neutralize-libc-o",
+      "input_sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+    },
+    "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libbase.so?format=TEXT"
+    },
+    "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216": {
+      "kind": "compat",
+      "path": "libbionic28compat.so"
+    },
+    "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libc++.so?format=TEXT",
+      "transform": "neutralize-libc-o",
+      "input_sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+    },
+    "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libc++.so?format=TEXT"
+    },
+    "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232": {
+      "kind": "sdk24",
+      "path": "/lib/libc.so"
+    },
+    "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libcutils.so?format=TEXT",
+      "transform": "neutralize-libc-o",
+      "input_sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+    },
+    "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libcutils.so?format=TEXT"
+    },
+    "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff": {
+      "kind": "sdk24",
+      "path": "/lib/libdl.so"
+    },
+    "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4": {
+      "kind": "compat",
+      "path": "libged.so"
+    },
+    "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd": {
+      "kind": "compat",
+      "path": "libgpu_aux.so"
+    },
+    "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563": {
+      "kind": "compat",
+      "path": "libgralloc_extra.so"
+    },
+    "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libhardware.so?format=TEXT"
+    },
+    "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libhidlbase.so?format=TEXT"
+    },
+    "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libhidltransport.so?format=TEXT"
+    },
+    "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libhwbinder.so?format=TEXT"
+    },
+    "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libion.so?format=TEXT"
+    },
+    "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a": {
+      "kind": "sdk24",
+      "path": "/lib/liblog.so"
+    },
+    "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/liblzma.so?format=TEXT"
+    },
+    "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8": {
+      "kind": "sdk24",
+      "path": "/lib/libm.so"
+    },
+    "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72": {
+      "kind": "compat",
+      "path": "libnativewindow.so"
+    },
+    "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499": {
+      "kind": "sdk24",
+      "path": "/lib/libsync.so"
+    },
+    "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libunwindstack.so?format=TEXT"
+    },
+    "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libutils.so?format=TEXT"
+    },
+    "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096": {
+      "kind": "compat",
+      "path": "libvndksupport.so"
+    },
+    "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libz.so?format=TEXT"
+    },
+    "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.configstore-utils.so?format=TEXT"
+    },
+    "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.configstore@1.0.so?format=TEXT"
+    },
+    "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.configstore@1.1.so?format=TEXT"
+    },
+    "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.graphics.allocator@2.0.so?format=TEXT"
+    },
+    "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.graphics.bufferqueue@1.0.so?format=TEXT"
+    },
+    "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/android.hardware.graphics.common@1.1.so?format=TEXT"
+    },
+    "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/android.hardware.graphics.mapper@2.0.so?format=TEXT"
+    },
+    "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/android.hardware.graphics.mapper@2.1.so?format=TEXT"
+    },
+    "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.media.omx@1.0.so?format=TEXT"
+    },
+    "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/android.hardware.media@1.0.so?format=TEXT"
+    },
+    "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615": {
+      "kind": "compat",
+      "path": "libGLESv1_CM.so"
+    },
+    "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/libbinder.so?format=TEXT"
+    },
+    "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713": {
+      "kind": "compat",
+      "path": "libion_ulit.so"
+    },
+    "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-core/libui.so?format=TEXT"
+    },
+    "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libunwind.so?format=TEXT"
+    },
+    "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/arch-arm-armv7-a-neon/shared/vndk-sp/libutilscallstack.so?format=TEXT"
+    },
+    "7585ba7ce44cb14d3e7bbaa40aca4a3e7e8c97b8c76e2b9514c1c53c5bf97ca2": {
+      "kind": "apex",
+      "path": "/lib/bionic/libc.so"
+    },
+    "01ff90be229ce00bf68bc25447a2ce5162853d041c0e4e6a7492de4546446b81": {
+      "kind": "apex",
+      "path": "/lib/bionic/libdl.so"
+    },
+    "f7974d3f1843fc2d9a708ae79d0a16d7c7e3a1cf7b620b6c5ec7e54813a3f9b9": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/runtime/+/889e7cb78ec7268b096f285f3dce8885ed06719d/mainline/platform/impl/arm/liblog.so?format=TEXT"
+    },
+    "ac4d03ac3ebde8520cf933079c210ae07e0d3eff2a35549fb0ab22409f8ab00e": {
+      "kind": "apex",
+      "path": "/lib/bionic/libm.so"
+    },
+    "6a9d2fd130c8f4c89ae55ded7095308a023922b2f0777e41a7e71d438e4f50f8": {
+      "kind": "apex",
+      "path": "/bin/linker"
+    },
+    "16341d0831541c88184fa3eb26a00c7900321d41b5d8cb103bf0be92547b6e50": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/binder32/arch-arm-armv7-a-neon/shared/vndk-sp/android.hidl.memory.token@1.0.so?format=TEXT"
+    },
+    "6d953d868c26093a2c78fde5aae25e6d767c291e00f87cb6d59313797b1ded1c": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/binder32/arch-arm-armv7-a-neon/shared/vndk-sp/android.hidl.memory@1.0.so?format=TEXT"
+    },
+    "cbeaa880507356957b7955bec7ed7b7f4489270bc17dc532c00baabc6693c549": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/binder32/arch-arm-armv7-a-neon/shared/vndk-core/libbinder.so?format=TEXT"
+    },
+    "70e189e762975e679eb7c0548cc4d49555cfa3968db7f931d9922074a7292800": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/binder32/arch-arm-armv7-a-neon/shared/vndk-sp/libhidlmemory.so?format=TEXT"
+    },
+    "91488942832b48b5550bd3f6515412e0fdb88c6b8cc6fe34ba1f4e364a7b9515": {
+      "kind": "gitiles",
+      "url": "https://android.googlesource.com/platform/prebuilts/vndk/v28/+/1cb210981d2baf325aaab36cdd84afa40c775f00/arm/binder32/arch-arm-armv7-a-neon/shared/vndk-sp/libhwbinder.so?format=TEXT"
+    },
+    "74336925a40e086da6992351aa8449e0a69f502e80597667ab12af50ae71a7fe": {
+      "kind": "compat",
+      "path": "libsync.so"
+    }
+  },
+  "targets": {
+    "checkers": {
+      "kernel": "4.9.337-g8d928c5176cc",
+      "panel": "480,2880",
+      "roots": [
+        "tater-gpu",
+        "tater-vdec-lineage-1",
+        "tater-venc-lineage-1"
+      ],
+      "files": {
+        "tater-gpu/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-gpu/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-gpu/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-gpu/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-gpu/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-gpu/lib/libbase.so.orig": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-gpu/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-gpu/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-gpu/lib/libc++.so.orig": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-gpu/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-gpu/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-gpu/lib/libcutils.so.orig": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-gpu/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-gpu/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-gpu/lib/libged.so": {
+          "sha256": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4",
+          "public": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4"
+        },
+        "tater-gpu/lib/libgpu_aux.so": {
+          "sha256": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd",
+          "public": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd"
+        },
+        "tater-gpu/lib/libgralloc_extra.so": {
+          "sha256": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563",
+          "public": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563"
+        },
+        "tater-gpu/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-gpu/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-gpu/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-gpu/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-gpu/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-gpu/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-gpu/lib/libion_ulit.so": {
+          "sha256": "639b31a2622bf02f7edcc8ff35c92b2edb63c70ebdd7029aba159f8108e7ce67",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-gpu/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-gpu/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-gpu/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-gpu/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-gpu/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-gpu/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-gpu/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-gpu/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-gpu/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-gpu/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-vdec-lineage-1/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.configstore-utils.so": {
+          "sha256": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767",
+          "public": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.configstore@1.0.so": {
+          "sha256": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2",
+          "public": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.configstore@1.1.so": {
+          "sha256": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49",
+          "public": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.allocator@2.0.so": {
+          "sha256": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415",
+          "public": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.bufferqueue@1.0.so": {
+          "sha256": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899",
+          "public": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.common@1.1.so": {
+          "sha256": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342",
+          "public": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.mapper@2.0.so": {
+          "sha256": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b",
+          "public": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.graphics.mapper@2.1.so": {
+          "sha256": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097",
+          "public": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.media.omx@1.0.so": {
+          "sha256": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8",
+          "public": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8"
+        },
+        "tater-vdec-lineage-1/lib/android.hardware.media@1.0.so": {
+          "sha256": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151",
+          "public": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151"
+        },
+        "tater-vdec-lineage-1/lib/gralloc.mt8163.so": {
+          "sha256": "caa3ef25813be03a8c68d03ac6a5a382f79e0df9e0e41f90861885200710b97d",
+          "vendor": "hw/gralloc.mt8163.so"
+        },
+        "tater-vdec-lineage-1/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-vdec-lineage-1/lib/libGLESv1_CM.so": {
+          "sha256": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615",
+          "public": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615"
+        },
+        "tater-vdec-lineage-1/lib/libGdmaScalerPipe.so": {
+          "sha256": "2ce40ea5400a70bec688d6d29cda0346dfcc28a143639489704c948ce57a6b75",
+          "vendor": "libGdmaScalerPipe.so"
+        },
+        "tater-vdec-lineage-1/lib/libJpgDecPipe.so": {
+          "sha256": "62e3566f07d02a1df93e583e65464f6067a32fba330d0714d113663f516e4d8f",
+          "vendor": "libJpgDecPipe.so"
+        },
+        "tater-vdec-lineage-1/lib/libMtkOmxVdecEx.so": {
+          "sha256": "812cd2a56b50e994fee60cdb92d3b0c82ff339d25b55c55d31ac9233f7b6ee89",
+          "vendor": "libMtkOmxVdecEx.so"
+        },
+        "tater-vdec-lineage-1/lib/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        },
+        "tater-vdec-lineage-1/lib/libSwJpgCodec.so": {
+          "sha256": "e4473275e049980c385b108207110a972e282f9df261dcb83b5defa496ac4f94",
+          "vendor": "libSwJpgCodec.so"
+        },
+        "tater-vdec-lineage-1/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-vdec-lineage-1/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-vdec-lineage-1/lib/libbinder.so": {
+          "sha256": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef",
+          "public": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef"
+        },
+        "tater-vdec-lineage-1/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-vdec-lineage-1/lib/libbwc.so": {
+          "sha256": "3d6539c80d840fe19a6f7353a2f5c90899fe093b118326d31f4dd6ce9838c4ed",
+          "vendor": "libbwc.so"
+        },
+        "tater-vdec-lineage-1/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-vdec-lineage-1/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-vdec-lineage-1/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-vdec-lineage-1/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-vdec-lineage-1/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-vdec-lineage-1/lib/libged.so": {
+          "sha256": "b9ac0f6f51828dbefaf371a81202def5dce39a1a4eb708f48f4c6e69a7c2296c",
+          "vendor": "libged.so"
+        },
+        "tater-vdec-lineage-1/lib/libgpu_aux.so": {
+          "sha256": "05800127aa6e26d2a6112e34d4d1f58ca50ce6fa52792637d195ac09e170e6c3",
+          "vendor": "libgpu_aux.so"
+        },
+        "tater-vdec-lineage-1/lib/libgralloc_extra.so": {
+          "sha256": "6dba915041984215e1596efd63e40616b0470d2c5fc28b039859060ac3b5da5d",
+          "vendor": "libgralloc_extra.so"
+        },
+        "tater-vdec-lineage-1/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-vdec-lineage-1/lib/libhevce_sb.ca7.android.so": {
+          "sha256": "ad5f0802acff548c9a705dc7d3dd35b174a6f6371ae43fe7470f8433ec45c42d",
+          "vendor": "libhevce_sb.ca7.android.so"
+        },
+        "tater-vdec-lineage-1/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-vdec-lineage-1/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-vdec-lineage-1/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-vdec-lineage-1/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-vdec-lineage-1/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-vdec-lineage-1/lib/libion_ulit.so": {
+          "sha256": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+          "public": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713"
+        },
+        "tater-vdec-lineage-1/lib/libjpeg-alpha_vendor.so": {
+          "sha256": "ce52871b5cce39f682562420b842d536cdb0d94ef3de28cc8b01824dbdcfab6b",
+          "vendor": "libjpeg-alpha_vendor.so"
+        },
+        "tater-vdec-lineage-1/lib/libladder.so": {
+          "sha256": "836e8b57ebed9d3c0811f3d25b8effb404dfad90ea0e0407801b5805d160ed8f",
+          "vendor": "libladder.so"
+        },
+        "tater-vdec-lineage-1/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-vdec-lineage-1/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-vdec-lineage-1/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-vdec-lineage-1/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-vdec-lineage-1/lib/libmhalImageCodec.so": {
+          "sha256": "bc10bca5b5f3fc946cb434a64f62b06aa9d365ae49f34e60f861d8c471d9651a",
+          "vendor": "libmhalImageCodec.so"
+        },
+        "tater-vdec-lineage-1/lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4d3e60b77b1066d96641e4eab815555cdb6fe0898b9da01eacd34a606bb3236a",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-vdec-lineage-1/lib/libmtk_drvb.so": {
+          "sha256": "02363312b8f631a3b594fe749d6fc276ee03a37c26e76b17211de230af8f3058",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-vdec-lineage-1/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-vdec-lineage-1/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-vdec-lineage-1/lib/libtz_uree.so": {
+          "sha256": "f740c321088c223bf53ae1c83f05e3b4db2f59902c3815c46fd6e80d746b6629",
+          "vendor": "libtz_uree.so"
+        },
+        "tater-vdec-lineage-1/lib/libui-v28.so": {
+          "sha256": "7f12f5e82d35ee2a3b64c791fabe574ee9b9364c6902ea49fd6063a22c5adfa8",
+          "vendor": "libui-v28.so"
+        },
+        "tater-vdec-lineage-1/lib/libui.so": {
+          "sha256": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641",
+          "public": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641"
+        },
+        "tater-vdec-lineage-1/lib/libunwind.so": {
+          "sha256": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc",
+          "public": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc"
+        },
+        "tater-vdec-lineage-1/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-vdec-lineage-1/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-vdec-lineage-1/lib/libutilscallstack.so": {
+          "sha256": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3",
+          "public": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3"
+        },
+        "tater-vdec-lineage-1/lib/libvc1dec_sa.ca7.so": {
+          "sha256": "870aea38d97bc5b4763dae4bd37c4cd0e6bd689bcb5648ea28a36a600de3eba7",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-vdec-lineage-1/lib/libvcodec_oal.so": {
+          "sha256": "bd76ad061e9ce75358e575956133990b793a5f6631444b0c4713907e25f422bf",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-vdec-lineage-1/lib/libvcodec_utility.so": {
+          "sha256": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-vdec-lineage-1/lib/libvcodecdrv.so": {
+          "sha256": "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-vdec-lineage-1/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-vdec-lineage-1/lib/libvp8enc_sa.ca7.so": {
+          "sha256": "2c12dde3cbe12b039f06797b20b9e45b7f68c868ae1c4933f07cbb9d6f70b74c",
+          "vendor": "libvp8enc_sa.ca7.so"
+        },
+        "tater-vdec-lineage-1/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-venc-lineage-1/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        }
+      },
+      "manifests": {
+        "tater-gpu/runtime.json": {
+          "schema": 2,
+          "runtime_id": "checkers-mt8163-mali-pbuffer-1",
+          "tree_sha256": "bc75d30a7be167b827e89b1d7629ec5dc4b528c99106d0b1e9beed02b4815561",
+          "file_count": 34,
+          "runtime_bytes": 37506624
+        },
+        "tater-vdec-lineage-1/runtime.json": {
+          "schema": 2,
+          "runtime_id": "checkers-mt8163-vdec-lineage-1",
+          "tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a",
+          "file_count": 66,
+          "runtime_bytes": 41926684
+        },
+        "tater-venc-lineage-1/runtime.json": {
+          "schema": 2,
+          "runtime_id": "checkers-mt8163-venc-lineage-1",
+          "component_sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "base_tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a"
+        }
+      }
+    },
+    "cronos": {
+      "kernel": "4.9.337-g8d928c5176cc",
+      "panel": "480,2880",
+      "roots": [
+        "tater-gpu",
+        "tater-vdec",
+        "tater-venc"
+      ],
+      "files": {
+        "tater-gpu/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-gpu/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-gpu/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-gpu/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-gpu/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-gpu/lib/libbase.so.orig": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-gpu/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-gpu/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-gpu/lib/libc++.so.orig": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-gpu/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-gpu/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-gpu/lib/libcutils.so.orig": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-gpu/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-gpu/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-gpu/lib/libged.so": {
+          "sha256": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4",
+          "public": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4"
+        },
+        "tater-gpu/lib/libgpu_aux.so": {
+          "sha256": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd",
+          "public": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd"
+        },
+        "tater-gpu/lib/libgralloc_extra.so": {
+          "sha256": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563",
+          "public": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563"
+        },
+        "tater-gpu/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-gpu/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-gpu/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-gpu/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-gpu/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-gpu/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-gpu/lib/libion_ulit.so": {
+          "sha256": "639b31a2622bf02f7edcc8ff35c92b2edb63c70ebdd7029aba159f8108e7ce67",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-gpu/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-gpu/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-gpu/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-gpu/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-gpu/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-gpu/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-gpu/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-gpu/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-gpu/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-gpu/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-vdec/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-vdec/lib/android.hardware.configstore-utils.so": {
+          "sha256": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767",
+          "public": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.0.so": {
+          "sha256": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2",
+          "public": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.1.so": {
+          "sha256": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49",
+          "public": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49"
+        },
+        "tater-vdec/lib/android.hardware.graphics.allocator@2.0.so": {
+          "sha256": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415",
+          "public": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415"
+        },
+        "tater-vdec/lib/android.hardware.graphics.bufferqueue@1.0.so": {
+          "sha256": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899",
+          "public": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.1.so": {
+          "sha256": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342",
+          "public": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.0.so": {
+          "sha256": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b",
+          "public": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.1.so": {
+          "sha256": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097",
+          "public": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097"
+        },
+        "tater-vdec/lib/android.hardware.media.omx@1.0.so": {
+          "sha256": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8",
+          "public": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8"
+        },
+        "tater-vdec/lib/android.hardware.media@1.0.so": {
+          "sha256": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151",
+          "public": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151"
+        },
+        "tater-vdec/lib/gralloc.mt8163.so": {
+          "sha256": "caa3ef25813be03a8c68d03ac6a5a382f79e0df9e0e41f90861885200710b97d",
+          "vendor": "hw/gralloc.mt8163.so"
+        },
+        "tater-vdec/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-vdec/lib/libGLESv1_CM.so": {
+          "sha256": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615",
+          "public": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615"
+        },
+        "tater-vdec/lib/libGdmaScalerPipe.so": {
+          "sha256": "2ce40ea5400a70bec688d6d29cda0346dfcc28a143639489704c948ce57a6b75",
+          "vendor": "libGdmaScalerPipe.so"
+        },
+        "tater-vdec/lib/libJpgDecPipe.so": {
+          "sha256": "62e3566f07d02a1df93e583e65464f6067a32fba330d0714d113663f516e4d8f",
+          "vendor": "libJpgDecPipe.so"
+        },
+        "tater-vdec/lib/libMtkOmxVdecEx.so": {
+          "sha256": "812cd2a56b50e994fee60cdb92d3b0c82ff339d25b55c55d31ac9233f7b6ee89",
+          "vendor": "libMtkOmxVdecEx.so"
+        },
+        "tater-vdec/lib/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        },
+        "tater-vdec/lib/libSwJpgCodec.so": {
+          "sha256": "e4473275e049980c385b108207110a972e282f9df261dcb83b5defa496ac4f94",
+          "vendor": "libSwJpgCodec.so"
+        },
+        "tater-vdec/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-vdec/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-vdec/lib/libbinder.so": {
+          "sha256": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef",
+          "public": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef"
+        },
+        "tater-vdec/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-vdec/lib/libbwc.so": {
+          "sha256": "3d6539c80d840fe19a6f7353a2f5c90899fe093b118326d31f4dd6ce9838c4ed",
+          "vendor": "libbwc.so"
+        },
+        "tater-vdec/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-vdec/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-vdec/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-vdec/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-vdec/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-vdec/lib/libged.so": {
+          "sha256": "b9ac0f6f51828dbefaf371a81202def5dce39a1a4eb708f48f4c6e69a7c2296c",
+          "vendor": "libged.so"
+        },
+        "tater-vdec/lib/libgpu_aux.so": {
+          "sha256": "05800127aa6e26d2a6112e34d4d1f58ca50ce6fa52792637d195ac09e170e6c3",
+          "vendor": "libgpu_aux.so"
+        },
+        "tater-vdec/lib/libgralloc_extra.so": {
+          "sha256": "6dba915041984215e1596efd63e40616b0470d2c5fc28b039859060ac3b5da5d",
+          "vendor": "libgralloc_extra.so"
+        },
+        "tater-vdec/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-vdec/lib/libhevce_sb.ca7.android.so": {
+          "sha256": "ad5f0802acff548c9a705dc7d3dd35b174a6f6371ae43fe7470f8433ec45c42d",
+          "vendor": "libhevce_sb.ca7.android.so"
+        },
+        "tater-vdec/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-vdec/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-vdec/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-vdec/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-vdec/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-vdec/lib/libion_ulit.so": {
+          "sha256": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+          "public": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713"
+        },
+        "tater-vdec/lib/libjpeg-alpha_vendor.so": {
+          "sha256": "ce52871b5cce39f682562420b842d536cdb0d94ef3de28cc8b01824dbdcfab6b",
+          "vendor": "libjpeg-alpha_vendor.so"
+        },
+        "tater-vdec/lib/libladder.so": {
+          "sha256": "836e8b57ebed9d3c0811f3d25b8effb404dfad90ea0e0407801b5805d160ed8f",
+          "vendor": "libladder.so"
+        },
+        "tater-vdec/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-vdec/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-vdec/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-vdec/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-vdec/lib/libmhalImageCodec.so": {
+          "sha256": "bc10bca5b5f3fc946cb434a64f62b06aa9d365ae49f34e60f861d8c471d9651a",
+          "vendor": "libmhalImageCodec.so"
+        },
+        "tater-vdec/lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4d3e60b77b1066d96641e4eab815555cdb6fe0898b9da01eacd34a606bb3236a",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libmtk_drvb.so": {
+          "sha256": "02363312b8f631a3b594fe749d6fc276ee03a37c26e76b17211de230af8f3058",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-vdec/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-vdec/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-vdec/lib/libtz_uree.so": {
+          "sha256": "f740c321088c223bf53ae1c83f05e3b4db2f59902c3815c46fd6e80d746b6629",
+          "vendor": "libtz_uree.so"
+        },
+        "tater-vdec/lib/libui-v28.so": {
+          "sha256": "7f12f5e82d35ee2a3b64c791fabe574ee9b9364c6902ea49fd6063a22c5adfa8",
+          "vendor": "libui-v28.so"
+        },
+        "tater-vdec/lib/libui.so": {
+          "sha256": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641",
+          "public": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641"
+        },
+        "tater-vdec/lib/libunwind.so": {
+          "sha256": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc",
+          "public": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc"
+        },
+        "tater-vdec/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-vdec/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-vdec/lib/libutilscallstack.so": {
+          "sha256": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3",
+          "public": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3"
+        },
+        "tater-vdec/lib/libvc1dec_sa.ca7.so": {
+          "sha256": "870aea38d97bc5b4763dae4bd37c4cd0e6bd689bcb5648ea28a36a600de3eba7",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-vdec/lib/libvcodec_oal.so": {
+          "sha256": "bd76ad061e9ce75358e575956133990b793a5f6631444b0c4713907e25f422bf",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-vdec/lib/libvcodec_utility.so": {
+          "sha256": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-vdec/lib/libvcodecdrv.so": {
+          "sha256": "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-vdec/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-vdec/lib/libvp8enc_sa.ca7.so": {
+          "sha256": "2c12dde3cbe12b039f06797b20b9e45b7f68c868ae1c4933f07cbb9d6f70b74c",
+          "vendor": "libvp8enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-venc/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        }
+      },
+      "manifests": {
+        "tater-gpu/runtime.json": {
+          "schema": 2,
+          "runtime_id": "cronos-mt8163-mali-pbuffer-1",
+          "tree_sha256": "bc75d30a7be167b827e89b1d7629ec5dc4b528c99106d0b1e9beed02b4815561",
+          "file_count": 34,
+          "runtime_bytes": 37506624
+        },
+        "tater-vdec/runtime.json": {
+          "schema": 2,
+          "runtime_id": "cronos-mt8163-vdec-stock-1",
+          "tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a",
+          "file_count": 66,
+          "runtime_bytes": 41926684
+        },
+        "tater-venc/runtime.json": {
+          "schema": 2,
+          "runtime_id": "cronos-mt8163-venc-stock-1",
+          "component_sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "base_tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a"
+        }
+      }
+    },
+    "crown": {
+      "kernel": "4.9.337-g8d928c5176cc",
+      "panel": "800,3840",
+      "roots": [
+        "tater-gpu",
+        "tater-vdec",
+        "tater-venc"
+      ],
+      "files": {
+        "tater-gpu/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-gpu/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-gpu/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-gpu/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-gpu/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-gpu/lib/libbase.so.orig": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-gpu/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-gpu/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-gpu/lib/libc++.so.orig": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-gpu/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-gpu/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-gpu/lib/libcutils.so.orig": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-gpu/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-gpu/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-gpu/lib/libged.so": {
+          "sha256": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4",
+          "public": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4"
+        },
+        "tater-gpu/lib/libgpu_aux.so": {
+          "sha256": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd",
+          "public": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd"
+        },
+        "tater-gpu/lib/libgralloc_extra.so": {
+          "sha256": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563",
+          "public": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563"
+        },
+        "tater-gpu/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-gpu/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-gpu/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-gpu/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-gpu/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-gpu/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-gpu/lib/libion_ulit.so": {
+          "sha256": "639b31a2622bf02f7edcc8ff35c92b2edb63c70ebdd7029aba159f8108e7ce67",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-gpu/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-gpu/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-gpu/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-gpu/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-gpu/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-gpu/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-gpu/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-gpu/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-gpu/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-gpu/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-vdec/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-vdec/lib/android.hardware.configstore-utils.so": {
+          "sha256": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767",
+          "public": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.0.so": {
+          "sha256": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2",
+          "public": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.1.so": {
+          "sha256": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49",
+          "public": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49"
+        },
+        "tater-vdec/lib/android.hardware.graphics.allocator@2.0.so": {
+          "sha256": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415",
+          "public": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415"
+        },
+        "tater-vdec/lib/android.hardware.graphics.bufferqueue@1.0.so": {
+          "sha256": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899",
+          "public": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.1.so": {
+          "sha256": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342",
+          "public": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.0.so": {
+          "sha256": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b",
+          "public": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.1.so": {
+          "sha256": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097",
+          "public": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097"
+        },
+        "tater-vdec/lib/android.hardware.media.omx@1.0.so": {
+          "sha256": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8",
+          "public": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8"
+        },
+        "tater-vdec/lib/android.hardware.media@1.0.so": {
+          "sha256": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151",
+          "public": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151"
+        },
+        "tater-vdec/lib/gralloc.mt8163.so": {
+          "sha256": "caa3ef25813be03a8c68d03ac6a5a382f79e0df9e0e41f90861885200710b97d",
+          "vendor": "hw/gralloc.mt8163.so"
+        },
+        "tater-vdec/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-vdec/lib/libGLESv1_CM.so": {
+          "sha256": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615",
+          "public": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615"
+        },
+        "tater-vdec/lib/libGdmaScalerPipe.so": {
+          "sha256": "2ce40ea5400a70bec688d6d29cda0346dfcc28a143639489704c948ce57a6b75",
+          "vendor": "libGdmaScalerPipe.so"
+        },
+        "tater-vdec/lib/libJpgDecPipe.so": {
+          "sha256": "62e3566f07d02a1df93e583e65464f6067a32fba330d0714d113663f516e4d8f",
+          "vendor": "libJpgDecPipe.so"
+        },
+        "tater-vdec/lib/libMtkOmxVdecEx.so": {
+          "sha256": "812cd2a56b50e994fee60cdb92d3b0c82ff339d25b55c55d31ac9233f7b6ee89",
+          "vendor": "libMtkOmxVdecEx.so"
+        },
+        "tater-vdec/lib/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        },
+        "tater-vdec/lib/libSwJpgCodec.so": {
+          "sha256": "e4473275e049980c385b108207110a972e282f9df261dcb83b5defa496ac4f94",
+          "vendor": "libSwJpgCodec.so"
+        },
+        "tater-vdec/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-vdec/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-vdec/lib/libbinder.so": {
+          "sha256": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef",
+          "public": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef"
+        },
+        "tater-vdec/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-vdec/lib/libbwc.so": {
+          "sha256": "3d6539c80d840fe19a6f7353a2f5c90899fe093b118326d31f4dd6ce9838c4ed",
+          "vendor": "libbwc.so"
+        },
+        "tater-vdec/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-vdec/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-vdec/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-vdec/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-vdec/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-vdec/lib/libged.so": {
+          "sha256": "b9ac0f6f51828dbefaf371a81202def5dce39a1a4eb708f48f4c6e69a7c2296c",
+          "vendor": "libged.so"
+        },
+        "tater-vdec/lib/libgpu_aux.so": {
+          "sha256": "05800127aa6e26d2a6112e34d4d1f58ca50ce6fa52792637d195ac09e170e6c3",
+          "vendor": "libgpu_aux.so"
+        },
+        "tater-vdec/lib/libgralloc_extra.so": {
+          "sha256": "6dba915041984215e1596efd63e40616b0470d2c5fc28b039859060ac3b5da5d",
+          "vendor": "libgralloc_extra.so"
+        },
+        "tater-vdec/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-vdec/lib/libhevce_sb.ca7.android.so": {
+          "sha256": "ad5f0802acff548c9a705dc7d3dd35b174a6f6371ae43fe7470f8433ec45c42d",
+          "vendor": "libhevce_sb.ca7.android.so"
+        },
+        "tater-vdec/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-vdec/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-vdec/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-vdec/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-vdec/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-vdec/lib/libion_ulit.so": {
+          "sha256": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+          "public": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713"
+        },
+        "tater-vdec/lib/libjpeg-alpha_vendor.so": {
+          "sha256": "ce52871b5cce39f682562420b842d536cdb0d94ef3de28cc8b01824dbdcfab6b",
+          "vendor": "libjpeg-alpha_vendor.so"
+        },
+        "tater-vdec/lib/libladder.so": {
+          "sha256": "836e8b57ebed9d3c0811f3d25b8effb404dfad90ea0e0407801b5805d160ed8f",
+          "vendor": "libladder.so"
+        },
+        "tater-vdec/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-vdec/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-vdec/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-vdec/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-vdec/lib/libmhalImageCodec.so": {
+          "sha256": "bc10bca5b5f3fc946cb434a64f62b06aa9d365ae49f34e60f861d8c471d9651a",
+          "vendor": "libmhalImageCodec.so"
+        },
+        "tater-vdec/lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4d3e60b77b1066d96641e4eab815555cdb6fe0898b9da01eacd34a606bb3236a",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libmtk_drvb.so": {
+          "sha256": "02363312b8f631a3b594fe749d6fc276ee03a37c26e76b17211de230af8f3058",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-vdec/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-vdec/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-vdec/lib/libtz_uree.so": {
+          "sha256": "f740c321088c223bf53ae1c83f05e3b4db2f59902c3815c46fd6e80d746b6629",
+          "vendor": "libtz_uree.so"
+        },
+        "tater-vdec/lib/libui-v28.so": {
+          "sha256": "7f12f5e82d35ee2a3b64c791fabe574ee9b9364c6902ea49fd6063a22c5adfa8",
+          "vendor": "libui-v28.so"
+        },
+        "tater-vdec/lib/libui.so": {
+          "sha256": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641",
+          "public": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641"
+        },
+        "tater-vdec/lib/libunwind.so": {
+          "sha256": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc",
+          "public": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc"
+        },
+        "tater-vdec/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-vdec/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-vdec/lib/libutilscallstack.so": {
+          "sha256": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3",
+          "public": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3"
+        },
+        "tater-vdec/lib/libvc1dec_sa.ca7.so": {
+          "sha256": "870aea38d97bc5b4763dae4bd37c4cd0e6bd689bcb5648ea28a36a600de3eba7",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-vdec/lib/libvcodec_oal.so": {
+          "sha256": "bd76ad061e9ce75358e575956133990b793a5f6631444b0c4713907e25f422bf",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-vdec/lib/libvcodec_utility.so": {
+          "sha256": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-vdec/lib/libvcodecdrv.so": {
+          "sha256": "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-vdec/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-vdec/lib/libvp8enc_sa.ca7.so": {
+          "sha256": "2c12dde3cbe12b039f06797b20b9e45b7f68c868ae1c4933f07cbb9d6f70b74c",
+          "vendor": "libvp8enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-venc/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        }
+      },
+      "manifests": {
+        "tater-gpu/runtime.json": {
+          "schema": 2,
+          "runtime_id": "crown-mt8163-mali-pbuffer-1",
+          "tree_sha256": "bc75d30a7be167b827e89b1d7629ec5dc4b528c99106d0b1e9beed02b4815561",
+          "file_count": 34,
+          "runtime_bytes": 37506624
+        },
+        "tater-vdec/runtime.json": {
+          "schema": 2,
+          "runtime_id": "crown-mt8163-vdec-stock-1",
+          "tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a",
+          "file_count": 66,
+          "runtime_bytes": 41926684
+        },
+        "tater-venc/runtime.json": {
+          "schema": 2,
+          "runtime_id": "crown-mt8163-venc-stock-1",
+          "component_sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "base_tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a"
+        }
+      }
+    },
+    "rook": {
+      "kernel": "4.9.337-g4174e0b4d0e2",
+      "panel": "480,1440",
+      "roots": [
+        "tater-gpu",
+        "tater-vdec",
+        "tater-venc"
+      ],
+      "files": {
+        "tater-gpu/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-gpu/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-gpu/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-gpu/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-gpu/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-gpu/lib/libbase.so.orig": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-gpu/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-gpu/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-gpu/lib/libc++.so.orig": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-gpu/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-gpu/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-gpu/lib/libcutils.so.orig": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-gpu/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-gpu/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-gpu/lib/libged.so": {
+          "sha256": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4",
+          "public": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4"
+        },
+        "tater-gpu/lib/libgpu_aux.so": {
+          "sha256": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd",
+          "public": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd"
+        },
+        "tater-gpu/lib/libgralloc_extra.so": {
+          "sha256": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563",
+          "public": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563"
+        },
+        "tater-gpu/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-gpu/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-gpu/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-gpu/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-gpu/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-gpu/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-gpu/lib/libion_ulit.so": {
+          "sha256": "639b31a2622bf02f7edcc8ff35c92b2edb63c70ebdd7029aba159f8108e7ce67",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-gpu/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-gpu/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-gpu/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-gpu/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-gpu/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-gpu/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-gpu/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-gpu/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-gpu/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-gpu/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-vdec/linker": {
+          "sha256": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa",
+          "public": "b9c6e172a16c5e1337cca905bc3457392e877ffc3b040e250929a5ca56afdaaa"
+        },
+        "tater-vdec/lib/android.hardware.configstore-utils.so": {
+          "sha256": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767",
+          "public": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.0.so": {
+          "sha256": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2",
+          "public": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2"
+        },
+        "tater-vdec/lib/android.hardware.configstore@1.1.so": {
+          "sha256": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49",
+          "public": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49"
+        },
+        "tater-vdec/lib/android.hardware.graphics.allocator@2.0.so": {
+          "sha256": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415",
+          "public": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415"
+        },
+        "tater-vdec/lib/android.hardware.graphics.bufferqueue@1.0.so": {
+          "sha256": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899",
+          "public": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-vdec/lib/android.hardware.graphics.common@1.1.so": {
+          "sha256": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342",
+          "public": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.0.so": {
+          "sha256": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b",
+          "public": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b"
+        },
+        "tater-vdec/lib/android.hardware.graphics.mapper@2.1.so": {
+          "sha256": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097",
+          "public": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097"
+        },
+        "tater-vdec/lib/android.hardware.media.omx@1.0.so": {
+          "sha256": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8",
+          "public": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8"
+        },
+        "tater-vdec/lib/android.hardware.media@1.0.so": {
+          "sha256": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151",
+          "public": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151"
+        },
+        "tater-vdec/lib/gralloc.mt8163.so": {
+          "sha256": "caa3ef25813be03a8c68d03ac6a5a382f79e0df9e0e41f90861885200710b97d",
+          "vendor": "hw/gralloc.mt8163.so"
+        },
+        "tater-vdec/lib/libGLES_mali.so": {
+          "sha256": "dcb3eac3dd0f220124b39c5a44b0e8a4d5caeb475fe9465db45d8f5f9a75f04d",
+          "vendor": "egl/libGLES_mali.so"
+        },
+        "tater-vdec/lib/libGLESv1_CM.so": {
+          "sha256": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615",
+          "public": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615"
+        },
+        "tater-vdec/lib/libGdmaScalerPipe.so": {
+          "sha256": "2ce40ea5400a70bec688d6d29cda0346dfcc28a143639489704c948ce57a6b75",
+          "vendor": "libGdmaScalerPipe.so"
+        },
+        "tater-vdec/lib/libJpgDecPipe.so": {
+          "sha256": "62e3566f07d02a1df93e583e65464f6067a32fba330d0714d113663f516e4d8f",
+          "vendor": "libJpgDecPipe.so"
+        },
+        "tater-vdec/lib/libMtkOmxVdecEx.so": {
+          "sha256": "812cd2a56b50e994fee60cdb92d3b0c82ff339d25b55c55d31ac9233f7b6ee89",
+          "vendor": "libMtkOmxVdecEx.so"
+        },
+        "tater-vdec/lib/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        },
+        "tater-vdec/lib/libSwJpgCodec.so": {
+          "sha256": "e4473275e049980c385b108207110a972e282f9df261dcb83b5defa496ac4f94",
+          "vendor": "libSwJpgCodec.so"
+        },
+        "tater-vdec/lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-vdec/lib/libbase.so": {
+          "sha256": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59",
+          "public": "597b5b12f67d432c399e69eb0bb196024228af20d2a2a4dee3127009d6ed4f59"
+        },
+        "tater-vdec/lib/libbinder.so": {
+          "sha256": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef",
+          "public": "db30224904301a713208ff453ad5605b96f89d2c84b95e4cf04dda3ecf0f19ef"
+        },
+        "tater-vdec/lib/libbionic28compat.so": {
+          "sha256": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+          "public": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216"
+        },
+        "tater-vdec/lib/libbwc.so": {
+          "sha256": "3d6539c80d840fe19a6f7353a2f5c90899fe093b118326d31f4dd6ce9838c4ed",
+          "vendor": "libbwc.so"
+        },
+        "tater-vdec/lib/libc++.so": {
+          "sha256": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68",
+          "public": "7657d3741f92ad6e793283d40b7930b7b3e9c9eca902e4af063c917ee910bb68"
+        },
+        "tater-vdec/lib/libc.so": {
+          "sha256": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232",
+          "public": "076861a228fd9c7a41c164d625b6141fd1e0c6d74b814b484e136dc3b64c2232"
+        },
+        "tater-vdec/lib/libcutils.so": {
+          "sha256": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3",
+          "public": "2c185b10de381cc4eb8767a3958c5c62850b1d8d1dbb20deb5a0c64af8f673c3"
+        },
+        "tater-vdec/lib/libdl.so": {
+          "sha256": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff",
+          "public": "0ede9f6cf5fbee3fe31d093b13613db9561c382d5e7ad64e79f43b5f6541e8ff"
+        },
+        "tater-vdec/lib/libdpframework.so": {
+          "sha256": "1b66dc624f4968cd21bcd2180962def11dcddc92b05fa6322b5b6cb382c11564",
+          "vendor": "libdpframework.so"
+        },
+        "tater-vdec/lib/libged.so": {
+          "sha256": "b9ac0f6f51828dbefaf371a81202def5dce39a1a4eb708f48f4c6e69a7c2296c",
+          "vendor": "libged.so"
+        },
+        "tater-vdec/lib/libgpu_aux.so": {
+          "sha256": "05800127aa6e26d2a6112e34d4d1f58ca50ce6fa52792637d195ac09e170e6c3",
+          "vendor": "libgpu_aux.so"
+        },
+        "tater-vdec/lib/libgralloc_extra.so": {
+          "sha256": "6dba915041984215e1596efd63e40616b0470d2c5fc28b039859060ac3b5da5d",
+          "vendor": "libgralloc_extra.so"
+        },
+        "tater-vdec/lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-vdec/lib/libhevce_sb.ca7.android.so": {
+          "sha256": "ad5f0802acff548c9a705dc7d3dd35b174a6f6371ae43fe7470f8433ec45c42d",
+          "vendor": "libhevce_sb.ca7.android.so"
+        },
+        "tater-vdec/lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-vdec/lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-vdec/lib/libhwbinder.so": {
+          "sha256": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060",
+          "public": "82f154eb7147c84c55562fc41b224952b18848aecdc37ad7f877486c0aa0a060"
+        },
+        "tater-vdec/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-vdec/lib/libion_mtk.so": {
+          "sha256": "f14b60503b4a109158a732c019ece0d47b39ec2d603e00f182497edafde8355f",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-vdec/lib/libion_ulit.so": {
+          "sha256": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+          "public": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713"
+        },
+        "tater-vdec/lib/libjpeg-alpha_vendor.so": {
+          "sha256": "ce52871b5cce39f682562420b842d536cdb0d94ef3de28cc8b01824dbdcfab6b",
+          "vendor": "libjpeg-alpha_vendor.so"
+        },
+        "tater-vdec/lib/libladder.so": {
+          "sha256": "836e8b57ebed9d3c0811f3d25b8effb404dfad90ea0e0407801b5805d160ed8f",
+          "vendor": "libladder.so"
+        },
+        "tater-vdec/lib/liblog.so": {
+          "sha256": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a",
+          "public": "b523f127b429530ef141a19c735b9be09b19303009dc0212277b76866dd6112a"
+        },
+        "tater-vdec/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-vdec/lib/libm.so": {
+          "sha256": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8",
+          "public": "0b8893c6470034862bc571bf940bb65b7c31cedddfe91ea6578dc7a50efeb4e8"
+        },
+        "tater-vdec/lib/libm4u.so": {
+          "sha256": "2ef01c1046457d2bccfbea366cf387543a37253d767c24e8ad38a96dd63a1a86",
+          "vendor": "libm4u.so"
+        },
+        "tater-vdec/lib/libmhalImageCodec.so": {
+          "sha256": "bc10bca5b5f3fc946cb434a64f62b06aa9d365ae49f34e60f861d8c471d9651a",
+          "vendor": "libmhalImageCodec.so"
+        },
+        "tater-vdec/lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4d3e60b77b1066d96641e4eab815555cdb6fe0898b9da01eacd34a606bb3236a",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libmtk_drvb.so": {
+          "sha256": "02363312b8f631a3b594fe749d6fc276ee03a37c26e76b17211de230af8f3058",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-vdec/lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-vdec/lib/libsync.so": {
+          "sha256": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499",
+          "public": "c2d593223a4548c01ba65bee6e1248121f3fc15788181a5acbb4562c80c81499"
+        },
+        "tater-vdec/lib/libtz_uree.so": {
+          "sha256": "f740c321088c223bf53ae1c83f05e3b4db2f59902c3815c46fd6e80d746b6629",
+          "vendor": "libtz_uree.so"
+        },
+        "tater-vdec/lib/libui-v28.so": {
+          "sha256": "7f12f5e82d35ee2a3b64c791fabe574ee9b9364c6902ea49fd6063a22c5adfa8",
+          "vendor": "libui-v28.so"
+        },
+        "tater-vdec/lib/libui.so": {
+          "sha256": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641",
+          "public": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641"
+        },
+        "tater-vdec/lib/libunwind.so": {
+          "sha256": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc",
+          "public": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc"
+        },
+        "tater-vdec/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-vdec/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-vdec/lib/libutilscallstack.so": {
+          "sha256": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3",
+          "public": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3"
+        },
+        "tater-vdec/lib/libvc1dec_sa.ca7.so": {
+          "sha256": "870aea38d97bc5b4763dae4bd37c4cd0e6bd689bcb5648ea28a36a600de3eba7",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-vdec/lib/libvcodec_oal.so": {
+          "sha256": "bd76ad061e9ce75358e575956133990b793a5f6631444b0c4713907e25f422bf",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-vdec/lib/libvcodec_utility.so": {
+          "sha256": "7f46d588d62a552ec00954d0ca23662390071150a6cef7c04f814ebfd6548313",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-vdec/lib/libvcodecdrv.so": {
+          "sha256": "6a9b8be27634d37a451a05cb359797289254d8250573973b8fc064f4ff07989e",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-vdec/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-vdec/lib/libvp8enc_sa.ca7.so": {
+          "sha256": "2c12dde3cbe12b039f06797b20b9e45b7f68c868ae1c4933f07cbb9d6f70b74c",
+          "vendor": "libvp8enc_sa.ca7.so"
+        },
+        "tater-vdec/lib/libz.so": {
+          "sha256": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b",
+          "public": "93ee222988a1371d863fa631d7a70dcdab1f1d3432f0d28f0552ce12b78d8b8b"
+        },
+        "tater-venc/libMtkOmxVenc.so": {
+          "sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "vendor": "libMtkOmxVenc.so"
+        }
+      },
+      "manifests": {
+        "tater-gpu/runtime.json": {
+          "schema": 2,
+          "runtime_id": "rook-mt8163-mali-pbuffer-1",
+          "tree_sha256": "bc75d30a7be167b827e89b1d7629ec5dc4b528c99106d0b1e9beed02b4815561",
+          "file_count": 34,
+          "runtime_bytes": 37506624
+        },
+        "tater-vdec/runtime.json": {
+          "schema": 2,
+          "runtime_id": "rook-mt8163-vdec-stock-1",
+          "tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a",
+          "file_count": 66,
+          "runtime_bytes": 41926684
+        },
+        "tater-venc/runtime.json": {
+          "schema": 2,
+          "runtime_id": "rook-mt8163-venc-stock-1",
+          "component_sha256": "161020e59faad3b1d250dcc3db168ce9109c08c8b2f02bc736109356f7ed5db4",
+          "base_tree_sha256": "8564d383faba23c32545037f62a7ab9ddddf227a61790470dbc883e6eb871f0a"
+        }
+      }
+    },
+    "athena": {
+      "kernel": "6.18.56-techo5-athena",
+      "roots": [
+        "tater-athena-codec"
+      ],
+      "files": {
+        "tater-athena-codec/lib/libbase.so": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-athena-codec/lib/libbwc.so": {
+          "sha256": "d007c563b78b3ad8e7f552780f6b6adb9f4fdd906d426a169a3ee2bc1bf81d41",
+          "vendor": "libbwc.so"
+        },
+        "tater-athena-codec/lib/libc++.so": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-athena-codec/lib/libc.so": {
+          "sha256": "7585ba7ce44cb14d3e7bbaa40aca4a3e7e8c97b8c76e2b9514c1c53c5bf97ca2",
+          "public": "7585ba7ce44cb14d3e7bbaa40aca4a3e7e8c97b8c76e2b9514c1c53c5bf97ca2"
+        },
+        "tater-athena-codec/lib/libcutils.so": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-athena-codec/lib/libdl.so": {
+          "sha256": "01ff90be229ce00bf68bc25447a2ce5162853d041c0e4e6a7492de4546446b81",
+          "public": "01ff90be229ce00bf68bc25447a2ce5162853d041c0e4e6a7492de4546446b81"
+        },
+        "tater-athena-codec/lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-athena-codec/lib/libion_mtk.so": {
+          "sha256": "ba52be04219104bcaa280f623d217e7dc3234e242784cbb86827103fd9f57c84",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-athena-codec/lib/libion_ulit.so": {
+          "sha256": "375023230fbe32e5d6e9c722f53bf6cba2c210e90f5e6ceef15b6181a6341c0f",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-athena-codec/lib/libladder.so": {
+          "sha256": "4afda9301105380f693c2b8d7c2ee4a5e5a80d1d4cc8bee8543daa3a34f3de6e",
+          "vendor": "libladder.so"
+        },
+        "tater-athena-codec/lib/liblog.so": {
+          "sha256": "f7974d3f1843fc2d9a708ae79d0a16d7c7e3a1cf7b620b6c5ec7e54813a3f9b9",
+          "public": "f7974d3f1843fc2d9a708ae79d0a16d7c7e3a1cf7b620b6c5ec7e54813a3f9b9"
+        },
+        "tater-athena-codec/lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-athena-codec/lib/libm.so": {
+          "sha256": "ac4d03ac3ebde8520cf933079c210ae07e0d3eff2a35549fb0ab22409f8ab00e",
+          "public": "ac4d03ac3ebde8520cf933079c210ae07e0d3eff2a35549fb0ab22409f8ab00e"
+        },
+        "tater-athena-codec/lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4f720a6708072ffea7891d3a3399886e408059ca13900d626cfd2ce32679743e",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-athena-codec/lib/libmtk_drvb.so": {
+          "sha256": "06f3a8bdcdef0183f6794b245d5cce0faec07c5ae0c30f38c343abb8c6527a9b",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-athena-codec/lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-athena-codec/lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-athena-codec/lib/libvc1dec_sa.ca7.so": {
+          "sha256": "9d04bfa2ec630ab0e0a0483c8c7bf3dd5b13ca3a61beb2a2ca22610cfbde299e",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-athena-codec/lib/libvcodec_oal.so": {
+          "sha256": "d8e0d6f8ad1f752756a8c18975afc7071dea9d022f2b67caf1e1db1211c7c2e1",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-athena-codec/lib/libvcodec_utility.so": {
+          "sha256": "47c6979ab704b3885ad522b83b68b492e69eb341741814cd28b24d238ca83218",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-athena-codec/lib/libvcodecdrv.so": {
+          "sha256": "8f3eff348d8254a846695985905a63f8d93dc7fb9dccc1f2712b8935172d4e7f",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-athena-codec/lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-athena-codec/lib/libvp8dec_sa.ca7.so": {
+          "sha256": "61d352aae0886412ac2e7ed155d1d62c9b0612bb6b9869973aca00fc464060a2",
+          "vendor": "libvp8dec_sa.ca7.so"
+        },
+        "tater-athena-codec/linker": {
+          "sha256": "6a9d2fd130c8f4c89ae55ded7095308a023922b2f0777e41a7e71d438e4f50f8",
+          "public": "6a9d2fd130c8f4c89ae55ded7095308a023922b2f0777e41a7e71d438e4f50f8"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.configstore-utils.so": {
+          "sha256": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767",
+          "public": "d9fefc36020ae3972240cf24ec377e6da4090d1d7ff0aec4acadb3a2659a5767"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.configstore@1.0.so": {
+          "sha256": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2",
+          "public": "1acaf54d3437b8157b0a99a59ead525cd25e91708ae34747deb2d4d3461e62c2"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.configstore@1.1.so": {
+          "sha256": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49",
+          "public": "72bcb810262e9995677e3b8845c67f05f2a69c38ce80761167bd9207ee506e49"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.allocator@2.0.so": {
+          "sha256": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415",
+          "public": "c67f209c86205eeb8031d5b99e3725e3c7d24f140aaf3867ca879968d3daa415"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.bufferqueue@1.0.so": {
+          "sha256": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899",
+          "public": "5266bdc0214306ad9ad38dabe3f581d5914bfdceb666fa61a6b6960a9e796899"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.common@1.0.so": {
+          "sha256": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259",
+          "public": "4099e2bf1c1550391b9e20347bd5c9c93e35bfc98cb3922fb7bcb3544073e259"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.common@1.1.so": {
+          "sha256": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342",
+          "public": "89470538aeb9be676e86610bd1b8cfe33f2b36dfa72d1c305eb6ee880dca3342"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.mapper@2.0.so": {
+          "sha256": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b",
+          "public": "d7466dc628b2b073e09125a07ad4bd0b06d40f76e9cd5ff37408d3a228f7b00b"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.graphics.mapper@2.1.so": {
+          "sha256": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097",
+          "public": "b770834c656fcb858843353e649eb205c0d1a23feba06ec9b1b85d36f43c1097"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.media.omx@1.0.so": {
+          "sha256": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8",
+          "public": "b96a78c523b13df4bd8bc484ae91ff0b2c38bacd00b48a2630d241dca1b810a8"
+        },
+        "tater-athena-codec/omx-lib/android.hardware.media@1.0.so": {
+          "sha256": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151",
+          "public": "b42b176aede0e0fa564b766733b2fb02985b912d7c90bc747ae99163bfd94151"
+        },
+        "tater-athena-codec/omx-lib/android.hidl.memory.token@1.0.so": {
+          "sha256": "16341d0831541c88184fa3eb26a00c7900321d41b5d8cb103bf0be92547b6e50",
+          "public": "16341d0831541c88184fa3eb26a00c7900321d41b5d8cb103bf0be92547b6e50"
+        },
+        "tater-athena-codec/omx-lib/android.hidl.memory@1.0.so": {
+          "sha256": "6d953d868c26093a2c78fde5aae25e6d767c291e00f87cb6d59313797b1ded1c",
+          "public": "6d953d868c26093a2c78fde5aae25e6d767c291e00f87cb6d59313797b1ded1c"
+        },
+        "tater-athena-codec/omx-lib/libMtkOmxVenc.so": {
+          "sha256": "852f82e3dd4d05d1b63435b258811f89b6f5b6466ff1d52cf577e85108cb5ec5",
+          "vendor": "libMtkOmxVenc.so"
+        },
+        "tater-athena-codec/omx-lib/libbacktrace.so": {
+          "sha256": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54",
+          "public": "bf4e6b3ecf7d14db8e5e62e2f72b3bd42cf58a57deb4e34b1835e750a6b9af54"
+        },
+        "tater-athena-codec/omx-lib/libbase.so": {
+          "sha256": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e",
+          "public": "ce5af18fea3001895a079e74dc712f9c6473e19c7b7657dc3b5a2733c4f27b3e"
+        },
+        "tater-athena-codec/omx-lib/libbinder.so": {
+          "sha256": "cbeaa880507356957b7955bec7ed7b7f4489270bc17dc532c00baabc6693c549",
+          "public": "cbeaa880507356957b7955bec7ed7b7f4489270bc17dc532c00baabc6693c549"
+        },
+        "tater-athena-codec/omx-lib/libbwc.so": {
+          "sha256": "d007c563b78b3ad8e7f552780f6b6adb9f4fdd906d426a169a3ee2bc1bf81d41",
+          "vendor": "libbwc.so"
+        },
+        "tater-athena-codec/omx-lib/libc++.so": {
+          "sha256": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e",
+          "public": "812b7edee3e7ebed369a9dac66921c93098e15617c995e3f58e7143e3aac522e"
+        },
+        "tater-athena-codec/omx-lib/libc.so": {
+          "sha256": "7585ba7ce44cb14d3e7bbaa40aca4a3e7e8c97b8c76e2b9514c1c53c5bf97ca2",
+          "public": "7585ba7ce44cb14d3e7bbaa40aca4a3e7e8c97b8c76e2b9514c1c53c5bf97ca2"
+        },
+        "tater-athena-codec/omx-lib/libcutils.so": {
+          "sha256": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe",
+          "public": "04e41f96159bbcf30255e1c69b8b70218efc20ccc301ab27e7a07248964f0ebe"
+        },
+        "tater-athena-codec/omx-lib/libdl.so": {
+          "sha256": "01ff90be229ce00bf68bc25447a2ce5162853d041c0e4e6a7492de4546446b81",
+          "public": "01ff90be229ce00bf68bc25447a2ce5162853d041c0e4e6a7492de4546446b81"
+        },
+        "tater-athena-codec/omx-lib/libdpframework.so": {
+          "sha256": "47ee0ff8dc25c677e5393abee3ac5cdd6eba99de520018714bcecd4b769f0970",
+          "vendor": "libdpframework.so"
+        },
+        "tater-athena-codec/omx-lib/libged.so": {
+          "sha256": "c90b7cca279be016ef630d967116efe82aa6dc0c1d73401a61afed1d06a8ec8d",
+          "vendor": "libged.so"
+        },
+        "tater-athena-codec/omx-lib/libgralloc_extra.so": {
+          "sha256": "bac21d2ac1e69d8463208f4d2bc66f700791d46955fc023003a8c4f436f8ca54",
+          "vendor": "libgralloc_extra.so"
+        },
+        "tater-athena-codec/omx-lib/libhardware.so": {
+          "sha256": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06",
+          "public": "ea5327d9d001719810cd2e637a3df0d96f5d155ad812091557381a073a8a8a06"
+        },
+        "tater-athena-codec/omx-lib/libhidlbase.so": {
+          "sha256": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0",
+          "public": "734e7ee68c2b9ba5afb8dcf52d0b1ba35fff66437a6ad134ac4d8db9e26db9b0"
+        },
+        "tater-athena-codec/omx-lib/libhidlmemory.so": {
+          "sha256": "70e189e762975e679eb7c0548cc4d49555cfa3968db7f931d9922074a7292800",
+          "public": "70e189e762975e679eb7c0548cc4d49555cfa3968db7f931d9922074a7292800"
+        },
+        "tater-athena-codec/omx-lib/libhidltransport.so": {
+          "sha256": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d",
+          "public": "c1c763dd2ff14173e9c5dd48ffa195cfb63bd2fd82df7116540146f83059a00d"
+        },
+        "tater-athena-codec/omx-lib/libhwbinder.so": {
+          "sha256": "91488942832b48b5550bd3f6515412e0fdb88c6b8cc6fe34ba1f4e364a7b9515",
+          "public": "91488942832b48b5550bd3f6515412e0fdb88c6b8cc6fe34ba1f4e364a7b9515"
+        },
+        "tater-athena-codec/omx-lib/libion.so": {
+          "sha256": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626",
+          "public": "de3e597edc16f5a8de1a025a4ef31777a582545cd81979bcbf4aeff63afa8626"
+        },
+        "tater-athena-codec/omx-lib/libion_mtk.so": {
+          "sha256": "ba52be04219104bcaa280f623d217e7dc3234e242784cbb86827103fd9f57c84",
+          "vendor": "libion_mtk.so"
+        },
+        "tater-athena-codec/omx-lib/libion_ulit.so": {
+          "sha256": "375023230fbe32e5d6e9c722f53bf6cba2c210e90f5e6ceef15b6181a6341c0f",
+          "vendor": "libion_ulit.so"
+        },
+        "tater-athena-codec/omx-lib/libladder.so": {
+          "sha256": "4afda9301105380f693c2b8d7c2ee4a5e5a80d1d4cc8bee8543daa3a34f3de6e",
+          "vendor": "libladder.so"
+        },
+        "tater-athena-codec/omx-lib/liblog.so": {
+          "sha256": "f7974d3f1843fc2d9a708ae79d0a16d7c7e3a1cf7b620b6c5ec7e54813a3f9b9",
+          "public": "f7974d3f1843fc2d9a708ae79d0a16d7c7e3a1cf7b620b6c5ec7e54813a3f9b9"
+        },
+        "tater-athena-codec/omx-lib/liblzma.so": {
+          "sha256": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70",
+          "public": "2f8e3b417bb82d94b6893046b6329a1fcfb27f53f451212868cc30247152ac70"
+        },
+        "tater-athena-codec/omx-lib/libm.so": {
+          "sha256": "ac4d03ac3ebde8520cf933079c210ae07e0d3eff2a35549fb0ab22409f8ab00e",
+          "public": "ac4d03ac3ebde8520cf933079c210ae07e0d3eff2a35549fb0ab22409f8ab00e"
+        },
+        "tater-athena-codec/omx-lib/libmp4enc_sa.ca7.so": {
+          "sha256": "4f720a6708072ffea7891d3a3399886e408059ca13900d626cfd2ce32679743e",
+          "vendor": "libmp4enc_sa.ca7.so"
+        },
+        "tater-athena-codec/omx-lib/libmtk_drvb.so": {
+          "sha256": "06f3a8bdcdef0183f6794b245d5cce0faec07c5ae0c30f38c343abb8c6527a9b",
+          "vendor": "libmtk_drvb.so"
+        },
+        "tater-athena-codec/omx-lib/libnativewindow.so": {
+          "sha256": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+          "public": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72"
+        },
+        "tater-athena-codec/omx-lib/libpq_prot.so": {
+          "sha256": "bbd23f94ceeddad6f1440134d8ef212a3b4e90704d8f341f4bfe6e6892be4b5d",
+          "vendor": "libpq_prot.so"
+        },
+        "tater-athena-codec/omx-lib/libsync.so": {
+          "sha256": "74336925a40e086da6992351aa8449e0a69f502e80597667ab12af50ae71a7fe",
+          "public": "74336925a40e086da6992351aa8449e0a69f502e80597667ab12af50ae71a7fe"
+        },
+        "tater-athena-codec/omx-lib/libtz_uree.so": {
+          "sha256": "d05cf7adf62f7f75758043c03639dca68d0e7dc387eeac7303a88f57284ba432",
+          "vendor": "libtz_uree.so"
+        },
+        "tater-athena-codec/omx-lib/libui.so": {
+          "sha256": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641",
+          "public": "92b7a431b065e6fc34ed068802f709972a18d9eab532dc4406fce1969022e641"
+        },
+        "tater-athena-codec/omx-lib/libunwind.so": {
+          "sha256": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc",
+          "public": "368c10030c6dd29ac2cc445373362f988330aa56192739db72320b545e79f7bc"
+        },
+        "tater-athena-codec/omx-lib/libunwindstack.so": {
+          "sha256": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44",
+          "public": "87861c713ae6fcee92aa59c8ff8b5022e075a43a9fbc50533baf5f5164ca2a44"
+        },
+        "tater-athena-codec/omx-lib/libutils.so": {
+          "sha256": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca",
+          "public": "aa897d4311500863882b4901837902baae3a5f837ae6f67ebb972afba339a4ca"
+        },
+        "tater-athena-codec/omx-lib/libutilscallstack.so": {
+          "sha256": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3",
+          "public": "4f8b0500560a97da85884d0d5e5a8caf89d3c3121ccb66c08a9ff9e281bdf6e3"
+        },
+        "tater-athena-codec/omx-lib/libvc1dec_sa.ca7.so": {
+          "sha256": "9d04bfa2ec630ab0e0a0483c8c7bf3dd5b13ca3a61beb2a2ca22610cfbde299e",
+          "vendor": "libvc1dec_sa.ca7.so"
+        },
+        "tater-athena-codec/omx-lib/libvcodec_oal.so": {
+          "sha256": "d8e0d6f8ad1f752756a8c18975afc7071dea9d022f2b67caf1e1db1211c7c2e1",
+          "vendor": "libvcodec_oal.so"
+        },
+        "tater-athena-codec/omx-lib/libvcodec_utility.so": {
+          "sha256": "47c6979ab704b3885ad522b83b68b492e69eb341741814cd28b24d238ca83218",
+          "vendor": "libvcodec_utility.so"
+        },
+        "tater-athena-codec/omx-lib/libvcodecdrv.so": {
+          "sha256": "8f3eff348d8254a846695985905a63f8d93dc7fb9dccc1f2712b8935172d4e7f",
+          "vendor": "libvcodecdrv.so"
+        },
+        "tater-athena-codec/omx-lib/libvndksupport.so": {
+          "sha256": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+          "public": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096"
+        },
+        "tater-athena-codec/omx-lib/libvp8dec_sa.ca7.so": {
+          "sha256": "61d352aae0886412ac2e7ed155d1d62c9b0612bb6b9869973aca00fc464060a2",
+          "vendor": "libvp8dec_sa.ca7.so"
+        },
+        "tater-athena-codec/omx-lib/vendor.mediatek.hardware.pq@2.0.so": {
+          "sha256": "d581346d48e48be057241d68d1b403a6debcee9fb1de8e23a57b2579246e01d3",
+          "vendor": "vendor.mediatek.hardware.pq@2.0.so"
+        }
+      },
+      "manifests": {
+        "tater-athena-codec/runtime.json": {
+          "schema": 1,
+          "target": "athena",
+          "runtime_id": "athena-mt8183-ap-vdec-1",
+          "experimental": true,
+          "tree_sha256": "efcfe0d53924554af190c7e9f8068f190e1af3620c0346efceed3a81890b23bc",
+          "file_count": 24,
+          "runtime_bytes": 6042836
+        },
+        "tater-athena-codec/omx-lib/runtime.json": {
+          "schema": 1,
+          "target": "athena",
+          "runtime_id": "athena-mt8183-ap-venc-1",
+          "experimental": true,
+          "tree_sha256": "de1daf2574d4d4d4d3c5ba8605852f782a9f170d35934888290e1d52d9a91db3",
+          "file_count": 55,
+          "runtime_bytes": 8510652
+        }
+      }
+    }
+  },
+  "archives": {
+    "sdk24": {
+      "url": "https://dl.google.com/android/repository/sys-img/android/armeabi-v7a-24_r07.zip",
+      "sha256": "42690977fe4b97b0643da11a2b42742b2e3d5b8849dcdd6893e0b92d6618c91d",
+      "size": 283677512,
+      "member": "armeabi-v7a/system.img",
+      "max_image_bytes": 1879048192
+    },
+    "apex": {
+      "url": "https://android.googlesource.com/platform/prebuilts/runtime/+/889e7cb78ec7268b096f285f3dce8885ed06719d/mainline/runtime/apex/com.android.runtime-arm.apex?format=TEXT",
+      "sha256": "2cc72dff7edee2d25e27d844f872ffafa2c6c973e2e2f84912931e49fd790a59",
+      "size": 3860527,
+      "encoding": "base64",
+      "member": "apex_payload.img",
+      "max_image_bytes": 67108864
+    }
+  },
+  "compat_files": {
+    "libbionic28compat.so": "e98b5822d5e3e2ba5cc88da3a3f0aca0b9309af7f59b35c2d8ea42fdaec4f216",
+    "libged.so": "f3b48ec350b7fc19e409f3ba99a7b6645f43a090339102fce85d19b4d79f6cd4",
+    "libgpu_aux.so": "b2447f9655074cd446e79bcc781f44a5b39fb94812cfdc93983c1554b3a9fbcd",
+    "libgralloc_extra.so": "f847adaaa52e9aa5bb42296f3fc347260f909c5317a0075c51010229db3cb563",
+    "libnativewindow.so": "212fe8c6fb70dfbe0edc60b83c86945a401f0335fdd12c6d73b66c6a4b0c4f72",
+    "libvndksupport.so": "d415f8ae4ab630bfe6f809e72f14317a727156b8c607a1e9fe49515661294096",
+    "libGLESv1_CM.so": "f510f8d0ff4a66bfe16d5e1e70343fdbfbdd2f1aa6422f3f18775abab81bd615",
+    "libion_ulit.so": "6790909777094d628fa4337c5a4928d1bf3559cd2ce4ca6200d5507611d9f713",
+    "libsync.so": "74336925a40e086da6992351aa8449e0a69f502e80597667ab12af50ae71a7fe"
+  }
+}

@@ -47,6 +47,41 @@ func TestHardwareDecoderRequiresExplicitOptIn(t *testing.T) {
 	}
 }
 
+func TestCheckersLineageDecoderCannotFallBackToFireOS(t *testing.T) {
+	t.Setenv("TATER_VDEC_ENABLE", "1")
+	t.Setenv("TATER_FIRMWARE_TARGET", "checkers")
+	t.Setenv("TATER_CHECKERS_LINEAGE_ENABLE", "1")
+	for _, key := range []string{"TATER_VDEC_COMPONENT", "TATER_VDEC_GRALLOC", "TATER_VDEC_LIBRARY_PATH", "TATER_VDEC_RUNTIME_MANIFEST"} {
+		t.Setenv(key, "/old/fireos")
+	}
+	config, enabled := hardwareDecoderConfigFromEnvironment()
+	if !enabled || !config.lineage || config.gralloc != "" || config.component != checkersLineageRoot+"/lib/libMtkOmxVdecEx.so" || config.manifest != checkersLineageRoot+"/runtime.json" || config.libraryPath != checkersLineageRoot+"/lib" {
+		t.Fatal("Checkers Lineage profile was not isolated", config)
+	}
+	if strings.Contains(strings.Join(config.environment(), "\n"), "/old/fireos") {
+		t.Fatal("old runtime leaked into the retained-Lineage profile")
+	}
+	manifest := vdecRuntimeManifest{Schema: 2, RuntimeID: "checkers-mt8163-vdec-lineage-1", TreeSHA256: cronosVDECTreeSHA256, FileCount: 66, RuntimeBytes: 41_926_684}
+	value, _ := json.Marshal(manifest)
+	if err := validateVDECRuntimeManifestForTarget(value, "checkers-lineage"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"checkers", "cronos", "crown", "rook"} {
+		if validateVDECRuntimeManifestForTarget(value, target) == nil {
+			t.Fatal("accepted the versioned Checkers manifest for another ABI", target)
+		}
+	}
+	manifest.Schema = 1
+	value, _ = json.Marshal(manifest)
+	if validateVDECRuntimeManifestForTarget(value, "checkers-lineage") == nil {
+		t.Fatal("accepted old helper-coupled runtime metadata")
+	}
+	t.Setenv("TATER_FIRMWARE_TARGET", "cronos")
+	if config, _ := hardwareDecoderConfigFromEnvironment(); config.lineage {
+		t.Fatal("Checkers opt-in affected Cronos")
+	}
+}
+
 func TestHardwareDecoderRejectsOtherTargets(t *testing.T) {
 	t.Setenv("TATER_VDEC_ENABLE", "1")
 	for _, target := range []string{"", "crown-extra", "athena", "rook-extra"} {

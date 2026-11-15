@@ -5,10 +5,17 @@ This installer is only for the 2021 Echo Show 8 second generation, model
 `saiyaku-athena` from Fire OS 7080 / PS7574.1.7080N and booted into TWRP with
 working ADB. It is not compatible with the first-generation `crown` model.
 
-Every Athena running Tater firmware earlier than v4.0.0 must use this USB/TWRP
-factory bundle once. The v4 transition itself is not an OTA update. Existing
-Tater setup is preserved by default, and compatible releases after v4.0.0 can
-update both the application and inactive root-system slot through Tater.
+Every Athena running Tater firmware earlier than v5.0.0 must use this USB/TWRP
+factory bundle once, including v4.2.3. The v5 hardware transition is not an OTA
+update. Existing Tater setup is preserved by default; compatible later releases
+can update the application and inactive root-system slot through Tater.
+
+Before flashing, the installer prepares hash-pinned public Android runtime
+inputs. After first boot it assembles the codec runtime with this device's
+retained vendor libraries, verifies the result, and restarts the satellite.
+Keep power and USB attached until this completes. No FireOS backup, NDK,
+filesystem tools, or separately prepared library tree is needed. Public inputs
+are cached locally; allow roughly 3 GB of free host space for extraction.
 
 Keep reliable power and USB attached. From the extracted bundle, first run:
 

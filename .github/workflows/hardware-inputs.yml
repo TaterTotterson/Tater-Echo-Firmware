@@ -45,6 +45,31 @@ jobs:
           print('Source content pins verified; this is not physical firmware qualification.')
           PY
 
+  public-runtime-compatibility:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Test and verify published source-built compatibility libraries
+        run: |
+          python3 -m unittest tools.test_runtime_compat factory.test_hardware_runtime
+          python3 tools/runtime_compat.py fetch --output /tmp/runtime-compat
+          python3 - <<'PY'
+          import hashlib, json, subprocess, tarfile
+          from pathlib import Path
+          catalog = json.loads(Path('platforms/runtime-compat-input.json').read_text())
+          source = Path('/tmp/runtime-compat-source')
+          subprocess.run(['git', 'clone', '--filter=blob:none', '--no-checkout',
+                          'https://github.com/TaterTotterson/Tater-Echo-Hardware', str(source)], check=True)
+          subprocess.run(['git', '-C', str(source), 'checkout', '--detach', catalog['source_commit']], check=True)
+          with tarfile.open('/tmp/runtime-compat/runtime-compat-source.tar.gz') as archive:
+              lock = json.load(archive.extractfile('platforms/runtime-compat-lock.json'))
+          for relative, expected in lock['sources'].items():
+              path = source / relative
+              assert not path.is_symlink() and path.is_file(), relative
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, relative
+          print('Public source-built compatibility inputs verified; no physical qualification implied.')
+          PY
+
   kernel-inputs:
     runs-on: ubuntu-24.04
     strategy:

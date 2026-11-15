@@ -1,5 +1,11 @@
 # Checkers hardware release qualification
 
+Current USB-candidate status (2026-11-15): see
+[Echo 5 build inputs and fleet qualification](echo-5-build-inputs.md). The
+retained-Lineage codec profile and corrected separate-microphone kernel need
+their full USB/hardware trial. The sections below retain development history;
+earlier application-only results do not approve the assembled 5.0.0 image.
+
 This is the release gate for the unpublished Checkers hardware/camera work.
 Passing individual hardware probes is not sufficient to publish a release.
 Do not enable the new target-specific paths on other Echo models from these

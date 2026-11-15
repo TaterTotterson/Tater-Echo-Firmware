@@ -4,8 +4,10 @@ Three original landscape assets generated with the built-in image tool on
 2026-11-12 for the satellite UI/background request. No stock photos or
 device-proprietary image assets were used for these additions.
 
-The seven older scenes are unchanged. New assets are appended in
-`wallpapers.go`; existing rotation settings and uploaded photos still apply.
+The Meadow scene was removed from both display-size asset sets and the
+built-in rotation on 2026-11-15. The other six older scenes and these three
+additions remain unchanged; existing rotation settings and uploaded photos
+still apply.
 
 ## Firmware assets
 

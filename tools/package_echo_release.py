@@ -22,7 +22,7 @@ import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, prepare_release_mesa, release_hardware_inputs  # noqa: E402
+from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, prepare_release_mesa, release_hardware_inputs, runtime_compat  # noqa: E402
 from linux.dot import build_kernel as dot_kernel  # noqa: E402
 from linux.dot import early_boot as dot_early_boot  # noqa: E402
 
@@ -457,13 +457,19 @@ def minimum_system_version(target: str, definition: dict, release_version: str) 
     return value
 
 
-def build(version: str, target: str, output: Path) -> list[Path]:
+def build(version: str, target: str, output: Path, *, usb_test_candidate: bool = False) -> list[Path]:
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
         raise SystemExit("version must look like v0.1.0")
     targets = json.loads(TARGETS.read_text())["targets"]
     if target not in targets:
         raise SystemExit(f"unknown target {target!r}")
-    if target in LINUX_DOT_TARGETS:
+    # Unqualified test packages are USB-only, never feed-compatible OTA files.
+    # Only the physical qualification gate is deferred; all payload and source
+    # identity checks below still run against the actual input files.
+    if usb_test_candidate:
+        if output.resolve() == (REPO / "release").resolve() or output.is_symlink() or (output.exists() and any(output.iterdir())):
+            raise SystemExit("USB test candidates require a separate empty output directory")
+    elif target in LINUX_DOT_TARGETS:
         require_dot_audio_platform(target)
     elif target == "checkers":
         require_checkers_hardware_platform()
@@ -477,7 +483,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         require_athena_hardware_platform()
     required_system_version = minimum_system_version(target, targets[target], version)
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"tater-echo-{target}-{version}"
+    stem = f"tater-echo-{target}-{version}" + ("-usb-candidate" if usb_test_candidate else "")
     artifacts: dict[str, Path] = {}
     if target in LINUX_DOT_TARGETS | LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
         prefix = target.upper()
@@ -535,47 +541,48 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             # The rootfs is the source of truth; never package a different
             # ad-hoc /data helper into the matching application release.
             hardware_files = hardware_files_from_rootfs(rootfs_source, target)
-        ota = output / f"{stem}-ota.tar.gz"
-        if target in LINUX_DOT_TARGETS:
-            write_app_ota(ota, {"tater-echo": server.read_bytes()})
-        else:
-            bridge_files = {
-                "tater-echo": server.read_bytes(),
-                "tater-show": show.read_bytes(),
-            }
-            ota_bridge = output / f"{stem}-ota-bridge.tar.gz"
-            write_app_ota(ota_bridge, bridge_files)
-            artifacts["ota_bridge"] = ota_bridge
-            write_app_ota(ota, {
-                **bridge_files,
-                "FFMPEG-LGPL-2.1.txt": ffmpeg_license.read_bytes(),
-                "tater-camera": camera.read_bytes(),
-                "tater-ffmpeg": ffmpeg.read_bytes(),
-                **hardware_files,
-            })
-        artifacts["ota"] = ota
+        if not usb_test_candidate:
+            ota = output / f"{stem}-ota.tar.gz"
+            if target in LINUX_DOT_TARGETS:
+                write_app_ota(ota, {"tater-echo": server.read_bytes()})
+            else:
+                bridge_files = {
+                    "tater-echo": server.read_bytes(),
+                    "tater-show": show.read_bytes(),
+                }
+                ota_bridge = output / f"{stem}-ota-bridge.tar.gz"
+                write_app_ota(ota_bridge, bridge_files)
+                artifacts["ota_bridge"] = ota_bridge
+                write_app_ota(ota, {
+                    **bridge_files,
+                    "FFMPEG-LGPL-2.1.txt": ffmpeg_license.read_bytes(),
+                    "tater-camera": camera.read_bytes(),
+                    "tater-ffmpeg": ffmpeg.read_bytes(),
+                    **hardware_files,
+                })
+            artifacts["ota"] = ota
 
-        system_ota = output / f"{stem}-system-ota.tar.gz"
-        rootfs_meta = metadata(rootfs_source)
-        system_manifest = {
-            "schema": OTA_SCHEMA,
-            "platform": ota_platform(target),
-            "kind": "tater-linux-rootfs",
-            "target": target,
-            "base_os": "tater-linux",
-            "version": version,
-            "rootfs": rootfs_meta,
-        }
-        deterministic_mixed_tar(
-            {
-                "manifest.json": (
-                    json.dumps(system_manifest, indent=2, sort_keys=True) + "\n"
-                ).encode(),
-                "rootfs.tar.gz": rootfs_source,
-            },
-            system_ota,
-        )
-        artifacts["system"] = system_ota
+            system_ota = output / f"{stem}-system-ota.tar.gz"
+            rootfs_meta = metadata(rootfs_source)
+            system_manifest = {
+                "schema": OTA_SCHEMA,
+                "platform": ota_platform(target),
+                "kind": "tater-linux-rootfs",
+                "target": target,
+                "base_os": "tater-linux",
+                "version": version,
+                "rootfs": rootfs_meta,
+            }
+            deterministic_mixed_tar(
+                {
+                    "manifest.json": (
+                        json.dumps(system_manifest, indent=2, sort_keys=True) + "\n"
+                    ).encode(),
+                    "rootfs.tar.gz": rootfs_source,
+                },
+                system_ota,
+            )
+            artifacts["system"] = system_ota
     else:
         raise SystemExit(f"factory packaging is not implemented for {target!r}")
 
@@ -587,13 +594,14 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     if target in LINUX_DOT_TARGETS:
         require_elf(runtime_source, ELFCLASS32, EM_ARM, f"{target} microWakeWord runtime")
         require_elf(ort_source, ELFCLASS32, EM_ARM, f"{target} ONNX Runtime")
-    runtime_asset = output / f"{stem}-wake-runtime.so"
-    copy(runtime_source, runtime_asset, 0o755)
-    artifacts["wake_runtime"] = runtime_asset
+    if not usb_test_candidate:
+        runtime_asset = output / f"{stem}-wake-runtime.so"
+        copy(runtime_source, runtime_asset, 0o755)
+        artifacts["wake_runtime"] = runtime_asset
 
-    ort_asset = output / f"{stem}-onnxruntime.so"
-    copy(ort_source, ort_asset, 0o755)
-    artifacts["onnx_runtime"] = ort_asset
+        ort_asset = output / f"{stem}-onnxruntime.so"
+        copy(ort_source, ort_asset, 0o755)
+        artifacts["onnx_runtime"] = ort_asset
 
     with tempfile.TemporaryDirectory(prefix="tater-echo-package-") as temporary:
         factory = Path(temporary) / f"{stem}-factory"
@@ -769,8 +777,10 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             REPO / "LICENSES/ECHOLOCAL-MIT.txt", 0o644)
         inputs["licenses/SENDSPIN-MIT.txt"] = (
             REPO / "LICENSES/SENDSPIN-MIT.txt", 0o644)
-        if target in ("checkers", "cronos"):
-            inputs["provision_hardware.py"] = (REPO / "factory/provision_hardware.py", 0o755)
+        if target in ("checkers", "cronos", "crown", "rook", "athena"):
+            inputs["hardware_runtime.py"] = (REPO / "factory/hardware_runtime.py", 0o755)
+            inputs["hardware-runtime-sources.json"] = (REPO / "factory/hardware-runtime-sources.json", 0o644)
+            inputs.update(runtime_compat.factory_inputs(Path(temporary)))
         inputs["to_recovery.py"] = (REPO / "factory/to_recovery.py", 0o755)
         inputs["recovery_install.py"] = (REPO / "factory/recovery_install.py", 0o755)
         inputs["tater_settings.py"] = (REPO / "factory/tater_settings.py", 0o644)
@@ -833,6 +843,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             "ota_platform": ota_platform(target),
             "files": bundle_files,
         }
+        if usb_test_candidate:
+            bundle_manifest.update(purpose="usb-test-candidate", release_qualified=False)
         if target in LINUX_DOT_TARGETS | LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
             bundle_manifest["base_os"] = "tater-linux"
             bundle_manifest["platform"] = platform_provenance(target)
@@ -840,6 +852,19 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         archive = output / f"{stem}-factory.tar.gz"
         deterministic_tar(factory, archive)
         artifacts["factory"] = archive
+
+    if usb_test_candidate:
+        receipt = output / "usb-test-candidate.json"
+        write_json(receipt, {
+            "schema": 1, "target": target, "version": version,
+            "purpose": "usb-test-candidate", "release_qualified": False,
+            "platform": platform_provenance(target),
+            "artifacts": {name: {"name": path.name, **metadata(path)} for name, path in artifacts.items()},
+        })
+        sums = output / "SHA256SUMS"
+        files = [*artifacts.values(), receipt]
+        sums.write_text("".join(f"{digest(path)}  {path.name}\n" for path in files))
+        return [*files, sums]
 
     release_manifest = output / "firmware-manifest.json"
     target_manifest = {
@@ -898,8 +923,10 @@ def main() -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--target", default="biscuit")
     parser.add_argument("--output", type=Path, default=REPO / "release")
+    parser.add_argument("--usb-test-candidate", action="store_true",
+                        help="factory-only, unqualified USB test package; no OTA/feed artifacts")
     args = parser.parse_args()
-    for artifact in build(args.version, args.target, args.output.resolve()):
+    for artifact in build(args.version, args.target, args.output.resolve(), usb_test_candidate=args.usb_test_candidate):
         print(artifact)
     return 0
 

@@ -28,7 +28,6 @@ var defaultWallpaperNames = [...]string{
 	"forest",
 	"ocean",
 	"desert",
-	"meadow",
 	"waterfall",
 	"night",
 	"alpine-sunset",
