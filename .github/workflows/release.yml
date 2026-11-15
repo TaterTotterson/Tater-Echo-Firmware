@@ -17,6 +17,19 @@ on:
         default: 'v0.0.0-dev'
 
 jobs:
+  ota-compatibility:
+    name: Reject unsafe OTA from v4.2.3
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: device/go.mod
+      - name: Test the pinned legacy updater
+        run: |
+          git fetch --no-tags --depth=1 origin d5b395a6e680a5b765fcd6c3339598f7d3807ff5
+          python3 -m tools.check_legacy_ota
+
   onnxruntime-armv7:
     name: Shared Linux ARMv7 ONNX Runtime
     runs-on: ubuntu-24.04
@@ -122,7 +135,7 @@ jobs:
 
   biscuit:
     name: ${{ matrix.name }}
-    needs: onnxruntime-armv7
+    needs: [onnxruntime-armv7, ota-compatibility]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -185,6 +198,9 @@ jobs:
             ./internal/server \
             ./internal/recovery \
             ./internal/bindings/buttons \
+            ./internal/bindings/codec \
+            ./internal/bindings/mixer \
+            ./internal/micgain \
             ./internal/bindings/speaker
           python3 -m py_compile scripts/silent_stream_server.py
 
@@ -209,14 +225,29 @@ jobs:
           echo '020ef80d522cb09169a866f3aeeb58f2ad4045461937e78e8c806df29ff61eea  device/build/microwakeword-testdata/stop.tflite' | sha256sum -c -
           python3 tools/fetch_platform_input.py platforms.dot.rootfs /tmp/techo5-dot-rootfs.tar.gz
           python3 tools/fetch_platform_input.py \
-            'platforms.dot.targets.${{ matrix.target }}.kernel' /tmp/${{ matrix.kernel_name }}
-          python3 tools/fetch_platform_input.py \
             platforms.dot.rescue_apks /tmp/techo5-dot-rescue-apks.tar
           python3 tools/fetch_platform_input.py \
             platforms.dot.alpine_rootfs /tmp/alpine-minirootfs.tar.gz
           git clone "$(python3 tools/platform_lock.py get source.repository)" /tmp/tater-echo-linux-dot
           git -C /tmp/tater-echo-linux-dot checkout \
             "$(python3 tools/platform_lock.py get platforms.dot.commit)"
+
+      - name: Build target-specific audio kernel from pinned source
+        env:
+          WORK: /tmp/tater-dot-audio-kernel-work
+          TOOLCHAIN: /tmp/tater-dot-audio-toolchain/arm-eabi-4.8
+        run: |
+          # Use the runner's existing host tools; never replace the pinned
+          # cross compiler or install floating packages during a release.
+          for tool in make gcc bison flex bc openssl patch curl tar xz; do
+            command -v "$tool" >/dev/null || { echo "::error::Kernel host tool missing: $tool"; exit 1; }
+          done
+          python3 linux/dot/build_kernel.py --target '${{ matrix.target }}' \
+            --platform /tmp/tater-echo-linux-dot/platforms/dot \
+            --output /tmp/tater-dot-audio-kernel
+          cp /tmp/tater-dot-audio-kernel/zImage-dtb /tmp/${{ matrix.kernel_name }}
+          python3 linux/dot/build_kernel.py --target '${{ matrix.target }}' \
+            --verify-kernel /tmp/${{ matrix.kernel_name }}
 
       - name: Build Tater Linux rootfs
         run: |
@@ -257,7 +288,7 @@ jobs:
 
   checkers:
     name: ${{ matrix.name }} Tater Linux
-    needs: [onnxruntime-armv7, ffmpeg-armv7]
+    needs: [onnxruntime-armv7, ffmpeg-armv7, ota-compatibility]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -308,6 +339,30 @@ jobs:
           go-version-file: device/go.mod
           cache-dependency-path: device/go.sum
 
+      - name: Verify target-qualified public Echo Show hardware helpers
+        if: matrix.target == 'checkers' || matrix.target == 'cronos' || matrix.target == 'crown'
+        env:
+          HARDWARE_TARGET: ${{ matrix.target }}
+          CHECKERS_HARDWARE_BUNDLE_URL: ${{ vars.TATER_CHECKERS_HARDWARE_BUNDLE_URL }}
+          CRONOS_HARDWARE_BUNDLE_URL: ${{ vars.TATER_CRONOS_HARDWARE_BUNDLE_URL }}
+          CROWN_HARDWARE_BUNDLE_URL: ${{ vars.TATER_CROWN_HARDWARE_BUNDLE_URL }}
+        run: |
+          case "$HARDWARE_TARGET" in
+            checkers) HARDWARE_BUNDLE_URL="$CHECKERS_HARDWARE_BUNDLE_URL" ;;
+            cronos) HARDWARE_BUNDLE_URL="$CRONOS_HARDWARE_BUNDLE_URL" ;;
+            crown) HARDWARE_BUNDLE_URL="$CROWN_HARDWARE_BUNDLE_URL" ;;
+            *) exit 1 ;;
+          esac
+          test -n "$HARDWARE_BUNDLE_URL" || {
+            echo "::error::$HARDWARE_TARGET hardware helpers are not published/configured. Set the target's TATER_*_HARDWARE_BUNDLE_URL only after the public source/artifact audit."
+            exit 1
+          }
+          python3 -c 'import os; from tools.package_echo_release import require_checkers_hardware_platform, require_cronos_hardware_platform, require_crown_hardware_platform; {"checkers": require_checkers_hardware_platform, "cronos": require_cronos_hardware_platform, "crown": require_crown_hardware_platform}[os.environ["HARDWARE_TARGET"]]()'
+          python3 tools/hardware_bundle.py fetch \
+            --target "$HARDWARE_TARGET" \
+            --url "$HARDWARE_BUNDLE_URL" --output "/tmp/tater-$HARDWARE_TARGET-hardware-public"
+          echo "TATER_CHECKERS_HARDWARE_BUNDLE=/tmp/tater-$HARDWARE_TARGET-hardware-public" >> "$GITHUB_ENV"
+
       - name: Run shared Echo Show Linux regression tests
         run: |
           python3 -m unittest discover -s linux/checkers -p 'test_*.py'
@@ -315,7 +370,8 @@ jobs:
           python3 -m unittest \
             factory.test_to_twrp \
             factory.test_to_recovery \
-            factory.test_recovery_install
+            factory.test_recovery_install \
+            linux.common.test_recovery_router
           python3 -m unittest tools.test_package_echo_release
           python3 -m py_compile \
             linux/checkers/build_rootfs.py \
@@ -328,8 +384,12 @@ jobs:
             factory/to_twrp.py
           sh -n linux/checkers/build_btbridge_helper.sh
           cd device
+          go test cmd/camera_environment.go cmd/camera_environment_test.go
           go test -race \
             ./cmd/tater-show-linux \
+            ./cmd/tater-camera-probe \
+            ./internal/gpucompositor \
+            ./internal/liveh264 \
             ./internal/bluetooth \
             ./internal/platform \
             ./internal/taternative \
@@ -411,9 +471,15 @@ jobs:
           mkdir /tmp/tater-show-factory-check
           tar -xzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-factory.tar.gz \
             -C /tmp/tater-show-factory-check
-          /tmp/tater-show-factory-check/*/install.sh --verify-bundle
+          factory_installers=(/tmp/tater-show-factory-check/*/install.sh)
+          [[ ${#factory_installers[@]} -eq 1 ]]
+          "${factory_installers[0]}" --verify-bundle
+          expected_app_files=(FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show)
+          if [[ '${{ matrix.target }}' == checkers || '${{ matrix.target }}' == cronos || '${{ matrix.target }}' == crown ]]; then
+            expected_app_files+=(tater-hardware.json tater-hw-gpu tater-hw-vdec tater-hw-venc)
+          fi
           diff -u \
-            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show | sort) \
+            <(printf '%s\n' "${expected_app_files[@]}" | sort) \
             <(tar -tzf release/tater-echo-${{ matrix.target }}-${{ steps.version.outputs.version }}-ota.tar.gz | sort)
           diff -u \
             <(printf '%s\n' manifest.json tater-echo tater-show | sort) \
@@ -432,7 +498,7 @@ jobs:
 
   athena:
     name: Echo Show 8 2nd Gen (athena) Tater Linux
-    needs: [onnxruntime-armv7, ffmpeg-armv7]
+    needs: [onnxruntime-armv7, ffmpeg-armv7, ota-compatibility]
     runs-on: ubuntu-24.04
 
     steps:
@@ -620,7 +686,7 @@ jobs:
 
   rook:
     name: Echo Spot 2017 (rook) Tater Linux
-    needs: [onnxruntime-armv7, ffmpeg-armv7]
+    needs: [onnxruntime-armv7, ffmpeg-armv7, ota-compatibility]
     runs-on: ubuntu-24.04
 
     steps:
@@ -743,6 +809,18 @@ jobs:
           go-version: '1.26.0'
           cache: false
 
+      - name: Verify Rook public hardware helpers
+        env:
+          ROOK_HARDWARE_BUNDLE_URL: ${{ vars.TATER_ROOK_HARDWARE_BUNDLE_URL }}
+        run: |
+          test -n "$ROOK_HARDWARE_BUNDLE_URL" || {
+            echo "::error::Rook hardware helpers are not published/configured. Complete the source/artifact and final OTA audit first."
+            exit 1
+          }
+          python3 -c 'from tools.package_echo_release import require_rook_hardware_platform; require_rook_hardware_platform()'
+          python3 tools/hardware_bundle.py fetch --target rook \
+            --url "$ROOK_HARDWARE_BUNDLE_URL" --output /tmp/tater-rook-hardware-public
+
       - name: Build Rook boot and root filesystem
         run: |
           python3 linux/rook/build_boot.py \
@@ -755,6 +833,7 @@ jobs:
             --output device/build/rook/tater-rook-boot.img
           sh linux/rook/build_linux.sh \
             --version '${{ steps.version.outputs.version }}' \
+            --hardware-bundle /tmp/tater-rook-hardware-public \
             --base-rootfs linux/rook/inputs/tater-echo-rook-baseline-rootfs.tar.gz \
             --spot-source /tmp/tater-echo-linux-spot/platforms/spot --show-source /tmp/tater-echo-linux-show/platforms/show \
             --ffmpeg device/build/rook/tater-ffmpeg \
@@ -772,7 +851,7 @@ jobs:
             -C /tmp/tater-rook-factory-check
           /tmp/tater-rook-factory-check/*/install.sh --verify-bundle
           diff -u \
-            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show | sort) \
+            <(printf '%s\n' FFMPEG-LGPL-2.1.txt manifest.json tater-camera tater-echo tater-ffmpeg tater-show tater-hw-gpu tater-hw-vdec tater-hw-venc tater-hardware.json | sort) \
             <(tar -tzf release/tater-echo-rook-${{ steps.version.outputs.version }}-ota.tar.gz | sort)
           diff -u \
             <(printf '%s\n' manifest.json tater-echo tater-show | sort) \

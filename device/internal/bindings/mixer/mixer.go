@@ -344,6 +344,12 @@ type byteBackend interface {
 	SetBytes(name string, values []byte) error
 }
 
+// integerBackend is optional. Gain verification must read every channel;
+// duplicating Get's first value would hide a mismatched stereo ADC setting.
+type integerBackend interface {
+	GetIntegers(name string) ([]int, error)
+}
+
 var (
 	mu      sync.Mutex
 	backend Backend = unavailable{}
@@ -403,6 +409,19 @@ func Get(name string) (string, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	return backend.Get(name)
+}
+
+// GetIntegers reads all channels of an integer control, without substituting
+// a first-channel-only read on backends that do not implement it.
+func GetIntegers(name string) ([]int, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	b, ok := backend.(integerBackend)
+	if !ok {
+		return nil, fmt.Errorf("mixer: %q: backend does not support integer-array reads", name)
+	}
+	values, err := b.GetIntegers(name)
+	return append([]int(nil), values...), err
 }
 
 type unavailable struct{}

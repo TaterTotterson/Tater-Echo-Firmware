@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/gpucompositor"
 	"golang.org/x/sys/unix"
 )
 
@@ -104,6 +106,8 @@ type Device struct {
 	bandRows                [][]byte
 	directRow               []byte
 	lastConvert, lastPan    time.Duration
+	gpu                     *gpucompositor.Compositor
+	gpuFrame                []byte
 }
 
 func Open() (*Device, error) {
@@ -164,6 +168,18 @@ func Open() (*Device, error) {
 		// Checkers has a 480x960 portrait panel mounted as a 960x480 display.
 		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelHeight, d.panelWidth))
 	}
+	if d.gpuGeometrySupported() {
+		compositor, gpuErr := gpucompositor.Open()
+		if gpuErr != nil {
+			log.Printf("GPU compositor unavailable; using CPU framebuffer path: %v", gpuErr)
+		} else if compositor != nil {
+			d.gpu = compositor
+			log.Printf("GPU compositor active for %dx%d frames; partial UI updates remain on CPU", d.canvas.Rect.Dx(), d.canvas.Rect.Dy())
+			if compositor.SupportsScenes() {
+				log.Printf("GPU retained UI active: text/menu crossfades, voice glow, and thinking indicators")
+			}
+		}
+	}
 	return d, nil
 }
 
@@ -190,6 +206,52 @@ func (d *Device) LastPresentTimings() (time.Duration, time.Duration) {
 	return d.lastConvert, d.lastPan
 }
 
+func (d *Device) SupportsGPUScenes() bool {
+	return d.gpuGeometrySupported() && d.gpu.SupportsScenes()
+}
+
+func (d *Device) SupportsAnimatedText() bool {
+	return d.SupportsGPUScenes() && d.gpu.SupportsAnimatedText()
+}
+
+func (d *Device) SupportsGPUVideo() bool {
+	return d.SupportsGPUScenes() && d.gpu.SupportsVideoScenes()
+}
+
+// PresentGPUScene receives into normal RAM before changing an offscreen page.
+// A rejected/failed helper leaves the framebuffer intact and returns false so
+// the caller can render the current snapshot through the CPU path immediately.
+func (d *Device) PresentGPUScene(source []byte, effects gpucompositor.Effects) (bool, error) {
+	if !d.SupportsGPUScenes() {
+		return false, nil
+	}
+	started := time.Now()
+	if len(d.gpuFrame) != d.panelWidth*d.panelHeight*4 {
+		d.gpuFrame = make([]byte, d.panelWidth*d.panelHeight*4)
+	}
+	if err := d.gpu.CompositeScene(source, d.gpuFrame, effects); err != nil {
+		log.Printf("GPU scene failed; continuing with CPU renderer: %v", err)
+		_ = d.gpu.Close()
+		d.gpu = nil
+		return false, nil
+	}
+	next := d.page
+	if d.pages > 1 {
+		next = (next + 1) % d.pages
+	}
+	copy(d.memory[next*d.pageBytes:(next+1)*d.pageBytes], d.gpuFrame)
+	// Scene pixels never enter the CPU canvas. Invalidate every page so the
+	// next normal/video presentation restores a complete, coherent canvas.
+	for index := range d.sourceValid {
+		d.sourceValid[index] = false
+	}
+	if next < len(d.shadow) {
+		d.shadow[next] = nil
+	}
+	d.lastConvert = time.Since(started)
+	return true, d.pan(next, started)
+}
+
 func (d *Device) Size() (int, int) { return d.canvas.Rect.Dx(), d.canvas.Rect.Dy() }
 
 func (d *Device) String() string {
@@ -199,6 +261,73 @@ func (d *Device) String() string {
 }
 
 const rotateBand = 8
+
+func (d *Device) gpuGeometrySupported() bool {
+	known := (d.panelWidth == 480 && (d.panelHeight == 960 || d.panelHeight == 480)) || (d.panelWidth == 800 && d.panelHeight == 1280)
+	return known && d.canvas != nil && d.canvas.Rect.Dx() == d.panelHeight &&
+		d.canvas.Rect.Dy() == d.panelWidth && d.canvas.Stride == d.panelHeight*4 &&
+		d.lineBytes == d.panelWidth*4 && d.shifts == [4]uint{16, 8, 0, 24}
+}
+
+func shouldUseGPU(regions []image.Rectangle, bounds image.Rectangle) bool {
+	if bounds.Empty() {
+		return false
+	}
+	area := 0
+	for _, region := range regions {
+		clipped := region.Intersect(bounds)
+		if clipped == bounds {
+			return true
+		}
+		area += clipped.Dx() * clipped.Dy()
+	}
+	// The pbuffer path always transfers a complete frame. Below half a screen,
+	// the cache-friendly CPU region writer is cheaper and avoids needless pipe
+	// traffic. Overlaps can only select the safe GPU path a little early.
+	return area >= bounds.Dx()*bounds.Dy()/2
+}
+
+func (d *Device) compositeGPU(destination []byte, next int, updateCaches bool) bool {
+	if d.gpu == nil || len(destination) < d.panelWidth*d.panelHeight*4 {
+		return false
+	}
+	if len(d.gpuFrame) != d.panelWidth*d.panelHeight*4 {
+		d.gpuFrame = make([]byte, d.panelWidth*d.panelHeight*4)
+	}
+	if err := d.gpu.Composite(d.canvas.Pix, d.gpuFrame); err != nil {
+		log.Printf("GPU compositor failed; continuing with CPU framebuffer path: %v", err)
+		_ = d.gpu.Close()
+		d.gpu = nil
+		d.sourceValid[next] = false
+		return false
+	}
+	// Pipes into uncached framebuffer memory are materially slower on MT8163.
+	// Receive into reusable normal RAM, then issue one contiguous page write.
+	// A short helper response can therefore never leave half a visible frame.
+	copy(destination[:len(d.gpuFrame)], d.gpuFrame)
+	if updateCaches {
+		copy(d.shadow[next], d.gpuFrame)
+		copy(d.sourceShadow[next], d.canvas.Pix)
+		d.sourceValid[next] = true
+		d.transientDirty[next] = false
+	} else {
+		d.transientDirty[next] = true
+	}
+	return true
+}
+
+func (d *Device) pan(next int, started time.Time) error {
+	v := d.variable
+	v.Xoffset = 0
+	v.Yoffset = uint32(next * d.panelHeight)
+	if err := ioctl(d.file.Fd(), fbioPanDisplay, unsafe.Pointer(&v)); err != nil {
+		return fmt.Errorf("FBIOPAN_DISPLAY: %w", err)
+	}
+	d.lastPan = time.Since(started) - d.lastConvert
+	d.page = next
+	d.variable.Yoffset = v.Yoffset
+	return nil
+}
 
 func (d *Device) Present() error {
 	started := time.Now()
@@ -234,6 +363,13 @@ func (d *Device) Present() error {
 	if sourceShadow == nil {
 		sourceShadow = make([]byte, len(imageData.Pix))
 		d.sourceShadow[next] = sourceShadow
+	}
+	if d.gpu != nil && d.gpuGeometrySupported() {
+		if d.compositeGPU(destination, next, true) {
+			d.lastConvert = time.Since(started)
+			return d.pan(next, started)
+		}
+		shadow = d.shadow[next]
 	}
 	rowBytes := d.panelWidth * 4
 	if d.panelWidth == d.panelHeight {
@@ -326,16 +462,7 @@ func (d *Device) Present() error {
 		d.transientDirty[next] = false
 	}
 	d.lastConvert = time.Since(started)
-	v := d.variable
-	v.Xoffset = 0
-	v.Yoffset = uint32(next * d.panelHeight)
-	if err := ioctl(d.file.Fd(), fbioPanDisplay, unsafe.Pointer(&v)); err != nil {
-		return fmt.Errorf("FBIOPAN_DISPLAY: %w", err)
-	}
-	d.lastPan = time.Since(started) - d.lastConvert
-	d.page = next
-	d.variable.Yoffset = v.Yoffset
-	return nil
+	return d.pan(next, started)
 }
 
 // PresentRegions updates only the supplied logical-canvas rectangles before
@@ -424,6 +551,19 @@ func (d *Device) presentRegions(regions []image.Rectangle, updateCaches bool) er
 	if len(clipped) == 0 {
 		d.lastConvert, d.lastPan = 0, 0
 		return nil
+	}
+	if d.gpu != nil && d.gpuGeometrySupported() && shouldUseGPU(clipped, canvasBounds) {
+		if d.compositeGPU(destination, next, updateCaches) {
+			d.lastConvert = time.Since(started)
+			return d.pan(next, started)
+		}
+		// The staging buffer kept the framebuffer untouched; retry this update as
+		// one complete CPU frame so every page remains coherent after fallback.
+		clipped = []image.Rectangle{canvasBounds}
+		updateCaches = true
+		shadow = d.shadow[next]
+		sourceShadow = d.sourceShadow[next]
+		d.transientDirty[next] = false
 	}
 
 	if d.panelWidth == d.panelHeight {
@@ -538,19 +678,14 @@ func (d *Device) presentRegions(regions []image.Rectangle, updateCaches bool) er
 		d.transientDirty[next] = true
 	}
 	d.lastConvert = time.Since(started)
-	v := d.variable
-	v.Xoffset = 0
-	v.Yoffset = uint32(next * d.panelHeight)
-	if err := ioctl(d.file.Fd(), fbioPanDisplay, unsafe.Pointer(&v)); err != nil {
-		return fmt.Errorf("FBIOPAN_DISPLAY: %w", err)
-	}
-	d.lastPan = time.Since(started) - d.lastConvert
-	d.page = next
-	d.variable.Yoffset = v.Yoffset
-	return nil
+	return d.pan(next, started)
 }
 
 func (d *Device) Close() error {
+	if d.gpu != nil {
+		_ = d.gpu.Close()
+		d.gpu = nil
+	}
 	if d.memory != nil {
 		_ = unix.Munmap(d.memory)
 		d.memory = nil

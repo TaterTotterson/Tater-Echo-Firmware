@@ -1,0 +1,13 @@
+--- a/echod/internal/hardware/camera/camera.go
++++ b/echod/internal/hardware/camera/camera.go
+@@ -685,6 +685,10 @@
+ 		d.v.stream(stop, frame)
+ 		return
+ 	}
++	if taterUseHeldCaptureSlots(layout.Board) {
++		d.taterStreamHeldBuffers(stop, frame)
++		return
++	}
+ 	cam := d.cam
+ 	cur := 0
+ 	cam.wr(regImgoBase, d.mva)

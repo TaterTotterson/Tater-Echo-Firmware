@@ -6,11 +6,27 @@ import (
 	"strings"
 )
 
-// The speaker is card 0 device 23; the mic is device 24. Here rather than in
-// pcm_speaker.go because that file is ARM-only (build tag `server`) and the
-// status-path test needs to pin these on the host.
+// The legacy speaker is card 0 device 23; the mic is device 24. Athena's
+// native Linux output differs; playbackPCMForTarget selects its renderer clock.
+// These live here because pcm_speaker.go is ARM-only (build tag `server`).
 const cardNr = 0
 const deviceNr = 23
+
+type playbackPCM struct {
+	card   int
+	device int
+	rate   int
+}
+
+// playbackPCMForTarget describes the actual ALSA output, not the 48 kHz mixer
+// or Sendspin wire format. Athena opens pcmC0D0p at 96 kHz and upsamples after
+// mixing; its procfs delay is therefore measured in 96 kHz hardware frames.
+func playbackPCMForTarget(target string) playbackPCM {
+	if strings.EqualFold(strings.TrimSpace(target), "athena") {
+		return playbackPCM{card: 0, device: 0, rate: 96000}
+	}
+	return playbackPCM{card: cardNr, device: deviceNr, rate: 48000}
+}
 
 // The playback substream's status file, which is how we find out whether
 // anyone else holds the speaker BEFORE trying to open it.

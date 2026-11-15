@@ -1,0 +1,57 @@
+--- a/sound/soc/codecs/tlv320aic3101.c
++++ b/sound/soc/codecs/tlv320aic3101.c
+@@ -41,6 +41,7 @@
+ #endif
+ 
+ #include "tlv320aic3101.h"
++#include "tater_adc3101_hpf.h"
+ 
+ /* TODO: DEE-32682 Update ADCs driver to read registers rather than using a
+  *  cached array of written values.
+@@ -98,6 +99,8 @@
+  * Structure Initialization
+  */
+ static const struct snd_kcontrol_new aic31xx_snd_controls[] = {
++	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = "Tater ADC HPF Status",
++	  .access = SNDRV_CTL_ELEM_ACCESS_READ, .info = tater_hpf_info, .get = tater_hpf_get },
+ 
+ 	SOC_DOUBLE_R_SX_TLV("ADC_A Digital Volume Control",
+ 			    ADC_LADC_VOL(0), ADC_RADC_VOL(0), 0, 0x28,
+@@ -1213,7 +1216,7 @@
+  ********************************************************************************/
+ 
+ 
+-static void aic31xx_apply_tuning(struct snd_soc_codec *codec)
++static int aic31xx_apply_tuning(struct snd_soc_codec *codec)
+ {
+ 	const struct aic31xx_configs *config;
+ 	size_t config_size;
+@@ -1233,6 +1236,7 @@
+ 	/* Set the signal processing block (PRB) modes */
+ 	for (i = 0; i < NUM_ADC3101; i++)
+ 		snd_soc_write(codec, ADC_PRB_SELECT(i), 0x2);
++	return tater_hpf_apply(codec, IDC_enabled != 0);
+ }
+ 
+ /*
+@@ -1889,6 +1893,7 @@
+ 	aic31xx->freq_out = freq_out;
+ 	divs = &divs[i];
+ 
++	atomic_set(&tater_hpf_verified, 0);
+ 	/* Backup gains and mode settings before reset */
+ 	tlv320aic3101_save_settings(codec);
+ 
+@@ -1933,8 +1938,10 @@
+ 		/* Add M_Val */
+ 	}
+ 
+-	/* Program DSP */
+-	aic31xx_apply_tuning(codec);
++	/* Program DSP; a failed optional filter must not start capture. */
++	i = aic31xx_apply_tuning(codec);
++	if (i)
++		return i;
+ 
+ 	dev_info(codec->dev, "%s: DAI ID %d PLL_ID %d InFreq %d OutFreq %d\n",
+ 		__func__, dai->id, pll_id, freq_in, freq_out);

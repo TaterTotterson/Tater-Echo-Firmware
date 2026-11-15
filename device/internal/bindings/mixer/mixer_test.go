@@ -13,6 +13,31 @@ type fake struct {
 	fail     bool
 }
 
+type integerFake struct {
+	fake
+	integers []int
+}
+
+func (f *integerFake) GetIntegers(string) ([]int, error) { return f.integers, nil }
+
+func TestIntegerReadRequiresAllChannelsAndOwnsItsSnapshot(t *testing.T) {
+	defer Use(unavailable{})
+	Use(&fake{values: map[string]string{"gain": "88"}})
+	if _, err := GetIntegers("gain"); err == nil {
+		t.Fatal("stereo verification silently fell back to a first-channel read")
+	}
+	f := &integerFake{integers: []int{88, 68}}
+	Use(f)
+	values, err := GetIntegers("gain")
+	if err != nil || !reflect.DeepEqual(values, []int{88, 68}) {
+		t.Fatalf("all-channel read = %v, %v", values, err)
+	}
+	values[1] = 88
+	if f.integers[1] != 68 {
+		t.Fatal("caller mutated the backend's snapshot")
+	}
+}
+
 func (f *fake) Set(name string, v []string) error {
 	if f.fail {
 		return errors.New("no such control")

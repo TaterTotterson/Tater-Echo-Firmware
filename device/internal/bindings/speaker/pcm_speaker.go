@@ -25,8 +25,8 @@ import (
 	"github.com/Binozo/GoTinyAlsa/pkg/tinyalsa"
 )
 
-// cardNr/deviceNr live in pcmstatus.go so the host test can pin them against
-// the status path — this file is ARM-only (build tag `server`).
+// Playback device/clock selection lives in pcmstatus.go so host tests can pin
+// the renderer status path — this file is ARM-only (build tag `server`).
 const periodSize = 2048
 
 // alsaPeriodSize is the legacy tinyalsa period and direct-playback fallback.
@@ -223,12 +223,19 @@ func (p *PcmSpeaker) fillMusicSource(source MusicSource, playAt time.Time, uncer
 // pullSource measures when the next ALSA period reaches the DAC and asks
 // Sendspin for exactly the audio due at that instant.
 func (p *PcmSpeaker) pullSource() []byte {
+	return p.pullSourceWithStatus(os.ReadFile)
+}
+
+// Keep the status reader separate so regression tests can exercise the real
+// target selection and pull path without opening an ALSA device.
+func (p *PcmSpeaker) pullSourceWithStatus(readStatus func(string) ([]byte, error)) []byte {
 	box := p.src.Load()
 	if box == nil || !box.source.Active() {
 		return nil
 	}
+	output := playbackPCMForTarget(p.target)
 	before := time.Now()
-	status, err := os.ReadFile(statusPath(cardNr, deviceNr))
+	status, err := readStatus(statusPath(output.card, output.device))
 	readDuration := time.Since(before)
 	if err != nil {
 		return nil
@@ -238,7 +245,7 @@ func (p *PcmSpeaker) pullSource() []byte {
 		return nil
 	}
 	measuredAt := before.Add(readDuration / 2)
-	playAt := measuredAt.Add(time.Duration(queuedFrames) * time.Second / 48000)
+	playAt := measuredAt.Add(time.Duration(queuedFrames) * time.Second / time.Duration(output.rate))
 	out := p.fillMusicSource(box.source, playAt, readDuration/2)
 	if out == nil {
 		return nil
@@ -362,7 +369,8 @@ func (p *PcmSpeaker) Init() error {
 	if platform.Base() != platform.TaterLinux && !isLinuxScreenPlaybackTarget(p.target) {
 		exec.Command("stop", "media").Run()
 	}
-	waitForFreePcm(cardNr, deviceNr, pcmFreeTimeout)
+	output := playbackPCMForTarget(p.target)
+	waitForFreePcm(output.card, output.device, pcmFreeTimeout)
 	// Connect the DAC to the output mixer before opening the stream: DAPM
 	// decides what to power at stream open, and an unrouted DAC is powered
 	// down, which presents as a clean "voice stream complete, underruns=0"
@@ -835,6 +843,17 @@ func (p *PcmSpeaker) PumpMusic(data []byte) error {
 	return err
 }
 
+// MusicFramesPlayed is the monotonic count of 48 kHz PCM frames removed from
+// the music queue by the ALSA pump. It intentionally measures consumption,
+// not network receipt or queueing, so fullscreen video can make bounded frame
+// drop decisions against audio that has actually reached the hardware path.
+func (p *PcmSpeaker) MusicFramesPlayed() uint64 {
+	if p == nil || p.music == nil {
+		return 0
+	}
+	return p.music.framesPlayed()
+}
+
 // SetDuck sets the gain applied to music while it plays under voice, in dB of
 // attenuation (0 = no ducking). The change is ramped by the mixer rather than
 // applied at once, because a gain step at a period boundary is a click — and
@@ -930,6 +949,24 @@ func (p *PcmSpeaker) WaitVoiceIdle(ctx context.Context) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for p.VoiceAudible(hardwareDrainHold) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
+// WaitMusicStreamIdle blocks until the directly queued music plane has left
+// the speaker. It deliberately ignores an independent Sendspin MusicSource:
+// fullscreen video needs to hold its final frame for its own PCM tail without
+// waiting for an unrelated, potentially continuous player.
+func (p *PcmSpeaker) WaitMusicStreamIdle(ctx context.Context) error {
+	const hardwareDrainHold = 150 * time.Millisecond
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for p.music.playedWithin(time.Now(), hardwareDrainHold) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -207,3 +207,21 @@ func TestNothingPlayedIsNotAudible(t *testing.T) {
 		t.Fatal("a plane that never played must not hold the barge bar down")
 	}
 }
+
+func TestFramesPlayedCountsOnlyPeriodsTakenByTheConsumer(t *testing.T) {
+	s, _ := newTestStream(4)
+	period := make([]byte, 2048*4) // 2048 stereo S16LE frames
+	if _, err := s.pump(period, len(period)/2); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.framesPlayed(); got != 0 {
+		t.Fatalf("queued audio counted as played: %d", got)
+	}
+	s.endStream()
+	if got := s.take(); len(got) != len(period) {
+		t.Fatalf("take returned %d bytes, want %d", len(got), len(period))
+	}
+	if got := s.framesPlayed(); got != 2048 {
+		t.Fatalf("played frames = %d, want 2048", got)
+	}
+}

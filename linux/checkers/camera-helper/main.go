@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/jpeg"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +29,7 @@ const (
 	streamFramePeriod    = time.Second / 15
 	echoStreamPeriod     = time.Second / 20
 	balancedStreamPeriod = time.Second / 15
+	smoothStreamPeriod   = time.Second / 20
 	streamJPEGQuality    = 60
 	echoJPEGQuality      = 55
 	balancedJPEGQuality  = 62
@@ -37,6 +39,9 @@ const (
 
 func main() {
 	log.SetOutput(os.Stdout)
+	if os.Getenv("TATER_CAMERA_DEBUG") == "1" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	address := strings.TrimSpace(os.Getenv("TATER_CAMERA_ADDRESS"))
@@ -47,19 +52,30 @@ func main() {
 	if err != nil {
 		log.Fatalf("camera listen: %v", err)
 	}
-	server := &http.Server{ReadHeaderTimeout: 2 * time.Second}
+	server := &http.Server{ReadHeaderTimeout: 2 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
 	http.HandleFunc("/health", health)
+	http.HandleFunc("/capabilities", cameraCapabilities)
 	http.HandleFunc("/snapshot", snapshot)
 	http.HandleFunc("/stream", stream)
+	http.HandleFunc("/stream.h264", streamH264)
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdown, stop := context.WithTimeout(context.Background(), 3*time.Second)
 		defer stop()
 		_ = server.Shutdown(shutdown)
+		_ = server.Close()
+		if err := camera.Get().TaterStop(shutdown); err != nil {
+			log.Printf("camera shutdown: %v", err)
+		}
 	}()
 	log.Printf("Tater Checkers camera ready on %s", address)
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		<-shutdownDone
 	}
 }
 
@@ -85,22 +101,68 @@ func snapshot(response http.ResponseWriter, request *http.Request) {
 	}
 	response.Header().Set("Content-Type", "image/jpeg")
 	response.Header().Set("Cache-Control", "no-store")
-	image := frame.Full()
-	quality := snapshotJPEGQuality
-	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
-	if profile == "video" {
-		image = frame.Image()
-		quality = streamJPEGQuality
-	} else if profile == "echo-low" {
-		image = frame.TaterEchoVideo(nil)
-		quality = echoJPEGQuality
-	} else if profile == "echo-balanced" {
-		image = echoBalancedVideoImage(frame.Image(), nil)
-		quality = balancedJPEGQuality
-	}
+	image, quality := snapshotImage(frame, request.URL.Query().Get("profile"))
 	if err := jpeg.Encode(response, image, &jpeg.Options{Quality: quality}); err != nil {
 		log.Printf("camera JPEG: %v", err)
 	}
+}
+
+type snapshotFrame interface {
+	Full() *image.RGBA
+	Image() *image.RGBA
+	TaterEchoVideo(*image.RGBA) *image.RGBA
+	TaterSmoothVideo(*image.RGBA) *image.RGBA
+}
+
+func snapshotImage(frame snapshotFrame, profile string) (*image.RGBA, int) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "video", "echo-low", "echo-balanced":
+		return liveVideoImage(frame, cameraVideoProfile(profile), nil)
+	default:
+		return frame.Full(), snapshotJPEGQuality
+	}
+}
+
+// Only the two connected development targets use the lower-cost live profile.
+// Still photos and other models retain their existing resolution and cadence.
+func smoothLiveCapture() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TATER_FIRMWARE_TARGET"))) {
+	case "checkers", "cronos":
+		return true
+	default:
+		return false
+	}
+}
+
+func liveVideoImage(frame snapshotFrame, profile string, reuse *image.RGBA) (*image.RGBA, int) {
+	if profile == "echo-low" {
+		return frame.TaterEchoVideo(reuse), echoJPEGQuality
+	}
+	quality := streamJPEGQuality
+	if profile == "echo-balanced" {
+		quality = balancedJPEGQuality
+	}
+	if smoothLiveCapture() {
+		// Develop only the 480x270 Bayer samples the stream needs, rather than
+		// developing a larger image and throwing most of its pixels away.
+		return frame.TaterSmoothVideo(reuse), quality
+	}
+	if profile == "echo-balanced" {
+		return echoBalancedVideoImage(frame.Image(), reuse), quality
+	}
+	return frame.Image(), quality
+}
+
+type liveCameraAcquirer interface {
+	Acquire() (func(), error)
+	AcquireTaterLiveVideo() (func(), error)
+}
+
+func acquireLiveCamera(device liveCameraAcquirer) (func(), error) {
+	if smoothLiveCapture() {
+		return device.AcquireTaterLiveVideo()
+	}
+	return device.Acquire()
 }
 
 func stream(response http.ResponseWriter, request *http.Request) {
@@ -114,7 +176,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	device := camera.Get()
-	release, err := device.Acquire()
+	release, err := acquireLiveCamera(device)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -144,8 +206,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 	nextFrame := time.Time{}
 	var encoded bytes.Buffer
 	encoded.Grow(128 * 1024)
-	var echoFrame *image.RGBA
-	var balancedFrame *image.RGBA
+	var videoFrame *image.RGBA
 	profile := cameraVideoProfile(request.URL.Query().Get("profile"))
 	statsStarted := time.Now()
 	statsFrames := 0
@@ -162,20 +223,11 @@ func stream(response http.ResponseWriter, request *http.Request) {
 			}
 			nextFrame = now.Add(cameraStreamPeriod(profile))
 			encoded.Reset()
-			var cameraImage image.Image
-			quality := streamJPEGQuality
-			switch profile {
-			case "echo-low":
-				echoFrame = frame.TaterEchoVideo(echoFrame)
-				cameraImage = echoFrame
-				quality = echoJPEGQuality
-			case "echo-balanced":
-				balancedFrame = echoBalancedVideoImage(frame.Image(), balancedFrame)
-				cameraImage = balancedFrame
-				quality = balancedJPEGQuality
-			default:
-				cameraImage = frame.Image()
+			cameraImage, quality := liveVideoImage(frame, profile, videoFrame)
+			if cameraImage == nil {
+				continue
 			}
+			videoFrame = cameraImage
 			encodeStarted := time.Now()
 			if err := jpeg.Encode(&encoded, cameraImage, &jpeg.Options{Quality: quality}); err != nil {
 				log.Printf("camera stream JPEG: %v", err)
@@ -212,6 +264,9 @@ func averageDuration(total time.Duration, count int) time.Duration {
 }
 
 func cameraStreamPeriod(profile string) time.Duration {
+	if smoothLiveCapture() && cameraVideoProfile(profile) != "echo-low" {
+		return smoothStreamPeriod
+	}
 	switch cameraVideoProfile(profile) {
 	case "echo-low":
 		return echoStreamPeriod

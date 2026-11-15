@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: $0 --version vX.Y.Z --base-rootfs FILE --spot-source DIR --show-source DIR --ffmpeg FILE --ffmpeg-license FILE [--output FILE]" >&2
+    echo "usage: $0 --version vX.Y.Z --base-rootfs FILE --spot-source DIR --show-source DIR --ffmpeg FILE --ffmpeg-license FILE --hardware-bundle DIR [--output FILE]" >&2
     exit 2
 }
 
@@ -13,6 +13,7 @@ show_source=
 ffmpeg=
 ffmpeg_license=
 output=
+hardware_bundle=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
@@ -22,6 +23,7 @@ while [ "$#" -gt 0 ]; do
         --ffmpeg) [ "$#" -ge 2 ] || usage; ffmpeg=$2; shift 2 ;;
         --ffmpeg-license) [ "$#" -ge 2 ] || usage; ffmpeg_license=$2; shift 2 ;;
         --output) [ "$#" -ge 2 ] || usage; output=$2; shift 2 ;;
+        --hardware-bundle) [ "$#" -ge 2 ] || usage; hardware_bundle=$2; shift 2 ;;
         *) usage ;;
     esac
 done
@@ -33,6 +35,9 @@ esac
 
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+[ -n "$hardware_bundle" ] || { echo "Rook requires its locked public hardware bundle" >&2; exit 1; }
+hardware_bundle=$(CDPATH= cd -- "$hardware_bundle" && pwd)
+python3 "$repo/tools/hardware_bundle.py" verify "$hardware_bundle" --target rook
 device=$repo/device
 base_rootfs=$(CDPATH= cd -- "$(dirname "$base_rootfs")" && pwd)/$(basename "$base_rootfs")
 spot_source=$(CDPATH= cd -- "$spot_source" && pwd)
@@ -75,7 +80,7 @@ mkdir -p "$cache_root/go-build" "$cache_root/go-mod"
 "$device/prepare_onnxruntime_linux_armv7.sh"
 
 docker run --rm --platform linux/arm/v7 \
-    -e TATER_VERSION="$version" -e GOTOOLCHAIN=local \
+    -e TATER_VERSION="$version" -e GOTOOLCHAIN=local -e GOMODCACHE=/root/go/pkg/mod \
     -e GOFLAGS=-buildvcs=false \
     -e SOURCE_DATE_EPOCH="$source_date_epoch" \
     -v "$repo:/src" \
@@ -113,7 +118,7 @@ CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -tags server,onnxruntime -ldflags "$ldflags" \
   -o build/rook/tater-echo ./cmd/
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
-  go build -trimpath -ldflags "-s -w -X main.version=$TATER_VERSION" \
+  go build -trimpath -ldflags "-s -w -X main.version=$TATER_VERSION -X main.target=rook" \
   -o build/rook/tater-show ./cmd/tater-show-linux
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w" \
@@ -138,6 +143,7 @@ for required in \
 done
 
 python3 "$script_dir/build_rootfs.py" \
+    --hardware-bundle "$hardware_bundle" \
     --base-rootfs "$base_rootfs" \
     --server "$device/build/rook/tater-echo" \
     --show "$device/build/rook/tater-show" \

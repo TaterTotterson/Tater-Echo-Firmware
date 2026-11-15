@@ -85,6 +85,25 @@ func (t *tinyalsa) SetBytes(name string, values []byte) error {
 	return setByteControl(t.card, name, values)
 }
 
+func (t *tinyalsa) GetIntegers(name string) ([]int, error) {
+	c, err := t.ctl(name)
+	if err != nil {
+		return nil, err
+	}
+	if C.mixer_ctl_get_type(c) != C.MIXER_CTL_TYPE_INT {
+		return nil, fmt.Errorf("mixer: %q is not an integer control", name)
+	}
+	n := int(C.mixer_ctl_get_num_values(c))
+	if n < 1 || n > 128 {
+		return nil, fmt.Errorf("mixer: %q has invalid integer count %d", name, n)
+	}
+	values := make([]int, n)
+	for i := range values {
+		values[i] = int(C.mixer_ctl_get_value(c, C.uint(i)))
+	}
+	return values, nil
+}
+
 func (t *tinyalsa) Get(name string) (string, error) {
 	c, err := t.ctl(name)
 	if err != nil {

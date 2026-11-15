@@ -19,11 +19,23 @@ jobs:
           python-version: "3.12"
       - name: Run Go tests
         working-directory: device
-        run: go test ./internal/... ./pkg/... ./cmd/tater-show-linux
+        run: go test ./internal/... ./pkg/... ./cmd/tater-show-linux ./cmd/tater-camera-probe
+      - name: Verify v4.2.3 rejects every new OTA kind
+        run: |
+          git fetch --no-tags --depth=1 origin d5b395a6e680a5b765fcd6c3339598f7d3807ff5
+          python3 -m tools.check_legacy_ota
+      - name: Test application camera environment
+        working-directory: device
+        run: go test cmd/camera_environment.go cmd/camera_environment_test.go
+      - name: Test camera encoder shutdown without hardware
+        run: go test -race linux/checkers/camera-helper/h264_lifecycle.go linux/checkers/camera-helper/h264_lifecycle_test.go
+      - name: Test pre-encode live-call cadence without hardware
+        run: go test -race linux/checkers/camera-helper/h264_cadence.go linux/checkers/camera-helper/h264_cadence_test.go
       - name: Run factory and release tests
         run: |
           python3 -m unittest \
             tools.test_build_scripts \
+            tools.test_hardware_bundle \
             tools.test_ssh_access \
             tools.test_platform_lock \
             tools.test_extract_platform_member \
@@ -36,17 +48,24 @@ jobs:
           python3 -m unittest \
             factory.test_to_twrp \
             factory.test_to_recovery \
-            factory.test_recovery_install
+            factory.test_recovery_install \
+            factory.test_provision_hardware \
+            linux.common.test_recovery_router
           python3 -m unittest discover -s factory/dot-linux -p 'test_*.py'
           python3 -m unittest discover -s linux/rook -p 'test_*.py'
           python3 -m unittest discover -s factory/rook-linux -p 'test_*.py'
           python3 -m py_compile \
+            linux/dot/build_kernel.py \
+            linux/dot/early_boot.py \
             linux/dot/build_rootfs.py \
             factory/dot-linux/install.py \
             factory/recovery_install.py \
             factory/to_recovery.py \
             factory/to_twrp.py \
             tools/package_echo_release.py \
+            tools/check_legacy_ota.py \
+            tools/hardware_bundle.py \
+            factory/provision_hardware.py \
             tools/fetch_platform_input.py \
             tools/extract_platform_member.py \
             tools/platform_lock.py \
@@ -59,6 +78,7 @@ jobs:
       - name: Check shell entrypoints
         run: |
           sh -n linux/dot/build_linux.sh
+          sh -n linux/dot/tater-early-recovery
           sh -n linux/checkers/build_linux.sh
           sh -n linux/checkers/build_btbridge_helper.sh
           sh -n linux/rook/build_linux.sh
@@ -66,6 +86,7 @@ jobs:
           sh -n linux/dot/tater-net
           sh -n linux/common/tater-usb-ethernet
           sh -n linux/common/tater-usb-inventory
+          sh -n linux/common/tater-recovery-router
           sh -n linux/dot/wifi-set
           sh -n factory/dot-linux/install.sh
       - name: Test native microWakeWord runtime
@@ -93,9 +114,14 @@ jobs:
         run: |
           python3 -m pip install pyflakes
           python3 -m pyflakes \
+            linux/dot/build_kernel.py \
+            linux/dot/early_boot.py \
             linux/dot/build_rootfs.py \
             factory/dot-linux/install.py \
             factory/recovery_install.py \
             factory/to_recovery.py \
             factory/to_twrp.py \
-            tools/package_echo_release.py
+            tools/package_echo_release.py \
+            tools/check_legacy_ota.py \
+            tools/hardware_bundle.py \
+            factory/provision_hardware.py

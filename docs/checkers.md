@@ -64,6 +64,117 @@ queue is empty. Tater treats that as an idle poll, not EOF; repeatedly reopening
 the device power-cycles the MT7668 radio and can also wedge its shared Wi-Fi
 transport.
 
+## GPU UI
+
+With the reviewed owner-local Mali runtime installed, Checkers can retain its
+home, menu, climate, and conversation layers on the GPU. Text is rasterized
+when it changes; fades, the voice rim, ambient edge light, and thinking dots
+are composited by GLES2 shaders. Menus fade over 220 ms at the existing 30 Hz
+cadence. Scene changes snapshot the
+last completed GPU image so an interrupted fade does not jump backward.
+Settled static screens stop submitting GPU jobs.
+
+With scene protocol v3, STT and streamed replies animate individual words on a
+retained glyph atlas. New words rise 8 pixels and fade in over 180 ms; replaced
+partial words rise gently and fade out over 120 ms. Earlier words stay opaque
+and keep their position. Repeated words, rapid revisions, and line overflow
+retain their animation progress rather than restarting the paragraph. The
+full conversation fades away when its turn closes.
+
+The helper remains offscreen; `tater-show` owns the framebuffer, stages each
+completed GPU result in RAM, and flips a complete panel page. Video, media,
+camera, notifications, night mode, and volume overlays retain their existing
+rendering paths. Returning to those paths invalidates the CPU page caches.
+Missing runtimes and failed or stalled helpers fall back to CPU rendering.
+
+The original rotation-only helper remains supported. Retained UI effects
+require a helper advertising `scene_version: 2` or newer; word motion requires
+`scene_version: 3`. Its source and owner-local
+runtime preparation tool are in the hardware-research project's
+`probes/mt8163-gpu/` and `scripts/prepare_tater_gpu_runtime.py`. The vendor
+libraries and linker are unchanged and are not included in the public image.
+`tater-gpu-probe --benchmark-scenes-offscreen` checks fade endpoints,
+interruption, shader output, and round-trip timings without opening the display.
+
+## Native camera and H.264 Sat Chat
+
+The development capture policy again enables hardware H.264 on Checkers and
+Cronos after exact local encoder/decoder preflight. The MJPEG comparison and
+a watched CPU-display comparison did not resolve the Checkers Sat Chat jitter;
+the host relay remains under investigation. GPU UI/video composition, the
+corrected encoder colors and bounded frame pacing are retained. This restores
+the hardware integration, not a live-call performance or release qualification.
+Peers without compatible hardware capabilities continue using MJPEG.
+
+Checkers and Cronos develop live MJPEG directly at 480×270 with a maximum
+20 FPS cadence, including the existing `echo-balanced` call profile. Actual
+FPS depends on capture/exposure and load; this is not a 20 FPS guarantee.
+Native still photos, incoming playback resolution and other models are unchanged.
+Live MJPEG now uses motion-priority exposure on these two qualified targets:
+shutter stays within a nominal sensor frame, with gain compensating where
+possible. Dim rooms can look noisier. When the final live stream closes,
+normal long-exposure policy resumes; still-photo resolution is unchanged.
+
+The Checkers hardware capture path keeps the existing open camera driver and
+privacy controls, develops native 1280×720 Bayer frames directly to YUV420,
+and sends them to an isolated MediaTek hardware H.264 encoder. Bayer
+development/color processing remains software; this is not a replacement
+Android camera HAL or a claim of fully hardware ISP processing. Color/tone
+analysis is limited to 10 Hz while capture can continue at the sensor rate.
+Still photos use the original exposure policy and return native 1280×720 JPEGs.
+
+The loopback camera helper exposes `/capabilities` and `/stream.h264`.
+`TATER_VENC_ENABLE=1` is honored only on Checkers/Cronos and only after the installed
+`/data/tater-venc/runtime.json`, encoder helper, component, and required shared
+libraries pass exact identity checks. The encoder extension is prepared by the
+hardware-research project's `scripts/prepare_tater_venc_runtime.py`; it depends
+on the already-qualified `/data/tater-vdec` runtime. Device-owned libraries and
+the Android linker remain outside public source and firmware artifacts.
+
+Sat Chat advertises `sat_chat_h264=true` and version 1 only when both local
+encoding and decoding preflight succeed. Updated Tater or the Home Assistant
+bridge must negotiate compatible H.264 support at both peers. Tater selects
+`echo-h264-balanced` when both explicitly support the balanced profile
+(Checkers 768×432, Cronos 640×480). Other peers and older hosts keep JPEG.
+Timestamped `TSCV2` packets carry source PTS,
+stream generation, sequence, and keyframe state without touching call audio.
+Missing packets discard predictive state and wait for a fresh SPS/PPS-prefixed
+keyframe; queues are bounded rather than accumulating stale video. The renderer
+keeps Checkers' existing aspect-preserving call window.
+
+The kernel also needs the Checkers camera-clock patch in the Tater Linux
+source build. The prior probe obtained camera clock handles only when the DT
+requested always-on camera power; this privacy-gated device therefore silently
+ran its sensor at 13 MHz instead of 24 MHz. The fix obtains handles without
+powering the sensor and propagates clock errors. Do not add an always-on DT
+property to work around it. A system/kernel update and camera helper update
+are required; an application OTA alone cannot fix that clock bug.
+
+Connected development tests measured approximately 30 fps at 1280×720 for
+capture/encoding alone, and 28.4 fps over five minutes when the same unit
+simultaneously encoded and hardware-decoded through the production loopback
+relay. A dedicated bounded receive queue prevents TCP backlog; the qualified
+NEON pixel converter produces the same bytes as the scalar reference. Live
+call negotiation requires that helper, while ordinary media retains support
+for older verified helpers. These are bounded in-memory tests without the
+real display or host, not a guarantee of 30 fps full-duplex calls. The patched
+kernel compiles with the exact release identity and unchanged vendor-module
+symbol versions and is installed/boot-tested on the development unit, where
+native capture reached about 29.7 fps without the lab clock module. The first
+longer concurrent test exposed an unexpected stream exit; the corrected path
+completed five minutes, packet-loss recovery, and a native still. Installed
+candidate, extended thermal, two-device call, and distribution qualification
+remain release gates. See [the release checklist](checkers-release-readiness.md).
+
+`tater-camera-probe --acknowledge-camera-in-memory` performs a bounded
+capture/decode check without saving scene pixels or opening the microphone or
+display. `--capture-only`, `--relay`, `--drop-every N`, and `--snapshot` isolate
+capture performance, production relay behavior, packet-loss recovery, and
+native still dimensions respectively. Its default duration is 12 seconds and
+the normal maximum is 30 seconds. Explicit `--soak` permits a bounded test up
+to 10 minutes. These modes require an operator deliberately allowing camera
+capture.
+
 ## USB factory conversion
 
 Installing Tater Linux changes the partition layout and cannot be done by OTA.

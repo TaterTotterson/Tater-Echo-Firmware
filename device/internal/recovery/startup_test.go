@@ -35,23 +35,34 @@ func TestStartupGestureWindow(t *testing.T) {
 	}
 }
 
-func TestScreenTargetsDoNotRetainLinuxSideRecoveryGesture(t *testing.T) {
-	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
-		if _, err := StartupTWRPCommand(target); err == nil {
-			t.Fatalf("%s unexpectedly retained a Linux-side recovery gesture", target)
+func TestBiscuitRadarRetainLateSlotRescueForLegacyBootImages(t *testing.T) {
+	for _, target := range []string{"biscuit", "radar"} {
+		commands, err := StartupRecoveryCommands(target)
+		if err != nil || len(commands) != 2 {
+			t.Fatalf("%s commands=%+v err=%v", target, commands, err)
 		}
-	}
-	if _, err := StartupTWRPCommand("unknown"); err == nil {
-		t.Fatal("expected unsupported target error")
+		if commands[0].Path != "/usr/local/sbin/slotctl" ||
+			len(commands[0].Args) != 1 || commands[0].Args[0] != "rescue" {
+			t.Fatalf("%s prepare=%+v", target, commands[0])
+		}
+		if commands[1].Path != "/usr/local/bin/tater-reboot-now" || len(commands[1].Args) != 0 {
+			t.Fatalf("%s reboot=%+v", target, commands[1])
+		}
 	}
 }
 
-func TestStartupTWRPCommandForDotTargetsUsesSafeHandoff(t *testing.T) {
-	for _, target := range []string{"biscuit", "radar"} {
-		command, err := StartupTWRPCommand(target)
-		if err != nil || command.Path != "/usr/local/sbin/to-twrp" ||
-			len(command.Args) != 1 || command.Args[0] != "--handoff" {
-			t.Fatalf("%s command=%+v err=%v", target, command, err)
+func TestScreenStartupRecoveryUsesNativeTWRPWithoutArmingSlotRescue(t *testing.T) {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook", " Rook "} {
+		commands, err := StartupRecoveryCommands(target)
+		if err != nil || len(commands) != 1 || commands[0].Path != "/usr/local/bin/rebootto" ||
+			len(commands[0].Args) != 1 || commands[0].Args[0] != "recovery" {
+			t.Fatalf("%s commands=%+v err=%v", target, commands, err)
 		}
+	}
+}
+
+func TestUnsupportedStartupRecoveryTargetIsRefused(t *testing.T) {
+	if _, err := StartupRecoveryCommands("unknown"); err == nil {
+		t.Fatal("expected unsupported target error")
 	}
 }

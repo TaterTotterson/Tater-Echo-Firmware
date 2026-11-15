@@ -151,10 +151,11 @@ type SatChatCall struct {
 }
 
 type SatChat struct {
-	Self          string               `json:"self,omitempty"`
-	Participants  []SatChatParticipant `json:"participants,omitempty"`
-	Call          *SatChatCall         `json:"call,omitempty"`
-	VideoFrameURL string               `json:"video_frame_url,omitempty"`
+	Self           string               `json:"self,omitempty"`
+	Participants   []SatChatParticipant `json:"participants,omitempty"`
+	Call           *SatChatCall         `json:"call,omitempty"`
+	VideoFrameURL  string               `json:"video_frame_url,omitempty"`
+	VideoStreamURL string               `json:"video_stream_url,omitempty"`
 }
 
 type Camera struct {
@@ -251,6 +252,12 @@ type Snapshot struct {
 	Room                        string          `json:"room"`
 	DisplayTheme                string          `json:"display_theme,omitempty"`
 	DisplayEdgeGlow             bool            `json:"display_edge_glow"`
+	Settings                    map[string]any  `json:"settings,omitempty"`
+	SettingsError               string          `json:"settings_error,omitempty"`
+	FirmwareVersion             string          `json:"firmware_version,omitempty"`
+	FirmwareTarget              string          `json:"firmware_target,omitempty"`
+	DeviceAddress               string          `json:"device_address,omitempty"`
+	StartedAtUnixMS             int64           `json:"started_at_unix_ms,omitempty"`
 	WallpaperURLs               []string        `json:"wallpaper_urls,omitempty"`
 	WallpaperIntervalMinutes    int             `json:"wallpaper_interval_minutes,omitempty"`
 	ScreenBrightness            int             `json:"screen_brightness"`
@@ -302,6 +309,7 @@ type Command struct {
 	PositionMS  int64              `json:"position_ms,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	Diagnostics *ScreenDiagnostics `json:"diagnostics,omitempty"`
+	Settings    map[string]any     `json:"settings,omitempty"`
 }
 
 // ScreenDiagnostics is a low-rate performance sample from the native display
@@ -334,6 +342,7 @@ type ScreenDiagnostics struct {
 	AmbientLightError      string   `json:"ambient_light_error,omitempty"`
 	AmbientLux             *float64 `json:"ambient_lux,omitempty"`
 	UpdatedAtMS            int64    `json:"updated_at_ms"`
+	GPUScenes              bool     `json:"gpu_scenes"`
 }
 
 type client struct {
@@ -345,10 +354,11 @@ type client struct {
 // connected renderer. It binds loopback only; no screen control is exposed to
 // the LAN.
 type Server struct {
-	address      string
-	imageAddress string
-	onCommand    func(Command)
-	onVideoAudio func(context.Context, string, string, io.Reader) error
+	address           string
+	imageAddress      string
+	onCommand         func(Command)
+	onVideoAudio      func(context.Context, string, string, io.Reader) error
+	onVideoAudioClock func(string, string) (uint64, bool)
 
 	mu                       sync.RWMutex
 	state                    Snapshot
@@ -370,6 +380,7 @@ type Server struct {
 	taterTubeImageVersion    uint64
 	satChatVideoImage        []byte
 	satChatVideoVersion      uint64
+	satChatH264              *satChatH264Relay
 	cameraFrameImage         []byte
 	cameraFrameVersion       uint64
 	closed                   bool
@@ -405,6 +416,16 @@ func (s *Server) SetVideoAudioHandler(handler func(context.Context, string, stri
 	s.mu.Unlock()
 }
 
+// SetVideoAudioClockHandler exposes the number of 48 kHz audio frames the
+// active fullscreen-video stream has actually handed to ALSA. The companion
+// endpoint remains loopback-only and validates both the video session and its
+// generation-specific stream ID before returning a value.
+func (s *Server) SetVideoAudioClockHandler(handler func(string, string) (uint64, bool)) {
+	s.mu.Lock()
+	s.onVideoAudioClock = handler
+	s.mu.Unlock()
+}
+
 // Run serves until ctx is cancelled. A failure to bind is returned so the
 // firmware logs it, but it never prevents the voice satellite from starting.
 func (s *Server) Run(ctx context.Context) error {
@@ -423,8 +444,10 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/media-image", s.serveMediaImage)
 	mux.HandleFunc("/tater-tube-image", s.serveTaterTubeImage)
 	mux.HandleFunc("/sat-chat-video", s.serveSatChatVideo)
+	mux.HandleFunc("/sat-chat-h264", s.serveSatChatH264)
 	mux.HandleFunc("/camera-frame", s.serveCameraFrame)
 	mux.HandleFunc("/video-audio", s.serveVideoAudio)
+	mux.HandleFunc("/video-audio-clock", s.serveVideoAudioClock)
 	imageServer := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second}
 	s.mu.Lock()
 	s.listener = listener
@@ -488,7 +511,7 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 		s.clients[c] = struct{}{}
-		state := s.state
+		state := s.snapshotLocked()
 		s.mu.Unlock()
 		if err := writeSnapshot(c, state); err != nil {
 			s.remove(c)
@@ -587,6 +610,7 @@ func (s *Server) SetTaterTube(media *TaterTubeMedia, image []byte, contentType s
 // keeping large JPEGs out of the renderer control socket.
 func (s *Server) SetSatChatVideo(image []byte) {
 	s.mu.Lock()
+	s.clearSatChatH264Locked()
 	if s.state.SatChat == nil {
 		s.state.SatChat = &SatChat{}
 	}
@@ -663,6 +687,7 @@ func (s *Server) Close() {
 		return
 	}
 	s.closed = true
+	s.clearSatChatH264Locked()
 	listener := s.listener
 	imageListener := s.imageListener
 	imageServer := s.imageServer
@@ -886,12 +911,52 @@ func (s *Server) serveVideoAudio(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) serveVideoAudioClock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	streamID := strings.TrimSpace(r.URL.Query().Get("stream"))
+	if sessionID == "" || streamID == "" || len(sessionID) > 128 || len(streamID) > 128 {
+		http.Error(w, "invalid video audio session", http.StatusBadRequest)
+		return
+	}
+	s.mu.RLock()
+	video := s.state.Video
+	handler := s.onVideoAudioClock
+	valid := video != nil && video.Active && video.SessionID == sessionID &&
+		(strings.EqualFold(video.State, "playing") || strings.EqualFold(video.State, "loading"))
+	s.mu.RUnlock()
+	if !valid || handler == nil {
+		http.Error(w, "video session is not active", http.StatusConflict)
+		return
+	}
+	frames, active := handler(sessionID, streamID)
+	if !active {
+		http.Error(w, "video audio stream is not active", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(struct {
+		PlayedFrames uint64 `json:"played_frames"`
+		SampleRate   int    `json:"sample_rate"`
+	}{PlayedFrames: frames, SampleRate: 48_000}); err != nil {
+		log.Printf("[show] video audio clock response stopped: %v", err)
+	}
+}
+
 // Update atomically changes the complete state and schedules a broadcast.
 // Scheduling is non-blocking because audio and direction updates originate on
 // real-time capture/playback goroutines which must never wait on the renderer.
 func (s *Server) Update(change func(*Snapshot)) {
 	s.mu.Lock()
 	change(&s.state)
+	if s.state.SatChat == nil || s.state.SatChat.Call == nil || s.state.SatChat.Call.State != "active" || s.state.SatChat.Call.Mode != "video" {
+		s.clearSatChatH264Locked()
+	}
 	s.state.Protocol = ProtocolVersion
 	s.state.Type = "snapshot"
 	s.state.Phase = normalizePhase(s.state.Phase)
@@ -908,7 +973,24 @@ func (s *Server) Update(change func(*Snapshot)) {
 func (s *Server) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.state
+	return s.snapshotLocked()
+}
+
+// The caller holds mu. Sat Chat is updated in place as video arrives; neither
+// local readers nor JSON writers may retain its live pointers after unlock.
+func (s *Server) snapshotLocked() Snapshot {
+	state := s.state
+	state.Settings = CopyScreenSettings(state.Settings)
+	if state.SatChat != nil {
+		chat := *state.SatChat
+		chat.Participants = append([]SatChatParticipant(nil), chat.Participants...)
+		if chat.Call != nil {
+			call := *chat.Call
+			chat.Call = &call
+		}
+		state.SatChat = &chat
+	}
+	return state
 }
 
 func (s *Server) readCommands(c *client) {
@@ -941,7 +1023,7 @@ func (s *Server) broadcastLoop(ctx context.Context) {
 			return
 		case <-s.notify:
 			s.mu.RLock()
-			state := s.state
+			state := s.snapshotLocked()
 			clients := make([]*client, 0, len(s.clients))
 			for c := range s.clients {
 				clients = append(clients, c)

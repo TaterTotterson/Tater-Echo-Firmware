@@ -165,10 +165,10 @@ fi
     return release
 
 
-def prepare_upload(console_library, port: str, size: int) -> None:
+def prepare_upload(console_library, port: str, size: int, *, remote_dir=REMOTE_DIR, remote_file=REMOTE_ROOTFS) -> None:
     need_kib = (size + 1023) // 1024 + 8192
     command = (
-        f"mkdir -p {REMOTE_DIR}; rm -f {REMOTE_ROOTFS}.partial; "
+        f"umask 077; mkdir -p {shlex.quote(remote_dir)}; chmod 700 {shlex.quote(remote_dir)}; rm -f {shlex.quote(remote_file + '.partial')}; "
         "available=$(df -Pk /data | awk 'END {print $4}'); "
         f"if [ -n \"$available\" ] && [ \"$available\" -ge {need_kib} ]; then "
         "echo TATER_UPLOAD_SPACE_OK; else echo TATER_UPLOAD_NO_SPACE:$available; fi"
@@ -195,17 +195,17 @@ def _wait_for_pattern(serial_port, pattern: re.Pattern[str], timeout: int) -> re
     raise Fail("the recovery console timed out during payload transfer")
 
 
-def upload_rootfs(console_library, port: str, source: Path) -> None:
+def upload_rootfs(console_library, port: str, source: Path, *, remote_dir=REMOTE_DIR, remote_file=REMOTE_ROOTFS) -> None:
     size = source.stat().st_size
     digest = sha256(source)
-    prepare_upload(console_library, port, size)
-    remote_partial = REMOTE_ROOTFS + ".partial"
+    prepare_upload(console_library, port, size, remote_dir=remote_dir, remote_file=remote_file)
+    remote_partial = remote_file + ".partial"
     command = (
         "u=$$; stty raw -echo; printf '\\nTATER_UPLOAD_READY_%s\\n' \"$u\"; "
         f"head -c {size} > {shlex.quote(remote_partial)}; sync; "
         f"got=$(sha256sum {shlex.quote(remote_partial)} | cut -d' ' -f1); "
         f"if [ \"$got\" = {shlex.quote(digest)} ]; then "
-        f"mv -f {shlex.quote(remote_partial)} {shlex.quote(REMOTE_ROOTFS)}; fi; "
+        f"mv -f {shlex.quote(remote_partial)} {shlex.quote(remote_file)}; fi; "
         "printf '\\nTATER_UPLOAD_DONE_%s %s\\n' \"$u\" \"$got\"; stty sane"
     )
     try:
@@ -249,6 +249,20 @@ def upload_rootfs(console_library, port: str, source: Path) -> None:
             f"({done.group(1)} != {digest}); it was not installed"
         )
     print(f"   transferred and verified {size} bytes", flush=True)
+
+
+def verify_repair_platform(console_library, port: str, profile: str) -> None:
+    if not profile:
+        return
+    command = (
+        "store=/store; [ -e /.techo5-store ] && store=/; found=0; bad=0; "
+        'for root in "$store"/techo5/slots/[ab] "$store"/slots/[ab]; do '
+        '[ -x "$root/sbin/init" ] || continue; found=1; '
+        f'[ "$(cat "$root/etc/tater-ota-platform" 2>/dev/null)" = {shlex.quote(profile)} ] || bad=1; '
+        'done; [ "$found:$bad" != 1:0 ] || echo TATER_REPAIR_PLATFORM_OK'
+    )
+    if 'TATER_REPAIR_PLATFORM_OK' not in exchange(console_library, port, command, 10).splitlines():
+        raise Fail('A one-time full USB factory upgrade is required; --repair cannot install the new kernel/platform. Settings are preserved by default.')
 
 
 def install_rootfs(console_library, port: str, target: str, factory_reset: bool) -> str:
@@ -310,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         console_library = load_console_library()
         port = select_port(console_library, args.port)
         current = probe_recovery(console_library, port, info["target"])
+        verify_repair_platform(console_library, port, str(info.get('ota_platform') or ''))
         print(f"== Tater Recovery on {port}")
         print(f"   current: {current}")
         print(f"   repair:  {release}")

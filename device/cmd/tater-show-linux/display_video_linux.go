@@ -4,11 +4,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"io"
 	"log"
 	"net/http"
@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/linuxinput"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/show"
@@ -128,11 +129,14 @@ func (controller *displayVideoController) run(ctx context.Context, identity, ses
 	log.Printf("[display-video] opening %s with %s at %dx%d/%dfps", videostream.RedactedURL(parsed), videostream.DecoderPath(), request.Width, request.Height, request.FPS)
 	for ctx.Err() == nil {
 		audioReader, audioWriter := io.Pipe()
+		clock := &displayVideoAudioClock{}
+		clockContext, stopClock := context.WithCancel(ctx)
+		go pollDisplayVideoAudioClock(clockContext, sessionID, streamID, clock)
 		audioDone := make(chan error, 1)
 		go func() { audioDone <- postDisplayVideoAudio(ctx, sessionID, streamID, audioReader) }()
 		var sequence uint64
 		lastPositionMS := positionBaseMS
-		err := videostream.ReadMedia(ctx, request, audioWriter, func(source *image.RGBA) error {
+		err := videostream.ReadMedia(ctx, request, &clockedAudioWriter{Writer: audioWriter, clock: clock}, func(source *image.RGBA) error {
 			sequence++
 			destination := controller.acquire(source.Rect)
 			copy(destination.Pix, source.Pix)
@@ -146,6 +150,7 @@ func (controller *displayVideoController) run(ctx context.Context, identity, ses
 		})
 		_ = audioWriter.Close()
 		audioErr := <-audioDone
+		stopClock()
 		if ctx.Err() != nil {
 			return
 		}
@@ -176,6 +181,71 @@ func (controller *displayVideoController) run(ctx context.Context, identity, ses
 		log.Printf("[display-video] playback stopped: %v", err)
 		controller.publish(displayVideoResult{identity: identity, sessionID: sessionID, err: errors.New("video playback stopped")})
 		return
+	}
+}
+
+type displayVideoAudioClock struct {
+	positionUS atomic.Int64
+	active     atomic.Bool
+}
+
+func (clock *displayVideoAudioClock) PlaybackPositionUS() (int64, bool) {
+	if clock == nil || !clock.active.Load() {
+		return 0, false
+	}
+	return clock.positionUS.Load(), true
+}
+
+type clockedAudioWriter struct {
+	io.Writer
+	clock *displayVideoAudioClock
+}
+
+func (writer *clockedAudioWriter) PlaybackPositionUS() (int64, bool) {
+	return writer.clock.PlaybackPositionUS()
+}
+
+type videoAudioClockResponse struct {
+	PlayedFrames uint64 `json:"played_frames"`
+	SampleRate   int    `json:"sample_rate"`
+}
+
+func pollDisplayVideoAudioClock(ctx context.Context, sessionID, streamID string, clock *displayVideoAudioClock) {
+	if clock == nil {
+		return
+	}
+	defer clock.active.Store(false)
+	endpoint := "http://" + show.DefaultImageAddress + "/video-audio-clock?session=" + url.QueryEscape(sessionID) + "&stream=" + url.QueryEscape(streamID)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: nil},
+		Timeout:   time.Second,
+	}
+	defer client.CloseIdleConnections()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err == nil {
+			response, requestErr := client.Do(request)
+			if requestErr == nil {
+				var value videoAudioClockResponse
+				decodeErr := json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&value)
+				_ = response.Body.Close()
+				if response.StatusCode == http.StatusOK && decodeErr == nil && value.SampleRate == 48_000 {
+					clock.positionUS.Store(int64(value.PlayedFrames * 1_000_000 / uint64(value.SampleRate)))
+					clock.active.Store(true)
+				} else {
+					clock.active.Store(false)
+				}
+			} else {
+				clock.active.Store(false)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -274,51 +344,11 @@ func (r *renderer) applyDisplayVideo(controller *displayVideoController, result 
 }
 
 func (r *renderer) renderDisplayVideo(canvas *image.RGBA) {
-	draw.Draw(canvas, canvas.Rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
-	if r.displayVideoImage != nil {
-		draw.Draw(canvas, canvas.Rect, r.displayVideoImage, r.displayVideoImage.Rect.Min, draw.Src)
-	}
-	video := r.state.Video
-	if video == nil {
-		return
-	}
-	paused := strings.EqualFold(video.State, "paused")
-	loading := strings.EqualFold(video.State, "loading") || r.displayVideoImage == nil
-	if paused || loading || video.Error != "" {
-		draw.Draw(canvas, canvas.Rect, image.NewUniform(color.NRGBA{A: 104}), image.Point{}, draw.Over)
-	}
-	if video.Title != "" && (paused || loading || video.Error != "") {
-		size := 24
-		if r.isCrown() {
-			size = 34
-		}
-		r.centeredText(canvas, canvas.Rect.Dx()/2, max(54, canvas.Rect.Dy()/7), fitTextToWidth(video.Title, r.faces.bold[size], canvas.Rect.Dx()*3/4), size, true, color.White)
-	}
-	if paused {
-		play, stop := displayVideoControlBounds(canvas.Rect.Dx(), canvas.Rect.Dy(), r.spotScreen)
-		accent := paletteForTheme(r.state.DisplayTheme).primary
-		drawMenuRoundedRect(canvas, play, play.Dy()/2, color.RGBA{8, 20, 31, 238})
-		drawMenuRoundedOutline(canvas, play, play.Dy()/2, 3, accent)
-		drawVideoPlayGlyph(canvas, play.Min.X+play.Dy()/2, (play.Min.Y+play.Max.Y)/2, play.Dy()/5, accent)
-		r.centeredText(canvas, (play.Min.X+play.Max.X)/2+10, play.Min.Y+play.Dy()*62/100, "PLAY", max(16, play.Dy()/4), true, color.White)
-		drawMenuRoundedRect(canvas, stop, stop.Dy()/2, color.RGBA{42, 13, 17, 242})
-		drawMenuRoundedOutline(canvas, stop, stop.Dy()/2, 3, color.RGBA{255, 92, 82, 255})
-		r.centeredText(canvas, (stop.Min.X+stop.Max.X)/2, stop.Min.Y+stop.Dy()*62/100, "STOP", max(16, stop.Dy()/4), true, color.White)
-	} else if loading {
-		r.centeredText(canvas, canvas.Rect.Dx()/2, canvas.Rect.Dy()/2+10, "LOADING VIDEO", 18, true, color.RGBA{225, 235, 245, 230})
-	}
+	r.renderPopupVideo(canvas)
 }
 
 func displayVideoControlBounds(width, height int, spot bool) (image.Rectangle, image.Rectangle) {
-	if spot {
-		return image.Rect(72, 310, 252, 374), image.Rect(266, 310, 408, 374)
-	}
-	buttonHeight := max(58, height/10)
-	buttonWidth := max(180, width/5)
-	gap := max(20, width/40)
-	centerX, top := width/2, height*67/100
-	return image.Rect(centerX-gap/2-buttonWidth, top, centerX-gap/2, top+buttonHeight),
-		image.Rect(centerX+gap/2, top, centerX+gap/2+buttonWidth, top+buttonHeight)
+	return popupVideoButtonBounds(width, height)
 }
 
 func drawVideoPlayGlyph(canvas *image.RGBA, cx, cy, radius int, ink color.RGBA) {
@@ -340,13 +370,17 @@ func (r *renderer) handleDisplayVideoTouch(client *socketClient, event linuxinpu
 	}
 	video := r.state.Video
 	position := max(r.displayVideoPositionMS, video.PositionMS)
-	if !strings.EqualFold(video.State, "paused") {
-		client.sendVideo("video.pause", video.SessionID, position, "")
-		return
-	}
 	play, stop := displayVideoControlBounds(r.screenWidth, r.screenHeight, r.spotScreen)
 	point := image.Pt(event.X, event.Y)
-	if point.In(play) {
+	if !strings.EqualFold(video.State, "paused") {
+		if r.popupVideoOverlayVisible() && point.In(stop) {
+			client.sendVideo("video.stop", video.SessionID, position, "")
+		} else {
+			client.sendVideo("video.pause", video.SessionID, position, "")
+		}
+		return
+	}
+	if point.In(play) && video.Error == "" {
 		client.sendVideo("video.resume", video.SessionID, position, "")
 	} else if point.In(stop) {
 		client.sendVideo("video.stop", video.SessionID, position, "")

@@ -42,27 +42,23 @@ func InStartupGestureWindow(path string) (bool, error) {
 	return uptime <= StartupGestureWindow, nil
 }
 
-// StartupTWRPCommand selects the Linux-side Volume Up route used only by
-// Biscuit and Radar. The screen satellites enter their retained TWRP directly
-// in the boot chain, before Linux starts, so they must not retain the older
-// Linux-side gesture that requested Tater Recovery.
-//
-// Biscuit and Radar run Linux from the recovery partition itself. A current
-// factory install keeps a verified handoff TWRP image that restores Linux to
-// that partition while TWRP continues running from RAM. Do not fall back to
-// Tater Recovery when that image is absent: the physical gesture now has one
-// unambiguous meaning on every satellite, while to_recovery.py remains the
-// explicit route to Tater Recovery.
-func StartupTWRPCommand(target string) (Command, error) {
+// StartupRecoveryCommands selects the Linux-side held-key fallback. Screen
+// devices retain their native TWRP power-on route; a key passed through to
+// Linux must also request TWRP rather than redirecting to Tater Recovery.
+// Biscuit/Radar's factory-built initramfs handles held Volume Up before a root
+// slot loads. Retain this late slot-rescue fallback for older boot images or
+// refused early handoffs; application OTA must not assume a new boot image.
+// Explicit USB Tater Recovery is independent of this physical-key policy.
+func StartupRecoveryCommands(target string) ([]Command, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "biscuit", "radar":
-		return Command{
-			Path: "/usr/local/sbin/to-twrp",
-			Args: []string{
-				"--handoff",
-			},
+		return []Command{
+			{Path: "/usr/local/sbin/slotctl", Args: []string{"rescue"}},
+			{Path: "/usr/local/bin/tater-reboot-now"},
 		}, nil
+	case "checkers", "cronos", "crown", "athena", "rook":
+		return []Command{{Path: "/usr/local/bin/rebootto", Args: []string{"recovery"}}}, nil
 	default:
-		return Command{}, fmt.Errorf("no Linux-side TWRP gesture for target %q", target)
+		return nil, fmt.Errorf("no recovery gesture for target %q", target)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"sync"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/liveh264"
+
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/speaker"
 )
 
@@ -220,4 +222,12 @@ func (c *Client) SendSatChatVideo(jpeg []byte) bool {
 		return false
 	}
 	return c.sendBestEffortBinary(frame)
+}
+
+func (c *Client) SendSatChatH264(frame liveh264.Frame) bool {
+	if !c.satChatActive.Load() {
+		return false
+	}
+	wire := liveh264.Encode(frame)
+	return len(wire) > 0 && c.sendBestEffortBinary(wire)
 }

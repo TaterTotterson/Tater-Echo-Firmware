@@ -133,6 +133,15 @@ restoration. `tater-usb-inventory` collects read-only evidence, and
 `tater-usb-ethernet probe` performs a bounded enumeration-only check without
 DHCP or a Wi-Fi change.
 
+Automatic Biscuit/Rook discovery now leaves an attached computer's USB role
+alone while gadget/UDC state reports connection, enumeration or suspend. It
+waits for enumeration before a speculative host probe and reports
+`waiting usb-device` while serial is protected. After a computer disconnects,
+adapter detection resumes. Idle discovery still retries when no computer is
+detected: these boards cannot reliably identify a later powered-adapter plug-in
+without briefly entering host mode. The explicit diagnostic `probe` command
+still overrides that guard; normal Ethernet health and Wi-Fi rescue are unchanged.
+
 Do not distribute `r8152.ko` as a loose binary. RTL8152 is built into the pinned
 kernel so it is available before rootfs selection and cannot drift from the
 kernel ABI. Kernel outputs must be built from pinned Tater Linux source and

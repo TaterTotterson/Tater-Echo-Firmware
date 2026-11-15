@@ -20,6 +20,29 @@ REAL_REPO = Path(__file__).resolve().parents[1]
 
 
 class PackageEchoReleaseTests(unittest.TestCase):
+    def setUp(self):
+        # Archive-inventory fixtures below are not qualified rootfs builds.
+        # Exercise the real immutable-profile validator separately with tars.
+        self.real_profile_validator = package_echo_release.verify_rootfs_ota_platform
+        patcher = mock.patch.object(package_echo_release, 'verify_rootfs_ota_platform')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_rootfs_profile_is_required_and_target_specific(self):
+        import io
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / 'rootfs.tar.gz'
+            for profile in (None, b'echo-hardware-v1/rook\n', b'echo-hardware-v1/radar\n'):
+                with tarfile.open(rootfs, 'w:gz') as archive:
+                    if profile is not None:
+                        entry = tarfile.TarInfo('./etc/tater-ota-platform')
+                        entry.size = len(profile)
+                        archive.addfile(entry, io.BytesIO(profile))
+                if profile == b'echo-hardware-v1/radar\n':
+                    self.real_profile_validator(rootfs, 'radar')
+                else:
+                    with self.assertRaisesRegex(SystemExit, 'platform verification failed'):
+                        self.real_profile_validator(rootfs, 'radar')
     @staticmethod
     def _copy(root: Path, relative: str, destination: str | None = None) -> None:
         source = REAL_REPO / relative
@@ -54,7 +77,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
         path.write_bytes(header.ljust(page, b"\0") + ramdisk)
 
     @staticmethod
-    def _rook_rootfs(path: Path, version: str) -> None:
+    def _rook_rootfs(path: Path, version: str, public: Path | None = None) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "etc/techo5").mkdir(parents=True)
@@ -63,8 +86,17 @@ class PackageEchoReleaseTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             with tarfile.open(path, "w:gz") as archive:
                 archive.add(root / "etc", arcname="etc")
+                if public is not None:
+                    for helper in public.iterdir():
+                        archive.add(helper, arcname="usr/local/bin/" + helper.name)
 
     def dot_fixture(self, root: Path, target: str, version: str) -> tuple[Path, dict[str, str]]:
+        # Packaging fixtures model the archive contract, not qualified silicon.
+        # Real audio-kernel/release guards have separate negative tests below.
+        for name in ("require_dot_audio_platform", "verify_dot_audio_kernel"):
+            patcher = mock.patch.object(package_echo_release, name)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         targets = root / "targets/targets.json"
         targets.parent.mkdir(parents=True)
         targets.write_text(json.dumps({"targets": {target: {
@@ -83,6 +115,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             "factory/checkers-linux/tools/techo5/techo5lib.py",
             "linux/dot/tater-net",
             "linux/dot/wifi-set",
+            "linux/dot/early_boot.py",
+            "linux/dot/tater-early-recovery",
             "LICENSE",
             "LICENSES/ECHOLOCAL-MIT.txt",
             "LICENSES/SENDSPIN-MIT.txt",
@@ -104,7 +138,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             self._write(platform / relative, b"fixture\n")
         self._write(
             platform / "tools/linux/init",
-            b"/data/techo5-linux /data/misc/echolocal stale platform wording\n",
+            b"/data/techo5-linux /data/misc/echolocal stale platform wording\n"
+            b'\n[ -n "$UNHEALTHY" ] || boot_slot\n',
         )
         self._write(
             platform / "tools/linux/rootfs/usr/local/sbin/slotctl",
@@ -112,6 +147,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
         )
         build = root / "device/build"
         self._elf(build / "dot/tater-echo", package_echo_release.ELFCLASS32,
+                  package_echo_release.EM_ARM)
+        self._elf(build / "dot/tater-volume-up", package_echo_release.ELFCLASS32,
                   package_echo_release.EM_ARM)
         self._elf(build / "microwakeword-linux/libtater_microwakeword.so",
                   package_echo_release.ELFCLASS32, package_echo_release.EM_ARM)
@@ -133,6 +170,26 @@ class PackageEchoReleaseTests(unittest.TestCase):
             "TATER_LINUX_ROOTFS": "",
         }
         return targets, env
+
+    def test_dot_factory_rejects_a_missing_or_host_early_key_helper(self) -> None:
+        for contents in (None, b'host binary'):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / 'repo'
+                targets, env = self.dot_fixture(root, 'biscuit', 'v9.8.7')
+                helper = root / 'device/build/dot/tater-volume-up'
+                if contents is None:
+                    helper.unlink()
+                else:
+                    helper.write_bytes(contents)
+                with (
+                    mock.patch.object(package_echo_release, 'REPO', root),
+                    mock.patch.object(package_echo_release, 'TARGETS', targets),
+                    mock.patch.object(package_echo_release.subprocess, 'check_output',
+                                      return_value=package_echo_release.DOT_PLATFORM_COMMIT + '\n'),
+                    mock.patch.dict(os.environ, env, clear=False),
+                    self.assertRaisesRegex(SystemExit, 'early-recovery helper verification failed'),
+                ):
+                    package_echo_release.build('v9.8.7', 'biscuit', Path(temporary) / 'output')
 
     def test_dot_targets_package_linux_rootfs_and_single_daemon_ota(self) -> None:
         version = "v9.8.7"
@@ -158,12 +215,16 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 with tarfile.open(output / f"tater-echo-{target}-{version}-ota.tar.gz") as archive:
                     self.assertEqual(set(archive.getnames()), {"manifest.json", "tater-echo"})
                     ota_manifest = json.load(archive.extractfile("manifest.json"))
+                    self.assertEqual(2, ota_manifest['schema'])
+                    self.assertEqual(f'echo-hardware-v1/{target}', ota_manifest['platform'])
                     self.assertEqual("tater-linux", ota_manifest["base_os"])
                 with tarfile.open(
                     output / f"tater-echo-{target}-{version}-system-ota.tar.gz"
                 ) as archive:
                     self.assertEqual(set(archive.getnames()), {"manifest.json", "rootfs.tar.gz"})
                     system_manifest = json.load(archive.extractfile("manifest.json"))
+                    self.assertEqual(2, system_manifest['schema'])
+                    self.assertEqual(f'echo-hardware-v1/{target}', system_manifest['platform'])
                     self.assertEqual("tater-linux-rootfs", system_manifest["kind"])
                     self.assertEqual(target, system_manifest["target"])
                     self.assertEqual(version, system_manifest["version"])
@@ -181,6 +242,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
                         "to_recovery.py", "recovery_install.py",
                         "to_twrp.py",
                         "payload/rootfs.tar.gz", "payload/kernel.zImage-dtb",
+                        "payload/tater-volume-up", "tools/early_boot.py",
+                        "tools/linux/tater-early-recovery",
                         "payload/rescue-apks.tar", "payload/alpine-minirootfs.tar.gz",
                         "tools/dotimage.py", "tools/linux/mkimage.py",
                         "tools/linux/rootfs/usr/local/sbin/tater-net",
@@ -236,6 +299,22 @@ class PackageEchoReleaseTests(unittest.TestCase):
                     release_manifest["targets"][target]["system_ota"]["minimum_system_version"],
                 )
                 self.assertIn("system", release_manifest["targets"][target]["artifacts"])
+                kernel_update = release_manifest["targets"][target]["kernel_update"]
+                self.assertFalse(kernel_update["included_in_system_ota"])
+                self.assertFalse(kernel_update["included_in_application_ota"])
+
+    def test_unqualified_dot_audio_cannot_be_published(self) -> None:
+        for target in ("biscuit", "radar"):
+            with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio release is blocked"):
+                package_echo_release.require_dot_audio_platform(target)
+
+    def test_old_or_wrong_dot_audio_kernel_cannot_be_packaged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            kernel = Path(temporary) / "old-kernel"
+            kernel.write_bytes(b"old kernel without verified hardware filter")
+            for target in ("biscuit", "radar"):
+                with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio kernel verification failed"):
+                    package_echo_release.verify_dot_audio_kernel(kernel, target)
 
     def test_minimum_system_version_defaults_and_validates(self) -> None:
         self.assertEqual(
@@ -324,10 +403,39 @@ class PackageEchoReleaseTests(unittest.TestCase):
             ort.parent.mkdir(parents=True)
             ort.write_bytes(b"crown-onnx-runtime")
             rootfs = build / f"tater-crown-rootfs-{version}.tar.gz"
-            rootfs.write_bytes(b"crown-rootfs")
+            # Real, target-scoped helper metadata in a small generated rootfs.
+            # Only the lock is a fixture; the normal rootfs verifier still runs.
+            hardware = json.loads(json.dumps(package_echo_release.hardware_bundle.load_lock("crown")))
+            public = root / "public"
+            public.mkdir()
+            for name in package_echo_release.hardware_bundle.HELPERS:
+                self._elf(public / name, package_echo_release.ELFCLASS32, package_echo_release.EM_ARM)
+                hardware["helpers"][name] = package_echo_release.digest(public / name)
+            (public / "tater-hardware.json").write_text(json.dumps({
+                "schema": 1, "target": "crown", "bundle_id": hardware["bundle_id"],
+                "files": hardware["helpers"],
+                "source_lock_sha256": package_echo_release.hardware_bundle.lock_digest(hardware),
+            }))
+            with tarfile.open(rootfs, "w:gz") as archive:
+                for path in public.iterdir():
+                    archive.add(path, arcname="usr/local/bin/" + path.name)
             boot = root / "linux/checkers/inputs/tater-echo-crown-baseline-boot.img"
             boot.parent.mkdir(parents=True)
-            boot.write_bytes(b"pinned-crown-boot")
+            kernel = b"generated Crown kernel fixture"
+            header = bytearray(2048)
+            header[:8] = b"ANDROID!"
+            struct.pack_into("<I", header, 8, len(kernel))
+            struct.pack_into("<I", header, 36, 2048)
+            boot.write_bytes(bytes(header) + kernel)
+            platform = json.loads(json.dumps(package_echo_release.PLATFORM_LOCK))
+            show_platform = platform["platforms"]["show"]
+            show_platform["targets"]["crown"]["boot"]["sha256"] = package_echo_release.digest(boot)
+            show_platform["crown_hardware"] = {
+                "release_qualified": True,
+                "source_commit": show_platform["checkers_commit"],
+                "kernel_image_sha256": hashlib.sha256(kernel).hexdigest(),
+                "boot_sha256": package_echo_release.digest(boot),
+            }
 
             def brand(command, **_kwargs):
                 self.assertEqual(["--target", "crown"], command[2:4])
@@ -337,6 +445,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             with (
                 mock.patch.object(package_echo_release, "REPO", root),
                 mock.patch.object(package_echo_release, "TARGETS", targets),
+                mock.patch.object(package_echo_release, "PLATFORM_LOCK", platform),
+                mock.patch.object(package_echo_release.hardware_bundle, "load_lock", return_value=hardware),
                 mock.patch.object(package_echo_release.subprocess, "run", side_effect=brand),
                 mock.patch.dict(os.environ, {
                     "TATER_CROWN_ROOTFS": str(rootfs),
@@ -356,21 +466,28 @@ class PackageEchoReleaseTests(unittest.TestCase):
             ) as archive:
                 self.assertEqual(
                     set(archive.getnames()),
-                    {"manifest.json", "FFMPEG-LGPL-2.1.txt", "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg"},
+                    {"manifest.json", "FFMPEG-LGPL-2.1.txt", "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg",
+                     "tater-hardware.json", *package_echo_release.hardware_bundle.HELPERS},
                 )
+                for path in public.iterdir():
+                    self.assertEqual(archive.extractfile(path.name).read(), path.read_bytes())
+                self.assertEqual(archive.getmember("tater-hardware.json").mode & 0o777, 0o644)
                 self.assertEqual(archive.getmember("FFMPEG-LGPL-2.1.txt").mode & 0o777, 0o644)
                 self.assertEqual(archive.getmember("tater-ffmpeg").mode & 0o777, 0o755)
             with tarfile.open(
                 output / f"tater-echo-crown-{version}-ota-bridge.tar.gz", "r:gz"
             ) as archive:
+                bridge = json.load(archive.extractfile('manifest.json'))
+                self.assertEqual(bridge['schema'], 2)
+                self.assertEqual(bridge['platform'], 'echo-hardware-v1/crown')
                 self.assertEqual(
                     set(archive.getnames()), {"manifest.json", "tater-echo", "tater-show"}
                 )
             release_manifest = json.loads((output / "firmware-manifest.json").read_text())
             self.assertEqual(release_manifest["targets"]["crown"]["ota_migrations"], [{
-                "id": "linux-app-components-v2",
+                "id": "linux-app-components-v3",
                 "required_capability": "ota_bundle_components_version",
-                "minimum_capability_version": 2,
+                "minimum_capability_version": 3,
                 "bridge_artifact": "ota_bridge",
                 "final_artifact": "ota",
             }])
@@ -460,11 +577,18 @@ class PackageEchoReleaseTests(unittest.TestCase):
             ort.write_bytes(b"rook-onnx-runtime-v2.1.0")
             self._rook_boot(build / "tater-rook-boot.img")
             rootfs = build / f"tater-rook-rootfs-{version}.tar.gz"
-            self._rook_rootfs(rootfs, version)
+            from tools.test_hardware_bundle import HardwareBundleTests
+            public = root / "public"
+            hardware = HardwareBundleTests().fixture(public, "rook")
+            self._rook_rootfs(rootfs, version, public)
+            platform = json.loads(json.dumps(package_echo_release.PLATFORM_LOCK))
+            platform["platforms"]["rook"]["hardware"] = {"release_qualified": True}
 
             with (
                 mock.patch.object(package_echo_release, "REPO", root),
                 mock.patch.object(package_echo_release, "TARGETS", targets),
+                mock.patch.object(package_echo_release, "PLATFORM_LOCK", platform),
+                mock.patch.object(package_echo_release.hardware_bundle, "load_lock", return_value=hardware),
                 mock.patch.dict(os.environ, {
                     "TATER_ROOK_ROOTFS": str(rootfs),
                     "TATER_ROOK_BOOT_IMAGE": "",
@@ -521,7 +645,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             with tarfile.open(output / f"tater-echo-rook-{version}-ota.tar.gz", "r:gz") as archive:
                 self.assertEqual(
                     set(archive.getnames()),
-                    {"manifest.json", "FFMPEG-LGPL-2.1.txt", "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg"},
+                    {"manifest.json", "FFMPEG-LGPL-2.1.txt", "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg",
+                     "tater-hw-gpu", "tater-hw-vdec", "tater-hw-venc", "tater-hardware.json"},
                 )
             with tarfile.open(
                 output / f"tater-echo-rook-{version}-ota-bridge.tar.gz", "r:gz"
@@ -530,9 +655,9 @@ class PackageEchoReleaseTests(unittest.TestCase):
                     set(archive.getnames()), {"manifest.json", "tater-echo", "tater-show"}
                 )
             self.assertEqual(manifest["targets"]["rook"]["ota_migrations"], [{
-                "id": "linux-app-components-v2",
+                "id": "linux-app-components-v3",
                 "required_capability": "ota_bundle_components_version",
-                "minimum_capability_version": 2,
+                "minimum_capability_version": 3,
                 "bridge_artifact": "ota_bridge",
                 "final_artifact": "ota",
             }])
@@ -599,7 +724,11 @@ class PackageEchoReleaseTests(unittest.TestCase):
                     "TATER_LINUX_ROOTFS": "",
                 }),
             ):
-                artifacts = package_echo_release.build(version, "athena", output)
+                with mock.patch.object(package_echo_release, "hardware_files_from_rootfs", return_value={
+                    "tater-hw-gpu": b"native-mesa-helper", "tater-hardware.json": b"native-mesa-metadata"
+                }) as hardware:
+                    artifacts = package_echo_release.build(version, "athena", output)
+                    hardware.assert_called_once_with(rootfs, "athena")
 
             names = {path.name for path in artifacts}
             self.assertIn(f"tater-echo-athena-{version}-factory.tar.gz", names)
@@ -609,6 +738,7 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 self.assertEqual(set(archive.getnames()), {
                     "manifest.json", "FFMPEG-LGPL-2.1.txt", "tater-echo", "tater-show",
                     "tater-camera", "tater-ffmpeg",
+                    "tater-hw-gpu", "tater-hardware.json",
                 })
             with tarfile.open(
                 output / f"tater-echo-athena-{version}-ota-bridge.tar.gz", "r:gz"
@@ -618,9 +748,9 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 )
             release_manifest = json.loads((output / "firmware-manifest.json").read_text())
             self.assertEqual(release_manifest["targets"]["athena"]["ota_migrations"], [{
-                "id": "linux-app-components-v2",
+                "id": "linux-app-components-v3",
                 "required_capability": "ota_bundle_components_version",
-                "minimum_capability_version": 2,
+                "minimum_capability_version": 3,
                 "bridge_artifact": "ota_bridge",
                 "final_artifact": "ota",
             }])

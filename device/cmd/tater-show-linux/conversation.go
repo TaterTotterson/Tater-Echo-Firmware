@@ -155,6 +155,26 @@ func (r *renderer) drawConversationFlowLines(
 	if value == "" {
 		return
 	}
+	phase := conversationVisualPhase(r.state.Conversation, r.state.Phase)
+	if phase == "thinking" || phase == "working" {
+		// Once STT is complete the approved waiting surface centers its text.
+		// Streaming listening/replying keeps fixed left baselines, and matched
+		// GPU words ease into these final positions rather than snapping.
+		for index, line := range flowingConversationLines(value, r.faces.regular[size], maxWidth, maxLines) {
+			baseline := firstBaseline + index*(size+max(8, size/4))
+			if r.gpuTextCapture != nil {
+				width := textWidth(r.faces.regular[size], line)
+				r.captureConversationWords(line, centerX, baseline, width, 1, size, ink, false)
+			} else {
+				r.centeredText(canvas, centerX, baseline, line, size, false, ink)
+			}
+		}
+		return
+	}
+	if r.gpuTextCapture != nil {
+		r.captureConversationWords(value, centerX, firstBaseline, maxWidth, maxLines, size, ink, highlightNewest)
+		return
+	}
 	lines := flowingConversationLines(value, r.faces.regular[size], maxWidth, maxLines)
 	lineHeight := size + max(8, size/4)
 	left := centerX - maxWidth/2
@@ -180,6 +200,12 @@ func (r *renderer) drawConversationUserText(
 		text = strings.TrimSpace(conversation.UserText)
 	}
 	if text == "" {
+		if r.gpuTextCapture != nil {
+			placeholder := "I’m listening"
+			width := font.MeasureString(r.faces.regular[size], placeholder).Round()
+			r.captureConversationWords(placeholder, centerX, firstBaseline, width, 1, size, ink, false)
+			return
+		}
 		r.centeredText(canvas, centerX, firstBaseline, "I’m listening", size, false, ink)
 		return
 	}
@@ -221,6 +247,10 @@ func (r *renderer) drawConversationHighlightedLine(
 }
 
 func (r *renderer) drawConversationDots(canvas *image.RGBA, centerX, centerY int, seconds float64, accent color.RGBA, scale int) {
+	if !r.spotScreen {
+		drawThinkingDots(canvas, centerX, centerY, seconds, accent)
+		return
+	}
 	for index := 0; index < 3; index++ {
 		pulse := .5 + .5*math.Sin(seconds*3.0-float64(index)*.72)
 		radius := max(5, scale/2) + int(math.Round(pulse*2))
@@ -249,8 +279,9 @@ func conversationGaussian(value, center, spread float64) float64 {
 // from the regular voice-state rim: the broad falloff establishes the visual
 // surface, while drawConversationRim adds the crisp/reactive outer edge.
 func (r *renderer) drawConversationAmbientGlow(canvas *image.RGBA, _ float64, accent color.RGBA) {
-	if !r.state.DisplayEdgeGlow {
-		draw.Draw(canvas, canvas.Bounds(), image.NewUniform(conversationBackdrop), image.Point{}, draw.Src)
+	backdrop := workspaceBackground
+	if !r.state.DisplayEdgeGlow || r.gpuSceneBuilding {
+		draw.Draw(canvas, canvas.Bounds(), image.NewUniform(backdrop), image.Point{}, draw.Src)
 		return
 	}
 	key := conversationGlowCacheKey{
@@ -266,7 +297,7 @@ func (r *renderer) drawConversationAmbientGlow(canvas *image.RGBA, _ float64, ac
 	// imperceptibly, so build it once per target/theme and keep the dots, text,
 	// and audio-reactive rim as the live per-frame animation.
 	layer := image.NewRGBA(canvas.Bounds())
-	draw.Draw(layer, layer.Bounds(), image.NewUniform(conversationBackdrop), image.Point{}, draw.Src)
+	draw.Draw(layer, layer.Bounds(), image.NewUniform(backdrop), image.Point{}, draw.Src)
 	if r.spotScreen {
 		r.drawSpotConversationAmbientGlow(layer, 0, accent)
 	} else {
@@ -366,20 +397,16 @@ func (r *renderer) drawConversationRim(canvas *image.RGBA, accent color.RGBA, re
 func (r *renderer) drawSpotConversation(canvas *image.RGBA, seconds float64, accent color.RGBA, motion bool) {
 	conversation := r.state.Conversation
 	phase := conversationVisualPhase(conversation, r.state.Phase)
-	accent = conversationAccent(phase, r.state.DisplayTheme)
+	accent = r.conversationInk(phase)
 	r.drawConversationAmbientGlow(canvas, seconds, accent)
-	labelInk := mix(accent, color.RGBA{255, 255, 255, 255}, .22)
-	r.centeredText(canvas, 240, 138, conversationStageLabel(phase), 16, true, labelInk)
+	labelWidth := r.drawPopupTrackedLabel(canvas, 240, 104, conversationStageLabel(phase), 16, accent)
+	circle(canvas, 240-labelWidth/2-12, 99, 3, accent)
 
 	switch phase {
 	case "replying":
-		r.drawConversationFlowLines(canvas, firstNonEmpty(conversation.AssistantText, "Replying"), 240, 202, 338, 4, 30, conversationText, true)
+		r.drawConversationFlowLines(canvas, firstNonEmpty(conversation.AssistantText, "Replying"), 240, 188, 316, 4, 28, conversationText, true)
 	default:
-		ink := conversationText
-		if phase == "thinking" || phase == "working" {
-			ink = mix(conversationDimText, accent, .18)
-		}
-		r.drawConversationUserText(canvas, 240, 202, 338, 4, 30, ink, motion)
+		r.drawConversationUserText(canvas, 240, 205, 316, 4, 30, conversationText, motion)
 	}
 	if motion {
 		r.drawSpotConversationMotion(canvas, seconds, accent)
@@ -389,9 +416,9 @@ func (r *renderer) drawSpotConversation(canvas *image.RGBA, seconds float64, acc
 
 func (r *renderer) drawSpotConversationMotion(canvas *image.RGBA, seconds float64, accent color.RGBA) {
 	phase := conversationVisualPhase(r.state.Conversation, r.state.Phase)
-	accent = conversationAccent(phase, r.state.DisplayTheme)
+	accent = r.conversationInk(phase)
 	if phase == "thinking" || phase == "working" {
-		r.drawConversationDots(canvas, 240, 354, seconds, accent, 9)
+		drawRookThinkingDots(canvas, seconds, accent)
 	}
 	r.drawConversationRim(canvas, accent, phase == "replying")
 	drawConversationFadeIn(canvas, seconds)
@@ -400,18 +427,18 @@ func (r *renderer) drawSpotConversationMotion(canvas *image.RGBA, seconds float6
 func (r *renderer) drawShowConversation(canvas *image.RGBA, seconds float64, accent color.RGBA, motion bool) {
 	conversation := r.state.Conversation
 	phase := conversationVisualPhase(conversation, r.state.Phase)
-	accent = conversationAccent(phase, r.state.DisplayTheme)
+	accent = r.conversationInk(phase)
 	r.drawConversationAmbientGlow(canvas, seconds, accent)
 	width := canvas.Rect.Dx()
 	crown := r.isCrown()
-	labelSize, labelBaseline := 15, 58
+	labelSize, labelBaseline := 15, canvas.Rect.Dy()*12/100+7
 	maxWidth, maxLines := width*46/100, 4
 	if crown {
-		labelSize, labelBaseline = 20, 106
+		labelSize, labelBaseline = 20, canvas.Rect.Dy()*12/100+10
 		maxWidth = width * 54 / 100
 		maxLines = 5
 	}
-	labelInk := mix(accent, color.RGBA{255, 255, 255, 255}, .22)
+	labelInk := accent
 
 	switch phase {
 	case "replying":
@@ -426,15 +453,20 @@ func (r *renderer) drawShowConversation(canvas *image.RGBA, seconds float64, acc
 		r.centeredText(canvas, width/2, assistantLabelY, "TATER", metaSize, true, accent)
 		r.drawConversationFlowLines(canvas, firstNonEmpty(conversation.AssistantText, "Replying"), width/2, replyFirstBaseline, maxWidth, maxLines, replySize, conversationText, true)
 	default:
-		r.centeredText(canvas, width/2, labelBaseline, conversationStageLabel(phase), labelSize, true, labelInk)
-		bodySize, firstBaseline := 34, 194
+		labelWidth := r.drawPopupTrackedLabel(canvas, width/2, labelBaseline, conversationStageLabel(phase), labelSize, labelInk)
+		circle(canvas, width/2-labelWidth/2-max(10, width/100), labelBaseline-labelSize/3, max(2, width/360), accent)
+		bodySize, firstBaseline := 34, canvas.Rect.Dy()*33/100+34
 		if crown {
-			bodySize, firstBaseline = 48, 280
+			bodySize, firstBaseline = 48, canvas.Rect.Dy()*33/100+48
+		}
+		if phase == "thinking" || phase == "working" {
+			lines := flowingConversationLines(conversation.UserText, r.faces.regular[bodySize], maxWidth, maxLines)
+			if len(lines) > 0 {
+				lastBaseline := canvas.Rect.Dy()*72/100 - thinkingDotTile/2 - 16
+				firstBaseline = min(firstBaseline, lastBaseline-(len(lines)-1)*(bodySize+max(8, bodySize/4)))
+			}
 		}
 		ink := conversationText
-		if phase == "thinking" || phase == "working" {
-			ink = mix(conversationDimText, accent, .18)
-		}
 		r.drawConversationUserText(canvas, width/2, firstBaseline, maxWidth, maxLines, bodySize, ink, motion)
 	}
 	if motion {
@@ -445,7 +477,7 @@ func (r *renderer) drawShowConversation(canvas *image.RGBA, seconds float64, acc
 func (r *renderer) drawShowConversationMotion(canvas *image.RGBA, seconds float64, accent color.RGBA) {
 	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
 	phase := conversationVisualPhase(r.state.Conversation, r.state.Phase)
-	accent = conversationAccent(phase, r.state.DisplayTheme)
+	accent = r.conversationInk(phase)
 	if phase == "thinking" || phase == "working" {
 		dotScale := 9
 		if r.isCrown() {

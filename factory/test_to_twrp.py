@@ -76,15 +76,25 @@ class TaterEchoTwrpHelperTests(unittest.TestCase):
         self.assertIn("/etc/tater-release", console.commands[0][1])
         self.assertIn("/usr/local/sbin/to-twrp --yes", console.commands[1][1])
 
-    def test_screen_target_requests_retained_recovery(self) -> None:
+    def test_screen_target_supports_old_and_retired_router_helpers(self) -> None:
         console = FakeConsoleLibrary(
-            answers=["TATER_RECOVERY_SHOW", "TATER_TWRP_REBOOTING"]
+            answers=["TATER_RECOVERY_SHOW_ROUTER", "TATER_TWRP_REBOOTING"]
+        )
+
+        helper.reboot_to_twrp(console, "/dev/ttyACM0")
+
+        self.assertIn("tater-recovery-router install", console.commands[1][1])
+        self.assertIn("/usr/local/sbin/tater-recovery-router twrp", console.commands[1][1])
+
+    def test_pre_router_screen_release_keeps_legacy_twrp_route(self) -> None:
+        console = FakeConsoleLibrary(
+            answers=["TATER_RECOVERY_SHOW_LEGACY", "TATER_TWRP_REBOOTING"]
         )
 
         helper.reboot_to_twrp(console, "/dev/ttyACM0")
 
         self.assertIn("/usr/local/bin/rebootto recovery", console.commands[1][1])
-        self.assertNotIn("/usr/local/sbin/to-twrp", console.commands[1][1])
+        self.assertNotIn("tater-recovery-router twrp", console.commands[1][1])
 
     def test_refuses_an_unrecognized_console(self) -> None:
         console = FakeConsoleLibrary(answers=[""])

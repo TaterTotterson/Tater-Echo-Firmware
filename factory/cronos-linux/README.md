@@ -39,8 +39,9 @@ Do not disconnect power or USB while the installer is writing the device.
 
 ## Recovery
 
-Hold Volume Up while powering on to enter TWRP. The factory archive also
-includes `to_twrp.py` for entering TWRP from a normally booted satellite.
+Hold Volume Up while powering on to enter TWRP and stay there. There is no
+automatic redirect to Tater Recovery. From a normally running satellite, use
+`to_recovery.py` for explicit USB Tater Recovery or `to_twrp.py` for TWRP.
 
 Cronos support is hardware-tested on model C76N8S, including factory install,
 display and touch, audio and wake detection, recovery, and automatic USB

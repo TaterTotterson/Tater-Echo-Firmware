@@ -1,0 +1,12 @@
+--- a/echod/internal/hardware/camera/camera_spot.go
++++ b/echod/internal/hardware/camera/camera_spot.go
+@@ -427,5 +427,9 @@
+ // stream is the Show's: the DMA runs over the slots, aimed at the next one on every TG frame tick.
+ func (d *device) stream(stop chan struct{}, frame func(bayer []byte)) {
++	if taterUseHeldCaptureSlots() {
++		d.taterStreamHeldBuffers(stop, frame)
++		return
++	}
+ 	cam := d.cam
+ 	cur := 0
+ 	cam.wr(regImgoBase, d.mva)

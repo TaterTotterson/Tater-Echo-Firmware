@@ -23,9 +23,18 @@ command_dir=$checkout/echod/cmd/tater-rook-camera
 mkdir -p "$command_dir"
 cp "$script_dir/camera-helper/main.go" "$command_dir/main.go"
 cp "$script_dir/camera-helper/main_test.go" "$command_dir/main_test.go"
+for name in h264.go h264_athena.go h264_cadence.go h264_lifecycle.go; do
+    cp "$repo/linux/checkers/camera-helper/$name" "$command_dir/$name"
+done
 camera_dir=$checkout/echod/internal/hardware/camera
 cp "$script_dir/camera-helper/tater_video_spot.go" "$camera_dir/tater_video_spot.go"
 cp "$script_dir/camera-helper/tater_video_spot_test.go" "$camera_dir/tater_video_spot_test.go"
+cp "$script_dir/camera-helper/tater_encoder_input_spot.go" "$camera_dir/tater_encoder_input_spot.go"
+cp "$script_dir/camera-helper/tater_encoder_input_spot_test.go" "$camera_dir/tater_encoder_input_spot_test.go"
+cp "$script_dir/camera-helper/tater_capture_slots_spot.go" "$camera_dir/tater_capture_slots_spot.go"
+cp "$script_dir/camera-helper/tater_capture_slots_spot_test.go" "$camera_dir/tater_capture_slots_spot_test.go"
+cp "$script_dir/camera-helper/tater_live_exposure_spot.go" "$camera_dir/tater_live_exposure_spot.go"
+cp "$script_dir/camera-helper/tater_live_exposure_spot_test.go" "$camera_dir/tater_live_exposure_spot_test.go"
 
 # TECHO5 normally develops every second sensor frame because its standard path
 # expands each 640x480 Bayer frame before scaling it. Tater's echo-low path
@@ -45,8 +54,18 @@ matches=$(grep -c '^[[:space:]]*convertEvery = 2$' "$camera_driver" || true)
     exit 1
 }
 sed 's/^\([[:space:]]*\)convertEvery = 2$/\1convertEvery = 1/' "$driver_backup" > "$camera_driver"
+git -C "$checkout" apply --check "$script_dir/camera-helper/held_slots.patch"
+git -C "$checkout" apply "$script_dir/camera-helper/held_slots.patch"
+git -C "$checkout" apply --check "$script_dir/camera-helper/live_exposure.patch"
+git -C "$checkout" apply "$script_dir/camera-helper/live_exposure.patch"
 (
     cd "$checkout/echod"
+    # Run tests against the same temporary driver hooks as the shipped binary.
+    # This opt-in requires a Linux host with the race detector's C toolchain.
+    if [ "${TATER_CAMERA_TEST:-0}" = 1 ]; then
+        GOTOOLCHAIN=local GOFLAGS=-buildvcs=false go test -race -count=1 \
+            -tags spot ./internal/hardware/camera ./cmd/tater-rook-camera
+    fi
     GOTOOLCHAIN=local GOFLAGS=-buildvcs=false \
         GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build \
         -tags spot -trimpath -ldflags '-s -w' -o "$output" ./cmd/tater-rook-camera

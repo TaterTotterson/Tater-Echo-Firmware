@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "target": "checkers",
+  "bundle_id": "checkers-hardware-20261113.5",
+  "ndk_properties_sha256": "f60a3592fa8ee5a77759aa6855d91def4cc8f774dc31137becf65f0a34374ad2",
+  "headers": {
+    "android_frameworks_native": "dd2ce3e0509deeeb3344f047d09b8661b360a968",
+    "android_hardware_libhardware": "b5288579191c94da0ce1814dee0136eb49eec9ae",
+    "android_system_core": "2b5b9169a441f0ecb34651f146f37411a0a77c13"
+  },
+  "helpers": {
+    "tater-hw-gpu": "3dc9b5403f85d627f275739e6fa4ed86825cbfbde0a3edb7e79313f12b59f2f0",
+    "tater-hw-vdec": "56091ad1146815d30be313be9e08cb671640033756de14f294f04ab04ef6ce91",
+    "tater-hw-venc": "94dd2cc2edcc54b1938dff536ea44099ff3a1f7d22923dc6b137d9792279c4b4"
+  },
+  "link_libraries": {
+    "libui.so": "3c2a835b314fed44978873e07e0fd777c5fe2604faabfa3fa43d26b4c3ea728a",
+    "libutils.so": "c887d510dbf9a2e46a3ff3397c0a5327da45fccd5937b9ba848df47a56dc1966",
+    "libhardware.so": "a3f34755965dadb4f25c48f8ffa2f9f4adbf152c257ab1112f59dd65d030ee0b",
+    "libcutils.so": "0fa59d3e7c144e65bb0b2a5e3bce98550cccefa0f9ba155aff1081c11eee4709",
+    "libsync.so": "8c0046f989cbb51a2f5c370d20c717b4cc4d697f60e7b2fe381e8ba4b0ef8ea6",
+    "libstdc++.so": "6f3563992476d1caf846aa5f47a63bdfdc003b010ecd6da58ac5329f6faba25e",
+    "liblog.so": "989b4a6d4100edf2d8c6d67d7f15ab1f3058cc92fd91ecd9758bcf3165ffc48b",
+    "libdl.so": "90e9a3ec655198a5b309d603c700f9ecc43b29a3b44d0472bac09457fc2259a9"
+  },
+  "sources": {
+    "scripts/build_tater_hardware.py": "f31678e41b1b4977050fc95c833be5300da92bd86a450dce5bd254b72df96c98",
+    "probes/mt8163-gpu/Makefile": "b9026fd0abebfedcaf57e2f36458eb286fd677ccfd9f0ef6079966abc5be334a",
+    "probes/mt8163-gpu/rgba_rotate_stream_android.c": "a7a181aced8f31f91dbafd35dd777393bbb68a9cef65876d9de086e5f656ccc9",
+    "probes/mt8163-vcodec/Makefile": "e247dba378190246caae2df73e210a052329abd2a1e33a2c97da3981c5050049",
+    "probes/mt8163-vcodec/omx_probe_android.c": "51e7d38c628779c639e14e0e3f6e766a0a654685ef26aca6ab797b2e13c6ec8e",
+    "probes/mt8163-vcodec/omx_probe_android.h": "c39310ed3a288fd8d7524f3df42ecd18c1a9de58d35bcc243235779cae007e0b",
+    "probes/mt8163-vcodec/tater_vdec_android.c": "49f191f883360e04f476133c984f745a47894e118154c71e1a54acc99d77e9d4",
+    "probes/mt8163-vcodec/tater_vdec_android.h": "60a3fb46514ed7b0f34c28cb970f244152bb9255b9a4ef9f94fa4ff06a76c7ac",
+    "probes/mt8163-vcodec/tater_vdec_main_android.c": "3bd9b64684c98ec342b3aed27de320cbdea232f317a1638066f45ebf8cc3f7e0",
+    "probes/mt8163-vcodec/omx_native_buffer_android.cpp": "a18d49aa76e6ad8e7ec1bf182382e480d6101f2d7c9563c799e6a2cb6db0be33",
+    "probes/mt8163-vcodec/omx_native_buffer_android.h": "884d0db081b61393cd3ceb559d2d5d704c89cd4619c615891e04c013402fc52f",
+    "probes/mt8163-vcodec/mtk_yuv420_block.c": "3e9483b6c6ad892f525d5bb5fdf4e42e186bbc066056c32f58d4309d4f1e25b1",
+    "probes/mt8163-vcodec/mtk_yuv420_block.h": "335f9e60d2576de8c7fb3af9cb1475fc8b167652f98b63422ab2bebbd2eb9037",
+    "probes/mt8163-vcodec/venc_probe_android.c": "d21722d113361b4b1a9432a3097a9599a26679f7cc8fb8dc10cd171516702517",
+    "probes/mt8163-vcodec/planar_chroma.h": "8c454955444537acebe2427b27257d40abb1b798155bb42770eb7280316b8dfc",
+    "probes/mt8163-vcodec/tater_bayer10.c": "59e417935efa185dea70298d3955dc4087b64da7074bd509bf805deaa40255cd",
+    "probes/mt8163-vcodec/tater_bayer10.h": "554a63482ca6d71318ac4f24108450b522c518ddb799bc9ba63833f636dd59bb",
+    "probes/mt8163-vcodec/bayer10_scaled.h": "43c170dc3f9659981bd4b8b68464ffc2fb2cedcb3c4969d824897c6f3292d361"
+  }
+}

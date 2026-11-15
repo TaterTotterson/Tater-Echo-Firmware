@@ -15,13 +15,21 @@ TOOL_PATHS = (ROOT / "tools", ROOT / "tools/techo5")
 PROBE_COMMAND = (
     "if grep -q 'Tater Linux' /etc/tater-release 2>/dev/null; then "
     "if [ -x /usr/local/sbin/to-twrp ]; then echo TATER_RECOVERY_DOT; "
-    "elif [ -x /usr/local/bin/rebootto ]; then echo TATER_RECOVERY_SHOW; fi; fi"
+    "elif [ -x /usr/local/sbin/tater-recovery-router ]; then echo TATER_RECOVERY_SHOW_ROUTER; "
+    "elif [ -x /usr/local/bin/rebootto ]; then echo TATER_RECOVERY_SHOW_LEGACY; fi; fi"
 )
 DOT_REBOOT_COMMAND = (
     "(/bin/sleep 1; /usr/local/sbin/to-twrp --yes) "
     ">/tmp/to-twrp.log 2>&1 & echo TATER_TWRP_REBOOTING"
 )
-SHOW_REBOOT_COMMAND = (
+SHOW_ROUTER_REBOOT_COMMAND = (
+    # New helpers treat 'install' as redirect cleanup. Older development
+    # helpers retain their one-shot bypass through 'twrp'; support both.
+    "if /usr/local/sbin/tater-recovery-router install >/tmp/to-twrp.log 2>&1; then "
+    "(/bin/sleep 1; /usr/local/sbin/tater-recovery-router twrp) "
+    ">>/tmp/to-twrp.log 2>&1 & echo TATER_TWRP_REBOOTING; fi"
+)
+SHOW_LEGACY_REBOOT_COMMAND = (
     "(/bin/sleep 1; /usr/local/bin/rebootto recovery) "
     ">/tmp/to-twrp.log 2>&1 & echo TATER_TWRP_REBOOTING"
 )
@@ -95,8 +103,10 @@ def recovery_kind(answer: str | None) -> str:
     lines = [] if answer is None else answer.splitlines()
     if "TATER_RECOVERY_DOT" in lines:
         return "dot"
-    if "TATER_RECOVERY_SHOW" in lines:
-        return "show"
+    if "TATER_RECOVERY_SHOW_ROUTER" in lines:
+        return "show-router"
+    if "TATER_RECOVERY_SHOW_LEGACY" in lines:
+        return "show-legacy"
     return ""
 
 
@@ -115,7 +125,11 @@ def reboot_to_twrp(console_library, port: str) -> None:
             "with a TWRP recovery route"
         )
 
-    command = DOT_REBOOT_COMMAND if kind == "dot" else SHOW_REBOOT_COMMAND
+    command = {
+        "dot": DOT_REBOOT_COMMAND,
+        "show-router": SHOW_ROUTER_REBOOT_COMMAND,
+        "show-legacy": SHOW_LEGACY_REBOOT_COMMAND,
+    }[kind]
     print("== rebooting the satellite into TWRP", flush=True)
     answer = exchange(console_library, port, command, 5)
     if answer is None or "TATER_TWRP_REBOOTING" not in answer.splitlines():

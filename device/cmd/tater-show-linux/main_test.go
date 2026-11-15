@@ -26,7 +26,7 @@ import (
 )
 
 func TestDisplayThemesKeepTaterDefaultAndUsePrimaryColorForReply(t *testing.T) {
-	wantTater := color.RGBA{255, 132, 48, 255}
+	wantTater := color.RGBA{232, 123, 64, 255}
 	if got := accentForTheme("idle", ""); got != wantTater {
 		t.Fatalf("empty theme did not preserve the Tater default: got=%v want=%v", got, wantTater)
 	}
@@ -52,7 +52,7 @@ func TestDisplayThemesKeepTaterDefaultAndUsePrimaryColorForReply(t *testing.T) {
 
 func TestMenuThemesUseDedicatedTwoColorPalettes(t *testing.T) {
 	expectedSecondary := map[string]color.RGBA{
-		"tater":  {174, 189, 209, 255},
+		"tater":  {176, 167, 156, 255},
 		"ocean":  {73, 230, 194, 255},
 		"violet": {239, 141, 255, 255},
 		"forest": {212, 185, 95, 255},
@@ -68,7 +68,7 @@ func TestMenuThemesUseDedicatedTwoColorPalettes(t *testing.T) {
 		}
 	}
 	tater := menuPaletteForTheme("tater")
-	if tater.primary != (color.RGBA{255, 132, 48, 255}) || tater.secondary.G >= 200 {
+	if tater.primary != (color.RGBA{232, 123, 64, 255}) || tater.secondary.G >= 200 {
 		t.Fatalf("Tater menu did not use orange and neutral gray: %+v", tater)
 	}
 }
@@ -246,6 +246,55 @@ func TestReducedSensorRowsKeepFullProfileSpacing(t *testing.T) {
 	}
 }
 
+func TestDefaultWallpaperCatalogPreservesScenes(t *testing.T) {
+	want := []string{
+		"mountains", "forest", "ocean", "desert", "meadow", "waterfall", "night",
+		"alpine-sunset", "misty-lake", "desert-dusk",
+	}
+	if defaultWallpaperCount() != len(want) {
+		t.Fatalf("wallpaper count=%d, want %d", defaultWallpaperCount(), len(want))
+	}
+	for index, name := range want {
+		if got := defaultWallpaperNames[index]; got != name {
+			t.Errorf("wallpaper %d=%q, want %q", index, got, name)
+		}
+	}
+}
+
+func TestNewWallpapersReuseActiveSceneCache(t *testing.T) {
+	start := time.Date(2026, time.November, 12, 0, 20, 0, 0, time.UTC)
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
+		t.Run(target, func(t *testing.T) {
+			r := &renderer{
+				target: target, spotScreen: target == "rook", screenWidth: 480, screenHeight: 480,
+				state: show.Snapshot{WallpaperIntervalMinutes: 60},
+			}
+			for hour := 0; hour < defaultWallpaperCount(); hour++ {
+				now := start.Add(time.Duration(hour) * time.Hour)
+				index := wallpaperRotationIndex(now, defaultWallpaperCount(), 60)
+				if index < 7 {
+					continue // Exercise each appended scene without changing rotation policy.
+				}
+				picture := r.activeWallpaper(now)
+				if picture == nil {
+					t.Fatalf("missing %s", defaultWallpaperNames[index])
+				}
+				for second := 5; second <= 60; second += 5 {
+					if got := r.activeWallpaper(now.Add(time.Duration(second) * time.Second)); got != picture {
+						t.Fatalf("%s re-decoded within the same rotation slot", defaultWallpaperNames[index])
+					}
+				}
+				if target == "rook" && picture.Bounds().Size() != image.Pt(480, 480) {
+					t.Fatalf("%s was not prepared for Rook: %v", defaultWallpaperNames[index], picture.Bounds())
+				}
+				if next := r.activeWallpaper(now.Add(time.Hour)); next == nil || next == picture {
+					t.Fatalf("%s did not advance at its configured boundary", defaultWallpaperNames[index])
+				}
+			}
+		})
+	}
+}
+
 func TestEmbeddedPhotoHomeAssetsCoverBothScreens(t *testing.T) {
 	files, err := embeddedWallpaperFiles()
 	if err != nil {
@@ -391,7 +440,7 @@ func TestSatChatVideoIsPreparedAtDisplaySizeAndStableFramesDoNotRepaint(t *testi
 	}
 	r.applyScreenImage(screenImageResult{
 		kind: satChatVideoScreenImage, identity: "frame-1", session: "call-1",
-		image: prepareCoverImage(image.NewRGBA(image.Rect(0, 0, 640, 360)), r.satChatVideoBounds().Size()),
+		image: prepareContainImage(image.NewRGBA(image.Rect(0, 0, 640, 360)), r.satChatVideoBounds().Size()),
 	})
 	if got, want := r.satChatVideoImage.Bounds().Size(), r.satChatVideoBounds().Size(); got != want {
 		t.Fatalf("prepared camera frame size = %v, want %v", got, want)
@@ -407,7 +456,7 @@ func TestSatChatVideoIsPreparedAtDisplaySizeAndStableFramesDoNotRepaint(t *testi
 	}
 	r.applyScreenImage(screenImageResult{
 		kind: satChatVideoScreenImage, identity: "frame-2", session: "call-1",
-		image: prepareCoverImage(image.NewRGBA(image.Rect(0, 0, 640, 360)), r.satChatVideoBounds().Size()),
+		image: prepareContainImage(image.NewRGBA(image.Rect(0, 0, 640, 360)), r.satChatVideoBounds().Size()),
 	})
 	r.render(canvas, now.Add(2*time.Second/30))
 	if len(r.presentRegions) != 1 || r.presentRegions[0] != r.satChatVideoContentBounds(1280, 800) {
@@ -475,43 +524,31 @@ func TestLeavingSatChatForcesImmediateFullHomeRestore(t *testing.T) {
 	}
 }
 
-func TestSatChatVideoUsesTargetSpecificUncroppedArea(t *testing.T) {
-	tests := []struct {
-		name        string
-		renderer    renderer
-		wantContent image.Rectangle
-		wantLargest bool
+func TestSatChatVideoUsesFullLandscapeViewportBehindControls(t *testing.T) {
+	for _, test := range []struct {
+		target        string
+		width, height int
+		spot          bool
+		want          image.Rectangle
 	}{
-		{
-			name:        "crown",
-			renderer:    renderer{target: "crown", screenWidth: 1280, screenHeight: 800},
-			wantContent: image.Rect(192, 148, 1088, 652),
-		},
-		{
-			name:        "checkers",
-			renderer:    renderer{target: "checkers", screenWidth: 960, screenHeight: 480},
-			wantContent: image.Rect(56, 1, 904, 478),
-			wantLargest: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := test.renderer.satChatVideoBounds()
-			if got != test.wantContent {
-				t.Fatalf("video content = %v, want %v", got, test.wantContent)
+		{"checkers", 960, 480, false, image.Rect(0, 0, 960, 480)},
+		{"crown", 1280, 800, false, image.Rect(0, 0, 1280, 800)},
+		{"athena", 1280, 800, false, image.Rect(0, 0, 1280, 800)},
+		{"rook", 480, 480, true, image.Rect(0, 0, 480, 480)},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			r := renderer{target: test.target, screenWidth: test.width, screenHeight: test.height, spotScreen: test.spot,
+				state: show.Snapshot{Cameras: &show.Cameras{SelectedTalkback: true}, SatChat: &show.SatChat{Call: &show.SatChatCall{Mode: "video"}}}}
+			got := r.satChatVideoBounds()
+			if got != test.want || got != r.cameraVideoBounds() {
+				t.Fatalf("video viewport %v, camera %v, want %v", got, r.cameraVideoBounds(), test.want)
 			}
-			if got.Dx()*9 != got.Dy()*16 {
-				t.Fatalf("video content %v is not exactly 16:9", got)
+			end := r.satChatEndBounds(test.width, test.height)
+			if !end.In(got) {
+				t.Fatal("End Chat must float over the video canvas")
 			}
-			width, height := test.renderer.showSize()
-			if test.wantLargest && got.Dx()+16 <= width && got.Dy()+9 <= height {
-				t.Fatalf("video content %v does not use the largest 16:9 area in %dx%d", got, width, height)
-			}
-			if test.renderer.isCrown() {
-				formerArea := 1280 * 720
-				if got.Dx()*got.Dy()*100/formerArea != 49 {
-					t.Fatalf("Crown video area = %d%% of former viewport, want 49%%", got.Dx()*got.Dy()*100/formerArea)
-				}
+			if got.Dx()%2 != 0 || got.Dy()%2 != 0 {
+				t.Fatal("decoder dimensions are not even")
 			}
 		})
 	}
@@ -524,9 +561,9 @@ func TestCameraDirectoryUsesTargetSpecificPageSizes(t *testing.T) {
 		spot          bool
 		want          int
 	}{
-		{name: "checkers", width: 960, height: 480, want: 5},
-		{name: "crown", width: 1280, height: 800, want: 5},
-		{name: "rook", width: 480, height: 480, spot: true, want: 4},
+		{name: "checkers", width: 960, height: 480, want: 3},
+		{name: "crown", width: 1280, height: 800, want: 3},
+		{name: "rook", width: 480, height: 480, spot: true, want: 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := cameraPageSize(test.width, test.height, test.spot); got != test.want {
@@ -554,11 +591,12 @@ func TestCameraDirectoryPagesAndSelectsVisibleFeed(t *testing.T) {
 	}
 	first := cameraCardBounds(960, 480, 0, false)
 	r.handleCameraTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (first.Min.X + first.Max.X) / 2, Y: (first.Min.Y + first.Max.Y) / 2}, 960, 480, false)
-	if !strings.Contains(commands.String(), `"target":"camera-5"`) {
-		t.Fatalf("first camera on page 2 = %q, want camera-5", commands.String())
+	if !strings.Contains(commands.String(), `"target":"camera-3"`) {
+		t.Fatalf("first camera on page 2 = %q, want camera-3", commands.String())
 	}
+	r.cameraPage = 2
 	r.handleCameraTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 960, 480, false)
-	if r.cameraPage != 1 {
+	if r.cameraPage != 2 {
 		t.Fatalf("disabled next wrapped to page %d", r.cameraPage)
 	}
 }
@@ -613,8 +651,9 @@ func TestCameraNextPageRendersOnEveryScreen(t *testing.T) {
 	}
 }
 
-func TestCrownCameraViewerCloseFitsAboveVideo(t *testing.T) {
+func TestCrownCameraViewerControlsFitOverVideo(t *testing.T) {
 	r := renderer{target: "crown", screenWidth: 1280, screenHeight: 800}
+	r.state.Cameras = &show.Cameras{SelectedID: "front", SelectedTalkback: true}
 	closeBounds := r.cameraCloseBounds(1280, 800, false, true)
 	if got, want := closeBounds, image.Rect(1172, 42, 1234, 104); got != want {
 		t.Fatalf("Crown close bounds = %v, want %v", got, want)
@@ -626,19 +665,19 @@ func TestCrownCameraViewerCloseFitsAboveVideo(t *testing.T) {
 		t.Fatalf("Crown close height = %d, want %d", got, want)
 	}
 	videoBounds := r.cameraVideoBounds()
-	if closeBounds.Max.Y > videoBounds.Min.Y {
-		t.Fatalf("Crown close bounds %v overlap video bounds %v", closeBounds, videoBounds)
+	if !closeBounds.In(videoBounds) {
+		t.Fatalf("Crown close bounds %v are outside video bounds %v", closeBounds, videoBounds)
 	}
 	panel := cameraDirectoryLayoutFor(1280, 800, false).panel
 	if !closeBounds.In(panel) {
 		t.Fatalf("Crown close bounds %v extend beyond popup panel %v", closeBounds, panel)
 	}
 	talkBounds := r.cameraTalkBounds(1280, 800, false)
-	if !talkBounds.In(panel) {
-		t.Fatalf("Crown talk bounds %v extend beyond popup panel %v", talkBounds, panel)
+	if !talkBounds.In(image.Rect(0, 0, 1280, 800)) {
+		t.Fatalf("Crown talk bounds %v extend beyond screen", talkBounds)
 	}
-	if talkBounds.Min.Y <= videoBounds.Max.Y {
-		t.Fatalf("Crown talk bounds %v overlap video bounds %v", talkBounds, videoBounds)
+	if !talkBounds.In(videoBounds) {
+		t.Fatalf("Crown talk bounds %v are outside video bounds %v", talkBounds, videoBounds)
 	}
 
 	checkers := renderer{target: "checkers", screenWidth: 960, screenHeight: 480}
@@ -964,7 +1003,7 @@ func TestActionMenuLayoutFitsEveryScreen(t *testing.T) {
 		{name: "athena", width: 1280, height: 800},
 		{name: "rook", width: 480, height: 480, spot: true},
 	}
-	items := []actionMenuItem{actionMenuSatChat, actionMenuCameras, actionMenuClimate}
+	items := []actionMenuItem{actionMenuSatChat, actionMenuCameras, actionMenuClimate, actionMenuSound, actionMenuDisplay, actionMenuInfo}
 	for _, target := range targets {
 		t.Run(target.name, func(t *testing.T) {
 			screen := image.Rect(0, 0, target.width, target.height)
@@ -978,8 +1017,10 @@ func TestActionMenuLayoutFitsEveryScreen(t *testing.T) {
 				if !bounds.In(screen) || !bounds.In(panel) {
 					t.Fatalf("item %d bounds %v outside panel %v", index, bounds, panel)
 				}
-				if index > 0 && bounds.Min.Y <= previous.Max.Y {
-					t.Fatalf("item %d overlaps previous row: %v and %v", index, previous, bounds)
+				for earlier := 0; earlier < index; earlier++ {
+					if bounds.Overlaps(actionMenuBounds(target.width, target.height, earlier, target.spot)) {
+						t.Fatalf("item %d overlaps item %d", index, earlier)
+					}
 				}
 				center := image.Pt((bounds.Min.X+bounds.Max.X)/2, (bounds.Min.Y+bounds.Max.Y)/2)
 				if got := actionMenuItemAt(center, target.width, target.height, target.spot); got != item {
@@ -1119,8 +1160,8 @@ func TestRectangularSatChatDirectoryPagesAndSelectsVisibleTarget(t *testing.T) {
 		width, height int
 		pageSize      int
 	}{
-		{name: "checkers", target: "checkers", width: 960, height: 480, pageSize: 8},
-		{name: "crown", target: "crown", width: 1280, height: 800, pageSize: 8},
+		{name: "checkers", target: "checkers", width: 960, height: 480, pageSize: 3},
+		{name: "crown", target: "crown", width: 1280, height: 800, pageSize: 3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var commands bytes.Buffer
@@ -1132,7 +1173,7 @@ func TestRectangularSatChatDirectoryPagesAndSelectsVisibleTarget(t *testing.T) {
 			if got := r.satChatPageSize(test.width, test.height); got != test.pageSize {
 				t.Fatalf("page size = %d, want %d", got, test.pageSize)
 			}
-			next := satChatNextBounds(test.width)
+			next := satChatNextBounds(test.width, test.height)
 			r.handleSatChatTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, test.width, test.height)
 			if r.satChatPage != 1 {
 				t.Fatalf("next page = %d, want 1", r.satChatPage)
@@ -1805,8 +1846,8 @@ func TestCrownMusicProgressDoesNotRebuildFullFrame(t *testing.T) {
 	canvas := image.NewRGBA(image.Rect(0, 0, 1280, 800))
 	r.render(canvas, now)
 	base, key := r.crownBase, r.crownBaseKey
-	progressBounds := image.Rect(crownPane(1280, crownContextHeight).Min.X, 298, crownPane(1280, crownContextHeight).Max.X, 354).
-		Add(image.Pt(0, 800-crownContextHeight))
+	_, content, bars := r.fullscreenMusicLayout(1280, 800)
+	progressBounds := image.Rect(content.Min.X, bars.Min.Y-42, content.Max.X, bars.Min.Y+30)
 	before := image.NewRGBA(progressBounds)
 	draw.Draw(before, before.Rect, canvas, progressBounds.Min, draw.Src)
 
@@ -2008,6 +2049,9 @@ func TestCheckersVoiceStagesOnlyChangeTheHomeStatusWhenGlowIsDisabled(t *testing
 	r.state.Phase = "idle"
 	home := image.NewRGBA(image.Rect(0, 0, 960, 480))
 	r.render(home, now)
+	g := classicWorkspaceHomeGeometry(960, 480)
+	heading := r.classicHomeHeading(960, g)
+	dot := image.Rect(heading.dot.X-heading.radius-1, heading.dot.Y-heading.radius-1, heading.dot.X+heading.radius+2, heading.dot.Y+heading.radius+2)
 	for _, phase := range []string{"listening", "thinking", "tool_call", "speaking", "intercom"} {
 		r.state.Phase = phase
 		canvas := image.NewRGBA(image.Rect(0, 0, 960, 480))
@@ -2015,8 +2059,8 @@ func TestCheckersVoiceStagesOnlyChangeTheHomeStatusWhenGlowIsDisabled(t *testing
 		if bytes.Equal(home.Pix, canvas.Pix) {
 			t.Errorf("%s did not update the assistant status", phase)
 		}
-		if !imagesEqualOutside(home, canvas, image.Rect(0, 412, 960, 447)) {
-			t.Errorf("%s changed the photo home outside the room/status row", phase)
+		if !imagesEqualOutside(home, canvas, image.Rect(g.margin, g.margin, 300, g.margin+20), dot) {
+			t.Errorf("%s changed the photo home outside the transient status and status dot", phase)
 		}
 	}
 }
@@ -2339,13 +2383,20 @@ func TestAssistantStatusTracksVoiceModeAndTheme(t *testing.T) {
 	}
 }
 
-func imagesEqualOutside(left, right *image.RGBA, ignored image.Rectangle) bool {
+func imagesEqualOutside(left, right *image.RGBA, ignored ...image.Rectangle) bool {
 	if left == nil || right == nil || left.Rect != right.Rect {
 		return false
 	}
 	for y := left.Rect.Min.Y; y < left.Rect.Max.Y; y++ {
 		for x := left.Rect.Min.X; x < left.Rect.Max.X; x++ {
-			if image.Pt(x, y).In(ignored) {
+			skip := false
+			for _, region := range ignored {
+				if image.Pt(x, y).In(region) {
+					skip = true
+					break
+				}
+			}
+			if skip {
 				continue
 			}
 			if left.RGBAAt(x, y) != right.RGBAAt(x, y) {
@@ -2792,7 +2843,7 @@ func TestRenderPreview(t *testing.T) {
 	}
 	if os.Getenv("TATER_SHOW_PREVIEW_STATE") == "sat-chat-video" {
 		if wallpaper := r.activeWallpaper(now); wallpaper != nil {
-			r.satChatVideoImage = prepareCoverImage(wallpaper, r.satChatVideoBounds().Size())
+			r.satChatVideoImage = prepareContainImage(wallpaper, r.satChatVideoBounds().Size())
 		}
 	}
 	if os.Getenv("TATER_SHOW_PREVIEW_STATE") == "volume" {

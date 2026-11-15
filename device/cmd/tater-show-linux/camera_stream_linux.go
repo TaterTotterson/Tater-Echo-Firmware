@@ -22,10 +22,11 @@ const (
 )
 
 type cameraStreamResult struct {
-	identity string
-	sequence uint64
-	image    *image.RGBA
-	err      error
+	identity      string
+	sequence      uint64
+	image         *image.RGBA
+	scaleDuration time.Duration
+	err           error
 }
 
 // cameraStreamController owns at most one decoder. Frames cross into the
@@ -90,10 +91,10 @@ func (controller *cameraStreamController) run(ctx context.Context, identity stri
 	log.Printf("[camera-video] opening %s with %s at %dx%d", videostream.RedactedURL(parsed), videostream.DecoderPath(), request.Width, request.Height)
 	for attempt := 1; ctx.Err() == nil; attempt++ {
 		var sequence uint64
-		err := videostream.Read(ctx, request, func(source *image.RGBA) error {
+		err := videostream.ReadLive(ctx, request, func(source *image.RGBA) error {
 			sequence++
-			destination := controller.acquire(source.Rect)
-			copy(destination.Pix, source.Pix)
+			destination := controller.acquire(image.Rectangle{Max: source.Rect.Size()})
+			copyRGBAFrame(destination, source)
 			controller.publish(cameraStreamResult{identity: identity, sequence: sequence, image: destination})
 			return nil
 		})
@@ -108,6 +109,39 @@ func (controller *cameraStreamController) run(ctx context.Context, identity stri
 			return
 		}
 	}
+}
+
+func copyRGBAFrame(destination, source *image.RGBA) {
+	if destination == nil || source == nil || destination.Rect.Size() != source.Rect.Size() {
+		return
+	}
+	width := source.Rect.Dx() * 4
+	for y := 0; y < source.Rect.Dy(); y++ {
+		from := source.PixOffset(source.Rect.Min.X, source.Rect.Min.Y+y)
+		to := destination.PixOffset(destination.Rect.Min.X, destination.Rect.Min.Y+y)
+		copy(destination.Pix[to:to+width], source.Pix[from:from+width])
+	}
+}
+
+func fitCameraStreamFrame(destination, source *image.RGBA) {
+	if destination == nil || source == nil || destination.Rect.Empty() || source.Rect.Empty() {
+		return
+	}
+	if destination.Rect.Size() == source.Rect.Size() {
+		copy(destination.Pix, source.Pix)
+		return
+	}
+	clear(destination.Pix)
+	width, height := destination.Rect.Dx(), destination.Rect.Dy()
+	if source.Rect.Dx()*height > source.Rect.Dy()*width {
+		height = max(1, source.Rect.Dy()*width/source.Rect.Dx())
+	} else {
+		width = max(1, source.Rect.Dx()*height/source.Rect.Dy())
+	}
+	left := destination.Rect.Min.X + (destination.Rect.Dx()-width)/2
+	top := destination.Rect.Min.Y + (destination.Rect.Dy()-height)/2
+	scaled := destination.SubImage(image.Rect(left, top, left+width, top+height)).(*image.RGBA)
+	scaleNearestRGBA(scaled, source)
 }
 
 func (controller *cameraStreamController) acquire(bounds image.Rectangle) *image.RGBA {

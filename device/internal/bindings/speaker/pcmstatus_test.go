@@ -68,12 +68,32 @@ func TestPcmOwner(t *testing.T) {
 }
 
 func TestStatusPathMatchesTheDeviceWeOpen(t *testing.T) {
-	// Pins the path against the card/device constants. The speaker is device
-	// 23 and the mic is 24; checking pcm0p (Android's own) reads "closed" and
-	// proves nothing, which cost a wrong conclusion during the #80 hunt.
+	// Pin the legacy path. Athena's native Linux output uses device 0 instead
+	// and is covered separately below.
 	want := "/proc/asound/card0/pcm23p/sub0/status"
 	if got := statusPath(cardNr, deviceNr); got != want {
 		t.Fatalf("statusPath = %q, want %q", got, want)
+	}
+}
+
+func TestPlaybackPCMMatchesTargetOutput(t *testing.T) {
+	for _, target := range []string{"athena", " ATHENA "} {
+		output := playbackPCMForTarget(target)
+		if got := statusPath(output.card, output.device); got != "/proc/asound/card0/pcm0p/sub0/status" {
+			t.Errorf("%q status path = %q, want Athena device 0", target, got)
+		}
+		if output.rate != 96000 {
+			t.Errorf("%q hardware rate = %d, want 96000", target, output.rate)
+		}
+	}
+	for _, target := range []string{"checkers", "cronos", "crown", "rook", "biscuit", "radar", "", "unknown"} {
+		output := playbackPCMForTarget(target)
+		if got := statusPath(output.card, output.device); got != "/proc/asound/card0/pcm23p/sub0/status" {
+			t.Errorf("%q status path = %q, want legacy device 23", target, got)
+		}
+		if output.rate != 48000 {
+			t.Errorf("%q hardware rate = %d, want 48000", target, output.rate)
+		}
 	}
 }
 

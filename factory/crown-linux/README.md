@@ -95,10 +95,10 @@ To enter Tater Recovery from a normally booted Crown, connect USB and run
 `python3 to_recovery.py` from this extracted factory archive. On Windows use
 `py -3 to_recovery.py`; on Linux, use `sudo python3 to_recovery.py` if the
 serial port reports permission denied. Holding **Volume Up** while Crown
-powers on enters its retained TWRP through the native boot chain; it no longer
-requests Tater Recovery after Linux starts.
+powers on enters TWRP and stays there, without an automatic Tater Recovery
+redirect.
 
 Run `./install.sh --repair` (`py -3 install.py --repair` on Windows) in Tater
 Recovery to repair the inactive root slot while preserving settings. Add
-`--factory-reset` only to clear Wi-Fi and pairing. TWRP remains the lower-level
+`--factory-reset` only to clear Wi-Fi and pairing. TWRP remains the explicit lower-level
 fallback through `to_twrp.py` and the amonet recovery procedure.

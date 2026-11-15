@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "target": "crown",
+  "bundle_id": "crown-hardware-20261114.1",
+  "ndk_properties_sha256": "f60a3592fa8ee5a77759aa6855d91def4cc8f774dc31137becf65f0a34374ad2",
+  "headers": {
+    "android_frameworks_native": "dd2ce3e0509deeeb3344f047d09b8661b360a968",
+    "android_hardware_libhardware": "b5288579191c94da0ce1814dee0136eb49eec9ae",
+    "android_system_core": "2b5b9169a441f0ecb34651f146f37411a0a77c13"
+  },
+  "helpers": {
+    "tater-hw-gpu": "93d741156d90f2bfb000552abd17a56870ad11f0723aaa8e3dcdd3eb4d022de3",
+    "tater-hw-vdec": "abb64de71075441c32f43a7c8336bacc6364a34958f50028df5884ca2cc84d30",
+    "tater-hw-venc": "6b0ea3d6d44f9f75b266b3cad352f2924c60f1aab096254df6c58d1548b3131c"
+  },
+  "link_libraries": {},
+  "sources": {
+    "scripts/build_tater_hardware.py": "f31678e41b1b4977050fc95c833be5300da92bd86a450dce5bd254b72df96c98",
+    "probes/mt8163-gpu/Makefile": "b9026fd0abebfedcaf57e2f36458eb286fd677ccfd9f0ef6079966abc5be334a",
+    "probes/mt8163-gpu/rgba_rotate_stream_android.c": "a7a181aced8f31f91dbafd35dd777393bbb68a9cef65876d9de086e5f656ccc9",
+    "probes/mt8163-gpu/cronos_target.h": "e5789fd9b5dca7d03f7dff4e74a841c29c4601089e2245688cc038a87e61d742",
+    "probes/mt8163-vcodec/Makefile": "e247dba378190246caae2df73e210a052329abd2a1e33a2c97da3981c5050049",
+    "probes/mt8163-vcodec/omx_probe_android.c": "51e7d38c628779c639e14e0e3f6e766a0a654685ef26aca6ab797b2e13c6ec8e",
+    "probes/mt8163-vcodec/omx_probe_android.h": "c39310ed3a288fd8d7524f3df42ecd18c1a9de58d35bcc243235779cae007e0b",
+    "probes/mt8163-vcodec/tater_vdec_android.c": "49f191f883360e04f476133c984f745a47894e118154c71e1a54acc99d77e9d4",
+    "probes/mt8163-vcodec/tater_vdec_android.h": "60a3fb46514ed7b0f34c28cb970f244152bb9255b9a4ef9f94fa4ff06a76c7ac",
+    "probes/mt8163-vcodec/tater_vdec_main_android.c": "3bd9b64684c98ec342b3aed27de320cbdea232f317a1638066f45ebf8cc3f7e0",
+    "probes/mt8163-vcodec/cronos_linear_rgba.h": "5aa1321a9774a9abb209f234a8111ef1833cc24451cbea2aa1fff506cad3ff44",
+    "probes/mt8163-vcodec/planar_chroma.h": "8c454955444537acebe2427b27257d40abb1b798155bb42770eb7280316b8dfc",
+    "probes/mt8163-vcodec/bayer10_scaled.h": "43c170dc3f9659981bd4b8b68464ffc2fb2cedcb3c4969d824897c6f3292d361",
+    "probes/mt8163-gpu/crown_target.h": "ce97e98e696955eaee6a95053aee7ee61b2d4593d8fb3ef5e54873dfd36f27d4",
+    "probes/mt8163-vcodec/crown_venc_android.c": "555b01214a6c0e51114ffbce5a8a0ccaabfc46a499eb56ac5cae2a4d1259e04f",
+    "probes/mt8163-vcodec/tater_bayer10.c": "59e417935efa185dea70298d3955dc4087b64da7074bd509bf805deaa40255cd",
+    "probes/mt8163-vcodec/tater_bayer10.h": "554a63482ca6d71318ac4f24108450b522c518ddb799bc9ba63833f636dd59bb"
+  }
+}

@@ -23,15 +23,18 @@ const (
 	actionMenuSatChat
 	actionMenuCameras
 	actionMenuClimate
+	actionMenuSound
+	actionMenuDisplay
+	actionMenuInfo
 )
 
 var (
-	menuBackdropInk = color.RGBA{5, 17, 28, 224}
-	menuCardInk     = color.RGBA{17, 35, 51, 238}
-	menuControlInk  = color.RGBA{34, 43, 57, 238}
+	menuBackdropInk = color.RGBA{17, 18, 19, 255}
+	menuCardInk     = color.RGBA{27, 28, 30, 255}
+	menuControlInk  = color.RGBA{34, 36, 38, 255}
 	menuMutedInk    = color.RGBA{30, 32, 38, 220}
-	menuOutlineInk  = color.RGBA{87, 131, 160, 172}
-	menuSubtitleInk = color.RGBA{205, 222, 239, 255}
+	menuOutlineInk  = color.RGBA{52, 53, 54, 255}
+	menuSubtitleInk = color.RGBA{176, 167, 156, 255}
 	menuMaskCache   sync.Map
 )
 
@@ -41,7 +44,7 @@ type menuThemePalette struct {
 
 func menuPaletteForTheme(theme string) menuThemePalette {
 	primary := paletteForTheme(theme).primary
-	secondary := color.RGBA{174, 189, 209, 255}
+	secondary := color.RGBA{176, 167, 156, 255}
 	switch strings.ToLower(strings.TrimSpace(theme)) {
 	case "ocean":
 		secondary = color.RGBA{73, 230, 194, 255}
@@ -72,17 +75,11 @@ func actionMenuPanelBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
 		return image.Rect(52, 70, 428, 446)
 	}
-	panelWidth, panelHeight := min(width-48, 510), min(height-30, 352)
-	if height >= 600 {
-		panelWidth = min(width-96, height*11/10)
-		panelHeight = min(height-64, 690)
-	}
-	return image.Rect((width-panelWidth)/2, (height-panelHeight)/2, (width+panelWidth)/2, (height+panelHeight)/2)
+	return image.Rect(16, 16, width-16, height-12)
 }
-
 func actionMenuCloseBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(366, 76, 420, 130)
+		return settingsBackBounds(true)
 	}
 	panel := actionMenuPanelBounds(width, height, false)
 	size := 44
@@ -94,36 +91,25 @@ func actionMenuCloseBounds(width, height int, spot bool) image.Rectangle {
 }
 
 func actionMenuBounds(width, height, index int, spot bool) image.Rectangle {
-	if spot {
-		switch index {
-		case 0:
-			return image.Rect(80, 147, 400, 210)
-		case 1:
-			return image.Rect(67, 220, 413, 283)
-		case 2:
-			return image.Rect(75, 293, 405, 356)
-		default:
-			return image.Rectangle{}
-		}
-	}
-	if index < 0 || index > 2 {
+	if index < 0 || index >= 6 {
 		return image.Rectangle{}
 	}
-	panel := actionMenuPanelBounds(width, height, false)
-	inset, headerHeight, footerHeight, gap := 18, 64, 45, 7
+	columns, gap, left, top, right, bottom := 3, 16, 28, 96, width-28, height-78
 	if height >= 600 {
-		inset, headerHeight, footerHeight, gap = 36, 122, 78, 14
+		left, top, right, bottom, gap = 42, 144, width-42, height-110, 22
 	}
-	top := panel.Min.Y + headerHeight
-	bottom := panel.Max.Y - footerHeight - gap
-	rowHeight := (bottom - top - 2*gap) / 3
-	rowTop := top + index*(rowHeight+gap)
-	return image.Rect(panel.Min.X+inset, rowTop, panel.Max.X-inset, rowTop+rowHeight)
+	if spot {
+		columns, gap, left, top, right, bottom = 2, 10, 80, 134, 400, 356
+	}
+	rows := 6 / columns
+	cellWidth := (right - left - (columns-1)*gap) / columns
+	cellHeight := (bottom - top - (rows-1)*gap) / rows
+	x, y := left+(index%columns)*(cellWidth+gap), top+(index/columns)*(cellHeight+gap)
+	return image.Rect(x, y, x+cellWidth, y+cellHeight)
 }
-
 func actionMenuBroadcastBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(104, 368, 376, 416)
+		return image.Rect(104, 374, 376, 426)
 	}
 	panel := actionMenuPanelBounds(width, height, false)
 	inset, bottom, height := 18, 11, 38
@@ -134,7 +120,7 @@ func actionMenuBroadcastBounds(width, height int, spot bool) image.Rectangle {
 }
 
 func actionMenuItemAt(point image.Point, width, height int, spot bool) actionMenuItem {
-	for index, item := range []actionMenuItem{actionMenuSatChat, actionMenuCameras, actionMenuClimate} {
+	for index, item := range []actionMenuItem{actionMenuSatChat, actionMenuCameras, actionMenuClimate, actionMenuSound, actionMenuDisplay, actionMenuInfo} {
 		if point.In(actionMenuBounds(width, height, index, spot)) {
 			return item
 		}
@@ -162,6 +148,11 @@ func (r *renderer) handleActionMenuTouch(client *socketClient, event linuxinput.
 		r.menuOpen = false
 		r.climatePage = 0
 		r.climateOpen = true
+	case actionMenuSound, actionMenuDisplay, actionMenuInfo:
+		r.menuOpen = false
+		r.settingsOpen = true
+		r.settingsIndex = 0
+		r.settingsPage = map[actionMenuItem]string{actionMenuSound: "sound", actionMenuDisplay: "display", actionMenuInfo: "info"}[actionMenuItemAt(point, width, height, spot)]
 	}
 }
 
@@ -217,7 +208,7 @@ func (r *renderer) handleCameraTouch(client *socketClient, event linuxinput.Touc
 	}
 	start := r.cameraPage * perPage
 	for index := 0; index < perPage && start+index < len(cameras); index++ {
-		if point.In(cameraCardBounds(width, height, index, spot)) && cameras[start+index].Available {
+		if point.In(cameraCardBounds(width, height, index, spot)) && cameras[start+index].Available && !r.touchMoved && r.beginDirectoryRequest("camera", cameras[start+index].ID, time.Now()) {
 			client.sendCamera("camera.select", cameras[start+index].ID)
 			return
 		}
@@ -226,7 +217,13 @@ func (r *renderer) handleCameraTouch(client *socketClient, event linuxinput.Touc
 
 func (r *renderer) cameraCloseBounds(width, height int, spot, selected bool) image.Rectangle {
 	if spot {
-		return image.Rect(370, 66, 420, 116)
+		if !selected {
+			return settingsBackBounds(true)
+		}
+		if r.state.Cameras != nil && r.state.Cameras.SelectedTalkback {
+			return image.Rect(284, 374, 402, 426)
+		}
+		return image.Rect(156, 374, 324, 426)
 	}
 	panel := cameraDirectoryLayoutFor(width, height, false).panel
 	size, inset := 46, 14
@@ -278,67 +275,8 @@ func (r *renderer) drawActionMenuBackground(canvas *image.RGBA, now time.Time, a
 }
 
 func (r *renderer) drawActionMenu(canvas *image.RGBA, now time.Time, accent color.RGBA) {
-	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
-	palette := r.menuPalette()
-	r.drawActionMenuBackground(canvas, now, accent, 86)
-	panel := actionMenuPanelBounds(width, height, false)
-	large := height >= 600
-	radius := 24
-	if large {
-		radius = 38
-	}
-	drawMenuShadow(canvas, panel, radius, 12)
-	drawMenuRoundedRect(canvas, panel, radius, menuBackdropInk)
-	drawMenuRoundedOutline(canvas, panel, radius, 2, menuAlpha(palette.primary, 232))
-	drawMenuRoundedOutline(canvas, panel.Inset(3), max(1, radius-3), 1, color.RGBA{255, 255, 255, 30})
-
-	titleSize, onlineSize := 28, 13
-	if large {
-		titleSize, onlineSize = 42, 19
-	}
-	name := assistantFirstName(r.state.AssistantName)
-	textX := panel.Min.X + 28
-	titleY := panel.Min.Y + 31
-	if large {
-		textX, titleY = panel.Min.X+52, panel.Min.Y+62
-	}
-	if large {
-		r.text(canvas, textX, titleY, strings.ToUpper(name)+" MENU", titleSize, true, color.White)
-	} else {
-		r.centeredText(canvas, panel.Min.X+panel.Dx()/2, titleY, strings.ToUpper(name)+" MENU", titleSize, true, color.White)
-	}
-
-	close := actionMenuCloseBounds(width, height, false)
-	drawMenuRoundedRect(canvas, close, close.Dx()/2, menuControlInk)
-	drawMenuRoundedOutline(canvas, close, close.Dx()/2, 2, color.RGBA{172, 205, 230, 150})
-	drawClimateCloseGlyph(canvas, close, color.RGBA{255, 255, 255, 255})
-
-	online := name + " Online"
-	dotX, onlineY := textX+5, titleY+22
-	if large {
-		dotX, onlineY = textX+8, titleY+39
-	} else {
-		onlineWidth := textWidth(r.faces.regular[onlineSize], online)
-		dotX = panel.Min.X + (panel.Dx()-onlineWidth)/2 - 10
-	}
-	drawMenuRoundedRect(canvas, image.Rect(dotX-5, onlineY-onlineSize+3, dotX+5, onlineY-onlineSize+13), 5, color.RGBA{52, 240, 105, 255})
-	r.text(canvas, dotX+14, onlineY, online, onlineSize, false, color.RGBA{222, 235, 247, 255})
-
-	labels := []struct {
-		title, subtitle string
-		kind            actionMenuItem
-	}{
-		{"SAT CHAT", "Satellite calls", actionMenuSatChat},
-		{"CAMERAS", "Live view & talk", actionMenuCameras},
-		{"CLIMATE", "Thermostat & room temps", actionMenuClimate},
-	}
-	for index, label := range labels {
-		bounds := actionMenuBounds(width, height, index, false)
-		r.drawWideActionCard(canvas, bounds, label.kind, label.title, label.subtitle, large, false)
-	}
-	r.drawActionMenuBroadcast(canvas, actionMenuBroadcastBounds(width, height, false), large, false)
+	r.drawWorkspaceMenu(canvas, false)
 }
-
 func (r *renderer) drawWideActionCard(canvas *image.RGBA, bounds image.Rectangle, kind actionMenuItem, title, subtitle string, large, spot bool) {
 	palette := r.menuPalette()
 	radius := max(17, bounds.Dy()/3)
@@ -391,41 +329,8 @@ func (r *renderer) drawWideActionCard(canvas *image.RGBA, bounds image.Rectangle
 }
 
 func (r *renderer) drawSpotActionMenu(canvas *image.RGBA, now time.Time, accent color.RGBA) {
-	palette := r.menuPalette()
-	r.drawActionMenuBackground(canvas, now, accent, 82)
-	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{R: 2, G: 9, B: 17, A: 34}), image.Point{}, draw.Over)
-	panel := actionMenuPanelBounds(480, 480, true)
-	drawMenuSuperellipseShadow(canvas, panel, 9)
-	drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-	drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 226))
-	name := assistantFirstName(r.state.AssistantName)
-	r.centeredText(canvas, 240, 113, strings.ToUpper(name)+" MENU", 28, true, color.White)
-	online := fitTextToWidth(name+" Online", r.faces.regular[13], 150)
-	onlineWidth := textWidth(r.faces.regular[13], online)
-	dotX := 240 - onlineWidth/2 - 11
-	drawMenuRoundedRect(canvas, image.Rect(dotX-5, 127, dotX+5, 137), 5, color.RGBA{52, 240, 105, 255})
-	r.text(canvas, dotX+11, 138, online, 13, false, color.RGBA{222, 235, 247, 255})
-
-	close := actionMenuCloseBounds(480, 480, true)
-	drawMenuRoundedRect(canvas, close, close.Dx()/2, menuControlInk)
-	drawMenuRoundedOutline(canvas, close, close.Dx()/2, 2, color.RGBA{172, 205, 230, 165})
-	drawClimateCloseGlyph(canvas, close, color.RGBA{255, 255, 255, 255})
-
-	for index, item := range []struct {
-		kind            actionMenuItem
-		title, subtitle string
-	}{
-		{actionMenuSatChat, "SAT CHAT", "Satellite calls"},
-		{actionMenuCameras, "CAMERAS", "Live view & talk"},
-		{actionMenuClimate, "CLIMATE", "Thermostat & room temps"},
-	} {
-		bounds := actionMenuBounds(480, 480, index, true)
-		r.drawWideActionCard(canvas, bounds, item.kind, item.title, item.subtitle, false, true)
-	}
-	r.drawActionMenuBroadcast(canvas, actionMenuBroadcastBounds(480, 480, true), false, true)
-	maskOutsideSpotCircle(canvas, 236)
+	r.drawWorkspaceMenu(canvas, true)
 }
-
 func (r *renderer) drawActionMenuGlyph(canvas *image.RGBA, kind actionMenuItem, cx, cy, size int, ink color.RGBA) {
 	palette := r.menuPalette()
 	switch kind {
@@ -807,18 +712,14 @@ type cameraDirectoryLayout struct {
 func cameraDirectoryLayoutFor(width, height int, spot bool) cameraDirectoryLayout {
 	if spot {
 		return cameraDirectoryLayout{
-			panel: image.Rect(46, 56, 434, 444), content: image.Rect(90, 132, 390, 366),
-			rows: 4, columns: 1, gap: 7,
+			panel: image.Rect(46, 56, 434, 444), content: image.Rect(77, 134, 403, 312),
+			rows: 2, columns: 1, gap: 10,
 		}
 	}
 	panel := satChatDirectoryLayoutFor(width, height).panel
-	top, bottom, margin, gap := 120, 78, 48, 12
-	if height >= 700 {
-		top, bottom, margin, gap = 160, 100, 56, 18
-	}
 	return cameraDirectoryLayout{
-		panel: panel, content: image.Rect(margin, top, width-margin, height-bottom),
-		rows: 3, columns: 2, gap: gap,
+		panel: panel, content: connectedListBounds(width, height),
+		rows: 3, columns: 1,
 	}
 }
 
@@ -840,68 +741,50 @@ func cameraCardBounds(width, height, index int, spot bool) image.Rectangle {
 
 func cameraPageSize(width, height int, spot bool) int {
 	if spot {
-		return 4
+		return 2
 	}
-	return 5
+	return 3
 }
 
 func cameraPreviousBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(126, 392, 230, 434)
+		return settingsPageButton(width, height, false, true)
 	}
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	buttonWidth, buttonHeight, inset := 108, 40, 72
-	if height >= 700 {
-		buttonWidth, buttonHeight, inset = 148, 54, 94
-	}
-	bottom := panel.Max.Y - max(14, height/32)
-	return image.Rect(panel.Min.X+inset, bottom-buttonHeight, panel.Min.X+inset+buttonWidth, bottom)
+	return connectedPreviousBounds(width, height)
 }
 func cameraNextBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(250, 392, 354, 434)
+		return settingsPageButton(width, height, true, true)
 	}
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	buttonWidth, buttonHeight, inset := 108, 40, 72
-	if height >= 700 {
-		buttonWidth, buttonHeight, inset = 148, 54, 94
-	}
-	bottom := panel.Max.Y - max(14, height/32)
-	return image.Rect(panel.Max.X-inset-buttonWidth, bottom-buttonHeight, panel.Max.X-inset, bottom)
+	return connectedNextBounds(width, height)
 }
 func cameraBackBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(58, 72, 132, 116)
+		return settingsBackBounds(true)
 	}
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	buttonWidth, buttonHeight, inset := 120, 44, 14
-	if height >= 700 {
-		buttonWidth, buttonHeight, inset = 154, 56, 24
+	size := 48
+	if height >= 600 {
+		size = 64
 	}
-	return image.Rect(panel.Min.X+inset, panel.Min.Y+inset, panel.Min.X+inset+buttonWidth, panel.Min.Y+inset+buttonHeight)
+	return image.Rect(16, 22, 16+size, 22+size)
 }
 func cameraTalkBounds(width, height int, spot bool) image.Rectangle {
 	if spot {
-		return image.Rect(140, 380, 340, 430)
+		return image.Rect(78, 374, 274, 426)
 	}
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	buttonWidth, buttonHeight, bottom := 300, 48, 14
-	if height >= 700 {
-		buttonWidth, buttonHeight, bottom = 360, 58, 24
+	buttonWidth, buttonHeight := 300, 48
+	if height >= 600 {
+		buttonWidth, buttonHeight = 360, 58
 	}
-	return image.Rect(width/2-buttonWidth/2, panel.Max.Y-bottom-buttonHeight, width/2+buttonWidth/2, panel.Max.Y-bottom)
+	return image.Rect(width/2-buttonWidth/2, height-12-buttonHeight, width/2+buttonWidth/2, height-12)
 }
+
+// cameraVideoBounds is a stable maximum viewport, independent of source
+// geometry. Changing frame aspect never restarts the live decoder.
 func (r *renderer) cameraVideoBounds() image.Rectangle {
 	width, height := r.showSize()
-	if r.spotScreen {
-		return image.Rect(54, 126, 426, 366)
-	}
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	top, bottom, inset := panel.Min.Y+76, panel.Max.Y-76, 18
-	if height >= 700 {
-		top, bottom, inset = panel.Min.Y+104, panel.Max.Y-106, 26
-	}
-	return image.Rect(panel.Min.X+inset, top, panel.Max.X-inset, bottom)
+	controls := r.state.Cameras != nil && r.state.Cameras.SelectedTalkback
+	return workspaceVideoViewport(width, height, r.spotScreen, controls)
 }
 
 func (r *renderer) cameraVideoActive() bool {
@@ -914,239 +797,20 @@ func (r *renderer) cameraVideoRenderKey(accent color.RGBA) string {
 	}
 	return r.state.Cameras.SelectedID + "|" + r.state.Cameras.SelectedName + "|" +
 		r.state.Cameras.SelectedRoom + "|" + r.state.Cameras.Error + "|" +
-		fmt.Sprint(r.state.Cameras.SelectedTalkback, r.cameraTalkPressed, accent)
+		fmt.Sprint(r.state.Cameras.SelectedTalkback, r.cameraTalkPressed, r.state.Muted, r.state.DisplayTheme, accent)
 }
 
 func (r *renderer) drawCameraVideoFrame(canvas *image.RGBA) image.Rectangle {
-	palette := r.menuPalette()
-	bounds := r.cameraVideoBounds().Intersect(canvas.Rect)
-	radius := max(14, min(28, bounds.Dy()/12))
-	drawMenuRoundedRect(canvas, bounds, radius, color.RGBA{0, 0, 0, 255})
-	if r.cameraFrameImage != nil {
-		drawMenuRoundedImage(canvas, bounds, r.cameraFrameImage, radius, menuBackdropInk)
-	}
-	drawMenuRoundedOutline(canvas, bounds, radius, 2, menuAlpha(palette.primary, 220))
-	return bounds
+	viewport := r.cameraVideoBounds().Intersect(canvas.Rect)
+	drawWorkspaceVideoPicture(canvas, viewport, r.cameraFrameImage)
+	r.drawWorkspaceVideoControls(canvas, "camera")
+	return viewport
 }
 
 func (r *renderer) drawCameraScreen(canvas *image.RGBA, now time.Time, accent color.RGBA) {
-	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
-	palette := r.menuPalette()
-	r.drawActionMenuBackground(canvas, now, accent, 88)
-	panel := cameraDirectoryLayoutFor(width, height, false).panel
-	drawMenuGlassPanel(canvas, panel, max(24, height/22), palette.primary)
-	r.drawCameraContents(canvas, false)
+	r.drawWorkspaceCameras(canvas, false)
 }
 
 func (r *renderer) drawSpotCameraScreen(canvas *image.RGBA, now time.Time, accent color.RGBA) {
-	palette := r.menuPalette()
-	r.drawActionMenuBackground(canvas, now, accent, 84)
-	panel := cameraDirectoryLayoutFor(480, 480, true).panel
-	drawMenuSuperellipseShadow(canvas, panel, 8)
-	drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-	drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 230))
-	r.drawCameraContents(canvas, true)
-	maskOutsideSpotCircle(canvas, 236)
-}
-
-func (r *renderer) drawCameraContents(canvas *image.RGBA, spot bool) {
-	width, height := canvas.Rect.Dx(), canvas.Rect.Dy()
-	palette := r.menuPalette()
-	selected := r.state.Cameras != nil && r.state.Cameras.SelectedID != ""
-	close := r.cameraCloseBounds(width, height, spot, selected)
-	drawMenuCloseButton(canvas, close)
-	cameras := r.state.Cameras
-	if cameras != nil && cameras.SelectedID != "" {
-		bounds := r.cameraVideoBounds()
-		radius := max(14, min(28, bounds.Dy()/12))
-		drawMenuRoundedRect(canvas, bounds, radius, color.RGBA{0, 0, 0, 255})
-		if r.cameraFrameImage == nil {
-			r.centeredText(canvas, width/2, (bounds.Min.Y+bounds.Max.Y)/2, "CONNECTING TO CAMERA…", func() int {
-				if spot {
-					return 14
-				}
-				return max(17, height/32)
-			}(), true, color.RGBA{220, 232, 245, 255})
-		} else {
-			drawMenuRoundedImage(canvas, bounds, r.cameraFrameImage, radius, menuBackdropInk)
-		}
-		drawMenuRoundedOutline(canvas, bounds, radius, 2, menuAlpha(palette.primary, 225))
-		back := cameraBackBounds(width, height, spot)
-		drawMenuRoundedRect(canvas, back, back.Dy()/2, menuControlInk)
-		drawMenuRoundedOutline(canvas, back, back.Dy()/2, 1, menuOutlineInk)
-		r.centeredText(canvas, (back.Min.X+back.Max.X)/2, back.Min.Y+back.Dy()*2/3, "‹ BACK", func() int {
-			if spot {
-				return 12
-			}
-			return 17
-		}(), true, color.White)
-		nameSize := 17
-		if spot {
-			nameSize = 14
-		} else if height >= 700 {
-			nameSize = 25
-		}
-		label := cameras.SelectedName
-		if cameras.SelectedRoom != "" {
-			label += "  ·  " + cameras.SelectedRoom
-		}
-		r.centeredText(canvas, width/2, func() int {
-			if spot {
-				return 89
-			}
-			return max(58, height/13)
-		}(), fitTextToWidth(label, r.faces.bold[nameSize], width/2), nameSize, true, color.White)
-		if cameras.SelectedTalkback {
-			talk := r.cameraTalkBounds(width, height, spot)
-			ink, outline := color.RGBA{20, 28, 36, 235}, palette.secondary
-			if r.cameraTalkPressed {
-				ink = color.RGBA{94, 48, 14, 245}
-			}
-			drawMenuRoundedRect(canvas, talk, talk.Dy()/2, ink)
-			drawMenuRoundedOutline(canvas, talk, talk.Dy()/2, 2, outline)
-			micX := talk.Min.X + max(28, talk.Dy()*3/4)
-			drawSatChatMicGlyph(canvas, micX, (talk.Min.Y+talk.Max.Y)/2-2, max(8, talk.Dy()/5), palette.secondary)
-			r.centeredText(canvas, (talk.Min.X+talk.Max.X)/2+12, talk.Min.Y+talk.Dy()*2/3, "HOLD TO TALK", func() int {
-				if spot {
-					return 13
-				}
-				return 18
-			}(), true, color.White)
-		}
-		if cameras.Error != "" {
-			r.centeredText(canvas, width/2, bounds.Max.Y-14, fitTextToWidth(cameras.Error, r.faces.regular[13], bounds.Dx()-40), 13, false, color.RGBA{255, 166, 121, 255})
-		}
-		return
-	}
-	titleSize := 25
-	if !spot && height >= 700 {
-		titleSize = 42
-	} else if !spot {
-		titleSize = 30
-	}
-	if spot {
-		r.centeredText(canvas, 240, 99, "CAMERAS", titleSize, true, color.White)
-	} else {
-		layout := cameraDirectoryLayoutFor(width, height, false)
-		iconSize := 50
-		if height >= 700 {
-			iconSize = 68
-		}
-		iconBounds := image.Rect(layout.panel.Min.X+22, layout.panel.Min.Y+20, layout.panel.Min.X+22+iconSize, layout.panel.Min.Y+20+iconSize)
-		drawMenuIconMedallion(canvas, iconBounds, palette.primary)
-		r.drawActionMenuGlyph(canvas, actionMenuCameras, (iconBounds.Min.X+iconBounds.Max.X)/2, (iconBounds.Min.Y+iconBounds.Max.Y)/2, iconSize*28/100, palette.primary)
-		textX := iconBounds.Max.X + 16
-		r.text(canvas, textX, layout.panel.Min.Y+46, "CAMERAS", titleSize, true, color.White)
-		r.text(canvas, textX, layout.panel.Min.Y+72, "Choose a camera to open live view", 15, false, menuSubtitleInk)
-	}
-	items := []show.Camera{}
-	if cameras != nil {
-		items = cameras.Items
-	}
-	if len(items) == 0 {
-		r.drawActionMenuGlyph(canvas, actionMenuCameras, width/2, height/2-20, min(width, height)/10, color.RGBA{117, 151, 183, 255})
-		r.centeredText(canvas, width/2, height/2+70, "NO CAMERA FEEDS AVAILABLE", func() int {
-			if spot {
-				return 16
-			}
-			return max(17, titleSize/2)
-		}(), true, color.RGBA{224, 233, 244, 255})
-		return
-	}
-	perPage := cameraPageSize(width, height, spot)
-	pages := max(1, (len(items)+perPage-1)/perPage)
-	if r.cameraPage < 0 {
-		r.cameraPage = 0
-	} else if r.cameraPage >= pages {
-		r.cameraPage = pages - 1
-	}
-	start := r.cameraPage * perPage
-	end := min(len(items), start+perPage)
-	if spot {
-		r.centeredText(canvas, 240, 119, fmt.Sprintf("%d–%d OF %d", start+1, end, len(items)), 10, true, color.RGBA{215, 224, 237, 245})
-	} else if pages == 1 {
-		panel := cameraDirectoryLayoutFor(width, height, false).panel
-		r.centeredText(canvas, panel.Max.X-140, panel.Min.Y+48, fmt.Sprintf("%d AVAILABLE", len(items)), 12, true, menuSubtitleInk)
-	}
-	for index := 0; index < perPage && start+index < len(items); index++ {
-		item := items[start+index]
-		bounds := cameraCardBounds(width, height, index, spot)
-		radius := max(12, bounds.Dy()/4)
-		drawMenuCard(canvas, bounds, radius, !item.Available, palette.primary)
-		avatarLimit := 26
-		if !spot && height >= 700 {
-			avatarLimit = 42
-		}
-		avatarRadius := min(avatarLimit, bounds.Dy()/2-7)
-		avatarX, centerY := bounds.Min.X+avatarRadius+18, (bounds.Min.Y+bounds.Max.Y)/2
-		avatar := image.Rect(avatarX-avatarRadius, centerY-avatarRadius, avatarX+avatarRadius, centerY+avatarRadius)
-		drawMenuIconMedallion(canvas, avatar, palette.primary)
-		r.drawActionMenuGlyph(canvas, actionMenuCameras, avatarX, centerY, max(8, avatarRadius/2), palette.primary)
-		statusX := avatarX + avatarRadius + 20
-		circle(canvas, statusX, centerY-8, 6, func() color.RGBA {
-			if item.Available {
-				return color.RGBA{42, 233, 113, 255}
-			}
-			return color.RGBA{126, 137, 150, 255}
-		}())
-		nameSize, subSize, capabilitySize := 19, 12, 10
-		if spot {
-			nameSize, subSize, capabilitySize = 16, 9, 9
-		} else if height >= 700 {
-			nameSize, subSize, capabilitySize = 24, 15, 14
-		}
-		nameLeft := statusX + 20
-		nameWidth := max(72, bounds.Max.X-nameLeft-48)
-		minimumNameSize := 12
-		if spot {
-			minimumNameSize = 9
-		} else if height >= 700 {
-			minimumNameSize = 15
-		}
-		name, fittedNameSize := r.menuName(item.Name, nameSize, minimumNameSize, nameWidth)
-		r.text(canvas, nameLeft, centerY-2, name, fittedNameSize, true, color.White)
-		sub := "LIVE VIEW"
-		if item.Room != "" {
-			sub = strings.ToUpper(item.Room)
-		}
-		if item.Talkback {
-			sub += "  ·  TWO-WAY AUDIO"
-		}
-		r.text(canvas, nameLeft, centerY+20, fitTextToWidth(sub, r.faces.bold[subSize], max(90, bounds.Max.X-nameLeft-95)), subSize, true, menuSubtitleInk)
-		iconInk := palette.secondary
-		capabilityY := centerY + max(12, subSize/2+6)
-		if item.Talkback {
-			drawSatChatMicGlyph(canvas, bounds.Max.X-max(54, bounds.Dy()/3), capabilityY, capabilitySize, iconInk)
-		}
-		drawMenuCameraGlyph(canvas, bounds.Max.X-func() int {
-			if item.Talkback {
-				return max(94, bounds.Dy()*2/3)
-			}
-			return max(54, bounds.Dy()/3)
-		}(), capabilityY, capabilitySize, iconInk)
-		drawMenuChevron(canvas, bounds.Max.X-24, (bounds.Min.Y+bounds.Max.Y)/2, 7, color.RGBA{219, 232, 244, 235})
-	}
-	if pages > 1 {
-		for index, button := range []struct {
-			bounds image.Rectangle
-			label  string
-		}{{cameraPreviousBounds(width, height, spot), "‹ PREV"}, {cameraNextBounds(width, height, spot), "NEXT ›"}} {
-			buttonInk := palette.secondary
-			if (index == 0 && r.cameraPage == 0) || (index == 1 && r.cameraPage == pages-1) {
-				buttonInk = color.RGBA{92, 97, 106, 160}
-			}
-			drawMenuRoundedRect(canvas, button.bounds, button.bounds.Dy()/2, menuControlInk)
-			drawMenuRoundedOutline(canvas, button.bounds, button.bounds.Dy()/2, 2, buttonInk)
-			r.centeredText(canvas, (button.bounds.Min.X+button.bounds.Max.X)/2, button.bounds.Min.Y+button.bounds.Dy()*2/3, button.label, func() int {
-				if spot {
-					return 11
-				}
-				return 12
-			}(), true, buttonInk)
-		}
-		if !spot {
-			previous := cameraPreviousBounds(width, height, false)
-			r.centeredText(canvas, width/2, previous.Min.Y+previous.Dy()*2/3, fmt.Sprintf("%d–%d OF %d", start+1, end, len(items)), 12, true, menuSubtitleInk)
-		}
-	}
+	r.drawWorkspaceCameras(canvas, true)
 }

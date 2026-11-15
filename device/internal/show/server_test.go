@@ -7,9 +7,41 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestVideoAudioClockRequiresTheActiveSessionAndStream(t *testing.T) {
+	s := New("127.0.0.1:0", Snapshot{Phase: "idle", Video: &Video{
+		Active: true, SessionID: "movie-1", State: "playing",
+	}}, nil)
+	s.SetVideoAudioClockHandler(func(sessionID, streamID string) (uint64, bool) {
+		return 4096, sessionID == "movie-1" && streamID == "generation-2"
+	})
+
+	recorder := httptest.NewRecorder()
+	s.serveVideoAudioClock(recorder, httptest.NewRequest(http.MethodGet, "/video-audio-clock?session=movie-1&stream=generation-2", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("clock response status = %d, body=%q", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		PlayedFrames uint64 `json:"played_frames"`
+		SampleRate   int    `json:"sample_rate"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.PlayedFrames != 4096 || response.SampleRate != 48_000 {
+		t.Fatalf("clock response = %#v", response)
+	}
+
+	recorder = httptest.NewRecorder()
+	s.serveVideoAudioClock(recorder, httptest.NewRequest(http.MethodGet, "/video-audio-clock?session=movie-1&stream=old-generation", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("stale stream status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+}
 
 func TestScreenDiagnosticsCommandRoundTrips(t *testing.T) {
 	want := Command{

@@ -15,6 +15,70 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class BootPatchTests(unittest.TestCase):
+    def test_hardware_helpers_are_selected_with_camera_application_slot(self):
+        self.assertIn('binary=$(tater-app binary tater-camera)', build_rootfs.TATER_CAMERA_RUN)
+        self.assertIn('exec "$binary"', build_rootfs.TATER_CAMERA_RUN)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            app = root / "app"
+            for slot in ("a", "b"):
+                directory = app / "slots" / slot
+                directory.mkdir(parents=True)
+                for name in ("tater-echo", "tater-show", "tater-camera", "tater-hw-venc"):
+                    path = directory / name
+                    path.write_text(slot)
+                    path.chmod(0o755)
+            (app / "current").symlink_to("slots/b")
+            (app / "pending.env").write_text("previous=a\nnew=b\nversion=test\n")
+            script = build_rootfs.TATER_APP.replace("APP=/data/tater-linux/app", "APP=" + shlex.quote(str(app)))
+            def run(*arguments):
+                return subprocess.check_output(["sh", "-c", script, "tater-app", *arguments], text=True).strip()
+            self.assertEqual(str(app / "slots/b/tater-camera"), run("binary", "tater-camera"))
+            run("rollback")
+            camera = Path(run("binary", "tater-camera"))
+            self.assertEqual(str(app / "slots/a/tater-camera"), str(camera))
+            self.assertEqual("a", camera.with_name("tater-hw-venc").read_text())
+            (app / "current").unlink()
+            self.assertEqual("/usr/local/bin/tater-camera", run("binary", "tater-camera"))
+
+    def test_qualified_hardware_capture_does_not_disable_hardware_playback(self):
+        self.assertIn('[ "$TATER_FIRMWARE_TARGET" = checkers ]', build_rootfs.TATER_CAMERA_RUN)
+        self.assertNotIn("/data/tater-venc/runtime.json", build_rootfs.TATER_CAMERA_RUN)
+        self.assertIn("export TATER_VENC_ENABLE=0", build_rootfs.TATER_CAMERA_RUN)
+        self.assertIn('if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then\n    export TATER_VENC_ENABLE=1\nfi', build_rootfs.TATER_CAMERA_RUN)
+        self.assertIn("/data/tater-vdec/runtime.json", build_rootfs.TATER_RUN)
+        self.assertIn("export TATER_VDEC_ENABLE=1", build_rootfs.TATER_RUN)
+        policy = build_rootfs.TATER_CAMERA_RUN.split("LOG=", 1)[0]
+        for target in ("checkers", "cronos", "crown", "athena", "rook", ""):
+            result = subprocess.check_output(
+                ["sh", "-c", policy + 'printf "%s" "$TATER_VENC_ENABLE"'],
+                env={"TATER_FIRMWARE_TARGET": target}, text=True,
+            )
+            self.assertEqual("1" if target in ("checkers", "cronos", "crown") else "0", result)
+
+    def test_show_run_enables_only_owner_local_optional_media_runtimes(self):
+        self.assertIn("/data/tater-vdec/runtime.json", build_rootfs.TATER_SHOW_RUN)
+        self.assertIn("export TATER_VDEC_ENABLE=1", build_rootfs.TATER_SHOW_RUN)
+        self.assertIn("/data/tater-gpu/runtime.json", build_rootfs.TATER_SHOW_RUN)
+        self.assertIn("export TATER_GPU_ENABLE=1", build_rootfs.TATER_SHOW_RUN)
+        self.assertEqual(2, build_rootfs.TATER_SHOW_RUN.count(
+            '[ "$TATER_FIRMWARE_TARGET" = checkers ]'))
+
+    def test_tater_run_refreshes_stale_builtin_wake_assets(self):
+        self.assertIn('cmp -s "$source" "$target" || cp -f "$source" "$target"',
+                      build_rootfs.TATER_RUN)
+        self.assertNotIn('[ -e "$target" ] || cp "$source" "$target"',
+                         build_rootfs.TATER_RUN)
+
+    def test_tater_run_retires_redirect_and_keeps_native_twrp(self):
+        self.assertIn("tater-recovery-router disable", build_rootfs.TATER_RUN)
+        self.assertNotIn("tater-recovery-router install", build_rootfs.TATER_RUN)
+        self.assertIn("recovery redirect cleanup failed", build_rootfs.TATER_RUN)
+        source = Path(build_rootfs.__file__).read_text()
+        self.assertIn('root / "usr/local/sbin/tater-recovery-router"', source)
+        self.assertNotIn('root / "usr/share/tater/recovery/twrp-router.sh"', source)
+        self.assertIn("Volume Up enters TWRP", build_rootfs.MOTD)
+
     def test_release_workflow_uses_unified_show_platform_subdirectory(self):
         workflow = (
             Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
@@ -228,6 +292,7 @@ log "boot script done"
     def test_patch_athena_boot_preserves_platform_and_adds_tater_health(self):
         source = """#!/bin/sh
 LOGDIR=/data/techo5-linux
+grep -q '^trial' /data/techo5-linux/kernel/state
 mdev -s
 t5_wifi_conf $LOGDIR/wpa_supplicant.conf
 		pid=$(pidof techo5 | cut -d' ' -f1)
@@ -248,6 +313,11 @@ log "boot script done"
             patched = path.read_text()
 
         self.assertIn("LOGDIR=/data/tater-linux", patched)
+        self.assertIn("grep -q '^trial' /data/techo5-linux/kernel/state", patched)
+        self.assertIn("[ -x /usr/local/sbin/tater-athena-codecs ]", patched)
+        self.assertIn("retaining software media", patched)
+        self.assertLess(patched.index("mdev -s"), patched.index("/usr/local/sbin/tater-athena-codecs"))
+        self.assertNotIn("/data/tater-linux/kernel/", patched)
         self.assertIn("pidof tater-echo", patched)
         self.assertIn("[ -s /run/tater-connected ]", patched)
         self.assertIn("pidof tater-show", patched)

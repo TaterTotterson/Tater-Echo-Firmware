@@ -105,6 +105,9 @@ func (p *PcmMicrophone) Init() error {
 	// own noise floor — with a perfectly healthy ALSA clock, which is what
 	// makes it so hard to see. See the codec package.
 	codec.EnsureRoutes(p.target)
+	if err := codec.EnsureCaptureGain(p.target); err != nil {
+		return fmt.Errorf("microphone hardware gain: %w", err)
+	}
 	go p.readLoop()
 
 	// Do not report the daemon as ready while the ALSA producer is wedged or

@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
-import os
 from pathlib import Path, PurePosixPath
 import shutil
 import sys
@@ -21,7 +20,7 @@ from urllib import request as urlrequest
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from tools import platform_lock  # noqa: E402
+from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock  # noqa: E402
 
 PLATFORMS = platform_lock.load()["platforms"]
 BASE_VERSION = PLATFORMS["show"]["release"]
@@ -449,6 +448,11 @@ def patch_boot_athena(root: Path) -> None:
     path = root / "etc/techo5/boot.sh"
     contents = path.read_text()
     contents = contents.replace("/data/techo5-linux", "/data/tater-linux")
+    # tater-kernelctl retains the pinned platform's kernel.Default.Dir. Keep
+    # boot/trial/network checks on that same durable state; migrating only
+    # the shell checks makes a real kernel trial invisible to its watchdog.
+    # Application logs/settings still use Tater's separate data directory.
+    contents = contents.replace("/data/tater-linux/kernel/", "/data/techo5-linux/kernel/")
     contents = contents.replace("pidof techo5", "pidof tater-echo")
     contents = contents.replace(")\" != techo5 ]", ")\" != tater-echo ]")
     health = '\t\tif [ -n "$pid" ]; then'
@@ -479,7 +483,10 @@ def patch_boot_athena(root: Path) -> None:
         scan,
         scan + "\n# Tater's renderer and camera helper are loopback-only.\n"
         "ip link set lo up\n"
-        "ip -4 addr show lo | grep -q '127\\.0\\.0\\.1/' || ip addr add 127.0.0.1/8 dev lo",
+        "ip -4 addr show lo | grep -q '127\\.0\\.0\\.1/' || ip addr add 127.0.0.1/8 dev lo\n"
+        "if [ -x /usr/local/sbin/tater-athena-codecs ]; then\n"
+        "    /usr/local/sbin/tater-athena-codecs || log 'AP video unavailable; retaining software media'\n"
+        "fi",
         1,
     )
     wifi = "t5_wifi_conf $LOGDIR/wpa_supplicant.conf"
@@ -630,6 +637,25 @@ def deterministic_tar(root: Path, output: Path) -> None:
 
 
 def build(args: argparse.Namespace) -> None:
+    codecs = getattr(args, "athena_codec_bundle", None)
+    if codecs is not None:
+        if args.target != "athena" or args.kernel_image is None:
+            raise SystemExit("Athena AP codecs require Athena and their matching kernel template")
+        athena_codec_bundle.verify(codecs, kernel_image=args.kernel_image)
+    bundle = getattr(args, "hardware_bundle", None)
+    if args.target in ("checkers", "cronos", "crown"):
+        if bundle is None:
+            raise SystemExit(f"{args.target} requires its locked public hardware helper bundle")
+        hardware_bundle.verify(bundle, target=args.target)
+    elif args.target == "athena" and bundle is not None:
+        hardware_bundle.verify(bundle, target=args.target)
+    elif bundle is not None:
+        raise SystemExit("hardware helper bundle is not qualified for this target")
+    mesa = getattr(args, "mesa_runtime", None)
+    if mesa is not None:
+        if args.target != "athena" or bundle is None:
+            raise SystemExit("native Mesa requires Athena and its matching GPU helper bundle")
+        athena_mesa.verify(mesa)
     base_version = ATHENA_BASE_VERSION if args.target == "athena" else BASE_VERSION
     base_sha256 = ATHENA_BASE_SHA256 if args.target == "athena" else BASE_SHA256
     if sha256(args.base_rootfs) != base_sha256:
@@ -651,6 +677,21 @@ def build(args: argparse.Namespace) -> None:
         copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
         copy(args.btbridge, root / "usr/local/bin/btbridge", 0o755)
         copy(args.ffmpeg, root / "usr/local/bin/tater-ffmpeg", 0o755)
+        if bundle is not None:
+            for name in (*hardware_bundle.helper_names(args.target), hardware_bundle.MANIFEST):
+                copy(bundle / name, root / "usr/local/bin" / name,
+                     0o644 if name == hardware_bundle.MANIFEST else 0o755)
+        if mesa is not None:
+            for path in mesa.rglob("*"):
+                if path.is_file():
+                    copy(path, root / "usr/lib/tater-mesa" / path.relative_to(mesa),
+                         0o755 if path.name == "ld-musl-armhf.so.1" else 0o644)
+        if codecs is not None:
+            for name in athena_codec_bundle.identities(athena_codec_bundle.load_lock()):
+                destination = root / ("usr/lib/tater-athena-codecs" if name.endswith(".ko") else "usr/local/bin") / name
+                copy(codecs/name, destination, 0o644 if name.endswith(".ko") else 0o755)
+            copy(codecs/athena_codec_bundle.MANIFEST, root/"usr/lib/tater-athena-codecs"/athena_codec_bundle.MANIFEST, 0o644)
+            copy(Path(__file__).parents[1]/"athena/tater-athena-codecs", root/"usr/local/sbin/tater-athena-codecs", 0o755)
         if args.target == "athena":
             if args.kernelctl is None or args.kernel_image is None:
                 raise SystemExit("Athena rootfs requires its kernel updater and pinned boot image")
@@ -698,6 +739,8 @@ def build(args: argparse.Namespace) -> None:
              root / "usr/local/sbin/tater-ssh-authorize", 0o755)
         copy(Path(__file__).parents[1] / "common/tater-ssh-control",
              root / "usr/local/sbin/tater-ssh-control", 0o755)
+        copy(Path(__file__).parents[1] / "common/tater-recovery-router",
+             root / "usr/local/sbin/tater-recovery-router", 0o755)
         ensure_tater_ssh_group(root)
         ensure_video_decoder_user(root)
         for name in ("libtinyalsa.so", "libtinyalsa.so.2"):
@@ -719,15 +762,23 @@ def build(args: argparse.Namespace) -> None:
         }[args.target]
         pretty_target = args.target.title()
         write(root / "etc/inittab", INITTAB.format(target=pretty_target), 0o755)
-        write(root / "usr/local/sbin/tater-run", TATER_RUN, 0o755)
-        write(root / "usr/local/sbin/tater-show-run", TATER_SHOW_RUN, 0o755)
-        write(root / "usr/local/sbin/tater-camera-run", TATER_CAMERA_RUN, 0o755)
+        native_run = TATER_RUN.replace("export PATH\n", f"export PATH\nexport TATER_FIRMWARE_TARGET={args.target}\n", 1)
+        write(root / "usr/local/sbin/tater-run", native_run, 0o755)
+        show_run = TATER_SHOW_RUN.replace(
+            "export PATH\n",
+            f"export PATH\nexport TATER_FIRMWARE_TARGET={args.target}\n",
+            1,
+        )
+        write(root / "usr/local/sbin/tater-show-run", show_run, 0o755)
+        camera_run = TATER_CAMERA_RUN.replace("export PATH\n", f"export PATH\nexport TATER_FIRMWARE_TARGET={args.target}\n", 1)
+        write(root / "usr/local/sbin/tater-camera-run", camera_run, 0o755)
         write(root / "usr/local/sbin/tater-app", TATER_APP, 0o755)
         write(root / "etc/hostname", f"tater-{args.target}\n")
         write(root / "etc/motd", MOTD.format(device_name=device_name))
         write(root / "usr/lib/os-release", OS_RELEASE.format(version=args.version, target=pretty_target))
         release = f"Tater Linux {pretty_target} {args.version} (TECHO5 platform {base_version})\n"
         write(root / "etc/tater-release", release)
+        write(root / "etc/tater-ota-platform", f"echo-hardware-v1/{args.target}\n")
         write(root / "etc/techo5-release", release)
         write(root / "usr/share/licenses/tater-linux/TECHO5-LICENSE", args.techo5_license.read_text())
         write(root / "usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt",
@@ -776,12 +827,26 @@ TATER_RUN = """#!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 export TATER_NATIVE_CONFIG=/data/local/etc/tater/native.json
+if { [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; } && [ -s /data/tater-vdec/runtime.json ]; then
+    export TATER_VDEC_ENABLE=1
+fi
 export TATER_MWW_DIR=/data/local/share/tater/microwakeword
 LOG=/data/tater-linux/tater-echo.log
 mkdir -p /data/tater-linux /data/local/etc/tater /data/local/share/tater/microwakeword
+# Screen devices keep native TWRP for Volume Up. Retire our old cached
+# handoff on upgrade, without touching any unrelated recovery script.
+if [ -x /usr/local/sbin/tater-recovery-router ]; then
+    /usr/local/sbin/tater-recovery-router disable >> "$LOG" 2>&1 || \
+        echo "tater-run: retired recovery redirect cleanup failed; inspect cache recovery commands" >> "$LOG"
+fi
 for source in /usr/share/tater/microwakeword/*; do
     target=/data/local/share/tater/microwakeword/${source##*/}
-    [ -e "$target" ] || cp "$source" "$target"
+    # /data survives a system-slot update. Refresh files that are supplied by
+    # this image when their bytes changed, otherwise an older ONNX/MWW runtime
+    # can remain ahead of the newly linked daemon and make dual wake fail its
+    # checksum gate. User-installed packages have different names and are left
+    # untouched.
+    cmp -s "$source" "$target" || cp -f "$source" "$target"
 done
 if [ ! -s /data/local/etc/tater/native.json ]; then
     echo "tater-run: no native configuration; starting setup hotspot" >> "$LOG"
@@ -812,6 +877,20 @@ done
 TATER_SHOW_RUN = """#!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# The owner-local MT8163 decoder runtime is installed separately under /data;
+# it is never part of a public rootfs. The Go preflight verifies its complete
+# identity before touching Vcodec. Only separately qualified Show 5 targets
+# select it; their helpers and runtime identities are not interchangeable.
+if { [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; } && [ -s /data/tater-vdec/runtime.json ]; then
+    export TATER_VDEC_ENABLE=1
+fi
+# Checkers can optionally use its owner-local stock Mali userspace through the
+# reviewed pbuffer compositor. The runtime is installed separately under
+# /data and is never shipped in the public rootfs; Go verifies its allowlisted
+# manifest and critical file hashes before opening /dev/mali0.
+if { [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; } && [ -s /data/tater-gpu/runtime.json ]; then
+    export TATER_GPU_ENABLE=1
+fi
 LOG=/data/tater-linux/tater-show.log
 mkdir -p /data/tater-linux
 n=0
@@ -841,17 +920,27 @@ done
 TATER_CAMERA_RUN = """#!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# The camera helper independently checks its target, runtime and helper hashes.
+# Keep other targets on JPEG without changing decoding or GPU policy.
+export TATER_VENC_ENABLE=0
+if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then
+    export TATER_VENC_ENABLE=1
+fi
 LOG=/data/tater-linux/tater-camera.log
 mkdir -p /data/tater-linux
 echo "tater-camera-run: starting at $(date)" >> "$LOG"
-exec /usr/local/bin/tater-camera >> "$LOG" 2>&1
+binary=/usr/local/bin/tater-camera
+if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then
+    binary=$(tater-app binary tater-camera)
+fi
+exec "$binary" >> "$LOG" 2>&1
 """
 
 TATER_APP = """#!/bin/sh
 APP=/data/tater-linux/app
 case "$1" in
 binary)
-    case "$2" in tater-echo|tater-show) ;; *) exit 2;; esac
+    case "$2" in tater-echo|tater-show|tater-camera|tater-ffmpeg) ;; *) exit 2;; esac
     current=$(readlink -f "$APP/current" 2>/dev/null)
     if [ -n "$current" ] && [ -x "$current/$2" ]; then
         echo "$current/$2"
@@ -887,7 +976,8 @@ esac
 """
 
 MOTD = """Tater Linux for {device_name}.
-Root filesystems use A/B slots; persistent state is on /data and recovery is TWRP.
+Root filesystems use A/B slots; persistent state is on /data.
+Volume Up enters TWRP; to_recovery.py explicitly enters Tater Recovery.
 Logs: /data/tater-linux/   Slot status: slotctl status
 """
 
@@ -954,6 +1044,12 @@ def main() -> int:
     parser.add_argument("--camera", type=Path, required=True)
     parser.add_argument("--btbridge", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
+    parser.add_argument("--hardware-bundle", type=Path,
+                        help="verified target-owned public helpers (no private libraries)")
+    parser.add_argument("--mesa-runtime", type=Path,
+                        help="verified Athena-only open-source Mesa runtime directory")
+    parser.add_argument("--athena-codec-bundle", type=Path,
+                        help="experimental public AP helpers/modules; requires their exact kernel template")
     parser.add_argument("--kernelctl", type=Path)
     parser.add_argument("--kernel-image", type=Path)
     parser.add_argument("--mww-runtime", type=Path, required=True)

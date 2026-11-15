@@ -24,12 +24,13 @@ import (
 const maxSystemFirmwareBytes = 512 * 1024 * 1024
 
 type linuxSystemManifest struct {
-	Schema  int          `json:"schema"`
-	Kind    string       `json:"kind"`
-	Target  string       `json:"target"`
-	BaseOS  string       `json:"base_os"`
-	Version string       `json:"version"`
-	RootFS  linuxAppFile `json:"rootfs"`
+	Schema   int          `json:"schema"`
+	Platform string       `json:"platform"`
+	Kind     string       `json:"kind"`
+	Target   string       `json:"target"`
+	BaseOS   string       `json:"base_os"`
+	Version  string       `json:"version"`
+	RootFS   linuxAppFile `json:"rootfs"`
 }
 
 // InstallSystem downloads a target-scoped rootfs wrapper, verifies both the
@@ -47,6 +48,9 @@ func (i *OTAInstaller) InstallSystem(ctx context.Context, req OTARequest, report
 	}
 	if i.baseOS() != platform.TaterLinux {
 		return fmt.Errorf("%s System OTA requires Tater Linux; use the USB factory installer for conversion", i.Target)
+	}
+	if err := i.requireOTAPlatform(); err != nil {
+		return err
 	}
 	stateDir := i.StateDir
 	if stateDir == "" {
@@ -246,10 +250,13 @@ func extractVerifiedSystemRootFS(bundle, destination, target string) (linuxSyste
 			return manifest, fmt.Errorf("System OTA contains unexpected path %q", header.Name)
 		}
 	}
-	if manifest.Schema != 1 || manifest.Kind != "tater-linux-rootfs" ||
+	if manifest.Kind != "tater-linux-rootfs" ||
 		manifest.Target != target || manifest.BaseOS != platform.TaterLinux ||
 		!linuxAppVersionPattern.MatchString(manifest.Version) {
 		return manifest, errors.New("System OTA identity is incomplete")
+	}
+	if err := validateLinuxOTAPolicy(manifest.Schema, manifest.Platform, target); err != nil {
+		return manifest, err
 	}
 	if !seen["manifest.json"] || !seen["rootfs.tar.gz"] || len(seen) != 2 {
 		return manifest, errors.New("System OTA archive is incomplete")

@@ -10,6 +10,10 @@ must not use Crown images. The factory installer independently requires TWRP's
 `ro.product.device` property to equal `crown` before it starts the platform
 installer.
 
+Unpublished GPU/UI and hardware-video bring-up is tracked separately in
+[`crown-release-readiness.md`](crown-release-readiness.md). The existing release
+support below must not be confused with qualification of that new work.
+
 ## Upstream foundation
 
 - Unlock and TWRP: [amonet-crown v2.0.1+ guide](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-1st-gen-2019-crown.4766687/)

@@ -1,0 +1,43 @@
+--- a/echod/internal/hardware/camera/camera.go
++++ b/echod/internal/hardware/camera/camera.go
+@@ -280,6 +280,7 @@ type device struct {
+ 	// Exposure control: what is set on the sensor now, and frames to wait before judging it.
+ 	shutter, gain int
+ 	settle        int
++	taterLiveExposure bool
+ }
+ 
+ func open() (*device, error) {
+@@ -415,9 +416,12 @@ func (d *device) autoExpose(bayer []byte) {
+ 		return
+ 	}
++	midGain, maxShutter, live := taterVideoExposureLimits()
++	modeChanged := d.taterLiveExposure != live
++	d.taterLiveExposure = live
+ 	mean := int(meter(bayer))
+-	if d.hold.held(float64(mean)) {
++	if taterHoldExposure(d.hold.held(float64(mean)), modeChanged) {
+ 		return
+ 	}
+-	if mean >= aeTarget-aeDeadband && mean <= aeTarget+aeDeadband {
++	if mean >= aeTarget-aeDeadband && mean <= aeTarget+aeDeadband && !modeChanged {
+ 		return
+ 	}
+@@ -435,12 +439,12 @@ func (d *device) autoExpose(bayer []byte) {
+ 	switch {
+ 	case want <= float64(aeFrame*aeMinGain):
+ 		shutter, gain = int(want/aeMinGain), aeMinGain
+-	case want <= float64(aeFrame*aeMidGain):
++	case want <= float64(aeFrame*midGain):
+ 		shutter, gain = aeFrame, int(want)/aeFrame
+-	case want <= float64(aeMaxShut*aeMidGain):
+-		shutter, gain = int(want/aeMidGain), aeMidGain
++	case want <= float64(maxShutter*midGain):
++		shutter, gain = int(want/float64(midGain)), midGain
+ 	default:
+-		shutter, gain = aeMaxShut, int(want/float64(aeMaxShut))
++		shutter, gain = maxShutter, int(want/float64(maxShutter))
+ 	}
+-	d.setExposure(min(max(shutter, aeMinShut), aeMaxShut), min(max(gain, aeMinGain), aeMaxGain), mean)
++	d.setExposure(min(max(shutter, aeMinShut), maxShutter), min(max(gain, aeMinGain), aeMaxGain), mean)
+ }

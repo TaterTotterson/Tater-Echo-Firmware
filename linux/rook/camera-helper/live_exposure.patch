@@ -1,0 +1,15 @@
+--- a/echod/internal/hardware/camera/camera_spot.go
++++ b/echod/internal/hardware/camera/camera_spot.go
+@@ -177,4 +177,5 @@
+ 	shutter, gain int
+ 	settle        int
+ 	n             int // frames seen, for convertEvery
++	taterLiveExposure bool
+ }
+@@ -497,2 +498,6 @@
+ func (d *device) autoExpose(raw []byte) {
++	if taterUseLiveExposurePolicy() {
++		d.taterAutoExpose(raw)
++		return
++	}
+ 	if d.settle > 0 {

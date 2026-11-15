@@ -61,16 +61,56 @@ enters Tater Recovery over USB, then runs `install.sh --repair` to install the
 bundle into the inactive A/B root slot without clearing the satellite's
 settings. An explicit `--factory-reset` clears Wi-Fi and pairing too.
 
-Volume Up has one recovery meaning on all seven targets: TWRP. Checkers,
-Cronos, Crown, Athena, and Rook handle it in their native boot chain before
-Linux starts.
-Biscuit and Radar have no dependable bootloader shortcut, so a current factory
-install detects a continuous five-second hold during the first 90 seconds of
-Linux startup and enters a device-specific TWRP handoff that restores Linux to
-their shared recovery partition while TWRP runs from RAM. A Dot without the
-current handoff image continues normal startup rather than entering Tater
+Volume Up at power-on keeps native TWRP on Checkers, Cronos, Crown, Athena,
+and Rook. The Linux-side held-key fallback requests TWRP too. Screen system
+updates remove the retired Tater-generated cache redirect without replacing
+unrelated OpenRecoveryScript commands. There is no automatic handoff to Tater
 Recovery. Every archive retains `to_recovery.py` as the explicit USB route to
-Tater Recovery and `to_twrp.py` as the explicit lower-level TWRP route.
+Tater Recovery and `to_twrp.py` as the explicit TWRP route.
+
+Biscuit and Radar's new USB boot image checks a three-second Volume Up hold
+in its initramfs, before starting a main system slot. Correct board identity,
+the unit's checked Linux/TWRP/handoff copies and matching current recovery
+image are required before the existing automatic-return TWRP handoff runs.
+Older boot images retain the late five-second Tater Recovery fallback. The
+early route still starts a kernel, reboots once and swaps the shared recovery
+partition; it is not a bootloader change or a power-loss-proof transaction.
+Both-model physical entry/return qualification remains required.
+
+## Hardware-platform USB transition (after v4.2.3)
+
+This hardware release introduces inner OTA **schema 2** for applications,
+compatibility bridges and complete systems on all seven targets. Each package
+requires the exact platform `echo-hardware-v1/<target>`. Factory root filesystems
+contain the matching read-only `/etc/tater-ota-platform`; the packer refuses
+old, wrong-target or unstamped rootfs inputs. A copied new daemon on an old
+system cannot authorize the platform OTA. Rootfs-only USB `--repair` also
+refuses crossing this platform boundary: use the **full target-specific USB
+factory upgrade**, which preserves verified settings by default.
+
+The outer release catalog stays schema 1 so older hosts can still discover it.
+An unchanged v4.2.3 updater refuses the schema-2 inner packages before selecting
+an app slot or invoking system installation. Older hosts may download a bundle
+and show a generic rejection, but must not be supplied a schema-1 bypass bridge.
+New Tater and HA Bridge versions inspect `ota_policy`, `ota_package_schema`
+and `ota_platform` to show a clear USB-required message before downloading.
+After the full USB upgrade, compatible schema-2 application and system OTA
+remain available. A later incompatible kernel/platform transition must change
+the platform identity, not merely the displayed application version.
+
+`system_ota_version=1` still describes the command/transport support; it is not
+the inner package schema. Firmware additionally reports `ota_package_schema=2`
+and reports `ota_platform` only when its installed rootfs marker matches its
+target. The HA Bridge verifies a system-stage reboot's `system_version` before
+sending the final app, preventing rollback from being mistaken for success.
+
+Before distribution, run `python3 -m tools.check_legacy_ota`. It compiles the
+actual OTA implementation from v4.2.3 commit
+`d5b395a6e680a5b765fcd6c3339598f7d3807ff5` against schema-2 app/bridge/system
+fixtures for all targets, using only a temporary directory and loopback HTTP.
+The 21 legacy rejection checks, current updater/host tests and packaging tests
+do not replace end-to-end USB preservation, cold-boot, recovery and migrated
+fleet OTA qualification. No push, tag or release is implied by these checks.
 
 ## OTA artifacts
 
@@ -90,9 +130,12 @@ first updates the application when the connected daemon lacks the required
 System OTA support, then sends `ota.system.url`. The daemon verifies the outer
 download and embedded rootfs independently before `slotctl install` writes the
 inactive root slot. The established trial-boot health check commits the new
-slot or automatically returns to the previous one. System OTA never replaces
-the kernel, boot image, rescue environment, partition table, or device-specific
-vendor storage. It also never writes bootloader branding. The monochrome Tater
+slot or automatically returns to the previous one. The System OTA transaction
+itself stages only rootfs; it does not flash boot/recovery, partition tables or
+vendor storage. Athena's separate platform kernel updater can apply its matched
+bundled kernel after the root slot settles, preserving unit speaker tuning and
+its kernel trial/rollback policy. The other targets' new kernel migration is
+delivered through the full USB upgrade. OTA never writes bootloader branding. The monochrome Tater
 boot logo is a guarded USB-factory step on Checkers, Cronos, Crown, and Rook: the
 installer changes only a known logo slot in the verified `expdb` backup, reads
 the partition back, and

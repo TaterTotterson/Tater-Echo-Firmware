@@ -50,6 +50,7 @@ mkdir -p "$cache_root/go-build" "$cache_root/go-mod"
 docker run --rm --platform linux/arm/v7 \
     -e TATER_VERSION="$version" -e TATER_TARGET="$target" \
     -e GOTOOLCHAIN=local -e GOFLAGS=-buildvcs=false \
+    -e GOMODCACHE=/root/go/pkg/mod \
     -e SOURCE_DATE_EPOCH="$source_date_epoch" \
     -v "$repo:/src" \
     -v "$cache_root/go-build:/root/.cache/go-build" \
@@ -88,6 +89,9 @@ CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=7 \
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   go build -trimpath -ldflags "-s -w" \
   -o build/dot/tater-reboot-now ./cmd/tater-reboot-now
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+  go build -trimpath -ldflags "-s -w" \
+  -o build/dot/tater-volume-up ./cmd/tater-volume-up
 tiny=$(readlink -f /usr/lib/libtinyalsa.so.2)
 mkdir -p build/dot
 cp "$tiny" build/dot/libtinyalsa.so.2.0.0
@@ -141,6 +145,7 @@ file "$device/build/dot/tater-echo" "$device/build/dot/tater-reboot-now" \
     "$device/build/microwakeword-linux/libtater_microwakeword.so" \
     "$device/build/onnxruntime-linux-armv7/libonnxruntime.so"
 file "$device/build/dot/tater-echo" | grep -q '32-bit.*ARM'
+file "$device/build/dot/tater-volume-up" | grep -q '32-bit.*ARM'
 strings "$device/build/dot/tater-echo" | grep -qF "$version"
 strings "$device/build/dot/tater-echo" | grep -qF "$target"
 listing=$(mktemp "${TMPDIR:-/tmp}/tater-$target-rootfs.XXXXXX")

@@ -17,6 +17,12 @@ SPEC.loader.exec_module(build_rootfs)
 
 
 class RookRootfsTests(unittest.TestCase):
+    def test_rootfs_bundles_only_the_retired_redirect_cleanup_helper(self):
+        source = MODULE.read_text()
+        self.assertIn('root / "usr/local/sbin/tater-recovery-router"', source)
+        self.assertNotIn('root / "usr/share/tater/recovery/twrp-router.sh"', source)
+        self.assertIn("Volume Up enters TWRP", source)
+
     def test_factory_wifi_mac_is_set_before_link_up(self):
         source = """#!/bin/sh
 t5_ipv6_private() { :; }
@@ -333,8 +339,11 @@ log "boot script done"
                 build_rootfs.build(Args())
 
     def test_rootfs_bundles_camera_helper_and_service(self):
+        from tools.test_hardware_bundle import HardwareBundleTests
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            hardware = root / "hardware"
+            hardware_lock = HardwareBundleTests().fixture(hardware, "rook")
             base_tree = root / "base"
             board = base_tree / "etc/techo5/device.conf"
             board.parent.mkdir(parents=True)
@@ -363,9 +372,10 @@ log "boot script done"
                 techo5_lib=payload,
                 techo5_spot_license=license_file, techo5_license=license_file,
                 ffmpeg_license=license_file,
-                apk_cache=root, version="v0.0.1", output=output,
+                apk_cache=root, version="v0.0.1", output=output, hardware_bundle=hardware,
             )
             with (
+                patch.object(build_rootfs.hardware_bundle, "load_lock", return_value=hardware_lock),
                 patch.object(build_rootfs.common, "sha256", return_value=build_rootfs.BASE_SHA256),
                 patch.object(build_rootfs.common, "SETUP_PACKAGES", []),
                 patch.object(build_rootfs.common, "patch_rook_wifi_mac") as wifi_patch,

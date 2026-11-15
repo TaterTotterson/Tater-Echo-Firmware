@@ -152,8 +152,10 @@ func TestSpotUploadedWallpaperUsesCenteredRoundCrop(t *testing.T) {
 	}
 	canvas := image.NewRGBA(image.Rect(0, 0, 480, 480))
 	r.render(canvas, now)
-	if got, want := canvas.RGBAAt(240, 100), (color.RGBA{30, 180, 70, 255}); got != want {
-		t.Fatalf("Rook uploaded wallpaper center = %v, want centered crop color %v", got, want)
+	// The approved workspace adds a charcoal readability veil. The centered
+	// source is still green, never one of the red off-center regions.
+	if got := canvas.RGBAAt(240, 160); got.G <= got.R*3 || got.G <= got.B*2 || got.A != 255 {
+		t.Fatalf("Rook uploaded wallpaper lost its centered green crop: %v", got)
 	}
 	if got, want := canvas.RGBAAt(0, 0), (color.RGBA{0, 0, 0, 255}); got != want {
 		t.Fatalf("Rook uploaded wallpaper corner = %v, want round-screen mask %v", got, want)
@@ -532,6 +534,8 @@ func TestSpotOtherVoiceStagesOnlyChangeTheHomeStatusWhenGlowIsDisabled(t *testin
 	home := image.NewRGBA(image.Rect(0, 0, 480, 480))
 	r.state.Phase = "idle"
 	r.render(home, now)
+	heading := r.rookHomeHeading()
+	statusBounds := image.Rect(heading.dot.X-heading.radius, heading.dot.Y-heading.radius, heading.dot.X+heading.radius+1, heading.dot.Y+heading.radius+1)
 	for _, phase := range []string{"listening", "thinking", "tool_call", "intercom"} {
 		r.state.Phase = phase
 		r.intercomPressed = phase == "intercom"
@@ -540,7 +544,7 @@ func TestSpotOtherVoiceStagesOnlyChangeTheHomeStatusWhenGlowIsDisabled(t *testin
 		if bytes.Equal(frame.Pix, home.Pix) {
 			t.Errorf("%s did not update the assistant status", phase)
 		}
-		if !imagesEqualOutside(home, frame, image.Rect(0, 324, 480, 348)) {
+		if !imagesEqualOutside(home, frame, statusBounds) {
 			t.Errorf("%s changed the orb-free photo home outside the room/status row", phase)
 		}
 		if previewDir := os.Getenv("SPOT_PREVIEW_DIR"); previewDir != "" {
@@ -553,13 +557,15 @@ func TestSpotOtherVoiceStagesOnlyChangeTheHomeStatusWhenGlowIsDisabled(t *testin
 	withoutWeatherIdle := image.NewRGBA(image.Rect(0, 0, 480, 480))
 	r.state.Phase = "idle"
 	r.render(withoutWeatherIdle, now)
+	heading = r.rookHomeHeading()
+	statusBounds = image.Rect(heading.dot.X-heading.radius, heading.dot.Y-heading.radius, heading.dot.X+heading.radius+1, heading.dot.Y+heading.radius+1)
 	r.state.Phase = "listening"
 	frame := image.NewRGBA(withoutWeatherIdle.Rect)
 	r.render(frame, now)
 	if bytes.Equal(frame.Pix, withoutWeatherIdle.Pix) {
 		t.Error("weather-free listening stage did not update the assistant status")
 	}
-	if !imagesEqualOutside(withoutWeatherIdle, frame, image.Rect(0, 324, 480, 348)) {
+	if !imagesEqualOutside(withoutWeatherIdle, frame, statusBounds) {
 		t.Error("weather-free listening stage changed content outside the room/status row")
 	}
 }
@@ -716,6 +722,8 @@ func TestSpotClimatePreview(t *testing.T) {
 		writeSpotPreview(t, filepath.Join(previewDir, "spot-climate.png"), canvas)
 	}
 	client := &socketClient{writer: bufio.NewWriter(&bytes.Buffer{})}
+	readings := rookClimateReadingsBounds()
+	r.handleClimateTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: readings.Min.X + readings.Dx()/2, Y: readings.Min.Y + readings.Dy()/2}, 480, 480)
 	next := spotClimateNextBounds()
 	r.handleClimateTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2}, 480, 480)
 	if r.climatePage != 1 {
@@ -740,16 +748,17 @@ func TestSpotSatChatDirectoryPagesAndSelectsVisibleTarget(t *testing.T) {
 		faces: faces, target: "rook", spotScreen: true, screenWidth: 480, screenHeight: 480, satChatOpen: true,
 		state: show.Snapshot{Connected: true, Phase: "idle", SatChat: &show.SatChat{Participants: participants}},
 	}
-	if got := r.satChatPageSize(480, 480); got != 5 {
-		t.Fatalf("Rook page size = %d, want 5", got)
+	if got := r.satChatPageSize(480, 480); got != 2 {
+		t.Fatalf("Rook page size = %d, want 2 readable round-safe rows", got)
 	}
 	next := spotSatChatNextBounds()
 	r.handleSpotSatChatTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: (next.Min.X + next.Max.X) / 2, Y: (next.Min.Y + next.Max.Y) / 2})
 	if r.satChatPage != 1 {
 		t.Fatalf("Rook next page = %d, want 1", r.satChatPage)
 	}
-	r.handleSpotSatChatTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: 240, Y: 130})
-	if want := participants[5].ID; !strings.Contains(commands.String(), `"target":"`+want+`"`) {
+	row := rookDirectoryBounds(0)
+	r.handleSpotSatChatTouch(client, linuxinput.TouchEvent{Kind: linuxinput.Up, X: 240, Y: row.Min.Y + row.Dy()/2})
+	if want := participants[2].ID; !strings.Contains(commands.String(), `"target":"`+want+`"`) {
 		t.Fatalf("Rook first target on page 2 = %q, want %q", commands.String(), want)
 	}
 

@@ -18,10 +18,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools import platform_lock  # noqa: E402
+from tools import athena_mesa, hardware_bundle, platform_lock  # noqa: E402
+from linux.dot import build_kernel as dot_kernel  # noqa: E402
+from linux.dot import early_boot as dot_early_boot  # noqa: E402
 
 TARGETS = REPO / "targets" / "targets.json"
 LINUX_DOT_TARGETS = {"biscuit", "radar"}
@@ -30,6 +33,24 @@ LINUX_ATHENA_TARGETS = {"athena"}
 ELFCLASS32 = 1
 ELFCLASS64 = 2
 EM_ARM = 40
+OTA_SCHEMA = 2
+
+
+def ota_platform(target: str) -> str:
+    return f"echo-hardware-v1/{target}"
+
+
+def verify_rootfs_ota_platform(rootfs: Path, target: str) -> None:
+    try:
+        with tarfile.open(rootfs, 'r:gz') as archive:
+            profiles = [entry for entry in archive if entry.name.removeprefix('./') == 'etc/tater-ota-platform']
+            if len(profiles) != 1 or not profiles[0].isfile() or profiles[0].size > 128:
+                raise ValueError('missing or unsafe immutable OTA profile')
+            value = archive.extractfile(profiles[0]).read().decode().strip()
+            if value != ota_platform(target):
+                raise ValueError('rootfs OTA platform does not match its target')
+    except (OSError, ValueError, tarfile.TarError) as error:
+        raise SystemExit(f'{target} rootfs platform verification failed: {error}') from error
 EM_AARCH64 = 183
 SHOW_BOOT_LOGO_SHA256 = "9cfa08b845406dea4e1aa6b3878126afce16aa05a2a9afe5058c8c84d034c7d6"
 SHOW_BOOT_LOGO_SIZE = 6105
@@ -39,6 +60,125 @@ PLATFORM_LOCK = platform_lock.load()
 DOT_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["dot"]["commit"]
 ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
 PLATFORM_REPOSITORY = PLATFORM_LOCK["source"]["repository"]
+DOT_AUDIO_LOCK_PATH = REPO / "platforms/dot-audio-lock.json"
+QUALIFIED_CHECKERS_KERNEL_SHA256 = "758cb695409303453232e4313574af005a670619007df47c479afb473344e957"
+QUALIFIED_CRONOS_KERNEL_SHA256 = "79410d93c4a5a5c2920cd4b4164f2d99afef17661b0cdaea1a45336e6ab734e4"
+
+
+def require_dot_audio_platform(target: str) -> None:
+    profile = json.loads(DOT_AUDIO_LOCK_PATH.read_text())
+    status = profile.get("targets", {}).get(target, {})
+    if (status.get("release_qualified") is not True
+            or not re.fullmatch(r"[0-9a-f]{64}", str(status.get("kernel_image_sha256", "")))):
+        raise SystemExit(f"{target.title()} audio release is blocked: {status.get('remaining', 'complete kernel/audio/OTA qualification')}")
+
+
+def verify_dot_audio_kernel(kernel: Path, target: str) -> None:
+    profile = json.loads(DOT_AUDIO_LOCK_PATH.read_text())
+    expected = profile["targets"][target].get("kernel_image_sha256")
+    try:
+        actual = dot_kernel.verify_kernel(kernel, target)
+    except (OSError, ValueError, zlib.error) as error:
+        raise SystemExit(f"{target} audio kernel verification failed: {error}") from error
+    if actual["sha256"] != expected:
+        raise SystemExit(f"{target} factory kernel differs from the reviewed audio kernel")
+
+
+def require_rook_hardware_platform() -> None:
+    # Functional owner-device trials do not replace final fleet OTA/factory
+    # qualification or authorize publishing the owner's private libraries.
+    hardware = PLATFORM_LOCK["platforms"]["rook"].get("hardware", {})
+    if hardware.get("release_qualified") is not True:
+        raise SystemExit("Rook hardware release is blocked: finish the final OTA/factory audit before distribution")
+
+
+def require_crown_hardware_platform() -> None:
+    # A successful owner-local application trial is not distribution approval.
+    # Keep release packaging closed until final installer/OTA qualification.
+    show = PLATFORM_LOCK["platforms"]["show"]
+    hardware = show.get("crown_hardware", {})
+    if (hardware.get("release_qualified") is not True
+            or hardware.get("source_commit") != show["checkers_commit"]
+            or not re.fullmatch(r"[0-9a-f]{40}", str(hardware.get("source_commit", "")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(hardware.get("kernel_image_sha256", "")))
+            or hardware.get("boot_sha256") != show["targets"]["crown"]["boot"]["sha256"]):
+        raise SystemExit("Crown hardware release is blocked: complete final kernel/runtime/installer/OTA qualification and pin its reviewed inputs; see docs/crown-release-readiness.md")
+
+
+def require_cronos_hardware_platform() -> None:
+    show = PLATFORM_LOCK["platforms"]["show"]
+    hardware = show.get("cronos_hardware", {})
+    if (hardware.get("source_commit") != show["checkers_commit"]
+            or not re.fullmatch(r"[0-9a-f]{40}", str(hardware.get("source_commit", "")))
+            or hardware.get("kernel_image_sha256") != QUALIFIED_CRONOS_KERNEL_SHA256
+            or hardware.get("boot_sha256") != show["targets"]["cronos"]["boot"]["sha256"]):
+        raise SystemExit(
+            "Cronos hardware release is blocked: pin the reviewed kernel source, "
+            "qualified kernel image and matching redistributable boot artifact first; "
+            "see docs/cronos.md"
+        )
+
+
+def require_checkers_hardware_platform() -> None:
+    show = PLATFORM_LOCK["platforms"]["show"]
+    hardware = show.get("checkers_hardware", {})
+    if (hardware.get("source_commit") != show["checkers_commit"]
+            or not re.fullmatch(r"[0-9a-f]{40}", str(hardware.get("source_commit", "")))
+            or hardware.get("kernel_image_sha256") != QUALIFIED_CHECKERS_KERNEL_SHA256
+            or hardware.get("boot_sha256") != show["targets"]["checkers"]["boot"]["sha256"]):
+        raise SystemExit(
+            "Checkers hardware release is blocked: pin the reviewed kernel source, "
+            "qualified kernel image and matching redistributable boot artifact first; "
+            "see docs/checkers-hardware-build.md"
+        )
+
+
+def verify_checkers_hardware_boot(boot: Path) -> None:
+    verify_hardware_boot(boot, "Checkers", QUALIFIED_CHECKERS_KERNEL_SHA256)
+
+
+def verify_cronos_hardware_boot(boot: Path) -> None:
+    verify_hardware_boot(boot, "Cronos", QUALIFIED_CRONOS_KERNEL_SHA256)
+
+
+def verify_hardware_boot(boot: Path, target_name: str, expected: str) -> None:
+    """Do not package an old kernel merely because a metadata pin was edited."""
+    with boot.open("rb") as source:
+        header = source.read(2048)
+        if len(header) != 2048 or header[:8] != b"ANDROID!":
+            raise SystemExit(f"{target_name} hardware boot is not a legacy Android boot image")
+        size = struct.unpack_from("<I", header, 8)[0]
+        page = struct.unpack_from("<I", header, 36)[0]
+        if page not in (2048, 4096, 8192, 16384) or not 0 < size <= 32 * 1024 * 1024:
+            raise SystemExit(f"{target_name} hardware boot has invalid kernel bounds")
+        source.seek(page)
+        kernel = source.read(size)
+    if len(kernel) != size or hashlib.sha256(kernel).hexdigest() != expected:
+        raise SystemExit(f"{target_name} factory boot does not contain the qualified hardware kernel")
+
+
+def hardware_files_from_rootfs(rootfs_source: Path, target: str = "checkers") -> dict[str, bytes]:
+    """Return only the reviewed public helpers embedded in this exact rootfs."""
+    if target == "athena":
+        athena_mesa.verify_rootfs(rootfs_source)
+    with tempfile.TemporaryDirectory(prefix="tater-public-hardware-") as temporary:
+        directory = Path(temporary)
+        with tarfile.open(rootfs_source, "r:gz") as archive:
+            seen = set()
+            for member in archive:
+                name = member.name.removeprefix("./")
+                for filename in (*hardware_bundle.helper_names(target), hardware_bundle.MANIFEST):
+                    if name != "usr/local/bin/" + filename:
+                        continue
+                    if filename in seen or not member.isfile() or not 0 < member.size <= 8 * 1024 * 1024:
+                        raise SystemExit("rootfs contains an invalid public hardware helper")
+                    source = archive.extractfile(member)
+                    if source is None:
+                        raise SystemExit("rootfs hardware helper is unreadable")
+                    (directory / filename).write_bytes(source.read())
+                    seen.add(filename)
+        hardware_bundle.verify(directory, target=target)
+        return {path.name: path.read_bytes() for path in directory.iterdir()}
 
 
 def platform_provenance(target: str) -> dict:
@@ -47,11 +187,15 @@ def platform_provenance(target: str) -> dict:
     platforms = PLATFORM_LOCK["platforms"]
     builder = PLATFORM_LOCK["builder"]
     if target in LINUX_DOT_TARGETS:
+        audio = json.loads(DOT_AUDIO_LOCK_PATH.read_text())
         source = {
             "repository": PLATFORM_REPOSITORY,
             "commit": platforms["dot"]["commit"],
-            "release": platforms["dot"]["kernel_release"],
+            "release": audio["profile"],
+            "base_kernel_release": platforms["dot"]["kernel_release"],
             "base_release": platforms["dot"]["release"],
+            "audio_overlay_lock_sha256": digest(DOT_AUDIO_LOCK_PATH),
+            "kernel_image_sha256": audio["targets"][target]["kernel_image_sha256"],
         }
     elif target in LINUX_SHOW_TARGETS:
         source = {
@@ -75,11 +219,16 @@ def platform_provenance(target: str) -> dict:
         }
     else:
         return {}
-    return {
+    provenance = {
         "lock_sha256": digest(platform_lock.LOCK_PATH),
         "builder": f"{builder['image']}@{builder['digest']}",
         "source": source,
     }
+    if target in ("checkers", "cronos", "crown", "rook"):
+        lock = hardware_bundle.load_lock(target)
+        provenance["hardware_helpers"] = {"bundle_id": lock["bundle_id"],
+                                          "source_lock_sha256": hardware_bundle.lock_digest(lock)}
+    return provenance
 
 
 def require_elf(path: Path, elf_class: int, machine: int, description: str) -> None:
@@ -239,6 +388,16 @@ def build(version: str, target: str, output: Path) -> list[Path]:
     targets = json.loads(TARGETS.read_text())["targets"]
     if target not in targets:
         raise SystemExit(f"unknown target {target!r}")
+    if target in LINUX_DOT_TARGETS:
+        require_dot_audio_platform(target)
+    elif target == "checkers":
+        require_checkers_hardware_platform()
+    elif target == "cronos":
+        require_cronos_hardware_platform()
+    elif target == "crown":
+        require_crown_hardware_platform()
+    elif target == "rook":
+        require_rook_hardware_platform()
     required_system_version = minimum_system_version(target, targets[target], version)
     output.mkdir(parents=True, exist_ok=True)
     stem = f"tater-echo-{target}-{version}"
@@ -271,12 +430,14 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         for source in required_sources:
             if not source.is_file():
                 raise SystemExit(f"required release input is missing: {source}")
+        verify_rootfs_ota_platform(rootfs_source, target)
         if target in LINUX_DOT_TARGETS:
             require_elf(server, ELFCLASS32, EM_ARM, f"{target} Tater Linux daemon")
 
         def write_app_ota(path: Path, app_files: dict[str, bytes]) -> None:
             app_manifest = {
-                "schema": 1,
+                "schema": OTA_SCHEMA,
+                "platform": ota_platform(target),
                 "target": target,
                 "base_os": "tater-linux",
                 "version": version,
@@ -289,9 +450,14 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 **app_files,
                 "manifest.json": (json.dumps(app_manifest, indent=2, sort_keys=True) + "\n").encode(),
             }
-            executables = {name for name in app_files if name.startswith("tater-")}
+            executables = {name for name in app_files if name.startswith("tater-") and name != hardware_bundle.MANIFEST}
             deterministic_files_tar(app_entries, path, executables)
 
+        hardware_files = {}
+        if target in ("checkers", "cronos", "crown", "athena", "rook"):
+            # The rootfs is the source of truth; never package a different
+            # ad-hoc /data helper into the matching application release.
+            hardware_files = hardware_files_from_rootfs(rootfs_source, target)
         ota = output / f"{stem}-ota.tar.gz"
         if target in LINUX_DOT_TARGETS:
             write_app_ota(ota, {"tater-echo": server.read_bytes()})
@@ -308,13 +474,15 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 "FFMPEG-LGPL-2.1.txt": ffmpeg_license.read_bytes(),
                 "tater-camera": camera.read_bytes(),
                 "tater-ffmpeg": ffmpeg.read_bytes(),
+                **hardware_files,
             })
         artifacts["ota"] = ota
 
         system_ota = output / f"{stem}-system-ota.tar.gz"
         rootfs_meta = metadata(rootfs_source)
         system_manifest = {
-            "schema": 1,
+            "schema": OTA_SCHEMA,
+            "platform": ota_platform(target),
             "kind": "tater-linux-rootfs",
             "target": target,
             "base_os": "tater-linux",
@@ -376,6 +544,11 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                     f"TATER_{target.upper()}_KERNEL, TATER_DOT_RESCUE_APKS, and "
                     "TATER_DOT_ALPINE_ROOTFS are required for a Dot Linux factory bundle"
                 )
+            verify_dot_audio_kernel(Path(kernel_value), target)
+            try:
+                dot_early_boot.require_static_arm(REPO / "device/build/dot/tater-volume-up")
+            except (OSError, ValueError) as error:
+                raise SystemExit(f"Dot early-recovery helper verification failed: {error}") from error
             dot_factory = REPO / "factory/dot-linux"
             inputs = {
                 "install.sh": (dot_factory / "install.sh", 0o755),
@@ -385,10 +558,13 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 "NOTICE.md": (REPO / "NOTICE.md", 0o644),
                 "payload/rootfs.tar.gz": (rootfs_source, 0o644),
                 "payload/kernel.zImage-dtb": (Path(kernel_value), 0o644),
+                "payload/tater-volume-up": (REPO / "device/build/dot/tater-volume-up", 0o755),
                 "payload/rescue-apks.tar": (Path(rescue_value), 0o644),
                 "payload/alpine-minirootfs.tar.gz": (Path(alpine_value), 0o644),
                 "tools/techo5lib.py": (platform_source / "tools/techo5lib.py", 0o644),
                 "tools/dotimage.py": (platform_source / "tools/dotimage.py", 0o644),
+                "tools/early_boot.py": (REPO / "linux/dot/early_boot.py", 0o644),
+                "tools/linux/tater-early-recovery": (REPO / "linux/dot/tater-early-recovery", 0o755),
                 "tools/linux/mkimage.py": (platform_source / "tools/linux/mkimage.py", 0o755),
                 "tools/linux/init": (platform_source / "tools/linux/init", 0o755),
                 "tools/linux/back-to-linux.sh": (
@@ -423,6 +599,12 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 Path(configured_boot) if configured_boot
                 else default_boot
             )
+            if target == "checkers":
+                verify_checkers_hardware_boot(boot_source)
+            elif target == "cronos":
+                verify_cronos_hardware_boot(boot_source)
+            elif target == "crown":
+                verify_hardware_boot(boot_source, "Crown", PLATFORM_LOCK["platforms"]["show"]["crown_hardware"]["kernel_image_sha256"])
             inputs = {
                 "install.sh": (REPO / "factory/checkers-linux/install.sh", 0o755),
                 "install.py": (REPO / "factory/checkers-linux/install.py", 0o755),
@@ -507,6 +689,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             REPO / "LICENSES/ECHOLOCAL-MIT.txt", 0o644)
         inputs["licenses/SENDSPIN-MIT.txt"] = (
             REPO / "LICENSES/SENDSPIN-MIT.txt", 0o644)
+        if target == "checkers":
+            inputs["provision_hardware.py"] = (REPO / "factory/provision_hardware.py", 0o755)
         inputs["to_recovery.py"] = (REPO / "factory/to_recovery.py", 0o755)
         inputs["recovery_install.py"] = (REPO / "factory/recovery_install.py", 0o755)
         inputs["tater_settings.py"] = (REPO / "factory/tater_settings.py", 0o644)
@@ -541,6 +725,9 @@ def build(version: str, target: str, output: Path) -> list[Path]:
                 for line in init_text.splitlines(keepends=True)
             )
             init.write_text(init_text)
+            # The unit-specific installer inserts the hook later. Fail the
+            # release build now if its pinned init contract has changed.
+            dot_early_boot.patch_init(init_text.encode())
             slotctl = factory / "tools/linux/rootfs/usr/local/sbin/slotctl"
             slotctl.write_text(slotctl.read_text().replace(
                 "usr/local/bin/echod", "usr/local/bin/tater-echo"))
@@ -563,6 +750,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             "product": "Tater Echo Firmware",
             "target": target,
             "version": version,
+            "ota_platform": ota_platform(target),
             "files": bundle_files,
         }
         if target in LINUX_DOT_TARGETS | LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
@@ -582,11 +770,16 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         },
     }
     target_manifest.pop("minimum_system_version", None)
+    target_manifest["ota_policy"] = {
+        "package_schema": OTA_SCHEMA,
+        "platform": ota_platform(target),
+        "usb_upgrade_required_if_missing": True,
+    }
     if target in LINUX_SHOW_TARGETS | LINUX_ATHENA_TARGETS | {"rook"}:
         target_manifest["ota_migrations"] = [{
-            "id": "linux-app-components-v2",
+            "id": "linux-app-components-v3",
             "required_capability": "ota_bundle_components_version",
-            "minimum_capability_version": 2,
+            "minimum_capability_version": 3,
             "bridge_artifact": "ota_bridge",
             "final_artifact": "ota",
         }]
@@ -596,6 +789,15 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         "minimum_system_version": required_system_version,
         "boot_policy": "inactive-rootfs-trial",
     }
+    if target in LINUX_DOT_TARGETS:
+        # System OTA v1 deliberately retains the installed recovery kernel.
+        # Never describe the new filter as delivered by that rootfs-only path.
+        target_manifest["kernel_update"] = {
+            "profile": "tater-adc3101-hpf80-v1",
+            "delivery": "target-specific-factory-or-usb-recovery",
+            "included_in_application_ota": False,
+            "included_in_system_ota": False,
+        }
     target_manifest["platform"] = platform_provenance(target)
     write_json(release_manifest, {
         "schema": 1,

@@ -557,6 +557,7 @@ def build(args: argparse.Namespace) -> None:
         write(root / "usr/local/sbin/tater-app", TATER_APP, 0o755)
         write(root / "usr/local/sbin/tater-boot-ring", BOOT_RING, 0o755)
         write(root / "etc/hostname", f"tater-{args.target}\n")
+        write(root / "etc/tater-ota-platform", f"echo-hardware-v1/{args.target}\n")
         write(root / "usr/lib/os-release", OS_RELEASE.format(version=args.version, target=args.target.title()))
         release = f"Tater Linux {args.target.title()} {args.version} (TECHO5 Dot {PLATFORM_VERSION})\n"
         write(root / "etc/tater-release", release)

@@ -26,6 +26,17 @@ class FakeConsole:
         return self.answers.pop(0)
 
 
+class RepairPlatformTests(unittest.TestCase):
+    def test_old_slots_require_full_usb_instead_of_rootfs_only_repair(self):
+        for answer in ('', 'TATER_RECOVERY_READY\n'):
+            with self.assertRaisesRegex(helper.Fail, 'full USB factory upgrade'):
+                helper.verify_repair_platform(FakeConsole([answer]), '/fake', 'echo-hardware-v1/rook')
+        console = FakeConsole(['TATER_REPAIR_PLATFORM_OK\n'])
+        helper.verify_repair_platform(console, '/fake', 'echo-hardware-v1/rook')
+        self.assertIn('etc/tater-ota-platform', console.commands[0])
+        self.assertNotIn('slotctl install', console.commands[0])
+
+
 class FakeSerialPort:
     def __init__(self) -> None:
         self.output = bytearray()

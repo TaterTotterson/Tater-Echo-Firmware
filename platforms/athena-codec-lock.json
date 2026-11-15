@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "target": "athena",
+  "experimental": true,
+  "bundle_id": "athena-ap-live-20261114.2",
+  "kernel_release": "6.18.56-techo5-athena",
+  "kernel_version": "#1 SMP PREEMPT 2026-11-14 10:00:00 UTC",
+  "kernel_template_sha256": "c6f38f2ca803845b395fe676df21de655a122377f884260d123bd8012fa3de8c",
+  "codec_source_lock": {
+    "schema": 1,
+    "target": "athena",
+    "experimental": true,
+    "bundle_id": "athena-ap-baseline-vdec-20261114.1",
+    "ndk_properties_sha256": "f60a3592fa8ee5a77759aa6855d91def4cc8f774dc31137becf65f0a34374ad2",
+    "helpers": {
+      "tater-hw-vdec": "2a342b28b72ce7096df006afb1785d9c18c53924697a12c366084775e6ff51a9",
+      "tater-hw-venc": "ecba5f5291797fb57b9930da757324de9b25973672fd3afa6b50783e79145de5"
+    },
+    "sources": {
+      "scripts/build_athena_codecs.py": "82211cd1c26b44492aa3c0c9fa799d148212e47f3eba3f02ce72b15ec3547ee5",
+      "probes/mt8183-codec/ap_sandbox.h": "3fc46a53159cd77d5bf4f1b7b72707a7d6ec9ca5602c1366013b2563a982274c",
+      "probes/mt8183-codec/ap_legacy.c": "bfaefe87560410033c78788d01590bf01b21159fdf72e2553fbf53be720ccf3d",
+      "probes/mt8183-codec/ap_decoder_abi.h": "fc96babecf5372d5e52e9096e9831151bd9361a760acd906e2503d2ee884d2bb",
+      "probes/mt8183-codec/baseline_packet.h": "89b25802818883149b5facafd44d8cc5ed7ce15a2a4022cd64f4d477f18ab22b",
+      "probes/mt8183-codec/ap_stream_io.h": "35b011e6c2b101e75c7748a4404eaf56dcde7cdf995a30e2c7e0c137ce72fdaa",
+      "probes/mt8183-codec/athena_vdec.c": "a0d5c906c3cb76806ba198d9c2abb9d2faf7073ad4b0e98d39c669df5922efd3",
+      "probes/mt8183-codec/athena_venc.c": "89d59e9b06b7ad508ca97959d62ee23a1482285c40e07398adb9981c0c21e4b9",
+      "probes/mt8163-vcodec/mtk_yuv420_block.c": "3e9483b6c6ad892f525d5bb5fdf4e42e186bbc066056c32f58d4309d4f1e25b1",
+      "probes/mt8163-vcodec/mtk_yuv420_block.h": "335f9e60d2576de8c7fb3af9cb1475fc8b167652f98b63422ab2bebbd2eb9037",
+      "kernel-patches/athena-codec/ap/athena_ap.h": "1ac1ea7c5a6aa2e1a78a35e8285047d1225fe6836a1674592a994032c796bda8"
+    },
+    "val_headers": {
+      "val_types_public.h": "6dce49d2393e993fe0a2aa0ffc30f7d5b96a6609aa636320d5507ee2df131402",
+      "val_types_private.h": "38231df6102afee8a2dc718a3208bb5b051a2480f48b2f8821afad443040519c",
+      "hal_types_private.h": "e2e5b60a65f276ce9021c5169c8792f6bd2fdd31ce0fa00b10270e02bbe05171"
+    },
+    "vdec_headers": {
+      "vdec_drv_if_public.h": "ab54f061c19fd6062a6926c652c0bfa1ab2f8f0bbb69e64a276036811eda33b5",
+      "vdec_drv_if_private.h": "08b07cc62ab02e19a39ef565f8f7f3456c7197c0b3ca508d5b3cd5bc8238fd0c",
+      "venc_drv_if_public.h": "a6ee7f5f813a2b338a409805cf46f6d61d6956232fb6dd390b55ceab59c14cf2",
+      "val_types_public.h": "0cf61f8caa4d4167279143f44cf3c2f84c771db5ce986fdefe045100aad1900a",
+      "val_types_private.h": "08ca4d7dd19f54e662ee921dfe42d125eeb38204fdcb8f8a424825dcbbda09b0",
+      "hal_types_public.h": "1e2a9ff4da80cae845d975749227a402350ecc731907177f342ec3afa96e843f"
+    },
+    "omx_headers": {
+      "media/openmax/OMX_Component.h": "32ddf10d8b32f3e100b87a5e88049b8221464db2580a9c7c218758397993810a",
+      "media/openmax/OMX_Audio.h": "a8c501618d96891bb74316584b8df989bda2f90558603f5fcdfdbcd43fd0f8f0",
+      "media/openmax/OMX_Core.h": "72d8d4dabcdce6ca6f8473d59d10640eb67ba6f5821d5bed888b206b57ed7471",
+      "media/openmax/OMX_Video.h": "602b0e571337790a609583fc7b3517695d841324d3630075252fb05893878f7d",
+      "media/openmax/OMX_IVCommon.h": "3101a5ac3a687da7170b500eaa8cc5f7be74b3ef3db8adacc875ceae1b4a9323",
+      "media/openmax/OMX_Index.h": "6a6a2fa7f1b06ec1458f24b592fbb21b8a5ddb659b0006b4fed5b95de44bce64",
+      "media/openmax/OMX_Image.h": "d3d9f1c9643b60fefbcfa7ad13a1c8905b5d8dc7d907e35515ac2c2a1290c68d",
+      "media/openmax/OMX_Other.h": "fc00885b8a98f01b98255b236fa7312bd22e3d8c1061c1944f482a54e607c310",
+      "media/openmax/OMX_Types.h": "4dd6361e455a1bd2493be27e214bbef1b3f3b3a9c1b775aa559cc53c0bdd0df7"
+    }
+  },
+  "modules": {
+    "mtk_rpmsg.ko": "d1694cf1513d8c436d9fd3e368f8c14fcaa2b96e1a883d18696240019f1a9db9",
+    "mtk_scp_ipi.ko": "5892c86448b429c571474b3a7a92acf52d88b5e85578ff20cee6546ff9ad988e",
+    "mtk_scp.ko": "d7dd1b23992b594b0ac05d9e54fdcf5583edd61dcc9c1029036cfdf6f219d7f4",
+    "athena_ap.ko": "9e0aab9b6c5e67b67e1e9aa65848ea43a0eec44cbb18db0b5b4433de72d6ab6d",
+    "athena_ap_vdec.ko": "cfe87de8eb584e36d9d397ab367b836a2fcf1bf6ef5fdf3f5212db93c43f99f3"
+  },
+  "module_sources": {
+    "kernel-patches/athena-codec/patch_scp_trial.py": "43d0e59906db835862074e3f0c42fa3306f70eecaf54b5e2d15ae0108502f86e",
+    "scripts/athena_scp_trial_dtb.py": "c08460c03351c218549ed9f2544c718860b5ec26db142bb4ed850eb8927b8f81",
+    "kernel-patches/athena-codec/ap/athena_ap.c": "174a179bf61554862483327af55d984521b54010071e64153b06d61d3d9032f4",
+    "kernel-patches/athena-codec/ap/athena_ap_vdec.c": "a34abc1ced4baad0386c1e135cd607c56052173e7fe1b3fee10ed1a26b883b1e",
+    "kernel-patches/athena-codec/ap/athena_ap.h": "1ac1ea7c5a6aa2e1a78a35e8285047d1225fe6836a1674592a994032c796bda8",
+    "kernel-patches/athena-codec/ap/Makefile": "56d5dd7fc982ca6d04d199f29c5531763758dc7367b3d1108152e2d1c548cd08"
+  }
+}

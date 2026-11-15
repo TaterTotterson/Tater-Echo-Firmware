@@ -149,10 +149,21 @@ traffic, the common controller first renews DHCP and resets the wired interface.
 Only after that bounded repair fails does it start Wi-Fi rescue, report the
 degraded state to Tater, and keep retrying Ethernet. Removing the adapter
 restores normal Wi-Fi and, where the controller claimed the port, the
-device/serial role. Biscuit and Rook have
-no non-disruptive way to see a host adapter while their shared controller is in
-gadget mode, so automatic detection briefly interrupts USB serial once per
-60-second retry. There is no user enable flag. Before testing that transition,
+device/serial role. Biscuit and Rook now protect an established computer
+connection: the shared controller reads Android gadget/UDC state and does not
+force a host-mode probe while the computer is connected, enumerating or
+suspended. It reports `waiting usb-device` and watches passively until the
+computer disconnects. An enumeration grace period and a final connection check
+also protect a computer plugged in just before a speculative probe starts.
+Other boards retain their passive hardware-OTG behavior.
+
+Biscuit and Rook have no independent, qualified cable-presence signal that
+identifies a powered Ethernet adapter while the controller is in gadget mode.
+When no computer is detected, bounded adapter discovery therefore retains its
+60-second retry. Removing that retry entirely would miss adapters plugged in
+later without a hardware OTG event. Connected adapters retain normal network
+health checks, DHCP recovery and Wi-Fi rescue; these checks do not repeatedly
+switch the USB role. There is no user enable flag. Before testing a role change,
 enable the per-satellite maintenance service described in
 [`ssh-access.md`](ssh-access.md); it provides the diagnostic shell over either
 Wi-Fi or Ethernet when USB serial is absent.
@@ -194,7 +205,8 @@ explicit bounded enumeration-only probe:
 tater-usb-ethernet probe
 ```
 
-That command may temporarily remove USB serial while the port is in host mode.
+That explicit diagnostic command overrides the automatic computer-connection
+guard and may temporarily remove USB serial while the port is in host mode.
 It does not run DHCP or stop Wi-Fi, restores device mode after enumeration, and
 has an independent 60-second restoration watchdog. A new backend must provide
 an equivalent bounded probe before its target can be marked qualified.

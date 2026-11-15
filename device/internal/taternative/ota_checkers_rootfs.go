@@ -28,11 +28,12 @@ type linuxAppFile struct {
 }
 
 type linuxAppManifest struct {
-	Schema  int                     `json:"schema"`
-	Target  string                  `json:"target"`
-	BaseOS  string                  `json:"base_os"`
-	Version string                  `json:"version"`
-	Files   map[string]linuxAppFile `json:"files"`
+	Schema   int                     `json:"schema"`
+	Platform string                  `json:"platform"`
+	Target   string                  `json:"target"`
+	BaseOS   string                  `json:"base_os"`
+	Version  string                  `json:"version"`
+	Files    map[string]linuxAppFile `json:"files"`
 }
 
 type linuxAppPending struct {
@@ -47,6 +48,10 @@ var linuxAppKnownFiles = map[string]bool{
 	"tater-show":          true,
 	"tater-camera":        true,
 	"tater-ffmpeg":        true,
+	"tater-hw-gpu":        true,
+	"tater-hw-vdec":       true,
+	"tater-hw-venc":       true,
+	"tater-hardware.json": true,
 }
 var linuxAppVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$`)
 
@@ -197,7 +202,7 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 			if err := json.NewDecoder(io.LimitReader(archive, header.Size)).Decode(&manifest); err != nil {
 				return manifest, fmt.Errorf("decode Linux application manifest: %w", err)
 			}
-		case "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg", "FFMPEG-LGPL-2.1.txt":
+		case "tater-echo", "tater-show", "tater-camera", "tater-ffmpeg", "FFMPEG-LGPL-2.1.txt", "tater-hw-gpu", "tater-hw-vdec", "tater-hw-venc", "tater-hardware.json":
 			if header.Typeflag != tar.TypeReg || header.Size <= 0 {
 				return manifest, fmt.Errorf("Linux application %s is invalid", name)
 			}
@@ -206,8 +211,11 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 			return manifest, fmt.Errorf("Linux application contains unexpected path %q", header.Name)
 		}
 	}
-	if manifest.Schema != 1 || manifest.Target != target || manifest.BaseOS != "tater-linux" || !linuxAppVersionPattern.MatchString(manifest.Version) {
+	if manifest.Target != target || manifest.BaseOS != "tater-linux" || !linuxAppVersionPattern.MatchString(manifest.Version) {
 		return manifest, errors.New("Linux application identity is incomplete")
+	}
+	if err := validateLinuxOTAPolicy(manifest.Schema, manifest.Platform, target); err != nil {
+		return manifest, err
 	}
 	for name := range found {
 		if _, declared := manifest.Files[name]; !declared {
@@ -221,6 +229,14 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 		optional["tater-camera"] = true
 		optional["tater-ffmpeg"] = true
 		optional["FFMPEG-LGPL-2.1.txt"] = true
+	}
+	if target == "checkers" || target == "cronos" || target == "crown" || target == "rook" {
+		for _, name := range []string{"tater-hw-gpu", "tater-hw-vdec", "tater-hw-venc", "tater-hardware.json"} {
+			optional[name] = true
+		}
+	} else if target == "athena" {
+		optional["tater-hw-gpu"], optional["tater-hardware.json"] = true, true
+		optional["tater-hw-vdec"], optional["tater-hw-venc"] = true, true
 	}
 	allowed := map[string]bool{"tater-echo": true}
 	for _, name := range required[1:] {
@@ -238,6 +254,22 @@ func readLinuxAppManifest(filename, target string) (linuxAppManifest, error) {
 	_, hasDecoderLicense := manifest.Files["FFMPEG-LGPL-2.1.txt"]
 	if hasDecoder != hasDecoderLicense {
 		return manifest, errors.New("Linux application must include the video decoder and its license together")
+	}
+	hardwareCount := 0
+	for _, name := range []string{"tater-hw-gpu", "tater-hw-vdec", "tater-hw-venc", "tater-hardware.json"} {
+		if _, included := manifest.Files[name]; included {
+			hardwareCount++
+		}
+	}
+	expectedHardwareCount := 4
+	if target == "athena" {
+		expectedHardwareCount = 2
+		if _, decoder := manifest.Files["tater-hw-vdec"]; decoder {
+			expectedHardwareCount = 4
+		}
+	}
+	if hardwareCount != 0 && (hardwareCount != expectedHardwareCount || !found["tater-camera"]) {
+		return manifest, errors.New("Linux application must include the complete hardware set and matching camera together")
 	}
 	for _, name := range required {
 		entry, ok := manifest.Files[name]
@@ -458,7 +490,7 @@ func extractLinuxApp(bundle, destination string, manifest linuxAppManifest) erro
 		}
 		target := filepath.Join(destination, name)
 		mode := os.FileMode(0o755)
-		if name == "FFMPEG-LGPL-2.1.txt" {
+		if name == "FFMPEG-LGPL-2.1.txt" || name == "tater-hardware.json" {
 			mode = 0o644
 		}
 		file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
@@ -475,7 +507,7 @@ func extractLinuxApp(bundle, destination string, manifest linuxAppManifest) erro
 		if actual := hex.EncodeToString(hash.Sum(nil)); !strings.EqualFold(actual, entry.SHA256) {
 			return fmt.Errorf("Linux application %s digest mismatch", name)
 		}
-		if name != "FFMPEG-LGPL-2.1.txt" {
+		if name != "FFMPEG-LGPL-2.1.txt" && name != "tater-hardware.json" {
 			if err := verifyELF(target); err != nil {
 				return fmt.Errorf("verify Linux application %s: %w", name, err)
 			}

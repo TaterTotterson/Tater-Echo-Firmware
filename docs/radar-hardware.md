@@ -51,7 +51,39 @@ protection, and limiting then run in the same native software output chain used
 by the screen targets. The route, gain, mute, and full-volume playback path have
 been validated on physical Radar hardware.
 
+### Hardware microphone gain (pending release)
+
+Radar uses the same four TLV320ADC3101 microphone ADCs as Biscuit, despite its
+different speaker codec/amplifier. The new shared capture profile sets each
+stereo microphone PGA to `80,80` (+40 dB), requires ADC digital volume `88,88`
+(unity), and disables the previous +40 dB software boost. Both channels of
+every control are verified before capture starts; missing/mismatched controls
+stop startup rather than leaving unexpectedly quiet or doubled-gain audio.
+Failed writes attempt restoration of every affected PGA's original values.
+Radar's speaker routes, amplifier gates and EQ are unchanged.
+
+DOA/VAD retain the previous total-gain calibration; no extra boost is applied
+to the playback reference. Legacy environment or controller gain values cannot
+reenable software amplification. See [Biscuit's gain-staging notes](biscuit-hardware.md#hardware-microphone-gain-pending-release)
+for the vendor digital-volume metadata quirk and why a manual downgrade must
+include a reboot. Supported OTA and fast-failure rollback already reboot.
+
+This is prepared source, not an installed Radar result. Biscuit's owner-operated
+trial passed, but Radar still needs its own normal/quiet/close speech,
+first-word, reply-interruption, mute and loud-playback/headroom checks before
+release, followed by the planned fleet OTA test.
+
 ## Privacy LED and inputs
+
+The pending application recognizes the same verified 80 Hz hardware filter
+interface as Biscuit. The normal release workflow now builds Radar's own kernel
+with that profile enabled by default, using Radar's config/device trees and
+the shared hash-locked overlay; older kernels continue using software filtering.
+The boot-time opt-out is `snd_soc_tlv320aic3101.tater_hpf80=0`.
+Radar has not had this kernel installed or physically qualified. Packaging
+remains blocked until its checks pass; do not copy Biscuit boot images or infer
+a Radar pass from matching public codec source. Application and System OTA v1
+do not install this kernel. See [Biscuit's filter notes](biscuit-hardware.md#hardware-high-pass-pending-release).
 
 Fire OS 6 owns the privacy line through
 `/sys/devices/soc/10010000.keypad/amz_privacy`. The red mic-off LED is

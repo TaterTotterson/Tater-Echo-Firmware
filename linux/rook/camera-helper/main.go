@@ -56,8 +56,10 @@ func main() {
 	}
 	server := &http.Server{ReadHeaderTimeout: 2 * time.Second}
 	http.HandleFunc("/health", health)
+	http.HandleFunc("/capabilities", cameraCapabilities)
 	http.HandleFunc("/snapshot", snapshot)
 	http.HandleFunc("/stream", stream)
+	http.HandleFunc("/stream.h264", streamH264)
 	go func() {
 		<-ctx.Done()
 		shutdown, stop := context.WithTimeout(context.Background(), 3*time.Second)
@@ -149,7 +151,7 @@ func stream(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	device := camera.Get()
-	release, err := device.Acquire()
+	release, err := device.AcquireTaterLiveVideo()
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusServiceUnavailable)
 		return

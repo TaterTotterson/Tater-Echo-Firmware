@@ -134,6 +134,9 @@ func (c *Client) SatChatAudioStatus() map[string]any {
 
 func (c *Client) setSatChatActive(active bool) bool {
 	wasActive := c.satChatActive.Swap(active)
+	if wasActive && !active {
+		c.drainVideoOutgoing()
+	}
 	c.satChatGateMu.Lock()
 	c.satChatGateGain = 1
 	c.satChatSpeechHold = 0

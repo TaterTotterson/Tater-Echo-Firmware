@@ -18,6 +18,52 @@ USB_INVENTORY = ROOT / "linux" / "common" / "tater-usb-inventory"
 
 
 class BuildScriptTests(unittest.TestCase):
+    def test_release_cannot_bypass_the_actual_v423_ota_rejection_gate(self):
+        workflow = RELEASE_WORKFLOW.read_text()
+        self.assertIn('python3 -m tools.check_legacy_ota', workflow)
+        self.assertIn('needs: [onnxruntime-armv7, ota-compatibility]', workflow)
+        self.assertEqual(workflow.count('needs: [onnxruntime-armv7, ffmpeg-armv7, ota-compatibility]'), 3)
+
+    def test_rook_renderer_is_linked_for_its_own_gpu_target(self) -> None:
+        script = (ROOT / "linux/rook/build_linux.sh").read_text()
+        self.assertIn("-X main.target=rook", script)
+        self.assertIn("-e GOMODCACHE=/root/go/pkg/mod", script)
+
+    def test_rook_camera_build_uses_held_slots_and_restores_pinned_driver(self) -> None:
+        script = (ROOT / "linux/rook/build_camera_helper.sh").read_text()
+        self.assertIn('camera-helper/tater_capture_slots_spot.go', script)
+        self.assertIn('apply --check "$script_dir/camera-helper/held_slots.patch"', script)
+        self.assertIn('trap restore_driver EXIT HUP INT TERM', script)
+        hook = (ROOT / "linux/rook/camera-helper/held_slots.patch").read_text()
+        self.assertIn("d.taterStreamHeldBuffers(stop, frame)", hook)
+
+    def test_rook_camera_build_tests_live_exposure_hooks_before_restoring_driver(self) -> None:
+        script = (ROOT / "linux/rook/build_camera_helper.sh").read_text()
+        self.assertIn('camera-helper/tater_live_exposure_spot.go', script)
+        self.assertIn('apply --check "$script_dir/camera-helper/live_exposure.patch"', script)
+        self.assertIn('TATER_CAMERA_TEST:-0', script)
+        self.assertIn('go test -race -count=1', script)
+        self.assertLess(script.index('apply "$script_dir/camera-helper/live_exposure.patch"'),
+                        script.index('go test -race -count=1'))
+        hook = (ROOT / "linux/rook/camera-helper/live_exposure.patch").read_text()
+        self.assertIn('d.taterAutoExpose(raw)', hook)
+        self.assertIn('taterLiveExposure bool', hook)
+
+    def test_show_builder_uses_its_mounted_module_cache(self) -> None:
+        script = (ROOT / "linux/checkers/build_linux.sh").read_text()
+        self.assertIn('-e GOMODCACHE=/root/go/pkg/mod', script)
+        self.assertIn('-v "$cache_root/go-mod:/root/go/pkg/mod"', script)
+
+    def test_dot_builder_uses_its_mounted_module_cache(self) -> None:
+        script = DOT_BUILD_SCRIPT.read_text()
+        self.assertIn('-e GOMODCACHE=/root/go/pkg/mod', script)
+        self.assertIn('-v "$cache_root/go-mod:/root/go/pkg/mod"', script)
+
+    def test_dot_factory_builds_a_static_readonly_early_key_helper(self) -> None:
+        script = DOT_BUILD_SCRIPT.read_text()
+        self.assertIn('-o build/dot/tater-volume-up ./cmd/tater-volume-up', script)
+        self.assertIn('CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7', script)
+
     def test_linux_armv7_onnxruntime_uses_verified_release_seed(self) -> None:
         script = ORT_BUILD_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("tater-echo-checkers-v2.2.0-onnxruntime.so", script)
@@ -39,6 +85,7 @@ class BuildScriptTests(unittest.TestCase):
         for script in (
             ORT_BUILD_SCRIPT,
             DOT_BUILD_SCRIPT,
+            ROOT / "linux/dot/tater-early-recovery",
             ROOT / "linux/checkers/build_linux.sh",
             ROOT / "linux/rook/build_linux.sh",
             ROOT / "device/tools/build_tools.sh",
@@ -328,6 +375,10 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("--target '${{ matrix.target }}'", show_job)
         self.assertIn("staging/crown/firmware-manifest.json", workflow)
         self.assertIn("staging/cronos/firmware-manifest.json", workflow)
+        self.assertIn("CROWN_HARDWARE_BUNDLE_URL: ${{ vars.TATER_CROWN_HARDWARE_BUNDLE_URL }}", show_job)
+        self.assertIn('crown) HARDWARE_BUNDLE_URL="$CROWN_HARDWARE_BUNDLE_URL" ;;', show_job)
+        self.assertIn('"crown": require_crown_hardware_platform', show_job)
+        self.assertIn("|| '${{ matrix.target }}' == crown ]]; then", show_job)
         show_build = (ROOT / "linux/checkers/build_linux.sh").read_text(encoding="utf-8")
         self.assertIn("-X main.target=$TATER_TARGET", show_build)
 

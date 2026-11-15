@@ -93,7 +93,7 @@ func linuxAppBundleWithVersionAndExtras(t *testing.T, target, baseOS, version st
 	for name, contents := range manifestExtra {
 		files[name] = []byte(contents)
 	}
-	manifest := linuxAppManifest{Schema: 1, Target: target, BaseOS: baseOS, Version: version, Files: map[string]linuxAppFile{}}
+	manifest := linuxAppManifest{Schema: linuxOTASchema, Platform: linuxOTAPlatform(target), Target: target, BaseOS: baseOS, Version: version, Files: map[string]linuxAppFile{}}
 	for name, contents := range files {
 		digest := sha256.Sum256(contents)
 		manifest.Files[name] = linuxAppFile{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(contents))}
@@ -157,6 +157,84 @@ func TestReadLinuxAppManifest(t *testing.T) {
 	}
 	if manifest.Version != "v2.0.0-test" {
 		t.Fatalf("version = %q", manifest.Version)
+	}
+}
+
+func hardwareAppExtras(label string) map[string]string {
+	return map[string]string{
+		"tater-hw-gpu": "\x7fELFgpu-" + label, "tater-hw-vdec": "\x7fELFvdec-" + label,
+		"tater-hw-venc": "\x7fELFvenc-" + label, "tater-camera": "\x7fELFcamera-" + label,
+		"tater-hardware.json": `{"schema":1,"target":"checkers"}`,
+	}
+}
+
+func TestHardwareAppSetIsAtomicAndTargetGated(t *testing.T) {
+	for _, target := range []string{"checkers", "crown", "cronos", "athena", "rook", "biscuit", "radar"} {
+		for _, partial := range []bool{false, true} {
+			extra := hardwareAppExtras("test")
+			if partial {
+				delete(extra, "tater-hw-venc")
+			}
+			bundle := writeLinuxAppBundle(t, linuxAppBundle(t, target, "tater-linux", extra))
+			_, err := readLinuxAppManifest(bundle, target)
+			if (err == nil) != ((target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook") && !partial) {
+				t.Fatalf("target=%s partial=%t: %v", target, partial, err)
+			}
+		}
+	}
+}
+
+func TestAthenaGPUOnlyAndPairedAPAppInventoriesRemainAtomic(t *testing.T) {
+	for _, mode := range []string{"complete", "ap_pair", "missing_helper", "missing_metadata", "partial_codec"} {
+		t.Run(mode, func(t *testing.T) {
+			extra := map[string]string{"tater-camera": "native-camera", "tater-hw-gpu": "native-mesa-helper", "tater-hardware.json": `{"schema":1,"target":"athena"}`}
+			switch mode {
+			case "missing_helper":
+				delete(extra, "tater-hw-gpu")
+			case "missing_metadata":
+				delete(extra, "tater-hardware.json")
+			case "ap_pair":
+				extra["tater-hw-vdec"], extra["tater-hw-venc"] = "pinned-at-runtime-ap-decoder", "pinned-at-runtime-ap-encoder"
+			case "partial_codec":
+				extra["tater-hw-vdec"] = "unsupported"
+			}
+			_, err := readLinuxAppManifest(writeLinuxAppBundle(t, linuxAppBundleWithVersionAndExtras(t, "athena", "tater-linux", "v4.2.3", extra, extra)), "athena")
+			if (err == nil) != (mode == "complete" || mode == "ap_pair") {
+				t.Fatal(mode, err)
+			}
+		})
+	}
+}
+
+func TestHardwareHelpersRemainInOwningApplicationSlots(t *testing.T) {
+	state := t.TempDir()
+	for index, label := range []string{"old", "new"} {
+		if index == 1 {
+			if err := os.Remove(filepath.Join(state, "app/pending.env")); err != nil {
+				t.Fatal(err) // Simulate the old slot's completed health commit.
+			}
+		}
+		version := "v4.2." + strconv.Itoa(index)
+		bundle := writeLinuxAppBundle(t, linuxAppBundleWithVersionAndExtras(t, "checkers", "tater-linux", version, hardwareAppExtras(label), hardwareAppExtras(label)))
+		manifest, err := readLinuxAppManifest(bundle, "checkers")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := installLinuxAppBundle(bundle, state, manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for slot, label := range map[string]string{"a": "old", "b": "new"} {
+		for _, name := range []string{"tater-hw-gpu", "tater-hw-vdec", "tater-hw-venc", "tater-camera"} {
+			contents, err := os.ReadFile(filepath.Join(state, "app/slots", slot, name))
+			if err != nil || !strings.HasSuffix(string(contents), label) {
+				t.Fatalf("helper lost slot identity: %s/%s %v", slot, name, err)
+			}
+		}
+	}
+	pending, err := os.ReadFile(filepath.Join(state, "app/pending.env"))
+	if err != nil || !strings.Contains(string(pending), "previous=a\nnew=b\n") {
+		t.Fatalf("hardware rollback does not retain original slot: %s %v", pending, err)
 	}
 }
 
@@ -419,11 +497,12 @@ func TestInstallDispatchesCheckersLinuxAppBundle(t *testing.T) {
 	restarted := make(chan struct{}, 1)
 	stateDir := t.TempDir()
 	installer := &OTAInstaller{
-		Target:   "checkers",
-		HTTP:     server.Client(),
-		StateDir: stateDir,
-		BaseOS:   func() string { return platform.TaterLinux },
-		Restart:  func() { restarted <- struct{}{} },
+		Target:       "checkers",
+		PlatformFile: writeOTAPlatform(t, "checkers"),
+		HTTP:         server.Client(),
+		StateDir:     stateDir,
+		BaseOS:       func() string { return platform.TaterLinux },
+		Restart:      func() { restarted <- struct{}{} },
 	}
 	err := installer.Install(context.Background(), OTARequest{
 		URL: server.URL, SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(len(payload)),
@@ -451,7 +530,8 @@ func TestInstallDispatchesRookLinuxAppBundle(t *testing.T) {
 	stateDir := t.TempDir()
 	installer := &OTAInstaller{
 		Target: "rook", HTTP: server.Client(), StateDir: stateDir,
-		BaseOS: func() string { return platform.TaterLinux },
+		PlatformFile: writeOTAPlatform(t, "rook"),
+		BaseOS:       func() string { return platform.TaterLinux },
 	}
 	if err := installer.Install(context.Background(), OTARequest{
 		URL: server.URL, SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(len(payload)),

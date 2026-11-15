@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "target": "cronos",
+  "bundle_id": "cronos-hardware-20261113.4",
+  "ndk_properties_sha256": "f60a3592fa8ee5a77759aa6855d91def4cc8f774dc31137becf65f0a34374ad2",
+  "headers": {
+    "android_frameworks_native": "dd2ce3e0509deeeb3344f047d09b8661b360a968",
+    "android_hardware_libhardware": "b5288579191c94da0ce1814dee0136eb49eec9ae",
+    "android_system_core": "2b5b9169a441f0ecb34651f146f37411a0a77c13"
+  },
+  "helpers": {
+    "tater-hw-gpu": "ce71abcc445a903b37113aecfdb0514835e00def9555220a5dbae29e71806f0b",
+    "tater-hw-vdec": "b6f9cf50e7a05aec9cf3a0cfaaee9277d0e16d8c81eda61662c6dc0331577f2d",
+    "tater-hw-venc": "29bf2acbd3d2d2e0c69af6111d9a15d5c32404a0a9a6f1be5d4581d819d7cecc"
+  },
+  "link_libraries": {},
+  "sources": {
+    "scripts/build_tater_hardware.py": "f31678e41b1b4977050fc95c833be5300da92bd86a450dce5bd254b72df96c98",
+    "probes/mt8163-gpu/Makefile": "b9026fd0abebfedcaf57e2f36458eb286fd677ccfd9f0ef6079966abc5be334a",
+    "probes/mt8163-gpu/rgba_rotate_stream_android.c": "a7a181aced8f31f91dbafd35dd777393bbb68a9cef65876d9de086e5f656ccc9",
+    "probes/mt8163-gpu/cronos_target.h": "e5789fd9b5dca7d03f7dff4e74a841c29c4601089e2245688cc038a87e61d742",
+    "probes/mt8163-vcodec/Makefile": "e247dba378190246caae2df73e210a052329abd2a1e33a2c97da3981c5050049",
+    "probes/mt8163-vcodec/omx_probe_android.c": "51e7d38c628779c639e14e0e3f6e766a0a654685ef26aca6ab797b2e13c6ec8e",
+    "probes/mt8163-vcodec/omx_probe_android.h": "c39310ed3a288fd8d7524f3df42ecd18c1a9de58d35bcc243235779cae007e0b",
+    "probes/mt8163-vcodec/tater_vdec_android.c": "49f191f883360e04f476133c984f745a47894e118154c71e1a54acc99d77e9d4",
+    "probes/mt8163-vcodec/tater_vdec_android.h": "60a3fb46514ed7b0f34c28cb970f244152bb9255b9a4ef9f94fa4ff06a76c7ac",
+    "probes/mt8163-vcodec/tater_vdec_main_android.c": "3bd9b64684c98ec342b3aed27de320cbdea232f317a1638066f45ebf8cc3f7e0",
+    "probes/mt8163-vcodec/cronos_linear_rgba.h": "5aa1321a9774a9abb209f234a8111ef1833cc24451cbea2aa1fff506cad3ff44",
+    "probes/mt8163-vcodec/cronos_venc_android.c": "769a5f4db18b1725671f9fc387d4a237a2144a88c891f4be233de3d421e932eb",
+    "probes/mt8163-vcodec/planar_chroma.h": "8c454955444537acebe2427b27257d40abb1b798155bb42770eb7280316b8dfc",
+    "probes/mt8163-vcodec/cronos_bayer10.c": "bd0ff74a31f3d6492aefa8484db1ae1297ff60435dac2033ae15c890f092767c",
+    "probes/mt8163-vcodec/cronos_bayer10.h": "75c8805afbf41e62b1f4258f0ddb840bf48236b2f5d69e8dad38433f44d7c9db",
+    "probes/mt8163-vcodec/bayer10_scaled.h": "43c170dc3f9659981bd4b8b68464ffc2fb2cedcb3c4969d824897c6f3292d361"
+  }
+}

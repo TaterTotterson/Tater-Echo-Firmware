@@ -1,0 +1,65 @@
+#!/bin/sh
+# Original AP adapters only. Failure leaves ordinary GPU/software media usable.
+set -eu
+test "$(uname -r)" = 6.18.56-techo5-athena
+test "$(uname -v)" = '#1 SMP PREEMPT 2026-11-14 10:00:00 UTC'
+tr '\000' '\n' < /proc/device-tree/compatible | grep -qx amzn,athena
+test -s /data/tater-athena-codec/runtime.json
+test -s /data/tater-athena-codec/omx-lib/runtime.json
+for module in athena_ap athena_ap_vdec mtk_vcodec_enc mtk_vcodec_dec; do
+    test ! -e /sys/module/$module
+done
+directory=/usr/lib/tater-athena-codecs
+test ! -L "$directory"
+for module in athena_ap athena_ap_vdec mtk_rpmsg mtk_scp_ipi mtk_scp; do
+    test -f "$directory/$module.ko"
+    test ! -L "$directory/$module.ko"
+done
+test "$(sha256sum "$directory/athena_ap.ko" | cut -d' ' -f1)" = 9e0aab9b6c5e67b67e1e9aa65848ea43a0eec44cbb18db0b5b4433de72d6ab6d
+test "$(sha256sum "$directory/athena_ap_vdec.ko" | cut -d' ' -f1)" = cfe87de8eb584e36d9d397ab367b836a2fcf1bf6ef5fdf3f5212db93c43f99f3
+test "$(sha256sum "$directory/mtk_rpmsg.ko" | cut -d' ' -f1)" = d1694cf1513d8c436d9fd3e368f8c14fcaa2b96e1a883d18696240019f1a9db9
+test "$(sha256sum "$directory/mtk_scp_ipi.ko" | cut -d' ' -f1)" = 5892c86448b429c571474b3a7a92acf52d88b5e85578ff20cee6546ff9ad988e
+test "$(sha256sum "$directory/mtk_scp.ko" | cut -d' ' -f1)" = d7dd1b23992b594b0ac05d9e54fdcf5583edd61dcc9c1029036cfdf6f219d7f4
+encoder_loaded=
+decoder_loaded=
+scp_loaded=
+ipi_loaded=
+rpmsg_loaded=
+cleanup() {
+    test -z "$decoder_loaded" || rmmod athena_ap_vdec
+    test -z "$encoder_loaded" || rmmod athena_ap
+    test -z "$scp_loaded" || rmmod mtk_scp
+    test -z "$ipi_loaded" || rmmod mtk_scp_ipi
+    test -z "$rpmsg_loaded" || rmmod mtk_rpmsg
+}
+trap cleanup EXIT
+trap 'exit 143' HUP INT TERM
+# A normal boot has no remoteproc instance until its driver is loaded. Use
+# the exact previously qualified adapter to hold SCP in reset, with automatic
+# boot/recovery disabled. Never start it, and refuse an already-active SCP.
+if [ ! -e /sys/class/remoteproc/remoteproc0/state ]; then
+    test ! -e /sys/module/mtk_scp
+    test ! -e /sys/bus/platform/devices/10500000.scp/driver
+    for entry in mtk_rpmsg mtk_scp_ipi; do
+        if [ ! -e /sys/module/$entry ]; then
+            insmod "$directory/$entry.ko"
+            case "$entry" in mtk_rpmsg) rpmsg_loaded=1;; mtk_scp_ipi) ipi_loaded=1;; esac
+        fi
+    done
+    insmod "$directory/mtk_scp.ko" athena_trial=1
+    scp_loaded=1
+    test "$(cat /sys/module/mtk_scp/parameters/athena_trial)" = Y
+fi
+test "$(cat /sys/class/remoteproc/remoteproc0/state)" = offline
+insmod "$directory/athena_ap.ko" allow_ap_trial=1 allow_encoder_mmio=1
+encoder_loaded=1
+insmod "$directory/athena_ap_vdec.ko" allow_ap_trial=1 allow_decoder_mmio=1
+decoder_loaded=1
+mdev -s
+test -c /dev/tater-athena-ap-venc
+test -c /dev/tater-athena-ap-vdec
+# Only a matched boot creates this ephemeral, root-owned marker. Each helper
+# still independently verifies the entire private runtime before hardware use.
+umask 077
+printf '%s\n' 'athena-ap-live-20261114.2' > /run/tater-athena-ap.ready
+trap - EXIT HUP INT TERM

@@ -26,7 +26,7 @@ func linuxSystemBundle(t *testing.T, target, version string, rootfs []byte, decl
 	}
 	digest := sha256.Sum256(declared)
 	manifest := linuxSystemManifest{
-		Schema: 1, Kind: "tater-linux-rootfs", Target: target,
+		Schema: linuxOTASchema, Platform: linuxOTAPlatform(target), Kind: "tater-linux-rootfs", Target: target,
 		BaseOS: platform.TaterLinux, Version: version,
 		RootFS: linuxAppFile{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(declared))},
 	}
@@ -121,7 +121,8 @@ func TestSystemOTAStagesRootFSAndRestarts(t *testing.T) {
 	var staged []byte
 	restarted := make(chan struct{}, 1)
 	installer := &OTAInstaller{
-		HTTP: server.Client(), Target: "crown", StateDir: t.TempDir(),
+		PlatformFile: writeOTAPlatform(t, "crown"),
+		HTTP:         server.Client(), Target: "crown", StateDir: t.TempDir(),
 		BaseOS: func() string { return platform.TaterLinux },
 		InstallRootFS: func(_ context.Context, filename string) error {
 			var err error

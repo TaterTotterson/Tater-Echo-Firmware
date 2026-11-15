@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: $0 --version vX.Y.Z --target checkers|cronos|crown|athena --base-rootfs FILE --platform DIR --ffmpeg FILE --ffmpeg-license FILE [--output FILE]" >&2
+    echo "usage: $0 --version vX.Y.Z --target checkers|cronos|crown|athena --base-rootfs FILE --platform DIR --ffmpeg FILE --ffmpeg-license FILE [--hardware-bundle DIR] [--mesa-runtime DIR] [--athena-codec-bundle DIR --kernel-image FILE] [--output FILE]" >&2
     exit 2
 }
 
@@ -13,6 +13,10 @@ platform_source=
 ffmpeg=
 ffmpeg_license=
 output=
+hardware_bundle=${TATER_CHECKERS_HARDWARE_BUNDLE:-}
+mesa_runtime=${TATER_ATHENA_MESA_RUNTIME:-}
+athena_codecs=
+kernel_image=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
@@ -22,6 +26,10 @@ while [ "$#" -gt 0 ]; do
         --ffmpeg) [ "$#" -ge 2 ] || usage; ffmpeg=$2; shift 2 ;;
         --ffmpeg-license) [ "$#" -ge 2 ] || usage; ffmpeg_license=$2; shift 2 ;;
         --output) [ "$#" -ge 2 ] || usage; output=$2; shift 2 ;;
+        --hardware-bundle) [ "$#" -ge 2 ] || usage; hardware_bundle=$2; shift 2 ;;
+        --mesa-runtime) [ "$#" -ge 2 ] || usage; mesa_runtime=$2; shift 2 ;;
+        --athena-codec-bundle) [ "$#" -ge 2 ] || usage; athena_codecs=$2; shift 2 ;;
+        --kernel-image) [ "$#" -ge 2 ] || usage; kernel_image=$2; shift 2 ;;
         *) usage ;;
     esac
 done
@@ -40,6 +48,42 @@ esac
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 device=$repo/device
+if [ "$target" = checkers ] || [ "$target" = cronos ] || [ "$target" = crown ]; then
+    if [ -z "$hardware_bundle" ]; then
+        # Build from explicitly provided owner-local inputs. No vendor download
+        # or guessed GitHub source/release is permitted.
+        : "${TATER_HARDWARE_SOURCE:?set TATER_CHECKERS_HARDWARE_BUNDLE or TATER_HARDWARE_SOURCE}"
+        : "${TATER_HARDWARE_NDK:?set the pinned Android NDK r21e directory}"
+        : "${TATER_HARDWARE_HEADERS:?set the pinned public header checkout parent}"
+        : "${TATER_HARDWARE_LINK_LIBRARIES:?set the reviewed owner-local link library directory}"
+        hardware_build=$(mktemp -d "${TMPDIR:-/tmp}/tater-checkers-hardware.XXXXXX")
+        hardware_bundle=$hardware_build/public
+        python3 "$repo/tools/hardware_bundle.py" build \
+            --target "$target" \
+            --source "$TATER_HARDWARE_SOURCE" --ndk "$TATER_HARDWARE_NDK" \
+            --headers "$TATER_HARDWARE_HEADERS" --link-libraries "$TATER_HARDWARE_LINK_LIBRARIES" \
+            --output "$hardware_bundle"
+    fi
+    hardware_bundle=$(CDPATH= cd -- "$hardware_bundle" && pwd)
+    python3 "$repo/tools/hardware_bundle.py" verify "$hardware_bundle" --target "$target"
+elif [ "$target" = athena ] && [ -n "$hardware_bundle" ]; then
+    hardware_bundle=$(CDPATH= cd -- "$hardware_bundle" && pwd)
+    python3 "$repo/tools/hardware_bundle.py" verify "$hardware_bundle" --target athena
+fi
+if [ -n "$mesa_runtime" ]; then
+    [ "$target" = athena ] && [ -n "$hardware_bundle" ] || { echo "Mesa requires Athena and its matching helper bundle" >&2; exit 1; }
+    mesa_runtime=$(CDPATH= cd -- "$mesa_runtime" && pwd)
+    python3 "$repo/tools/athena_mesa.py" "$mesa_runtime"
+fi
+if [ -n "$athena_codecs" ]; then
+    [ "$target" = athena ] && [ -n "$kernel_image" ] || { echo "AP codecs require Athena and their matching kernel template" >&2; exit 1; }
+    athena_codecs=$(CDPATH= cd -- "$athena_codecs" && pwd)
+    kernel_image=$(CDPATH= cd -- "$(dirname "$kernel_image")" && pwd)/$(basename "$kernel_image")
+    python3 "$repo/tools/athena_codec_bundle.py" verify "$athena_codecs" --kernel-image "$kernel_image"
+elif [ -n "$kernel_image" ]; then
+    echo "custom kernel templates require an explicit matching Athena AP codec bundle" >&2
+    exit 1
+fi
 base_rootfs=$(CDPATH= cd -- "$(dirname "$base_rootfs")" && pwd)/$(basename "$base_rootfs")
 platform_source=$(CDPATH= cd -- "$platform_source" && pwd)
 ffmpeg=$(CDPATH= cd -- "$(dirname "$ffmpeg")" && pwd)/$(basename "$ffmpeg")
@@ -80,6 +124,7 @@ docker run --rm --platform linux/arm/v7 \
     -e TATER_TARGET="$target" \
     -e GOTOOLCHAIN=local \
     -e GOFLAGS=-buildvcs=false \
+    -e GOMODCACHE=/root/go/pkg/mod \
     -e SOURCE_DATE_EPOCH="$source_date_epoch" \
     -v "$repo:/src" \
     -v "$cache_root/go-build:/root/.cache/go-build" \
@@ -131,7 +176,7 @@ cp "$tiny" build/tater-linux-libs/libtinyalsa.so.2.0.0
 python3 "$script_dir/build_rescue_fbprobe.py" "$platform_source" "$device/build/tater-rescue-fbprobe"
 kernel_args=
 if [ "$target" = athena ]; then
-    kernel_image=$repo/linux/athena/inputs/tater-echo-athena-kernel-boot.img
+    kernel_image=${kernel_image:-$repo/linux/athena/inputs/tater-echo-athena-kernel-boot.img}
     [ -f "$kernel_image" ] || { echo "pinned Athena boot image is missing: $kernel_image" >&2; exit 1; }
     (
         cd "$platform_source/echod"
@@ -156,7 +201,11 @@ for required in \
     [ -f "$required" ] || { echo "required model is missing: $required" >&2; exit 1; }
 done
 
-python3 "$script_dir/build_rootfs.py" \
+set --
+[ -z "$hardware_bundle" ] || set -- --hardware-bundle "$hardware_bundle"
+[ -z "$mesa_runtime" ] || set -- "$@" --mesa-runtime "$mesa_runtime"
+[ -z "$athena_codecs" ] || set -- "$@" --athena-codec-bundle "$athena_codecs"
+python3 "$script_dir/build_rootfs.py" "$@" \
     --target "$target" \
     --base-rootfs "$base_rootfs" \
     --server "$device/build/tater-echo" \

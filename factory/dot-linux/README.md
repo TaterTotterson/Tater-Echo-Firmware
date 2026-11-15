@@ -68,14 +68,23 @@ several compatible devices are connected, select one explicitly, for example
 `py -3 to_recovery.py --port COM3` on Windows. If Linux reports permission
 denied, close any serial terminal and run `sudo python3 to_recovery.py`.
 
-Without a computer command, begin holding **Volume Up** before powering on or
-restarting and keep it held for five continuous seconds during the first 90
-seconds of Tater Linux startup. A current factory install then enters TWRP.
-Because Biscuit and Radar normally run Linux from the same recovery partition,
-the device-specific handoff image verifies and restores Linux to that partition
-while TWRP remains active in RAM. Leaving TWRP therefore returns to Linux on
-the next boot. An installation without the current handoff image continues its
-normal boot; Volume Up no longer falls back to Tater Recovery.
+The new factory boot image checks **Volume Up** in its small initramfs, before
+loading either main system slot, Wi-Fi, audio, or Tater. Hold Volume Up before
+powering on and keep holding through the early three-second confirmation. It
+verifies the board identity, the saved Linux/TWRP/handoff image checksums and
+the current recovery image before using the automatic-return TWRP handoff.
+This starts the initial Linux kernel and reboots once into TWRP; it does not
+wait for the main Linux system or Tater application to start. While TWRP runs
+from RAM, the existing handoff restores Linux so the next restart returns to
+Tater. Keep power connected throughout this recovery-image swap.
+
+This early route needs the new **USB factory upgrade**; application/System OTA
+does not install it. Old boot images retain their existing late Volume Up
+gesture: a five-second hold during the first 90 seconds of Tater startup arms
+Tater Recovery. That late fallback also remains available when an early
+handoff is refused. Missing/corrupt cache images or an unbootable kernel still
+require the matching lower-level amonet/TWRP recovery procedure. The new route
+must pass physical cold-boot/recovery checks on each model before release.
 
 Once the USB recovery console appears, repair the inactive root slot with:
 
@@ -87,7 +96,8 @@ On Windows use `py -3 install.py --repair`. This keeps Wi-Fi, pairing, room,
 and satellite settings. Add `--factory-reset` only to clear those settings and
 return to setup mode.
 
-The USB `to_recovery.py` route is the explicit way to enter Tater Recovery for
-routine root-slot repair. `to_twrp.py` remains the explicit lower-level TWRP
-route. If Linux cannot start far enough to accept either helper or the button
-gesture, use the matching amonet/TWRP entry procedure.
+The USB `to_recovery.py` route provides the same one-boot Tater Recovery path.
+`to_twrp.py` remains the explicit lower-level TWRP route and restores the
+verified handoff image while TWRP runs from RAM. If Linux cannot start far
+enough to accept either helper or the button gesture, use the matching
+amonet/TWRP entry procedure.

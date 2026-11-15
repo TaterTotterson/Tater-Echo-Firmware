@@ -15,7 +15,7 @@ import tempfile
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from tools import platform_lock  # noqa: E402
+from tools import hardware_bundle, platform_lock  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "checkers"))
 import build_rootfs as common  # noqa: E402 - shared, hardware-neutral Tater scripts
@@ -29,6 +29,10 @@ BASE_SHA256 = PLATFORM["rootfs"]["sha256"]
 def build(args: argparse.Namespace) -> None:
     if common.sha256(args.base_rootfs) != BASE_SHA256:
         raise SystemExit(f"base rootfs is not signed TECHO5 Spot {BASE_VERSION}")
+    bundle = getattr(args, "hardware_bundle", None)
+    if bundle is None:
+        raise SystemExit("Rook requires its locked public hardware helper bundle")
+    hardware_bundle.verify(bundle, target="rook")
     with tempfile.TemporaryDirectory(prefix="tater-rook-rootfs-") as temporary:
         root = Path(temporary) / "root"
         root.mkdir()
@@ -53,6 +57,9 @@ def build(args: argparse.Namespace) -> None:
         common.copy(args.show, root / "usr/local/bin/tater-show", 0o755)
         common.copy(args.reboot, root / "usr/local/bin/tater-reboot-now", 0o755)
         common.copy(args.camera, root / "usr/local/bin/tater-camera", 0o755)
+        for name in (*hardware_bundle.helper_names("rook"), hardware_bundle.MANIFEST):
+            common.copy(bundle / name, root / "usr/local/bin" / name,
+                        0o644 if name == hardware_bundle.MANIFEST else 0o755)
         common.copy(args.ffmpeg, root / "usr/local/bin/tater-ffmpeg", 0o755)
         common.copy(args.mww_runtime, root / "usr/share/tater/microwakeword/libtater_microwakeword.so", 0o755)
         common.copy(args.onnx_runtime, root / "usr/share/tater/microwakeword/libonnxruntime.so", 0o755)
@@ -84,6 +91,8 @@ def build(args: argparse.Namespace) -> None:
                     root / "usr/local/sbin/tater-ssh-authorize", 0o755)
         common.copy(Path(__file__).parents[1] / "common/tater-ssh-control",
                     root / "usr/local/sbin/tater-ssh-control", 0o755)
+        common.copy(Path(__file__).parents[1] / "common/tater-recovery-router",
+                    root / "usr/local/sbin/tater-recovery-router", 0o755)
         common.ensure_tater_ssh_group(root)
         common.ensure_video_decoder_user(root)
         for name in ("libtinyalsa.so", "libtinyalsa.so.2"):
@@ -107,11 +116,13 @@ def build(args: argparse.Namespace) -> None:
         common.write(root / "usr/local/sbin/tater-app", common.TATER_APP, 0o755)
         common.write(root / "etc/hostname", "tater-rook\n")
         common.write(root / "etc/motd", "Tater Linux for Echo Spot (Rook).\n"
-                     "Root filesystems use A/B slots; state is on /data and recovery is TWRP.\n")
+                     "Root filesystems use A/B slots; state is on /data.\n"
+                     "Volume Up enters TWRP; to_recovery.py explicitly enters Tater Recovery.\n")
         common.write(root / "usr/lib/os-release",
                      common.OS_RELEASE.format(version=args.version, target="Rook"))
         release = f"Tater Linux Rook {args.version} (TECHO5 Spot platform {BASE_VERSION})\n"
         common.write(root / "etc/tater-release", release)
+        common.write(root / "etc/tater-ota-platform", "echo-hardware-v1/rook\n")
         common.write(root / "etc/techo5-release", release)
         common.write(root / "usr/share/licenses/tater-linux/TECHO5-SPOT-LICENSE",
                      args.techo5_spot_license.read_text())
@@ -144,6 +155,7 @@ def main() -> int:
                  "techo5-lib", "techo5-spot-license", "techo5-license", "ffmpeg-license", "apk-cache", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--hardware-bundle", type=Path, required=True)
     build(parser.parse_args())
     return 0
 

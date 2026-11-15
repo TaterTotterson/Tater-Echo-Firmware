@@ -1,8 +1,8 @@
 #!/bin/sh
 # Automatically prefer a usable USB Ethernet adapter without sacrificing the
-# device's Wi-Fi recovery path. Biscuit and the Rook candidate perform a
-# bounded MediaTek role probe; the other satellites passively watch for a
-# USB-network interface until their board-specific role/VBUS controls have
+# device's Wi-Fi recovery path. Biscuit and Rook perform a bounded MediaTek
+# role probe only when no computer connection is present. Other satellites
+# watch for a USB-network interface until their board-specific role/VBUS controls have
 # been qualified on hardware.
 set -u
 PATH=${TATER_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
@@ -10,7 +10,8 @@ export PATH
 
 DATA=${TATER_DATA_DIR:-/data/tater-linux}
 RUN=${TATER_RUN_DIR:-/run}
-SYS_NET=${TATER_SYS_NET:-/sys/class/net}
+SYS_ROOT=${TATER_SYS_ROOT:-/sys}
+SYS_NET=${TATER_SYS_NET:-$SYS_ROOT/class/net}
 PROC=${TATER_PROC_DIR:-/proc}
 MCHANGE=${TATER_MCHANGE:-/proc/mchange}
 TARGET_FILE=${TATER_TARGET_FILE:-/etc/hostname}
@@ -31,6 +32,7 @@ PROBE_MAX_SECONDS=${TATER_ETH_PROBE_MAX_SECONDS:-60}
 RETRY_INTERVAL=${TATER_ETH_RETRY_INTERVAL:-60}
 RESCUE_RETRY_INTERVAL=${TATER_ETH_RESCUE_RETRY_INTERVAL:-20}
 PASSIVE_INTERVAL=${TATER_ETH_PASSIVE_INTERVAL:-2}
+DEVICE_SETTLE_SECONDS=${TATER_ETH_DEVICE_SETTLE_SECONDS:-3}
 LOG=$DATA/eth.log
 [ -d "$DATA" ] || LOG=/tmp/eth.log
 STATE=$RUN/tater-usb-ethernet.state
@@ -52,6 +54,23 @@ setup_in_progress() {
 	# writes its runtime marker. Once the form is saved, that marker keeps the
 	# hotspot protected until the requested reboot completes.
 	[ ! -s "$NATIVE_CONFIG" ] || [ -s "$SETUP_SSID_FILE" ]
+}
+
+# Both the vendor Android gadget and configfs expose a read-only connection
+# state. Do not change role under an attached computer, including suspend and
+# enumeration. A disconnected/missing gadget is not proof of a new adapter:
+# powered adapters on these boards do not assert OTG ID, so idle discovery must
+# remain available when there is no host. Never use controller power or AC
+# supply state as cable presence; those stay on even with the data port empty.
+usb_device_connected() {
+	for gadget_state_path in "$SYS_ROOT"/class/android_usb/*/state "$SYS_ROOT"/class/udc/*/state; do
+		[ -r "$gadget_state_path" ] || continue
+		gadget_state=$(cat "$gadget_state_path" 2>/dev/null || true)
+		case "$gadget_state" in
+		CONNECTED|CONFIGURED|connected|configured|addressed|default|suspended) return 0 ;;
+		esac
+	done
+	return 1
 }
 
 pid_is() {
@@ -365,7 +384,9 @@ if [ "$mode" = start ]; then
 	trap cleanup_supervisor EXIT
 	trap 'exit 0' HUP INT TERM
 	while desired; do
-		if find_usb_ethernet || [ "$active_probe" -eq 1 ]; then
+		# A real NIC can always be adopted. Only speculative role switching is
+		# blocked by a computer connection; passive boards never force a role.
+		if find_usb_ethernet || { [ "$active_probe" -eq 1 ] && ! usb_device_connected; }; then
 			"$0" once || true
 			set -- $(cat "$STATE" 2>/dev/null || true)
 			if [ "${1:-}" = rescue ]; then
@@ -377,7 +398,11 @@ if [ "$mode" = start ]; then
 				delay=$RETRY_INTERVAL
 			fi
 		else
-			set_state waiting no-adapter
+			if [ "$active_probe" -eq 1 ] && usb_device_connected; then
+				set_state waiting usb-device
+			else
+				set_state waiting no-adapter
+			fi
 			delay=$PASSIVE_INTERVAL
 		fi
 		i=0
@@ -435,10 +460,26 @@ fi
 iface=
 find_usb_ethernet || true
 if [ "$role_backend" = mchange ]; then
+	if [ "$probe_only" -eq 0 ] && [ -z "$iface" ] && usb_device_connected; then
+		set_state waiting usb-device
+		exit 0
+	fi
 	force=$(sed -n 's/.*force:\([0-9]\).*/\1/p' "$MCHANGE" 2>/dev/null)
 	case "$force" in
 	2)
 		if [ -z "$iface" ]; then
+			if [ "$probe_only" -eq 0 ]; then
+				# Let a newly plugged computer enumerate before taking host
+				# ownership. Recheck immediately before any role write. This
+				# also avoids treating a brief bus reset as an adapter change.
+				say "waiting for USB device enumeration before adapter probe"
+				sleep "$DEVICE_SETTLE_SECONDS"
+				wanted || { set_state stopped; exit 0; }
+				if usb_device_connected; then
+					set_state waiting usb-device
+					exit 0
+				fi
+			fi
 			echo host > "$MCHANGE"
 			role_claimed=1
 		else

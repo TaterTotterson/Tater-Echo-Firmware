@@ -83,6 +83,8 @@ func (c *Client) handle(message Envelope) {
 	case "ble.gatt":
 		c.handleBLEGATT(message.ID, payload)
 	case "settings":
+		c.settingsApplyMu.Lock()
+		defer c.settingsApplyMu.Unlock()
 		applied := payload
 		result := map[string]any{"ok": true}
 		accepted := true
@@ -96,7 +98,11 @@ func (c *Client) handle(message Envelope) {
 			}
 		}
 		c.stateMu.Lock()
-		c.settings = copyMap(applied)
+		if accepted {
+			for key, value := range applied {
+				c.settings[key] = value
+			}
+		}
 		c.stateMu.Unlock()
 		c.syncDNDState()
 		if accepted {

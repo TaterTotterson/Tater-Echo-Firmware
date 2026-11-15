@@ -51,6 +51,13 @@ type MediaRequest struct {
 	FPS             int
 	StartPositionMS int64
 	VideoOnly       bool
+	// AllowSourceGeometry lets live video-only callers accept the coded H.264
+	// dimensions instead of requiring the source to have already been
+	// transcoded to the display rectangle. The callback then receives source-
+	// sized RGBA and owns fitting it into its UI bounds. Fullscreen playback
+	// deliberately leaves this false so its zero-copy display contract remains
+	// exact and A/V presentation cannot change geometry after startup.
+	AllowSourceGeometry bool
 }
 
 // DecoderPath chooses the decoder installed beside an OTA renderer first,
@@ -259,6 +266,14 @@ func MediaArgs(request MediaRequest) ([]string, error) {
 		"scale=%d:%d:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d",
 		request.Width, request.Height, request.Width, request.Height, request.FPS,
 	)
+	if request.VideoOnly && request.AllowSourceGeometry {
+		// Live camera frames retain transparent padding as explicit geometry
+		// for the UI's rounded picture, not black-pixel heuristics. Use display
+		// aspect ratio (including non-square samples) before dropping SAR from
+		// raw RGBA. The bounded output contract and decoder identity stay fixed.
+		filter = fmt.Sprintf("scale=w='max(2,trunc(min(%d,%d*dar)/2)*2)':h='max(2,trunc(min(%d,%d/dar)/2)*2)':flags=fast_bilinear,format=rgba,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black@0,fps=%d",
+			request.Width, request.Height, request.Height, request.Width, request.Width, request.Height, request.FPS)
+	}
 	protocols := "http,https,tcp,tls,hls,crypto"
 	if parsed.Scheme == "rtsp" || parsed.Scheme == "rtsps" {
 		protocols = "tcp,tls,udp,rtp,srtp,crypto"
@@ -303,18 +318,80 @@ func MediaArgs(request MediaRequest) ([]string, error) {
 	return args, nil
 }
 
+// HardwareH264MediaArgs keeps FFmpeg responsible for the authenticated network
+// input and PCM audio, but copies the H.264 video elementary stream to stdout
+// for the narrow hardware adapter. A second, copy-only framecrc output on fd 4
+// supplies the source packet sizes and timestamps without decoding the video a
+// second time. It does not select hardware decoding; the caller must first
+// verify the target, codec, coded geometry, helper runtime, and the pinned
+// FFmpeg capabilities.
+func HardwareH264MediaArgs(request MediaRequest) ([]string, error) {
+	software, err := MediaArgs(request)
+	if err != nil {
+		return nil, err
+	}
+	videoMap := -1
+	audioMap := len(software)
+	for index := 0; index+1 < len(software); index++ {
+		if software[index] != "-map" {
+			continue
+		}
+		switch software[index+1] {
+		case "0:v:0":
+			videoMap = index
+		case "0:a:0?":
+			audioMap = index
+		}
+	}
+	if videoMap < 0 || audioMap < videoMap {
+		return nil, errors.New("video decoder arguments have no bounded video output")
+	}
+	result := append([]string(nil), software[:videoMap]...)
+	copyFilter := "h264_mp4toannexb,h264_metadata=aud=remove,h264_metadata=aud=insert"
+	result = append(result,
+		"-map", "0:v:0", "-an", "-sn", "-dn", "-c:v", "copy",
+		"-bsf:v", copyFilter,
+		"-f", "h264", "pipe:1",
+		"-map", "0:v:0", "-an", "-sn", "-dn", "-c:v", "copy",
+		"-bsf:v", copyFilter,
+		"-f", "framecrc", "pipe:4",
+	)
+	if audioMap < len(software) {
+		result = append(result, software[audioMap:]...)
+	}
+	return result, nil
+}
+
 type lineTail struct {
 	mu       sync.Mutex
+	source   string
+	safeText bool
+	text     []byte
 	reported bool
 }
 
 func (tail *lineTail) Write(value []byte) (int, error) {
+	written := len(value)
 	tail.mu.Lock()
 	defer tail.mu.Unlock()
 	if strings.TrimSpace(string(value)) != "" {
 		tail.reported = true
 	}
-	return len(value), nil
+	if tail.safeText {
+		// OMX's final lifecycle summary is larger than 1 KiB. Retain enough
+		// bounded context that it cannot hide the preceding failure stage.
+		const limit = 8 * 1024
+		if len(value) >= limit {
+			tail.text = append(tail.text[:0], value[len(value)-limit:]...)
+		} else {
+			if excess := len(tail.text) + len(value) - limit; excess > 0 {
+				copy(tail.text, tail.text[excess:])
+				tail.text = tail.text[:len(tail.text)-excess]
+			}
+			tail.text = append(tail.text, value...)
+		}
+	}
+	return written, nil
 }
 
 func (tail *lineTail) Error() error {
@@ -326,7 +403,17 @@ func (tail *lineTail) Error() error {
 	// FFmpeg error lines can repeat the complete input URL, including a camera
 	// password or Home Assistant HLS token. Keep that ephemeral credential out
 	// of the persistent renderer log.
-	return errors.New("video decoder reported an error")
+	source := strings.TrimSpace(tail.source)
+	if source == "" {
+		source = "video decoder"
+	}
+	if tail.safeText {
+		message := strings.Join(strings.Fields(string(tail.text)), " ")
+		if message != "" {
+			return fmt.Errorf("%s reported an error: %s", source, message)
+		}
+	}
+	return fmt.Errorf("%s reported an error", source)
 }
 
 func decoderCredential() (*syscall.Credential, error) {
@@ -385,7 +472,7 @@ func Read(ctx context.Context, request Request, receive func(*image.RGBA) error)
 	if err != nil {
 		return err
 	}
-	tail := &lineTail{}
+	tail := &lineTail{source: "video decoder"}
 	command.Stderr = tail
 	if err := command.Start(); err != nil {
 		return err
@@ -413,10 +500,23 @@ func Read(ctx context.Context, request Request, receive func(*image.RGBA) error)
 	}
 }
 
-// ReadMedia decodes one finite or live media session. Audio is drained in a
-// sibling goroutine so neither output can back-pressure the other and disturb
-// A/V timing. Cancelling ctx kills the complete FFmpeg process group.
-func ReadMedia(ctx context.Context, request MediaRequest, audio io.Writer, receive func(*image.RGBA) error) error {
+// ReadLive is the shared hardware-aware path for integration cameras and
+// other video-only live sources. H.264 uses the same target-gated VDEC adapter
+// as fullscreen playback; MJPEG, unsupported codecs, or a failed hardware
+// preflight restart through the bounded software decoder. Keeping Read as the
+// explicit legacy software entry point avoids silently changing diagnostic
+// callers that use it as a software control.
+func ReadLive(ctx context.Context, request Request, receive func(*image.RGBA) error) error {
+	return ReadMedia(ctx, MediaRequest{
+		URL: request.URL, Width: request.Width, Height: request.Height,
+		FPS: 30, VideoOnly: true, AllowSourceGeometry: true,
+	}, nil, receive)
+}
+
+// readSoftwareMedia is the established bounded RGBA path. Audio is drained in
+// a sibling goroutine so neither output can back-pressure the other and
+// disturb A/V timing. Cancelling ctx kills the complete FFmpeg process group.
+func readSoftwareMedia(ctx context.Context, request MediaRequest, audio io.Writer, receive func(*image.RGBA) error) error {
 	args, err := MediaArgs(request)
 	if err != nil {
 		return err
@@ -453,7 +553,7 @@ func ReadMedia(ctx context.Context, request MediaRequest, audio io.Writer, recei
 		audioWrite.Close()
 		return err
 	}
-	tail := &lineTail{}
+	tail := &lineTail{source: "video decoder"}
 	command.Stderr = tail
 	if err := command.Start(); err != nil {
 		audioWrite.Close()

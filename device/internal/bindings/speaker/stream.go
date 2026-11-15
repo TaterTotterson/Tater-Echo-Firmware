@@ -100,6 +100,10 @@ type audioStream struct {
 	// the mic side reads it (playedWithin) to know whether sound is coming
 	// out, which isActive cannot say once a stream has fully arrived.
 	lastTakeNs atomic.Int64
+	// playedFrames is a lifetime monotonic counter of stereo PCM frames handed
+	// to the ALSA path. Fullscreen video snapshots it at stream start and uses
+	// the delta as its only trustworthy cross-process playback clock.
+	playedFrames atomic.Uint64
 
 	// ── consumption-side accounting, pump-loop-local by contract ──────────
 	// Only the ALSA goroutine touches these, so they need no synchronisation.
@@ -248,6 +252,7 @@ func (s *audioStream) take() []byte {
 	case period := <-s.ch:
 		s.playing = true
 		s.periods++
+		s.playedFrames.Add(uint64(len(period) / 4)) // stereo S16LE
 		now := time.Now().UnixNano()
 		s.lastTakeNs.Store(now)
 		// Buffer margin: occupancy remaining *after* taking this period.
@@ -274,6 +279,8 @@ func (s *audioStream) take() []byte {
 		return nil
 	}
 }
+
+func (s *audioStream) framesPlayed() uint64 { return s.playedFrames.Load() }
 
 // drained is called when the stream was playing and had nothing to give this
 // round. It reports the completed stream's stats when the drain is an EOS,

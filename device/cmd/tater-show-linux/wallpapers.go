@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// The seven built-in scenes are stored at each display's native resolution.
+// The built-in scenes are stored at each display's native resolution.
 // Keeping the JPEGs compressed in the executable avoids extra rootfs files;
 // only the one scene used today is decoded into memory.
 //
@@ -31,6 +31,9 @@ var defaultWallpaperNames = [...]string{
 	"meadow",
 	"waterfall",
 	"night",
+	"alpine-sunset",
+	"misty-lake",
+	"desert-dusk",
 }
 
 func defaultWallpaperCount() int {

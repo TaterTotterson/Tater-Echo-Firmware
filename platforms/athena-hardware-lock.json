@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "target": "athena",
+  "bundle_id": "athena-panfrost-ui-20261114.1",
+  "builder_image_id": "sha256:8f2fba1b9274e512524c572deb4dbb5abd92e15bb88b8620ea1e2cd24fe57a74",
+  "helpers": {
+    "tater-hw-gpu": "600a8e39e542c506ad1efe73923d1a49bf5cabc2ed93cd2e293b902c73b639bc"
+  },
+  "sources": {
+    "scripts/build_athena_gpu.py": "249f938beccefbac639ed889edd6fc5bb7cadbed3ca639a2b3f9402e49eb457f",
+    "probes/mt8163-gpu/rgba_rotate_stream_android.c": "a7a181aced8f31f91dbafd35dd777393bbb68a9cef65876d9de086e5f656ccc9",
+    "probes/mt8163-gpu/athena_target.h": "99a8384fee60e6980075422466defb9d1cec0efbfd4d924c0c2c0925be525587"
+  }
+}

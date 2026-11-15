@@ -152,6 +152,28 @@ func TestPresentRegionsRotatesOnlyRequestedCanvasPixels(t *testing.T) {
 	}
 }
 
+func TestGPUSelectionUsesOnlyLargeOrFullRegions(t *testing.T) {
+	bounds := image.Rect(0, 0, 960, 480)
+	if !shouldUseGPU([]image.Rectangle{bounds}, bounds) {
+		t.Fatal("full frame did not select GPU compositor")
+	}
+	if shouldUseGPU([]image.Rectangle{image.Rect(0, 0, 200, 100)}, bounds) {
+		t.Fatal("small partial update selected full-frame GPU compositor")
+	}
+	if !shouldUseGPU([]image.Rectangle{image.Rect(0, 0, 960, 240)}, bounds) {
+		t.Fatal("half-frame update did not select GPU compositor")
+	}
+	// Cameras with talkback and Sat Chat share this maximum viewport, with
+	// their controls outside it. Do not accidentally bypass Checkers' existing
+	// GPU compositor just because the steady video update is a partial region.
+	if !shouldUseGPU([]image.Rectangle{image.Rect(12, 86, 948, 410)}, bounds) {
+		t.Fatal("large camera/Sat Chat frame did not select GPU compositor")
+	}
+	if shouldUseGPU([]image.Rectangle{image.Rect(-20, -20, 20, 20)}, bounds) {
+		t.Fatal("mostly out-of-bounds update selected GPU compositor")
+	}
+}
+
 func TestTransientRegionSkipsCachesAndNormalUpdateRepairsWholePage(t *testing.T) {
 	file, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {

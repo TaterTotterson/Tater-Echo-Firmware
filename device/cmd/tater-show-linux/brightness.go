@@ -68,7 +68,7 @@ func (d *displayPowerController) probe(now time.Time) {
 		d.sensorError = err.Error()
 		return
 	}
-	d.sensor, d.sensorName, d.sensorError = sensor, sensor.Name(), ""
+	d.sensor, d.sensorName, d.sensorError = screenambient.NonBlocking(sensor, brightnessStepInterval), sensor.Name(), ""
 	d.sampleErrors = 0
 	log.Printf("[display] ambient light sensor using %s", d.sensorName)
 }
@@ -106,10 +106,10 @@ func (d *displayPowerController) Update(state show.Snapshot, local, now time.Tim
 				d.lastProbe = now
 			}
 		default:
-			d.sampleErrors, d.sensorError = 0, ""
 			if !ok {
 				break
 			}
+			d.sampleErrors, d.sensorError = 0, ""
 			if d.haveLux {
 				d.lux = .75*d.lux + .25*lux
 			} else {

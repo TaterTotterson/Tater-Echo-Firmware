@@ -33,7 +33,7 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 		r.spotReplyGlow = 0
 	}
 	if r.state.Phase == "setup" {
-		r.drawSpotSetup(canvas, seconds, accent)
+		r.drawRookSetup(canvas)
 		return
 	}
 	if !r.state.Connected && (r.state.Phase == "offline" || r.state.Phase == "connecting") {
@@ -45,18 +45,7 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 		return
 	}
 	if r.satChatVisible() {
-		palette := r.menuPalette()
-		if wallpaper := r.activeWallpaper(now); wallpaper != nil {
-			drawPreparedCover(canvas, canvas.Bounds(), wallpaper)
-		} else {
-			r.spotBackground(canvas, accent)
-		}
-		draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{A: 84}), image.Point{}, draw.Over)
-		panel := cameraDirectoryLayoutFor(480, 480, true).panel
-		drawMenuSuperellipseShadow(canvas, panel, 8)
-		drawMenuSuperellipse(canvas, panel, menuBackdropInk)
-		drawMenuSuperellipseOutline(canvas, panel, 2, menuAlpha(palette.primary, 230))
-		r.drawSpotSatChat(canvas)
+		r.drawRookSatChat(canvas)
 		maskOutsideSpotCircle(canvas, 236)
 		return
 	}
@@ -64,11 +53,14 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 	legacyContext := true
 	switch {
 	case r.notificationActive(now):
-		r.drawSpotLegacyBackdrop(canvas, now, accent)
-		r.drawSpotNotification(canvas, now, seconds, accent)
+		legacyContext = false
+		r.drawRookNotification(canvas, now, motion)
 	case r.state.Timer != nil && r.state.Timer.Active:
-		r.drawSpotLegacyBackdrop(canvas, now, accent)
-		r.drawSpotTimer(canvas, now, seconds, accent)
+		legacyContext = false
+		r.drawRookTimer(canvas, now, seconds)
+	case r.settingsOpen:
+		legacyContext = false
+		r.drawWorkspaceSettings(canvas)
 	case r.climateOpen:
 		legacyContext = false
 		r.drawSpotClimate(canvas, now, accent)
@@ -77,16 +69,16 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 		r.drawSpotCameraScreen(canvas, now, accent)
 	case r.menuOpen:
 		legacyContext = false
-		r.drawSpotActionMenu(canvas, now, accent)
+		r.drawRookMenu(canvas)
 	case r.state.Media != nil && r.state.Media.Active:
-		r.drawSpotLegacyBackdrop(canvas, now, accent)
-		r.drawSpotNowPlaying(canvas, now, seconds, accent, motion)
+		legacyContext = false
+		r.drawRookMedia(canvas, now, seconds, false, motion)
 	case r.taterTubeActive(now):
 		legacyContext = false
-		r.drawSpotTaterTube(canvas, now, accent, motion)
+		r.drawRookMedia(canvas, now, seconds, true, motion)
 	default:
 		legacyContext = false
-		r.drawSpotPhotoHome(canvas, now, accent)
+		r.drawRookHome(canvas, now)
 	}
 	if voiceEdgeActive(r.state.Phase) && r.state.DisplayEdgeGlow {
 		if speaking {
@@ -134,11 +126,7 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 		weatherGap := 9
 		weatherLeft := (480 - weatherIconSize - weatherGap - temperatureWidth) / 2
 		kind := weatherDisplayKind(weather, local)
-		if art := weatherArt(kind); art != nil {
-			drawContain(canvas, image.Rect(weatherLeft, 252, weatherLeft+weatherIconSize, 294), art)
-		} else {
-			r.drawWeatherIcon(canvas, weatherLeft+weatherIconSize/2, 273, 13, kind, 0, color.RGBA{255, 255, 255, 255})
-		}
+		drawWorkspaceWeatherGlyph(canvas, image.Rect(weatherLeft, 252, weatherLeft+weatherIconSize, 294), kind, r.menuPalette().primary)
 		r.text(canvas, weatherLeft+weatherIconSize+weatherGap, 291, temperature, temperatureSize, false, color.White)
 	}
 
@@ -175,7 +163,7 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 			metrics = append(metrics, metric{"temperature", "ROOM T", weather.IndoorTemperatureText, color.RGBA{255, 147, 66, 255}})
 		}
 		if weather.IndoorHumidityText != "" {
-			metrics = append(metrics, metric{"humidity", "ROOM RH", weather.IndoorHumidityText, color.RGBA{114, 92, 255, 255}})
+			metrics = append(metrics, metric{"humidity", "Room humidity", weather.IndoorHumidityText, color.RGBA{114, 92, 255, 255}})
 		}
 	}
 	if len(metrics) > 0 {
@@ -187,7 +175,12 @@ func (r *renderer) drawSpotPhotoHome(canvas *image.RGBA, now time.Time, accent c
 			// labels can use the diagonal space beyond the nominal slot edge.
 			const textWidth = 42
 			r.drawWeatherMetricGlyph(canvas, iconX, iconY, 7, item.kind, item.ink)
-			r.text(canvas, textLeft, rowTop+7, fitTextToWidth(item.label, r.faces.bold[8], textWidth), 8, true, color.RGBA{224, 230, 238, 230})
+			if item.label == "Room humidity" {
+				r.text(canvas, textLeft, rowTop+3, "Room", 8, true, color.RGBA{224, 230, 238, 230})
+				r.text(canvas, textLeft, rowTop+12, "humidity", 8, true, color.RGBA{224, 230, 238, 230})
+			} else {
+				r.text(canvas, textLeft, rowTop+7, fitTextToWidth(item.label, r.faces.bold[8], textWidth), 8, true, color.RGBA{224, 230, 238, 230})
+			}
 			valueSize := 11
 			if item.kind == "lightning" {
 				valueSize = 10
@@ -263,6 +256,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		r.state.ToolName,
 		r.state.ToolMessage,
 		mediaCacheIdentity(media),
+		r.workspaceCacheKey(),
 		taterTubeIdentity(r.state.TaterTube),
 		fmt.Sprint(r.taterTubeActive(now)),
 		r.state.Room,
@@ -275,7 +269,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
 		stableCacheValue(r.state.Conversation),
-		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
+		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage, "|", r.rookClimateRooms) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
 		fmt.Sprint(duration > 0),
@@ -299,28 +293,22 @@ func (r *renderer) drawSpotMotion(canvas *image.RGBA, now time.Time, seconds flo
 	}
 	if r.state.Phase == "speaking" && r.state.DisplayEdgeGlow {
 		r.drawSpotReplyRim(canvas, accent)
-		if r.state.Media != nil && r.state.Media.Active {
-			defer r.drawSpotStatus(canvas)
-		}
 	}
 	if r.state.Timer != nil && r.state.Timer.Active {
 		return
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen {
+	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
 		return
 	}
 	if media := r.state.Media; media != nil && media.Active {
-		ink := mediaDisplayColor(media, accent)
-		if r.mediaImage == nil {
-			r.drawMusicVisualizerBars(canvas, image.Rect(170, 190, 310, 330), seconds, ink)
-		}
-		if _, duration := mediaProgress(media, now); duration > 0 {
-			r.drawSpotMediaProgress(canvas, now, media, ink)
+		if progress, duration := mediaProgress(media, now); duration > 0 {
+			r.drawRookMediaProgress(canvas, progress, duration)
 		}
 		return
 	}
 	if media := r.state.TaterTube; r.taterTubeActive(now) {
-		r.drawSpotTaterTubeProgress(canvas, now, media, color.RGBA{247, 151, 68, 255})
+		progress, duration := taterTubeProgress(media, now)
+		r.drawRookMediaProgress(canvas, progress, duration)
 		return
 	}
 }
@@ -343,7 +331,7 @@ func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
 		regions := make([]image.Rectangle, 0, 2)
 		phase := conversationVisualPhase(r.state.Conversation, r.state.Phase)
 		if phase == "thinking" || phase == "working" {
-			regions = append(regions, image.Rect(176, 324, 304, 384))
+			regions = append(regions, image.Rect(176, 334, 304, 386))
 		}
 		return regions
 	}
@@ -357,21 +345,18 @@ func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
 	if r.state.Timer != nil && r.state.Timer.Active {
 		return regions
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen {
+	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
 		return regions
 	}
 	if media := r.state.Media; media != nil && media.Active {
-		if r.mediaImage == nil {
-			regions = append(regions, musicVisualizerMotionBounds(image.Rect(170, 190, 310, 330)))
-		}
 		if _, duration := mediaProgress(media, now); duration > 0 {
-			regions = append(regions, image.Rect(112, 388, 368, 432))
+			regions = append(regions, image.Rect(102, 374, 378, 412))
 		}
 		return regions
 	}
 	if media := r.state.TaterTube; r.taterTubeActive(now) {
 		if _, duration := taterTubeProgress(media, now); duration > 0 {
-			regions = append(regions, image.Rect(102, 350, 378, 408))
+			regions = append(regions, image.Rect(102, 374, 378, 412))
 		}
 		return regions
 	}
@@ -383,10 +368,7 @@ func (r *renderer) drawSpotTaterTube(canvas *image.RGBA, now time.Time, accent c
 	if media == nil {
 		return
 	}
-	ink := color.RGBA{247, 151, 68, 255}
-	if accent.R > 180 && accent.G > 80 {
-		ink = mix(ink, accent, .24)
-	}
+	ink := r.menuPalette().primary
 	drawTaterTubeBackdrop(canvas, r.taterTubeImage, ink)
 	circleOutline(canvas, 240, 240, 232, 2, color.RGBA{122, 171, 222, 42})
 	r.centeredText(canvas, 240, 54, "TATER TUBE", 20, true, ink)
@@ -430,7 +412,7 @@ func (r *renderer) drawSpotTaterTubeProgress(canvas *image.RGBA, now time.Time, 
 
 func (r *renderer) drawSpotNowPlaying(canvas *image.RGBA, now time.Time, seconds float64, accent color.RGBA, motion bool) {
 	media := r.state.Media
-	ink := mediaDisplayColor(media, accent)
+	ink := r.menuPalette().primary
 	heading := nowPlayingHeading(r.state, media)
 	r.centeredText(canvas, 240, 181, fitTextToWidth(heading, r.faces.bold[14], 270), 14, true, ink)
 
@@ -473,7 +455,7 @@ func (r *renderer) spotBackground(canvas *image.RGBA, accent color.RGBA) {
 	if r.spotBase == nil || r.spotBaseAccent != accent {
 		r.spotBase = image.NewRGBA(canvas.Bounds())
 		r.spotBaseAccent = accent
-		fillGradient(r.spotBase, color.RGBA{5, 9, 17, 255}, mix(color.RGBA{7, 12, 20, 255}, accent, .11))
+		draw.Draw(r.spotBase, r.spotBase.Bounds(), image.NewUniform(workspaceBackground), image.Point{}, draw.Src)
 		circleOutline(r.spotBase, 240, 240, 232, 2, color.RGBA{accent.R, accent.G, accent.B, 42})
 		circleOutline(r.spotBase, 240, 240, 220, 1, color.RGBA{190, 203, 225, 18})
 	}
@@ -851,7 +833,7 @@ func (r *renderer) handleSpotTouch(client *socketClient, event linuxinput.TouchE
 			if r.intercomPressed {
 				r.intercomPressed = false
 				client.send("intercom.stop")
-			} else {
+			} else if !r.touchMoved {
 				r.handleActionMenuTouch(client, event, 480, 480, true)
 			}
 			r.spotTouchDown = false
@@ -886,7 +868,7 @@ func (r *renderer) handleSpotTouch(client *socketClient, event linuxinput.TouchE
 			}
 			r.cameraOpen = false
 			r.climateOpen = false
-		} else if !r.spotTimerDown {
+		} else if !r.spotTimerDown && r.spotTouchDown && !r.touchMoved {
 			r.menuOpen = true
 		}
 		r.spotTouchDown = false
@@ -896,110 +878,97 @@ func (r *renderer) handleSpotTouch(client *socketClient, event linuxinput.TouchE
 }
 
 func (r *renderer) drawSpotSatChat(canvas *image.RGBA) {
-	palette := r.menuPalette()
-	r.centeredText(canvas, 240, 99, "SAT CHAT", 22, true, color.White)
+	connectedFill(canvas)
 	chat := r.state.SatChat
 	if chat != nil && chat.Call != nil {
-		call := chat.Call
-		name := firstNonEmpty(call.TargetName, call.CallerName, "Satellite")
-		if call.Target == chat.Self {
-			name = firstNonEmpty(call.CallerName, "Satellite")
-		}
-		if strings.EqualFold(call.Mode, "video") {
+		if strings.EqualFold(chat.Call.Mode, "video") {
 			r.drawSpotSatChatVideo(canvas)
-			button := spotSatChatEndBounds()
-			drawMenuRoundedRect(canvas, button, button.Dy()/2, color.RGBA{139, 30, 39, 248})
-			drawMenuRoundedOutline(canvas, button, button.Dy()/2, 2, color.RGBA{255, 80, 72, 240})
-			r.centeredText(canvas, 240, button.Min.Y+button.Dy()*2/3, "END VIDEO", 16, true, color.White)
 			return
+		} else {
+			name := firstNonEmpty(chat.Call.TargetName, chat.Call.CallerName, "Satellite")
+			if chat.Call.Target == chat.Self {
+				name = firstNonEmpty(chat.Call.CallerName, "Satellite")
+			}
+			r.centeredText(canvas, 240, 210, fitTextToWidth(name, r.faces.regular[25], 320), 25, false, workspaceText)
+			r.centeredText(canvas, 240, 250, "Audio call · "+chat.Call.State, 16, false, workspaceMuted)
 		}
-		name, nameSize := r.menuName(name, 25, 14, 320)
-		r.centeredText(canvas, 240, 194, name, nameSize, true, color.White)
-		r.centeredText(canvas, 240, 230, "CONNECTED · "+strings.ToUpper(firstNonEmpty(call.Mode, "audio")), 14, true, color.RGBA{77, 223, 158, 255})
 		button := spotSatChatEndBounds()
-		drawMenuRoundedRect(canvas, button, button.Dy()/2, color.RGBA{139, 30, 39, 248})
-		drawMenuRoundedOutline(canvas, button, button.Dy()/2, 2, color.RGBA{255, 80, 72, 240})
-		r.centeredText(canvas, 240, button.Min.Y+button.Dy()*2/3, "END CHAT", 16, true, color.White)
+		drawMenuRoundedRect(canvas, button, 12, color.RGBA{120, 38, 40, 255})
+		r.centeredText(canvas, 240, button.Min.Y+button.Dy()*2/3, "End Sat Chat", 16, false, workspaceText)
 		return
 	}
+	r.connectedHeader(canvas, "Sat Chat", r.directorySubtitle("sat-chat", "Choose a satellite"), spotSatChatCloseBounds(), true)
 	participants := []show.SatChatParticipant{}
 	if chat != nil {
 		participants = chat.Participants
 	}
-	closeBounds := spotSatChatCloseBounds()
-	drawMenuCloseButton(canvas, closeBounds)
 	if len(participants) == 0 {
-		r.centeredText(canvas, 240, 246, "NO SATELLITES AVAILABLE", 16, true, color.RGBA{164, 179, 198, 255})
+		r.centeredText(canvas, 240, 246, "No satellites available", 16, false, workspaceMuted)
 		return
 	}
 	pageSize := r.satChatPageSize(480, 480)
 	page := r.satChatPageFor(len(participants), pageSize)
-	pageCount := satChatPageCount(len(participants), pageSize)
-	start := page * pageSize
-	end := min(len(participants), start+pageSize)
-	r.centeredText(canvas, 240, 105, fmt.Sprintf("%d–%d OF %d", start+1, end, len(participants)), 10, true, color.RGBA{215, 224, 237, 245})
-	for visibleIndex, participant := range participants[start:end] {
-		top := 128 + visibleIndex*48
-		row := image.Rect(90, top, 390, top+44)
-		nameInk := color.RGBA{255, 255, 255, 255}
-		statusInk := color.RGBA{49, 239, 116, 255}
-		if participant.Busy {
-			nameInk = color.RGBA{139, 148, 163, 255}
-			statusInk = color.RGBA{255, 83, 67, 255}
+	start, end := page*pageSize, min(len(participants), (page+1)*pageSize)
+	connectedPanel(canvas, image.Rect(90, 128, 390, 368))
+	for index, p := range participants[start:end] {
+		row := image.Rect(90, 128+index*48, 390, 176+index*48)
+		r.drawDirectoryRowFeedback(canvas, row, "sat-chat", p.ID)
+		connectedDivider(canvas, row, index == pageSize-1)
+		ink, status := workspaceText, color.RGBA{110, 182, 134, 255}
+		if p.Busy {
+			ink, status = workspaceMuted, workspaceMuted
 		}
-		drawMenuCard(canvas, row, row.Dy()/2, participant.Busy, palette.primary)
-		avatar := image.Rect(96, top+4, 132, top+40)
-		drawMenuIconMedallion(canvas, avatar, palette.primary)
-		drawSatChatNetworkGlyph(canvas, 114, top+22, 8, palette.primary)
-		circle(canvas, 143, top+14, 5, statusInk)
-		name, nameSize := r.menuName(firstNonEmpty(participant.Name, participant.Room), 15, 9, 154)
-		r.text(canvas, 156, top+23, name, nameSize, true, nameInk)
-		label := "AUDIO ONLY"
-		if participant.Video {
-			label = "VIDEO + AUDIO"
+		circle(canvas, 103, row.Min.Y+23, 3, status)
+		r.text(canvas, 116, row.Min.Y+20, fitTextToWidth(firstNonEmpty(p.Name, p.Room, "Satellite"), r.faces.regular[15], 208), 15, false, ink)
+		detail := "Audio only"
+		if p.Video {
+			detail = "Video + audio"
 		}
-		if participant.Busy {
-			label = "BUSY"
+		if p.Room != "" {
+			detail = p.Room + " · " + detail
 		}
-		iconInk := palette.primary
-		if participant.Busy {
-			r.centeredText(canvas, 336, top+27, label, 9, true, color.RGBA{159, 169, 185, 255})
-		} else {
-			drawSatChatMicGlyph(canvas, 350, top+16, 8, iconInk)
-			if participant.Video {
-				drawSatChatVideoGlyph(canvas, 326, top+16, 8, iconInk)
-			}
-			r.centeredText(canvas, 338, top+38, label, 8, true, color.RGBA{191, 207, 226, 255})
+		if p.Busy {
+			detail += " · Busy"
+		}
+		if r.directoryRowPending("sat-chat", p.ID) {
+			detail = "Starting call…"
+		}
+		r.text(canvas, 116, row.Min.Y+37, fitTextToWidth(detail, r.faces.regular[10], 236), 10, false, workspaceMuted)
+		if p.Audio {
+			drawSatChatMicGlyph(canvas, 346, row.Min.Y+17, 7, workspaceMuted)
+		}
+		if p.Video {
+			drawSatChatVideoGlyph(canvas, 326, row.Min.Y+17, 7, workspaceMuted)
+		}
+		if !p.Busy {
+			drawMenuChevron(canvas, 376, row.Min.Y+23, 4, workspaceText)
 		}
 	}
-	if pageCount > 1 {
-		previous, next := spotSatChatPreviousBounds(), spotSatChatNextBounds()
-		previousInk, nextInk := palette.secondary, palette.secondary
-		if page == 0 {
-			previousInk = color.RGBA{83, 93, 108, 150}
+	pages := satChatPageCount(len(participants), pageSize)
+	if pages > 1 {
+		for i, bounds := range []image.Rectangle{spotSatChatPreviousBounds(), spotSatChatNextBounds()} {
+			label, ink := "Previous", r.menuPalette().primary
+			if i == 1 {
+				label = "Next"
+			}
+			if i == 0 && page == 0 || i == 1 && page == pages-1 {
+				ink = workspaceMuted
+			}
+			r.centeredText(canvas, bounds.Min.X+bounds.Dx()/2, 420, label, 14, false, ink)
 		}
-		if page == pageCount-1 {
-			nextInk = color.RGBA{83, 93, 108, 150}
-		}
-		drawMenuRoundedRect(canvas, previous, previous.Dy()/2, menuControlInk)
-		drawMenuRoundedRect(canvas, next, next.Dy()/2, menuControlInk)
-		drawMenuRoundedOutline(canvas, previous, previous.Dy()/2, 1, previousInk)
-		drawMenuRoundedOutline(canvas, next, next.Dy()/2, 2, nextInk)
-		r.centeredText(canvas, (previous.Min.X+previous.Max.X)/2, 420, "‹ PREV", 12, true, previousInk)
-		r.centeredText(canvas, (next.Min.X+next.Max.X)/2, 420, "NEXT ›", 12, true, nextInk)
 	}
 }
 
 func spotSatChatCloseBounds() image.Rectangle {
-	return image.Rect(370, 66, 420, 116)
+	return settingsBackBounds(true)
 }
 
 func spotSatChatPreviousBounds() image.Rectangle {
-	return image.Rect(100, 390, 230, 434)
+	return settingsPageButton(480, 480, false, true)
 }
 
 func spotSatChatNextBounds() image.Rectangle {
-	return image.Rect(250, 390, 380, 434)
+	return settingsPageButton(480, 480, true, true)
 }
 
 func spotSatChatEndBounds() image.Rectangle {
@@ -1007,37 +976,11 @@ func spotSatChatEndBounds() image.Rectangle {
 }
 
 func (r *renderer) drawSpotSatChatVideo(canvas *image.RGBA) image.Rectangle {
-	palette := r.menuPalette()
-	videoBounds := r.satChatVideoBounds().Inset(-4)
-	drawMenuRoundedRect(canvas, videoBounds, 24, color.RGBA{4, 13, 22, 255})
-	if r.satChatVideoImage != nil {
-		drawPreparedCover(canvas, videoBounds.Inset(4), r.satChatVideoImage)
-	} else {
-		r.centeredText(canvas, 240, 248, "WAITING FOR CAMERA", 14, true, color.RGBA{164, 179, 198, 255})
-	}
-	drawMenuRoundedOutline(canvas, videoBounds, 24, 2, menuAlpha(palette.primary, 230))
-	r.drawSpotSatChatVideoOverlay(canvas)
-	return videoBounds
+	return r.drawWorkspaceSatChatVideo(canvas, 480, 480)
 }
 
 func (r *renderer) drawSpotSatChatVideoFrame(canvas *image.RGBA) image.Rectangle {
-	content := r.satChatVideoBounds()
-	drawPreparedCover(canvas, content, r.satChatVideoImage)
-	r.drawSpotSatChatVideoOverlay(canvas)
-	return content
-}
-
-func (r *renderer) drawSpotSatChatVideoOverlay(canvas *image.RGBA) {
-	call := r.state.SatChat.Call
-	name := firstNonEmpty(call.TargetName, call.CallerName, "Satellite")
-	if call.Target == r.state.SatChat.Self {
-		name = firstNonEmpty(call.CallerName, "Satellite")
-	}
-	nameBox := image.Rect(118, 112, 362, 154)
-	drawMenuRoundedRect(canvas, nameBox, nameBox.Dy()/2, color.RGBA{5, 17, 28, 232})
-	drawMenuRoundedOutline(canvas, nameBox, nameBox.Dy()/2, 1, menuOutlineInk)
-	circle(canvas, nameBox.Min.X+24, (nameBox.Min.Y+nameBox.Max.Y)/2, 5, color.RGBA{52, 240, 105, 255})
-	r.centeredText(canvas, 248, 140, fitTextToWidth(name, r.faces.bold[16], 200), 16, true, color.White)
+	return r.drawSatChatVideoFrame(canvas, 480, 480)
 }
 
 func (r *renderer) handleSpotSatChatTouch(client *socketClient, event linuxinput.TouchEvent) {
@@ -1072,20 +1015,23 @@ func (r *renderer) handleSpotSatChatTouch(client *socketClient, event linuxinput
 		}
 		return
 	}
-	if event.Y < 128 || event.Y >= 368 {
-		return
-	}
-	visibleIndex := (event.Y - 128) / 48
-	index := page*pageSize + visibleIndex
-	if visibleIndex >= 0 && visibleIndex < pageSize && index < len(chat.Participants) {
+	for visibleIndex := 0; visibleIndex < pageSize; visibleIndex++ {
+		if !point.In(rookDirectoryBounds(visibleIndex)) {
+			continue
+		}
+		index := page*pageSize + visibleIndex
+		if index >= len(chat.Participants) {
+			return
+		}
 		participant := chat.Participants[index]
-		if !participant.Busy {
+		if !participant.Busy && !r.touchMoved && r.beginDirectoryRequest("sat-chat", participant.ID, time.Now()) {
 			mode := "audio"
 			if participant.Video {
 				mode = "video"
 			}
 			client.sendSatChat("sat_chat.start", participant.ID, mode, "")
 		}
+		return
 	}
 }
 
@@ -1096,7 +1042,7 @@ func (r *renderer) updateSpotHold(client *socketClient, now time.Time) {
 		r.spotTimerDown = false
 		client.send("intercom.stop")
 	}
-	if !r.spotTouchDown || r.intercomPressed || !r.state.Connected || r.state.Muted || r.spotTouchAt.IsZero() {
+	if !r.spotTouchDown || r.touchMoved || r.intercomPressed || !r.state.Connected || r.state.Muted || r.spotTouchAt.IsZero() {
 		return
 	}
 	if now.Sub(r.spotTouchAt) >= spotHoldDelay {

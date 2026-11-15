@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/clock"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/liveh264"
 	"github.com/gorilla/websocket"
 )
 
@@ -144,6 +145,7 @@ type Hooks struct {
 	SatChatState        func(SatChatState)
 	SatChatAudio        func([]byte)
 	SatChatVideo        func([]byte)
+	SatChatH264         func([]byte)
 	CameraFrame         func([]byte)
 	CameraSnapshot      func(context.Context) (CameraSnapshot, error)
 	CameraStream        func(context.Context, string, func([]byte)) error
@@ -194,14 +196,18 @@ type Client struct {
 	started            time.Time
 	out                chan outbound
 	videoOut           chan outbound
+	videoMu            sync.Mutex
+	videoStream        uint64
+	videoWaitKeyframe  bool
 
 	connMu sync.Mutex
 	conn   *websocket.Conn
 
-	stateMu  sync.RWMutex
-	state    string
-	settings map[string]any
-	selector string
+	settingsApplyMu sync.Mutex
+	stateMu         sync.RWMutex
+	state           string
+	settings        map[string]any
+	selector        string
 
 	audioMu             sync.Mutex
 	preRoll             [][]byte
@@ -306,7 +312,7 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 		cfg: cfg, hooks: hooks, url: normalized,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		started: time.Now(), out: make(chan outbound, outgoingCapacity),
-		videoOut: make(chan outbound, 1),
+		videoOut: make(chan outbound, liveh264.QueuedFrames),
 		state:    "idle", settings: map[string]any{
 			"barge_in_enabled":     false,
 			"continued_chat":       true,
@@ -371,6 +377,8 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["ssh_management"] = true
 		capabilities["ssh_management_version"] = 1
 		capabilities["system_ota_version"] = 1
+		capabilities["ota_package_schema"] = linuxOTASchema
+		capabilities["ota_platform"] = installedLinuxOTAPlatform(linuxOTAPlatformFile, target)
 	}
 	if target == "checkers" || target == "cronos" || target == "crown" || target == "athena" || target == "rook" {
 		// Checkers and Crown own /dev/stpbt directly, while Cronos, Athena, and
@@ -378,10 +386,10 @@ func CapabilitiesForTarget(target string) map[string]any {
 		// removes these claims if the selected backend cannot attach.
 		capabilities["led_ring"] = false
 		capabilities["ota"] = true
-		// Version 2 accepts the pinned video decoder in addition to the version
-		// 1 camera helper. Tater first bridges older updaters with only the daemon
-		// and renderer, then continues the same trial with the complete bundle.
-		capabilities["ota_bundle_components_version"] = 2
+		// Version 3 adds the atomic target-owned GPU/codec helper set. Version 2
+		// accepted FFmpeg but not these sidecars. Bridge older updaters with the
+		// daemon/renderer, then continue the same trial with the complete bundle.
+		capabilities["ota_bundle_components_version"] = 3
 		capabilities["screen"] = true
 		capabilities["touchscreen"] = true
 		capabilities["screen_protocol"] = 1
@@ -414,6 +422,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen_night_mode"] = true
 		capabilities["screen_red_clock"] = true
 		capabilities["screen_clock_format"] = true
+		capabilities["screen_text_style"] = true
 		capabilities["sat_chat_ui"] = true
 		capabilities["sat_chat_can_initiate"] = true
 		capabilities["sat_chat_can_end"] = true
@@ -558,10 +567,19 @@ func (c *Client) runOnce(parent context.Context) error {
 				continue
 			}
 			if c.satChatActive.Load() && !c.DNDActive() {
-				if jpeg, video := decodeSatChatVideoFrame(data); video {
+				if len(data) >= 5 && string(data[:5]) == "TSCV2" {
+					if hook := c.hooks.SatChatH264; hook != nil {
+						hook(append([]byte(nil), data...))
+					}
+				} else if len(data) >= 4 && string(data[:4]) == "TSCV" && (len(data) < 5 || string(data[:5]) != "TSCV1") {
+					// Reserved video envelopes, including malformed/newer ones,
+					// must never be interpreted as call audio.
+				} else if jpeg, video := decodeSatChatVideoFrame(data); video {
 					if hook := c.hooks.SatChatVideo; hook != nil {
 						hook(append([]byte(nil), jpeg...))
 					}
+				} else if len(data) >= 4 && string(data[:4]) == "TSCV" {
+					// Invalid JPEG video is reserved media too, never PCM.
 				} else if hook := c.hooks.SatChatAudio; hook != nil {
 					hook(append([]byte(nil), data...))
 				}
@@ -691,6 +709,18 @@ drainMain:
 			break drainMain
 		}
 	}
+	c.drainVideoOutgoing()
+}
+
+func (c *Client) drainVideoOutgoing() {
+	c.videoMu.Lock()
+	defer c.videoMu.Unlock()
+	c.clearVideoOutgoingLocked()
+}
+
+func (c *Client) clearVideoOutgoingLocked() {
+	c.videoStream = 0
+	c.videoWaitKeyframe = true
 	for {
 		select {
 		case <-c.videoOut:
@@ -738,21 +768,45 @@ func (c *Client) sendBinary(data []byte) bool {
 }
 
 func (c *Client) sendBestEffortBinary(data []byte) bool {
+	c.videoMu.Lock()
+	defer c.videoMu.Unlock()
 	if !c.connected.Load() || len(data) == 0 {
 		return false
 	}
+	if len(data) >= len(liveh264.Prefix) && string(data[:len(liveh264.Prefix)]) == liveh264.Prefix {
+		picture, err := liveh264.Decode(data)
+		if err != nil || !c.satChatActive.Load() {
+			return false
+		}
+		if picture.StreamID != c.videoStream {
+			c.clearVideoOutgoingLocked()
+			c.videoStream = picture.StreamID
+		}
+		if c.videoWaitKeyframe && !picture.Keyframe {
+			return false
+		}
+		frame := outbound{kind: websocket.BinaryMessage, data: append([]byte(nil), data...)}
+		select {
+		case c.videoOut <- frame:
+			c.videoWaitKeyframe = false
+			return true
+		default:
+			// H.264 prediction packets cannot use JPEG's replace-one policy.
+			// Discard the whole pending GOP, then resume at a fresh keyframe.
+			c.clearVideoOutgoingLocked()
+			c.videoStream = picture.StreamID
+			if picture.Keyframe {
+				c.videoOut <- frame
+				c.videoWaitKeyframe = false
+				return true
+			}
+			return false
+		}
+	}
+	// Independent JPEG/preview images always retain exactly the newest one,
+	// even though the separate video queue can now hold a short H.264 GOP.
+	c.clearVideoOutgoingLocked()
 	frame := outbound{kind: websocket.BinaryMessage, data: append([]byte(nil), data...)}
-	select {
-	case c.videoOut <- frame:
-		return true
-	default:
-	}
-	// Keep exactly the newest preview frame. This bounds video latency and
-	// prevents a burst of JPEGs from ever filling the audio/control queue.
-	select {
-	case <-c.videoOut:
-	default:
-	}
 	select {
 	case c.videoOut <- frame:
 		return true
@@ -884,5 +938,31 @@ func (c *Client) ReportSettings(values map[string]any) {
 	if len(values) == 0 {
 		return
 	}
+	c.stateMu.Lock()
+	for key, value := range values {
+		if c.settings == nil {
+			c.settings = map[string]any{}
+		}
+		c.settings[key] = value
+	}
+	c.stateMu.Unlock()
+	c.syncDNDState()
 	c.sendJSON("settings.changed", "", map[string]any{"ok": true, "settings": values})
+}
+
+// ApplyLocalSettings uses the same hook/validation as the remote protocol,
+// then merges the accepted delta before reporting it to the host.
+func (c *Client) ApplyLocalSettings(values map[string]any) error {
+	if c == nil || c.hooks.Settings == nil {
+		return fmt.Errorf("settings unavailable")
+	}
+	c.settingsApplyMu.Lock()
+	defer c.settingsApplyMu.Unlock()
+	applied, err := c.hooks.Settings(values)
+	if err != nil {
+		return err
+	}
+	c.settingsGeneration.Add(1)
+	c.ReportSettings(applied)
+	return nil
 }

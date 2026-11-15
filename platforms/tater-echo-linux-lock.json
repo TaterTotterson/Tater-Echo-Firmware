@@ -35,6 +35,11 @@
     "dot": {
       "release": "dot-v1.0.24",
       "kernel_release": "dot-kernel-v1.0.1",
+      "kernel_build": {
+        "entry_point": "linux/dot/build_kernel.py",
+        "profile_lock": "platforms/dot-audio-lock.json",
+        "legacy_kernel_assets": "baseline-only; not firmware release inputs"
+      },
       "commit": "f99397141e82a3f03b0b3b1000090c9e72ef3f28",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",

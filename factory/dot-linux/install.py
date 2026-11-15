@@ -45,6 +45,17 @@ def load_tater_settings():
     return module
 
 
+def load_early_boot():
+    candidates = (TOOLS / "early_boot.py", ROOT.parents[1] / "linux/dot/early_boot.py")
+    path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    require(path is not None, "the factory bundle is missing the early-recovery builder")
+    spec = importlib.util.spec_from_file_location("tater_dot_early_boot", path)
+    require(spec is not None and spec.loader is not None, "cannot load the early-recovery builder")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def md5(path: str | Path) -> str:
     digest = hashlib.md5()
     with Path(path).open("rb") as source:
@@ -310,6 +321,12 @@ def install(args: argparse.Namespace) -> None:
     image = backup_root / "tater-linux.img"
     build_boot_image(str(recovery), str(image), str(payload / "alpine-minirootfs.tar.gz"),
                      str(busybox), str(wmtup), str(apks), str(kernel))
+    early_boot = load_early_boot()
+    try:
+        early_boot.patch_boot_image(dotimage, image, payload / "tater-volume-up",
+                                    TOOLS / "linux/tater-early-recovery", board)
+    except ValueError as error:
+        raise Fail(f"cannot build early TWRP recovery: {error}") from error
     require(image.stat().st_size <= 16 * 1024 * 1024, "built Linux recovery image exceeds the partition")
     note(f"built this unit's {image.stat().st_size}-byte Linux boot image")
     handoff = backup_root / "tater-twrp-handoff.img"
@@ -317,6 +334,8 @@ def install(args: argparse.Namespace) -> None:
     require(handoff.stat().st_size <= 16 * 1024 * 1024,
             "built TWRP handoff image exceeds the recovery partition")
     note(f"built this unit's {handoff.stat().st_size}-byte automatic-return TWRP image")
+    early_checksums = backup_root / "early-recovery.sha256"
+    early_boot.write_checksums(early_checksums, image, recovery, handoff)
     if args.dry_run:
         print(f"Dry run complete; nothing was written to {serial}.\n"
               f"Boot image: {image}\nTWRP handoff image: {handoff}\nRootfs: {rootfs}")
@@ -358,6 +377,7 @@ def install(args: argparse.Namespace) -> None:
     push_checked(adb, handoff, "/cache/techo5/twrp-handoff.img")
     push_checked(adb, TOOLS / "linux/back-to-linux.sh", "/cache/techo5/back-to-linux.sh")
     push_checked(adb, image, "/cache/techo5/linux.img")
+    push_checked(adb, early_checksums, "/cache/techo5/early-recovery.sha256")
     push_checked(adb, busybox, stage + "/busybox")
     recovery_part = partition_source(adb, by_name, "recovery")
     image_md5 = md5(str(image))

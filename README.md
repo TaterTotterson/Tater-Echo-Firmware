@@ -35,8 +35,21 @@ installer on a similar-looking Echo from another generation.
 Target metadata used by Tater and the release builds lives in
 [`targets/targets.json`](targets/targets.json).
 
+Platform and kernel sources are maintained in
+[Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux).
+Original hardware helpers, diagnostics and interface research live in
+[Tater Echo Hardware](https://github.com/TaterTotterson/Tater-Echo-Hardware).
+
 ## Features
 
+- **GPU workspace:** Theme-aware menus, smooth transitions and redesigned home,
+  camera, climate, notification and media screens on the Shows and Rook.
+- **Hardware video:** Target-specific H.264 encoding/decoding and balanced
+  Sat Chat profiles, with ordered camera buffers and software/JPEG fallback.
+- **Conversation styles:** Smooth animated STT/reply text or Matrix-style
+  cycling symbols, selectable locally or per satellite in Tater/HA Bridge.
+- **Hardware microphone gain/filter:** Biscuit/Radar ADC gain and verified
+  80 Hz high-pass filtering avoid redundant software processing.
 - **Wake boundaries:** Model-driven endpoints preserve speech immediately after
   the wake phrase without sending the wake phrase to speech recognition.
 - **USB Ethernet:** Automatic wired networking with Wi-Fi fallback, including a
@@ -58,6 +71,9 @@ Target metadata used by Tater and the release builds lives in
   overlays, audio scenes, ducking, and selectable output channels.
 - **Dashboards:** Photos, weather, room sensors, music, timers, Awareness
   notifications, themes, and assistant status on screen-equipped satellites.
+- **Screen workspace:** Touch menus, per-device display/night/DND/EQ settings,
+  full-image notifications and large aspect-preserving video. GPU Fade, Slide
+  and Off effects retain theme support; Fade is the default.
 - **Touch controls:** Sat Chat, thermostats, and Room Vision camera or doorbell
   feeds with automatic fallback and optional push-to-talk.
 - **LED feedback:** Biscuit and Radar animations for wake, voice, music, volume,
@@ -86,11 +102,11 @@ details and per-device test results.
 ## Before you install
 
 > [!IMPORTANT]
-> **v4.0.0 requires one USB/TWRP factory installation on every supported Echo
-> target.** Any existing installation earlier than v4.0.0 cannot cross this platform boundary
+> **v5.0.0 requires one full USB/TWRP factory installation on every supported Echo
+> target, including devices already on v4.x.** Older installations cannot cross this hardware/kernel platform boundary
 > through OTA. Use the factory archive matching the exact device; the installer
 > preserves verified Tater pairing, Wi-Fi, SSH, and satellite settings by
-> default, or pass `--factory-reset` for a clean start. After v4.0.0 is installed,
+> default, or pass `--factory-reset` for a clean start. After v5.0.0 is installed,
 > Tater can deliver compatible application and root-system updates through its
 > verified A/B OTA flow with automatic rollback.
 
@@ -98,10 +114,10 @@ details and per-device test results.
 > On Checkers, Cronos, Crown, Athena, and Rook, hold Volume Up while the satellite
 > starts to enter TWRP.
 >
-> **Pre-v4 Biscuit and Radar:**
+> **Pre-v5 Biscuit and Radar:**
 >
 > 1. Boot the satellite normally.
-> 2. Extract the v4 factory archive for the device.
+> 2. Extract the v5 factory archive for the device.
 > 3. Connect the satellite directly by USB.
 > 4. Open Terminal in the extracted archive folder and run:
 >
@@ -462,20 +478,20 @@ enters Tater Recovery, repair its inactive root slot with
 preserves Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
 only when those settings should also be cleared.
 
-All seven Echo targets support entering TWRP with **Volume Up**. Checkers,
-Cronos, Crown, Athena, and Rook handle the button in their native boot chain
-before Linux starts. Biscuit and Radar have no dependable bootloader shortcut,
-so a current factory install detects an uninterrupted five-second hold during the first 90
-seconds of Linux startup and enters its device-specific TWRP handoff. Linux is
-restored to their shared recovery partition while TWRP runs from RAM, so the
-next reboot returns to Linux. There is no longer a Volume Up route to Tater
-Recovery: `to_recovery.py` is its explicit USB entry path. A Biscuit or Radar
-without the current handoff image continues its normal boot instead.
+All seven Echo targets support entering **Tater Recovery with Volume Up**.
+Biscuit and Radar detect an uninterrupted five-second hold during the first 90
+seconds of Tater Linux startup and arm their one-boot rescue environment.
+Checkers, Cronos, Crown, Athena, and Rook still reach their retained TWRP first
+in the native boot chain; a verified one-command router then arms the existing
+Tater slot-store rescue marker and returns through the normal boot image. The
+router checks the boot image and Tater store before writing anything. If any
+check fails, it returns to TWRP instead of guessing or modifying recovery.
 
-TWRP remains available as the lower-level, device-specific fallback. Run
+TWRP remains the explicit lower-level, device-specific fallback. Run
 `python3 to_twrp.py` from a normally booted satellite only when Tater Recovery
-cannot perform the repair. A unit that cannot start Tater Linux still needs its
-amonet/TWRP recovery procedure.
+cannot perform the repair; on screen devices the helper marks that boot so the
+router deliberately stays in TWRP. A unit that cannot start Tater Linux or has
+not yet armed the router still has its normal amonet/TWRP recovery procedure.
 
 ## Updates and release files
 

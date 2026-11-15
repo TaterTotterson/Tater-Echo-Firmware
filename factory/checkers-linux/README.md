@@ -20,6 +20,14 @@ remain USB recovery operations.
 
 ## Before you start
 
+The unpublished hardware-enabled installer also supports a separately prepared
+owner-local library directory with `--hardware-runtime DIRECTORY`. These private
+files are never bundled in a public release. See
+[the hardware build/provisioning guide](../../docs/checkers-hardware-build.md)
+in the source repository for preparation, target/kernel guards, rollback
+behavior, and the remaining kernel migration/release gates. Do not use this
+option as a substitute for that required kernel migration.
+
 - Confirm the device is a **2019 first-generation Echo Show 5** (`checkers`),
   unlocked with amonet-checkers 2.0.1 or newer and able to boot TWRP. Do not
   use this bundle on the second-generation Show 5 or another Echo model. See
@@ -121,13 +129,14 @@ Normal repair uses Tater Recovery. From a normally booted Checkers, connect USB
 and run `python3 to_recovery.py` from this extracted factory archive. On
 Windows use `py -3 to_recovery.py`; on Linux, use
 `sudo python3 to_recovery.py` if the serial port reports permission denied.
-Holding **Volume Up** while Checkers powers on enters its retained TWRP through
-the native boot chain; it no longer requests Tater Recovery after Linux starts.
+Holding **Volume Up** while Checkers powers on enters TWRP and stays there.
+It does not automatically redirect to Tater Recovery. System updates retire
+the earlier Tater-generated redirect while preserving unrelated recovery commands.
 
 Once recovery appears, run `./install.sh --repair`
 (`py -3 install.py --repair` on Windows) to repair the inactive root slot while
 preserving Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
-only to clear those settings. TWRP remains the lower-level fallback through
-`to_twrp.py` and the amonet recovery procedure. If the factory installer stops
+only to clear those settings. TWRP remains the explicit lower-level fallback
+through `to_twrp.py` and the amonet recovery procedure. If the factory installer stops
 before initial installation completes, keep the device connected and preserve
 the matching `backups/<serial>/` directory.

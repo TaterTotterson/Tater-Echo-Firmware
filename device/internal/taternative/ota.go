@@ -25,6 +25,7 @@ type OTAInstaller struct {
 	StateDir      string
 	BaseOS        func() string
 	InstallRootFS func(context.Context, string) error
+	PlatformFile  string // Tests may override the immutable rootfs profile path.
 	mu            sync.Mutex
 }
 
@@ -62,6 +63,9 @@ func (i *OTAInstaller) Install(ctx context.Context, req OTARequest, report func(
 	}
 	if i.baseOS() != platform.TaterLinux {
 		return fmt.Errorf("%s Linux firmware requires Tater Linux; use the USB factory installer for conversion", i.Target)
+	}
+	if err := i.requireOTAPlatform(); err != nil {
+		return err
 	}
 	return i.installLinuxApp(ctx, req, report)
 }

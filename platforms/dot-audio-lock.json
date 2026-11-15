@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "profile": "tater-adc3101-hpf80-v1",
+  "toolchain_repository": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.8",
+  "toolchain_commit": "26e93f6af47f7bd3a9beb5c102a5f45e19bfa38a",
+  "build_timestamp_utc": "2026-11-15 00:00:00 UTC",
+  "source_files": {
+    "0051-tater-adc3101-hpf.patch": "f4e6f06b0e7e4160fea1551b311c6d4903d6fbe914592622b951e89e57073ac0",
+    "tater_adc3101_hpf.h": "f90ab984706ff7c96323fd1102081eef662d6fef302d91c1e0d41c108985529c"
+  },
+  "targets": {
+    "biscuit": {
+      "kernel_image_sha256": "6d86314ad86f712c822de80ba30402f363ec667a19570fa09109fe11075cf55c",
+      "release_qualified": false,
+      "remaining": "Combined permanent gain/filter, extended headroom/playback and final kernel/OTA qualification"
+    },
+    "radar": {
+      "kernel_image_sha256": "b566da06193c98813f61dc70febee224c67550d791eab7bb7e8d179343f8bc3c",
+      "release_qualified": false,
+      "remaining": "Physical Radar voice/privacy/headroom checks and final kernel/OTA qualification"
+    }
+  }
+}

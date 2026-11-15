@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/micgain"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
@@ -57,7 +58,9 @@ type Device struct {
 	// applied pre-truncation to recover real captured resolution rather
 	// than amplify 16-bit quantisation noise. Fixed by design: this is
 	// the "fixed gain" stage of the dumb-transducer architecture — all
-	// adaptation lives upstream in Tater. 0 = unity.
+	// adaptation lives upstream in Tater. 0 = unity. Biscuit/Radar instead
+	// use a fixed hardware PGA gain; their software gain stays at unity even
+	// when an older controller sends the previous +40 dB setting.
 	MicGainDb int
 
 	// BeamAngle fixes the beamformer steering direction in degrees
@@ -151,7 +154,8 @@ func (d *Device) loadDefaults() {
 	d.NwwThreshold = envFloat("NWW_THRESHOLD", 0)
 	d.NwwPatience = envInt("NWW_PATIENCE", 0)
 	d.DuckDb = envFloat("DUCK_DB", -18)
-	d.MicGainDb = clampMicGainDb(envInt("MIC_GAIN_DB", defaultMicGainDb(d.firmwareTarget)))
+	d.MicGainDb = micgain.SoftwareDB(d.firmwareTarget,
+		clampMicGainDb(envInt("MIC_GAIN_DB", defaultMicGainDb(d.firmwareTarget))))
 	d.BeamAngle = envFloat("BEAM_ANGLE", -1)
 	d.BeamformingEnabled = envBool("BEAMFORMING_ENABLED", true)
 	// Echo AEC is firmware-owned and starts enabled. AEC_ENABLED remains an
@@ -240,7 +244,7 @@ func (d *Device) Apply(msg ConfigMessage) {
 		d.DuckDb = *msg.DuckDb
 	}
 	if msg.MicGainDb != nil {
-		d.MicGainDb = clampMicGainDb(*msg.MicGainDb)
+		d.MicGainDb = micgain.SoftwareDB(d.firmwareTarget, clampMicGainDb(*msg.MicGainDb))
 	}
 	if msg.BeamAngle != nil {
 		d.BeamAngle = *msg.BeamAngle
@@ -407,16 +411,10 @@ func clampMicGainDb(db int) int {
 	return db
 }
 
-// defaultMicGainDb compensates for the lower capture level measured on the
-// shared Puffin seven-microphone path used by Biscuit and Radar. Other targets
-// need only a smaller lift over the old +24dB fleet default.
+// defaultMicGainDb retains the other boards' calibrated software gain. The
+// Puffin seven-microphone targets now get their +40 dB in hardware instead.
 func defaultMicGainDb(target string) int {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "biscuit", "radar":
-		return 40
-	default:
-		return 28
-	}
+	return micgain.SoftwareDB(target, 28)
 }
 
 const (

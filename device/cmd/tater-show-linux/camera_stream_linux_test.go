@@ -44,6 +44,27 @@ func TestCameraStreamControllerRecyclesSupersededFrames(t *testing.T) {
 	}
 }
 
+func TestFitCameraStreamFrameContainsHardwareSource(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	for offset := 0; offset < len(source.Pix); offset += 4 {
+		source.Pix[offset], source.Pix[offset+3] = 0x7f, 0xff
+	}
+	destination := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for index := range destination.Pix {
+		destination.Pix[index] = 0xff
+	}
+	fitCameraStreamFrame(destination, source)
+	if got := destination.RGBAAt(0, 0); got.R != 0 || got.G != 0 || got.B != 0 || got.A != 0 {
+		t.Fatalf("top letterbox pixel = %#v", got)
+	}
+	if got := destination.RGBAAt(2, 1); got.R != 0x7f || got.A != 0xff {
+		t.Fatalf("scaled source pixel = %#v", got)
+	}
+	if got := destination.RGBAAt(3, 3); got.R != 0 || got.G != 0 || got.B != 0 || got.A != 0 {
+		t.Fatalf("bottom letterbox pixel = %#v", got)
+	}
+}
+
 func TestCameraStreamErrorKeepsSnapshotFallback(t *testing.T) {
 	fallback := image.NewRGBA(image.Rect(0, 0, 16, 16))
 	cameras := &show.Cameras{SelectedID: "front", StreamURL: "rtsps://camera.invalid/live"}

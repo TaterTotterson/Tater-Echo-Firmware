@@ -1,0 +1,98 @@
+#!/bin/sh
+# Compatibility/migration helper for screen Echo satellites. Volume Up keeps
+# the native TWRP route. Remove only our retired one-command redirect; never
+# replace an unrelated OpenRecoveryScript or write a boot/recovery partition.
+
+set -u
+
+WORK_MOUNT=/run/tater-recovery-cache
+OWN_MOUNT=
+CACHE_ROOT=
+
+say() { echo "tater-recovery-router: $*"; }
+fail() { say "$*" >&2; exit 1; }
+
+cleanup() {
+	if [ -n "$OWN_MOUNT" ]; then
+		sync
+		umount "$WORK_MOUNT" 2>/dev/null || true
+		OWN_MOUNT=
+	fi
+}
+trap cleanup EXIT HUP INT TERM
+
+partition() {
+	want=$1
+	for metadata in /sys/class/block/*/uevent; do
+		[ -r "$metadata" ] || continue
+		grep -qx "PARTNAME=$want" "$metadata" 2>/dev/null || continue
+		name=${metadata%/uevent}
+		name=${name##*/}
+		for node in "/dev/$name" "/dev/block/$name"; do
+			[ -b "$node" ] && { echo "$node"; return 0; }
+		done
+	done
+	return 1
+}
+
+open_cache() {
+	cache=$(partition cache) || fail "the cache partition was not found"
+	if awk '$2 == "/cache" { found=1 } END { exit !found }' /proc/mounts; then
+		CACHE_ROOT=/cache
+		return 0
+	fi
+	mkdir -p "$WORK_MOUNT" || fail "cannot create the private cache mount"
+	mount -o rw,noatime "$cache" "$WORK_MOUNT" || fail "cannot mount the cache partition"
+	CACHE_ROOT=$WORK_MOUNT
+	OWN_MOUNT=1
+}
+
+close_cache() {
+	sync
+	if [ -n "$OWN_MOUNT" ]; then
+		umount "$WORK_MOUNT" || fail "cannot unmount the cache partition cleanly"
+		OWN_MOUNT=
+	fi
+}
+
+disable_redirect() {
+	open_cache
+	command=$CACHE_ROOT/recovery/openrecoveryscript
+	[ ! -L "$CACHE_ROOT/recovery" ] || fail "recovery directory is a symlink; leaving it unchanged"
+	if [ -e "$command" ] || [ -L "$command" ]; then
+		[ -f "$command" ] && [ ! -L "$command" ] || \
+			fail "OpenRecoveryScript is not an ordinary file; leaving it unchanged"
+		# Our generated command is tiny. Do not load an arbitrary user script
+		# into the shell merely to discover that it is unrelated.
+		contents=
+		if [ "$(wc -c < "$command")" -le 128 ]; then
+			contents=$(cat "$command") || fail "cannot inspect OpenRecoveryScript"
+		fi
+		if [ "$contents" = 'cmd sh /cache/tater-recovery/router.sh' ]; then
+			rm -f "$command" || fail "cannot remove the retired Tater Recovery redirect"
+			say "removed retired Tater Recovery redirect; Volume Up stays in TWRP"
+		elif grep -Fq '/cache/tater-recovery/router.sh' "$command"; then
+			fail "mixed OpenRecoveryScript contains a Tater redirect; refusing to edit unrelated commands"
+		else
+			say "unrelated OpenRecoveryScript left unchanged"
+		fi
+	fi
+	close_cache
+}
+
+case "${1:-disable}" in
+disable|install)
+	# Older factory archives call 'install' before 'twrp'. Keep that spelling
+	# compatible, but it must no longer install or re-arm any redirect.
+	disable_redirect
+	;;
+twrp)
+	disable_redirect
+	say "requesting native TWRP"
+	exec /usr/local/bin/rebootto recovery
+	;;
+*)
+	echo "usage: tater-recovery-router [disable|twrp] (install is a legacy alias for disable)" >&2
+	exit 2
+	;;
+esac

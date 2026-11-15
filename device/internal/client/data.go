@@ -11,7 +11,9 @@ import (
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/aec"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/beamformer"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/bindings/codec"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/micgain"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/processor"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/wakeword/microwakeword"
 	"github.com/TaterTotterson/Tater-Echo-Firmware/pkg/mic"
@@ -902,6 +904,8 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 	}
 
 	cfg := config.Get()
+	hardwareHighPass := codec.CaptureHighPassOffloaded(FirmwareTarget)
+	log.Printf("[data] 80Hz mic high-pass: verified hardware=%v", hardwareHighPass)
 
 	buf := make([]byte, 0, wakeChunkBytes*4)
 	wakeBuf := make([]byte, 0, wakeChunkBytes*4)
@@ -923,6 +927,7 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 	// first period.
 	gainDb := -1
 	gainLin := 1.0
+	levelGainLin := 1.0
 
 	// On-device microWakeWord scoring. Reset at stream start because a
 	// A mute/unmute or pipeline restart creates an audio gap that the detector
@@ -969,6 +974,9 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 			discontinuous := lastCapture.Sequence != 0 &&
 				(capture.Generation != lastCapture.Generation || capture.Sequence != lastCapture.Sequence+1)
 			if discontinuous {
+				// A capture producer restart may reset/reprogram the ADC. Recheck
+				// its verified profile before omitting the software filter.
+				hardwareHighPass = codec.CaptureHighPassOffloaded(FirmwareTarget)
 				buf, wakeBuf = buf[:0], wakeBuf[:0]
 				wakeLatch.reset()
 				previousWakeActive = false
@@ -1031,8 +1039,9 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 
 			if snap.MicGainDb != nil && *snap.MicGainDb != gainDb {
 				gainDb = *snap.MicGainDb
-				gainLin = math.Pow(10, float64(gainDb)/20.0)
-				log.Printf("[data] mic gain: %ddB (linear %.2f)", gainDb, gainLin)
+				gainLin, levelGainLin = micgain.Factors(FirmwareTarget, gainDb)
+				log.Printf("[data] mic gain: software=%ddB hardware=%ddB (PCM %.2f, level calibration %.2f)",
+					micgain.SoftwareDB(FirmwareTarget, gainDb), micgain.HardwareDB(FirmwareTarget), gainLin, levelGainLin)
 			}
 			d.pipeMu.Lock()
 			// Consume any pending beam lock/unlock request from the control
@@ -1074,7 +1083,7 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 				observedDirection, observedOK = wakeDirection.WakeDirection()
 			}
 			batchAt := capture.CapturedAt
-			wakeActive := doaActivity(vadPeriodRMS(mono), gainLin, false)
+			wakeActive := doaActivity(vadPeriodRMS(mono), levelGainLin, false)
 			if beamDiag.PlaybackActive || musicActive {
 				wakeActive = previousWakeActive
 			}
@@ -1149,12 +1158,16 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 			// per mic batch — the measured cause of recurring ALSA xruns on Biscuit.
 			wakePCM = prepareWakeLanePCM(wakePCM, mono,
 				sharedWake || (aecEnabled && (beamDiag.PlaybackActive || musicActive)))
-			wakePCM = d.wakeProc.HighPass(wakePCM)
+			if !hardwareHighPass {
+				wakePCM = d.wakeProc.HighPass(wakePCM)
+			}
 
 			// Remove DC and sub-speech rumble before either VAD or AGC sees it.
 			// This mutates the batch owned by this stream; wake and turn audio
 			// therefore pass through the same stable, time-invariant filter.
-			mono = d.proc.HighPass(mono)
+			if !hardwareHighPass {
+				mono = d.proc.HighPass(mono)
+			}
 
 			// ── Processing pipeline ──────────────────────────────────────
 			// VAD on beamformed, echo-cancelled, high-passed output — pre-AGC
@@ -1166,10 +1179,11 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 			// mic gain and stay meaningful across gain changes. mono is
 			// post-gain, so scale the threshold up by the same factor
 			// rather than requiring every stored config to be retuned in
-			// lockstep with micGainDb.
+			// lockstep with micGainDb. Include the gain relocated into the
+			// Biscuit/Radar PGA, but do not apply it to the PCM again.
 			rms := vadPeriodRMS(mono)
-			previousWakeActive = doaActivity(rms, gainLin, false)
-			speech := rms >= threshold*gainLin
+			previousWakeActive = doaActivity(rms, levelGainLin, false)
+			speech := rms >= threshold*levelGainLin
 			if lockOnSpeech && speech {
 				turnBeam := snap.BeamformingEnabled != nil && *snap.BeamformingEnabled
 				d.beam.LockCurrent(turnBeam)
@@ -1195,7 +1209,7 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 				}
 				log.Printf("[data] VAD diag: rms=%.5f threshold=%.5f gain=%ddB clipped=%d by_ch=%v "+
 					"speech=%v agc=%v mic=ch%d doa_conf=%.2f spatial=%.2f playback=%v%s",
-					rms, threshold*gainLin, gainDb, clipped, d.beam.ClippedByChannel(),
+					rms, threshold*levelGainLin, gainDb, clipped, d.beam.ClippedByChannel(),
 					speech, agcEnabled, beamDiag.OutputChannel, beamDiag.Confidence,
 					beamDiag.Spatial, beamDiag.PlaybackActive, pairDiag)
 				lastClipped = clipped
@@ -1216,7 +1230,7 @@ func (d *DataClient) streamMic(stopCh <-chan struct{}, streamGeneration uint64) 
 				cb := d.onDirectionChange
 				d.directionMu.Unlock()
 				if cb != nil {
-					cb(angle, doaActivity(rms, gainLin, speech), speech)
+					cb(angle, doaActivity(rms, levelGainLin, speech), speech)
 				}
 			}
 

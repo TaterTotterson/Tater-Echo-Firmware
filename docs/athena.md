@@ -6,6 +6,11 @@ supports Athena factory installation, setup, native display and audio, camera,
 privacy controls, recovery, and application OTA updates. The validated hardware
 contract and ongoing regression checklist are recorded below.
 
+GPU/UI development now uses its native Mali-G72/Panfrost driver and an isolated,
+hash-pinned Mesa runtime. See [the current qualification checkpoint](athena-release-readiness.md)
+for installed UI progress and remaining tests. Hardware video codecs are not
+enabled by the current Athena kernel; this is independent of GPU composition.
+
 ## Platform foundation
 
 - Unlock and TWRP: [saiyaku-athena on XDA](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/), from Fire OS 7080 / PS7574.1.7080N.

@@ -3,6 +3,8 @@
 package videostream
 
 import (
+	"context"
+	"image"
 	"strings"
 	"testing"
 )
@@ -112,6 +114,30 @@ func TestMediaArgsDefaultsToThirtyFPS(t *testing.T) {
 	}
 }
 
+func TestLiveCameraSoftwareFitRetainsDisplayAspectAndTransparentPadding(t *testing.T) {
+	request := MediaRequest{URL: "https://camera.invalid/live", Width: 936, Height: 324, FPS: 30, VideoOnly: true, AllowSourceGeometry: true}
+	args, err := MediaArgs(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, part := range []string{"min(936,324*dar)", "min(324,936/dar)", "format=rgba,pad=936:324", ":color=black@0,fps=30", "-f rawvideo -pix_fmt rgba pipe:1"} {
+		if !strings.Contains(joined, part) {
+			t.Fatalf("live camera lost geometry contract %q: %s", part, joined)
+		}
+	}
+	// Fullscreen media's opaque, exact-size presentation must not change.
+	request.AllowSourceGeometry = false
+	args, err = MediaArgs(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(args, " ")
+	if strings.Contains(joined, "black@0") || !strings.Contains(joined, "force_original_aspect_ratio=decrease") {
+		t.Fatalf("fullscreen fallback was changed: %s", joined)
+	}
+}
+
 func TestMediaArgsCanRetrySilentVideoWithoutAudioOutput(t *testing.T) {
 	args, err := MediaArgs(MediaRequest{
 		URL: "http://media.invalid/silent.mp4", Width: 960, Height: 480, VideoOnly: true,
@@ -122,6 +148,60 @@ func TestMediaArgsCanRetrySilentVideoWithoutAudioOutput(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "pipe:3") || strings.Contains(joined, "0:a:0?") {
 		t.Fatalf("video-only fallback retained the optional audio output: %s", joined)
+	}
+}
+
+func TestReadLiveRejectsMissingSharedDecoder(t *testing.T) {
+	// The complete hardware/fallback execution path is integration-tested on
+	// Checkers. Keep the video-only adapter on the same bounded decoder
+	// discovery contract as ordinary media playback.
+	t.Setenv("TATER_VDEC_ENABLE", "")
+	t.Setenv("TATER_FFMPEG", "/path/that/does/not/exist")
+	err := ReadLive(context.Background(), Request{
+		URL: "https://camera.invalid/live", Width: 640, Height: 360,
+	}, func(*image.RGBA) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("ReadLive without a decoder = %v", err)
+	}
+}
+
+func TestHardwareH264MediaArgsCopiesVideoAndKeepsAudio(t *testing.T) {
+	args, err := HardwareH264MediaArgs(MediaRequest{
+		URL: "https://media.invalid/movie/master.m3u8", Width: 960, Height: 480,
+		FPS: 30, StartPositionMS: 3_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, wanted := range []string{
+		"-ss 3.000", "-map 0:v:0 -an -sn -dn -c:v copy",
+		"-bsf:v h264_mp4toannexb,h264_metadata=aud=remove,h264_metadata=aud=insert -f h264 pipe:1",
+		"-bsf:v h264_mp4toannexb,h264_metadata=aud=remove,h264_metadata=aud=insert -f framecrc pipe:4",
+		"-map 0:a:0? -vn -sn -dn -ac 1 -ar 48000 -f s16le pipe:3",
+	} {
+		if !strings.Contains(joined, wanted) {
+			t.Fatalf("hardware media args missing %q: %s", wanted, joined)
+		}
+	}
+	for _, forbidden := range []string{"-vf ", "-pix_fmt rgba", "-f rawvideo"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("hardware media args retained software output %q: %s", forbidden, joined)
+		}
+	}
+}
+
+func TestHardwareH264MediaArgsKeepsSilentRetryVideoOnly(t *testing.T) {
+	args, err := HardwareH264MediaArgs(MediaRequest{
+		URL: "http://media.invalid/silent.mp4", Width: 960, Height: 480,
+		FPS: 30, VideoOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "pipe:3") || strings.Contains(joined, "0:a:0?") {
+		t.Fatalf("hardware video-only retry retained audio: %s", joined)
 	}
 }
 
@@ -158,5 +238,35 @@ func TestDecoderErrorDoesNotExposeStreamURL(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "private-token") || strings.Contains(err.Error(), "https://") {
 		t.Fatalf("decoder error exposed the stream URL: %q", err)
+	}
+}
+
+func TestSafeHardwareHelperErrorKeepsBoundedDiagnostic(t *testing.T) {
+	tail := lineTail{source: "hardware decoder helper", safeText: true}
+	message := "OMX decode incomplete: fed=180 copied=178\n"
+	if written, err := tail.Write([]byte(message)); err != nil || written != len(message) {
+		t.Fatalf("Write() = %d, %v", written, err)
+	}
+	err := tail.Error()
+	if err == nil || !strings.Contains(err.Error(), "fed=180 copied=178") {
+		t.Fatalf("helper diagnostic = %v", err)
+	}
+}
+
+func TestSafeHardwareHelperKeepsFailureTailNotStartupNoise(t *testing.T) {
+	tail := lineTail{source: "hardware decoder helper", safeText: true}
+	_, _ = tail.Write([]byte(strings.Repeat("startup ", 4096)))
+	_, _ = tail.Write([]byte("OMX input queue failed: frame=4729\n"))
+	if len(tail.text) != 8*1024 || !strings.Contains(tail.Error().Error(), "frame=4729") {
+		t.Fatal("lost the final bounded helper diagnostic")
+	}
+}
+
+func TestHardwareLifecycleSummaryDoesNotHideFailureStage(t *testing.T) {
+	tail := lineTail{source: "hardware decoder helper", safeText: true}
+	_, _ = tail.Write([]byte("OMX input queue failed: frame=4729\n"))
+	_, _ = tail.Write([]byte(strings.Repeat("lifecycle-summary ", 160)))
+	if !strings.Contains(tail.Error().Error(), "frame=4729") {
+		t.Fatal("lifecycle diagnostics hid the original failure")
 	}
 }

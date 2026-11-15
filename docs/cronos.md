@@ -37,7 +37,7 @@ interfaces:
 | Privacy button | `gpio-privacy-button`, `KEY_POWER` |
 | Privacy state | `/sys/devices/platform/gpio-privacy/state`; software may engage the write-only `/sys/devices/platform/gpio-privacy/enable`, while physical release remains authoritative |
 | Ambient light | vendor `m_alsps_input` interface |
-| Recovery | 32 MiB dedicated recovery partition containing TWRP |
+| Recovery | Retained TWRP; live GPT labels distinguish 16 MiB `recovery` and 32 MiB `swdl`, so preserve the unlock-specific routing rather than inferring a flash target from size |
 
 The two microphone channels use Cronos' measured Checkers-shaped coherent
 frontend. The two loopback channels provide the aligned playback reference for
@@ -62,3 +62,51 @@ and Wi-Fi recovery behavior.
 
 See [`../factory/cronos-linux/README.md`](../factory/cronos-linux/README.md)
 for the factory procedure.
+
+## GPU workspace and hardware-video bring-up
+
+Recoverable development tests on 2026-11-13 installed the shared GPU workspace
+UI and separately qualified Cronos helpers. The operator passed menu/fade,
+touch, vertical EQ, immediate post-wake speech, volume and mute/unmute checks.
+This is development qualification, not a published hardware-enabled release.
+
+The development capture policy again enables target-verified H.264 encoding
+and advertisement. The MJPEG comparison and Checkers' CPU-display comparison
+did not resolve its Sat Chat jitter; host relay investigation is still open.
+GPU composition, incoming hardware decoding, corrected encoder colors and
+bounded frame pacing are retained. Compatible peers use `echo-h264-balanced`
+(Cronos 640×480, Checkers 768×432); older peers retain MJPEG. Restoring the
+hardware path is not a live-call smoothness or release qualification.
+Cronos and Checkers now sample live MJPEG directly to 480×270 with a 20 FPS
+ceiling, avoiding the larger intermediate Bayer/RGBA development. The existing
+16:9 MJPEG framing and JPEG quality are retained. Native stills stay 1600×1200;
+incoming hardware decoding and GPU display are not downscaled by this setting.
+Live MJPEG uses the qualified motion-priority exposure lease without enabling
+H.264 encoding. Shutter is capped to a nominal sensor frame, trading higher
+gain/noise for motion in dim scenes. Normal exposure resumes after live capture
+ends; the native still-photo resolution remains unchanged.
+
+- Mali-T720/r26p0 drives retained GPU scenes through a Cronos-specific runtime
+  identity and helper hash, with software fallback. The logical canvas remains
+  960×480. Offscreen composition measurements are not live screen FPS claims.
+- The OV02B10 sensor supplies full-field 1600×1200 red-first Bayer. Native
+  stills retain that resolution; hardware H.264 calls use 1280×960, preserving
+  4:3 rather than cropping/stretching into Checkers' 16:9 format.
+- A complete pinned GCC 8.3 kernel build applies the generic missing-CCF-handle
+  fix, preserving the original configuration, rescue ramdisk and appended
+  device trees. Readback confirms 24 MHz at the sensor, about 30 source FPS.
+  CPU Bayer/color processing remains the live bottleneck: installed loopback
+  capture/relay/hardware decode measured about 15 FPS, not a 30 FPS call claim.
+- The corrected app-slot camera explicitly enables its target-qualified
+  encoder independently of an older rootfs supervisor. Sidecar hashes, private
+  runtime trees and actual hardware preflight still gate H.264 advertisement.
+- The original good root slot and previous app remain available for rollback.
+  The kernel update changed only the verified boot partition; TWRP recovery
+  images/routing, pairing and device token were preserved.
+
+The public helper lock is `platforms/cronos-hardware-lock.json`; it is not
+interchangeable with Checkers. Owner-local proprietary libraries remain outside
+Git/releases. The release workflow requires the separate
+`TATER_CRONOS_HARDWARE_BUNDLE_URL` and reviewed platform/kernel/boot pins; no
+publication URL or replacement platform revision is invented by this work.
+See [the current development gates](cronos-release-readiness.md) before release.

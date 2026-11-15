@@ -1,0 +1,75 @@
+#!/bin/busybox.static sh
+# Runs before switch_root. No network, daemon or main-system dependency.
+# Return 20 means a handoff was attempted but reboot failed: remain in rescue.
+BB=/bin/busybox.static
+STORE=/store
+S=$STORE/techo5
+REC=/dev/mmcblk0p12
+CACHE=/dev/mmcblk0p15
+ID=/proc/idme/device_type_id
+TARGET=/etc/tater-early-target
+KEY=/usr/local/bin/tater-volume-up
+HANDOFF=/usr/local/sbin/to-twrp
+log() { echo "tater-early-recovery: $*"; }
+
+target=$($BB cat "$TARGET" 2>/dev/null)
+identity=$($BB tr -d '\000\r\n' < "$ID" 2>/dev/null)
+case "$target:$identity" in
+    biscuit:A3S5BH2HU6VAYF|radar:A7WXQPH584YP) ;;
+    *) log "board identity mismatch; early handoff disabled"; exit 0 ;;
+esac
+
+"$KEY"
+pressed=$?
+case "$pressed" in
+    0) ;;
+    1) exit 0 ;;
+    *) log "input unavailable; continuing normal startup"; exit 0 ;;
+esac
+
+$BB mkdir -p "$STORE"
+if ! $BB mount -t ext4 -o noatime "$CACHE" "$STORE"; then
+    log "cache unavailable; no recovery write attempted"
+    exit 0
+fi
+
+verify_images() {
+    [ -b "$REC" ] && [ -f "$S/early-recovery.sha256" ] || return 1
+    [ "$($BB wc -l < "$S/early-recovery.sha256")" -eq 3 ] || return 1
+    for name in linux.img twrp.img twrp-handoff.img; do
+        [ -f "$S/$name" ] && [ ! -L "$S/$name" ] || return 1
+        size=$($BB wc -c < "$S/$name")
+        [ "$size" -ge 2048 ] && [ "$size" -le 16777216 ] || return 1
+        [ "$($BB head -c 8 "$S/$name")" = 'ANDROID!' ] || return 1
+        expected=$($BB awk -v name="$name" '$2 == name {print $1}' "$S/early-recovery.sha256")
+        [ "${#expected}" -eq 64 ] || return 1
+        case "$expected" in *[!0-9a-f]*) return 1 ;; esac
+        actual=$($BB sha256sum < "$S/$name")
+        [ "${actual%% *}" = "$expected" ] || return 1
+        [ "$name" != linux.img ] || { linux_hash=$expected; linux_size=$size; }
+    done
+}
+
+current_is_linux() {
+    # Reading a block device must cover the entire cached image, not its tail.
+    actual=$($BB head -c "$linux_size" "$REC" | $BB sha256sum)
+    [ "${actual%% *}" = "$linux_hash" ]
+}
+
+if ! verify_images || ! current_is_linux; then
+    log "recovery images are missing, stale or unverified; no write attempted"
+    $BB umount "$STORE"
+    exit 0
+fi
+
+log "Volume Up held: entering this unit's TWRP before loading a system slot"
+# Retain the established handoff: verified TWRP boots, restores Linux while
+# running from RAM, and leaves the next normal restart pointing back to Tater.
+$BB sh "$HANDOFF" --handoff
+if current_is_linux; then
+    log "handoff failed; original Linux image remains verified"
+    $BB umount "$STORE"
+    exit 0
+fi
+log "handoff did not reboot; staying in rescue instead of booting a system slot"
+exit 20

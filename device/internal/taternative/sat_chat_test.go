@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
+	"sync"
 	"testing"
 
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/liveh264"
 	"github.com/gorilla/websocket"
 )
 
@@ -86,6 +88,150 @@ func TestSatChatWriterPrioritizesAudioAndControlOverVideo(t *testing.T) {
 	}
 	if got := string(frame.data); got != "audio" {
 		t.Fatalf("first outbound frame = %q, want audio", got)
+	}
+}
+
+func h264QueueFrame(sequence uint32, stream uint64, keyframe bool) liveh264.Frame {
+	return liveh264.Frame{Width: 1280, Height: 720, FPS: 30, Sequence: sequence,
+		StreamID: stream, PTSUS: int64(sequence) * 33333, Keyframe: keyframe,
+		Data: []byte{0, 0, 0, 1, 0x65}}
+}
+
+func TestSatChatH264SenderPreservesBurstOffAudioQueue(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.setSatChatActive(true)
+	for i := uint32(0); i < 12; i++ {
+		if !c.SendSatChatH264(h264QueueFrame(i, 1, i == 0)) {
+			t.Fatalf("rejected frame %d", i)
+		}
+	}
+	if len(c.out) != 0 || len(c.videoOut) != 12 {
+		t.Fatalf("queues audio=%d video=%d", len(c.out), len(c.videoOut))
+	}
+	for i := uint32(0); i < 12; i++ {
+		frame, err := liveh264.Decode((<-c.videoOut).data)
+		if err != nil || frame.Sequence != i {
+			t.Fatalf("frame %d: %+v, %v", i, frame, err)
+		}
+	}
+}
+
+func TestSatChatH264SenderOverflowWaitsForFreshKeyframe(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.setSatChatActive(true)
+	if c.SendSatChatH264(h264QueueFrame(1, 1, false)) {
+		t.Fatal("accepted initial predictive frame")
+	}
+	for i := uint32(0); i < liveh264.QueuedFrames; i++ {
+		if !c.SendSatChatH264(h264QueueFrame(i, 1, i == 0)) {
+			t.Fatalf("rejected burst frame %d", i)
+		}
+	}
+	if c.SendSatChatH264(h264QueueFrame(32, 1, false)) || len(c.videoOut) != 0 {
+		t.Fatal("overflow retained broken GOP")
+	}
+	if c.SendSatChatH264(h264QueueFrame(33, 1, false)) {
+		t.Fatal("accepted prediction after overflow")
+	}
+	if !c.SendSatChatH264(h264QueueFrame(34, 1, true)) || !c.SendSatChatH264(h264QueueFrame(35, 1, false)) {
+		t.Fatal("did not resume at keyframe")
+	}
+	if len(c.videoOut) != 2 {
+		t.Fatal("wrong recovered burst length")
+	}
+	if c.SendSatChatH264(h264QueueFrame(1, 2, false)) || len(c.videoOut) != 0 {
+		t.Fatal("new stream retained old GOP or initial prediction")
+	}
+	if !c.SendSatChatH264(h264QueueFrame(2, 2, true)) {
+		t.Fatal("new stream rejected keyframe")
+	}
+	c.setSatChatActive(false)
+	if len(c.videoOut) != 0 || c.SendSatChatH264(h264QueueFrame(3, 2, false)) {
+		t.Fatal("ended call retained video")
+	}
+	c.setSatChatActive(true)
+	if c.SendSatChatH264(h264QueueFrame(4, 2, false)) {
+		t.Fatal("restarted call did not wait for keyframe")
+	}
+	if !c.SendSatChatH264(h264QueueFrame(5, 2, true)) {
+		t.Fatal("restart rejected keyframe")
+	}
+	if !c.sendBestEffortBinary([]byte("jpeg")) || len(c.videoOut) != 1 || string((<-c.videoOut).data) != "jpeg" {
+		t.Fatal("JPEG did not keep newest-only behavior")
+	}
+}
+
+func TestSatChatH264SenderKeyframeOverflowAndDisconnect(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.setSatChatActive(true)
+	for i := uint32(0); i < liveh264.QueuedFrames; i++ {
+		c.SendSatChatH264(h264QueueFrame(i, 1, i == 0))
+	}
+	picture := h264QueueFrame(32, 1, true)
+	if !c.SendSatChatH264(picture) || len(c.videoOut) != 1 {
+		t.Fatal("overflow did not retain fresh keyframe")
+	}
+	picture.Data[4] = 0
+	c.out <- outbound{kind: websocket.TextMessage, data: []byte("end-call")}
+	control, err := c.nextOutbound(context.Background())
+	if err != nil || string(control.data) != "end-call" {
+		t.Fatal("video delayed control")
+	}
+	queued, err := liveh264.Decode((<-c.videoOut).data)
+	if err != nil || queued.Sequence != 32 || !queued.Keyframe || queued.Data[4] != 0x65 {
+		t.Fatal("keyframe content or ownership changed")
+	}
+	if c.sendBestEffortBinary([]byte("TSCV2invalid")) {
+		t.Fatal("accepted invalid H.264")
+	}
+	c.SendSatChatH264(h264QueueFrame(33, 1, false))
+	c.markDisconnected(nil)
+	if len(c.videoOut) != 0 || len(c.out) != 0 {
+		t.Fatal("disconnect retained outgoing media")
+	}
+	c.connected.Store(true)
+	c.setSatChatActive(true)
+	if c.SendSatChatH264(h264QueueFrame(34, 1, false)) {
+		t.Fatal("reconnect accepted prediction without keyframe")
+	}
+}
+
+func TestSatChatConcurrentVideoProducersRemainBounded(t *testing.T) {
+	c, err := New(Config{URL: "ws://tater.test", DeviceID: "echo-test"}, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.connected.Store(true)
+	c.setSatChatActive(true)
+	var workers sync.WaitGroup
+	for n := 0; n < 4; n++ {
+		workers.Add(1)
+		go func(stream uint64) {
+			defer workers.Done()
+			for i := uint32(0); i < 80; i++ {
+				c.SendSatChatH264(h264QueueFrame(i, stream, i%30 == 0))
+			}
+		}(uint64(n + 1))
+	}
+	workers.Wait()
+	if len(c.videoOut) > liveh264.QueuedFrames || len(c.out) != 0 {
+		t.Fatal("video queue bounds or audio isolation violated")
 	}
 }
 

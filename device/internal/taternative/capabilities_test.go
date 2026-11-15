@@ -2,6 +2,14 @@ package taternative
 
 import "testing"
 
+func TestScreenTargetsAdvertiseAtomicHardwareComponentOTA(t *testing.T) {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
+		if got := CapabilitiesForTarget(target)["ota_bundle_components_version"]; got != 3 {
+			t.Errorf("%s OTA components = %v; version 2 cannot accept hardware sidecars", target, got)
+		}
+	}
+}
+
 func TestCapabilitiesForTargetKeepsBiscuitRing(t *testing.T) {
 	got := CapabilitiesForTarget("biscuit")
 	if got["led_ring"] != true {
@@ -136,7 +144,7 @@ func TestCapabilitiesForTargetDescribesCheckersScreen(t *testing.T) {
 	if got["ota"] != true {
 		t.Fatal("checkers did not advertise OTA support")
 	}
-	if got["ota_bundle_components_version"] != 2 {
+	if got["ota_bundle_components_version"] != 3 {
 		t.Fatal("checkers did not advertise staged component OTA continuation")
 	}
 	if got["ble_advertisements"] != true || got["ble_advertisements_version"] != 1 {
@@ -182,6 +190,19 @@ func TestScreenTargetsAdvertiseDisplayPowerManagement(t *testing.T) {
 	}
 	if got := CapabilitiesForTarget("biscuit")["screen_power_management_version"]; got != nil {
 		t.Fatalf("screenless target advertised display power management: %#v", got)
+	}
+}
+
+func TestConversationTextStyleIsAdvertisedOnlyByScreens(t *testing.T) {
+	for _, target := range []string{"checkers", "cronos", "crown", "athena", "rook"} {
+		if CapabilitiesForTarget(target)["screen_text_style"] != true {
+			t.Errorf("%s omitted conversation text styles", target)
+		}
+	}
+	for _, target := range []string{"biscuit", "radar", "future-echo"} {
+		if _, ok := CapabilitiesForTarget(target)["screen_text_style"]; ok {
+			t.Errorf("%s incorrectly advertised text styles", target)
+		}
 	}
 }
 

@@ -46,6 +46,11 @@ panel may remain dark. Compatible post-v4 Tater OTA updates the application A/B
 slots and can stage a verified rootfs in the inactive System slot. Use `./install.sh
 --repair` from Tater Recovery when the device cannot boot far enough for OTA.
 
+Holding **Volume Up** while Athena powers on enters TWRP and stays there,
+without an automatic Tater Recovery redirect. Use `to_recovery.py` from a
+normally running satellite for explicit USB Tater Recovery, or `to_twrp.py`
+for TWRP.
+
 A factory install or System OTA reboots Athena into a trial root-system slot.
 After its connected health check passes, Athena commits that slot in place and
 does not make the additional five-minute confirmation restart used by Checkers,

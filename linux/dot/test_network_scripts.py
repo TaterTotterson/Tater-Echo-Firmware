@@ -74,6 +74,7 @@ class USBEthernetControllerTests(unittest.TestCase):
             "TATER_DATA_DIR": str(self.data),
             "TATER_RUN_DIR": str(self.run),
             "TATER_SYS_NET": str(self.sys_net),
+            "TATER_SYS_ROOT": str(self.root / "sys"),
             "TATER_PROC_DIR": str(self.proc),
             "TATER_MCHANGE": str(self.mchange),
             "TATER_NET_SCRIPT": str(self.net),
@@ -93,9 +94,145 @@ class USBEthernetControllerTests(unittest.TestCase):
             "TATER_ETH_CONTROLLER_FAILURE_LIMIT": "3",
             "TATER_ETH_HEALTH_INTERVAL": "0",
             "TATER_ETH_RESCUE_RETRY_INTERVAL": "1",
+            "TATER_ETH_DEVICE_SETTLE_SECONDS": "0",
         })
         environment.update(extra)
         return environment
+
+    def _gadget_state(self, state: str, *, vendor: bool = False) -> Path:
+        directory = self.root / "sys/class" / ("android_usb/android0" if vendor else "udc/musb-hdrc")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "state"
+        path.write_text(state + "\n", encoding="utf-8")
+        return path
+
+    def test_computer_connection_never_switches_usb_role_or_wifi(self) -> None:
+        for target in ("biscuit", "rook"):
+            for vendor, value in ((True, "CONNECTED"), (True, "CONFIGURED"), (False, "configured"),
+                                  (False, "addressed"), (False, "default"), (False, "suspended")):
+                with self.subTest(target=target, vendor=vendor, state=value):
+                    for path in (self.root / "sys/class").glob("*/**/state"):
+                        path.unlink()
+                    self._gadget_state(value, vendor=vendor)
+                    original = self.mchange.read_text()
+                    result = subprocess.run(
+                        ["sh", str(ETHERNET), "once"], env=self._environment(TATER_TARGET=target),
+                        capture_output=True, text=True, check=False, timeout=5,
+                    )
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual("waiting usb-device", (self.run / "tater-usb-ethernet.state").read_text().strip())
+                    self.assertEqual(original, self.mchange.read_text(), "computer's serial role was reset")
+                    self.assertFalse(self.net_log.exists(), "computer connection changed Wi-Fi")
+
+    def test_udc_connection_protects_serial_when_vendor_state_is_disconnected(self) -> None:
+        self._gadget_state("DISCONNECTED", vendor=True)
+        self._gadget_state("suspended")
+        original = self.mchange.read_text()
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "once"], env=self._environment(TATER_TARGET="rook"),
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(original, self.mchange.read_text())
+        self.assertEqual("waiting usb-device", (self.run / "tater-usb-ethernet.state").read_text().strip())
+
+    def test_computer_connection_is_protected_in_automatic_role_mode_too(self) -> None:
+        self._gadget_state("CONFIGURED", vendor=True)
+        self.mchange.write_text("Active:1 host:0 force:0\n", encoding="utf-8")
+        original = self.mchange.read_text()
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "once"], env=self._environment(TATER_TARGET="biscuit"),
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(original, self.mchange.read_text())
+        self.assertEqual("waiting usb-device", (self.run / "tater-usb-ethernet.state").read_text().strip())
+        self.assertFalse(self.net_log.exists())
+
+    def test_computer_that_enumerates_during_probe_grace_is_not_disconnected(self) -> None:
+        gadget = self._gadget_state("not attached")
+        original = self.mchange.read_text()
+        process = subprocess.Popen(
+            ["sh", str(ETHERNET), "once"],
+            env=self._environment(TATER_TARGET="rook", TATER_ETH_DEVICE_SETTLE_SECONDS="1"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            log = self.data / "eth.log"
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                if log.exists() and "waiting for USB device enumeration" in log.read_text():
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("automatic controller did not allow device enumeration")
+            gadget.write_text("configured\n", encoding="utf-8")
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+            self.assertEqual(original, self.mchange.read_text())
+            self.assertEqual("waiting usb-device", (self.run / "tater-usb-ethernet.state").read_text().strip())
+            self.assertFalse(self.net_log.exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+    def test_supervisor_protects_serial_until_computer_disconnects_and_after_reconnect(self) -> None:
+        gadget = self._gadget_state("configured")
+        original = self.mchange.read_text()
+        process = subprocess.Popen(
+            ["sh", str(ETHERNET)],
+            env=self._environment(TATER_TARGET="rook", TATER_ETH_RETRY_INTERVAL="1", TATER_ETH_PASSIVE_INTERVAL="1"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        state = self.run / "tater-usb-ethernet.state"
+        log = self.data / "eth.log"
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if state.exists() and state.read_text().strip() == "waiting usb-device":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("supervisor did not recognize the connected computer")
+            # Longer than two shortened retry periods: still no host probe.
+            time.sleep(2.2)
+            self.assertEqual(original, self.mchange.read_text())
+            self.assertFalse(log.exists(), "supervisor launched a disruptive probe under a computer")
+
+            gadget.write_text("not attached\n", encoding="utf-8")
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if state.read_text().strip() == "waiting no-adapter" and self.mchange.read_text().strip() == "device":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("computer unplug did not re-enable adapter detection and restore serial")
+            # Simulate the kernel's state after restoring device mode, then a
+            # fresh PC connection; probing must stop for the new session too.
+            self.mchange.write_text(original, encoding="utf-8")
+            gadget.write_text("configured\n", encoding="utf-8")
+            probes = log.read_text().count("entered host mode")
+            time.sleep(2.2)
+            self.assertEqual(original, self.mchange.read_text())
+            self.assertEqual(probes, log.read_text().count("entered host mode"))
+            self.assertEqual("waiting usb-device", state.read_text().strip())
+        finally:
+            (self.run / "tater-usb-ethernet.stop").touch()
+            stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(0, process.returncode, f"{stdout=} {stderr=}")
+        self.assertFalse(self.net_log.exists())
+
+    def test_explicit_diagnostic_probe_can_override_computer_guard(self) -> None:
+        self._gadget_state("configured")
+        result = subprocess.run(
+            ["sh", str(ETHERNET), "probe"], env=self._environment(TATER_TARGET="rook"),
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual("fallback no-adapter", (self.run / "tater-usb-ethernet.state").read_text().strip())
+        self.assertEqual("device", self.mchange.read_text().strip())
+        self.assertFalse(self.net_log.exists())
 
     def test_missing_adapter_restores_serial_without_flapping_wifi(self) -> None:
         result = subprocess.run(
