@@ -113,6 +113,13 @@ class ProvisionHardwareTests(unittest.TestCase):
         for forbidden in ("dd ", "flash", "slotctl", "reboot", "rm -rf", "native.json", "device_token"):
             self.assertNotIn(forbidden, command)
 
+    def test_rook_probe_uses_the_camera_clock_kernel_identity(self):
+        body=provision.target_probe_body('rook')
+        self.assertIn("'#2 '",body)
+        self.assertIn('4.9.337-g4174e0b4d0e2',body)
+        self.assertIn('480,1440',body)
+        self.assertNotIn("'#1 '",body)
+
     @unittest.skipUnless(sys.platform == "linux", "exercise the actual BusyBox/GNU mv -Tn contract on Linux")
     def test_real_installer_transaction_is_idempotent_and_refuses_mismatched_existing_libraries(self):
         for mismatch in (False, True):

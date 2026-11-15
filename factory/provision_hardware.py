@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify/install owner-local Checkers libraries. Read-only unless --install.
+"""Verify/install owner-local Checkers/Cronos/Rook libraries; --install opts in.
 
 This script and its hashes may be published; the private runtime directory
 and transfer archive must never be included in firmware/release artifacts.
@@ -146,7 +146,7 @@ def target_probe_body(target: str) -> str:
     if target == "checkers":
         return PROBE_BODY
     if target == "rook":
-        return PROBE_BODY.replace("checkers", "rook").replace("4.9.337-g8d928c5176cc", "4.9.337-g4174e0b4d0e2").replace("'#4 '", "'#1 '").replace("TATER_CHECKERS_", "TATER_ROOK_").replace(
+        return PROBE_BODY.replace("checkers", "rook").replace("4.9.337-g8d928c5176cc", "4.9.337-g4174e0b4d0e2").replace("'#4 '", "'#2 '").replace("TATER_CHECKERS_", "TATER_ROOK_").replace(
             "test -s /usr/local/bin/tater-hardware.json",
             "test -s /usr/local/bin/tater-hardware.json\n"
             "test \"$(cat /sys/class/graphics/fb0/virtual_size)\" = 480,1440\n"
@@ -204,7 +204,7 @@ def install(directory: Path, console_library, port: str, *, target: str = "check
     body = target_probe_body(target)
     answer = usb.exchange(console_library, port, "(\n"+body+"\n)", 10)
     if "TATER_"+target.upper()+"_HARDWARE_READY" not in answer.splitlines():
-        raise ValueError("refusing: this is not the qualified Checkers kernel/system USB console")
+        raise ValueError(f"refusing: this is not the qualified {target.title()} kernel/system USB console")
     with tempfile.TemporaryDirectory(prefix="tater-private-hardware-") as temporary:
         archive = Path(temporary) / "private-runtime.tar"
         archive_runtime(directory, inventory, archive, target=target)

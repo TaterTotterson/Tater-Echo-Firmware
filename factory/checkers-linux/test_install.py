@@ -262,6 +262,58 @@ class InstallerTests(unittest.TestCase):
                     install.main()
             flash.assert_not_called()
 
+    def test_private_runtime_is_verified_before_flash_and_keeps_its_target(self):
+        for target in ("checkers", "cronos"):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                args = SimpleNamespace(
+                    verify_bundle=False, lineage_zip=root / "lineage.zip", adb="adb",
+                    serial=None, name=None, work=root / "work", hardware_runtime=root / "private",
+                )
+                events = []
+                hardware = SimpleNamespace(
+                    verify=mock.Mock(side_effect=lambda *a, **k: events.append("verify")),
+                    install=mock.Mock(side_effect=lambda *a, **k: events.append("install")),
+                )
+                console = SimpleNamespace(port="FAKE_PORT")
+                library = SimpleNamespace(Console=mock.Mock(return_value=console), CONSOLE_TECHO5="fake")
+                provision = SimpleNamespace(load_techo5lib=mock.Mock(return_value=library),
+                                            wait_for_console=mock.Mock())
+                modules = {"tater_private_hardware": hardware, "tater_checkers_console": provision}
+                with mock.patch.object(install, "parse_args", return_value=args), \
+                     mock.patch.object(install, "load_manifest", return_value={
+                         "version": "v5.0.0-rc.1", "target": target, "base_os": "tater-linux",
+                     }), mock.patch.object(install, "verify_bundle"), \
+                     mock.patch.object(install, "verify_lineage_zip"), \
+                     mock.patch.object(install, "select_device", return_value=("SERIAL", "recovery")), \
+                     mock.patch.object(install, "adb_text", return_value=target), \
+                     mock.patch.object(install, "load_module", side_effect=lambda name, path: modules[name]), \
+                     mock.patch.object(install, "run_platform_installer", side_effect=lambda *a: events.append("flash")), \
+                     mock.patch.object(install, "finish_tater_provisioning"):
+                    self.assertEqual(0, install.main())
+                self.assertEqual(events, ["verify", "flash", "install"])
+                hardware.verify.assert_called_once_with(args.hardware_runtime, target=target)
+                hardware.install.assert_called_once_with(args.hardware_runtime, library, "FAKE_PORT", target=target)
+
+    def test_bad_or_unsupported_private_runtime_never_opens_a_device(self):
+        for target in ("checkers", "cronos", "crown"):
+            with self.subTest(target=target):
+                args = SimpleNamespace(verify_bundle=False, lineage_zip=Path("lineage.zip"),
+                                       hardware_runtime=Path("private"))
+                hardware = SimpleNamespace(verify=mock.Mock(side_effect=ValueError("bad runtime")))
+                with mock.patch.object(install, "parse_args", return_value=args), \
+                     mock.patch.object(install, "load_manifest", return_value={
+                         "version": "v5.0.0-rc.1", "target": target, "base_os": "tater-linux",
+                     }), mock.patch.object(install, "verify_bundle"), \
+                     mock.patch.object(install, "verify_lineage_zip"), \
+                     mock.patch.object(install, "load_module", return_value=hardware), \
+                     mock.patch.object(install, "select_device") as device, \
+                     mock.patch.object(install, "run_platform_installer") as flash:
+                    with self.assertRaises((install.InstallError, ValueError)):
+                        install.main()
+                device.assert_not_called()
+                flash.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

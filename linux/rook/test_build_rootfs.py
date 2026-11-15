@@ -253,7 +253,7 @@ tater_rook_wifi_mac wlan0
                 f"\n  {following}:\n", 1
             )[0]
             with self.subTest(target=target):
-                self.assertIn("needs: [onnxruntime-armv7, ffmpeg-armv7]", job)
+                self.assertIn("needs: [onnxruntime-armv7, ffmpeg-armv7, ota-compatibility]", job)
                 self.assertIn(
                     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
                     job,

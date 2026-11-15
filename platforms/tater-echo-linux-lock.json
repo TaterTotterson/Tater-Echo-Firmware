@@ -34,13 +34,13 @@
   "platforms": {
     "dot": {
       "release": "dot-v1.0.24",
-      "kernel_release": "dot-kernel-v1.0.1",
+      "kernel_release": "hardware-kernels-v1.0.0-rc.1",
       "kernel_build": {
         "entry_point": "linux/dot/build_kernel.py",
         "profile_lock": "platforms/dot-audio-lock.json",
         "legacy_kernel_assets": "baseline-only; not firmware release inputs"
       },
-      "commit": "f99397141e82a3f03b0b3b1000090c9e72ef3f28",
+      "commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
       "rootfs": {
         "url": "https://github.com/HuskerMinion/techo5-dot/releases/download/dot-v1.0.24/techo5-dot-rootfs-v1.0.24.tar.gz",
         "sha256": "7b78889fd2d7df25cc5816b4fe29190980fda6ff1c880f287017d0d6e98604ac"
@@ -57,21 +57,43 @@
         "biscuit": {
           "kernel": {
             "name": "tater-echo-biscuit-kernel.zImage-dtb",
-            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.1/tater-echo-biscuit-kernel.zImage-dtb",
-            "sha256": "1d3d7e6ade694c60ef29fe49683497b885afcea8c2ea3b23b6e47b077d953729"
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-biscuit-kernel.zImage-dtb",
+            "sha256": "6d86314ad86f712c822de80ba30402f363ec667a19570fa09109fe11075cf55c"
           }
         },
         "radar": {
           "kernel": {
             "name": "tater-echo-radar-kernel.zImage-dtb",
-            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/dot-kernel-v1.0.1/tater-echo-radar-kernel.zImage-dtb",
-            "sha256": "e9d245735b5bbf962cc0ad8baa50aa982d9bcc1368423725236eff966d9c1cfd"
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-radar-kernel.zImage-dtb",
+            "sha256": "b566da06193c98813f61dc70febee224c67550d791eab7bb7e8d179343f8bc3c"
           }
         }
       }
     },
     "show": {
-      "checkers_commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
+      "checkers_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+      "checkers_hardware": {
+        "release_qualified": false,
+        "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+        "kernel_image_sha256": "dee4a1d17315d61d3cc83b8b1d2b1526395a6068020da11eefbc034fc84590f0",
+        "boot_sha256": "4db3729916877c44ca3cd2c0974c1c58d3161fd358dec59d39c8001767a702d8",
+        "remaining": "Retest restored separate microphones and complete private-runtime factory/OTA qualification"
+      },
+      "cronos_hardware": {
+        "release_qualified": false,
+        "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+        "kernel_image_sha256": "79410d93c4a5a5c2920cd4b4164f2d99afef17661b0cdaea1a45336e6ab734e4",
+        "boot_sha256": "53a634522b9d27504fafb784392706fa6e57d97afb067e7ccd1c2ed080453130",
+        "remaining": "Complete private-runtime factory/OTA qualification"
+      },
+      "crown_hardware": {
+        "release_qualified": false,
+        "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+        "kernel_image_sha256": "0efd78f0179294f95e97e5314a2b963574c9faa1f82ab9eb1a646def0eb1dd89",
+        "boot_sha256": "e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7",
+        "kernel_origin": "retained public baseline custody image; untested camera-clock candidate excluded",
+        "remaining": "Complete private-runtime installer, hardware call and factory/OTA qualification"
+      },
       "release": "v0.9.26",
       "custody_release": "satellite-baselines-v1.0.0",
       "rootfs": {
@@ -81,9 +103,9 @@
       "targets": {
         "checkers": {
           "boot": {
-            "name": "tater-echo-checkers-baseline-boot.img",
-            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-checkers-baseline-boot.img",
-            "sha256": "46c19fd23c210714e29eb2bf88c77b540f3290c0cf50b680b22032e7a4771da7"
+            "name": "tater-echo-checkers-hardware-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-checkers-hardware-boot.img",
+            "sha256": "4db3729916877c44ca3cd2c0974c1c58d3161fd358dec59d39c8001767a702d8"
           }
         },
         "crown": {
@@ -95,53 +117,67 @@
         },
         "cronos": {
           "boot": {
-            "name": "tater-echo-cronos-baseline-boot.img",
-            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.1.0/tater-echo-cronos-baseline-boot.img",
-            "sha256": "7e9ce93a54fc613cbfab5d15929aa06bfd6f63c2c432d6f8261b3599fc3cd791"
+            "name": "tater-echo-cronos-hardware-boot.img",
+            "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-cronos-hardware-boot.img",
+            "sha256": "53a634522b9d27504fafb784392706fa6e57d97afb067e7ccd1c2ed080453130"
           }
         }
       }
     },
     "athena": {
-      "commit": "3a0c2d480e281226d28c831730abc3301d605ba4",
+      "commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+      "hardware": {
+        "release_qualified": false,
+        "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+        "boot_sha256": "c6f38f2ca803845b395fe676df21de655a122377f884260d123bd8012fa3de8c",
+        "mesa_manifest_sha256": "ab77ccdd446064c327bf3fe150b3eeb73d65cc8f9bf3c5aeb79f7376725a5ef8",
+        "codec_lock_sha256": "5b1842005582b5adaf8cdfefea608876012a05c074d5e8eda9d2cee5d03c8d38",
+        "remaining": "Finish private-runtime factory integration and final factory/OTA qualification"
+      },
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
-      "kernel_release": "athena-kernel-v1.0.0",
+      "kernel_release": "hardware-kernels-v1.0.0-rc.1",
       "rootfs": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-athena-baseline-rootfs.tar.gz",
         "sha256": "cce1d383df8df280ae47605ed13111215d868e4a3d2eb6693ab1ddd62f0d48e5"
       },
       "video_decoder": {
-        "release": "video-decoder-v8.1.2-1",
-        "source_commit": "da8226d9d7b877e4a7029e3ca9a8dc777bc3b64d",
-        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/tater-ffmpeg-armv7",
-        "sha256": "8f66c428bfca9ef7990aa1ba20dcf40d48a7cf451c05b733331b75142ae1da89",
-        "size": 4250248,
+        "release": "video-decoder-v8.1.2-2",
+        "source_commit": "4377ee9523137ec425072b70496625293b67dc39",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-2/tater-ffmpeg-armv7",
+        "sha256": "770eba6e8f637fc311ea39cc5eaededb1e836604095386ecd7a6c22ba8086c72",
+        "size": 4336264,
         "license": {
-          "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-1/FFMPEG-LGPL-2.1.txt",
+          "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/video-decoder-v8.1.2-2/FFMPEG-LGPL-2.1.txt",
           "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
           "size": 26517
         }
       },
       "boot": {
-        "name": "boot-athena.img",
-        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/athena-kernel-v1.0.0/boot-athena.img",
-        "sha256": "5a0d8a151bd3bf14c80d3e779371c844481a77ac43d440db0a0e2b8b5f92a191",
+        "name": "tater-echo-athena-hardware-boot.img",
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-athena-hardware-boot.img",
+        "sha256": "c6f38f2ca803845b395fe676df21de655a122377f884260d123bd8012fa3de8c",
         "size": 12951552
       }
     },
     "rook": {
       "release": "spot-v0.5.25",
       "custody_release": "satellite-baselines-v1.0.0",
-      "kernel_release": "rook-kernel-v1.0.0",
-      "commit": "a514109abeccb75c67593d3b1b9f614f181436f3",
+      "kernel_release": "hardware-kernels-v1.0.0-rc.1",
+      "commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+      "hardware": {
+        "release_qualified": false,
+        "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
+        "kernel_image_sha256": "aa33d9b29a5c4d3e5a3805842df385858589de62272e8cca8a5f263adaef5d17",
+        "remaining": "Finish private-runtime factory integration and final factory/OTA qualification"
+      },
       "rootfs": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rootfs.tar.gz",
         "sha256": "c2960f9a2792868a2707fdc514594a034b404c6a472b049c4fb3397165fe0eb2"
       },
       "kernel": {
-        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/rook-kernel-v1.0.0/tater-echo-rook-kernel.Image.gz-dtb",
-        "sha256": "57e6d7401e091f26d0efeadc86170144195f54b50105f98ea311cf0523c31a00"
+        "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/hardware-kernels-v1.0.0-rc.1/tater-echo-rook-hardware-kernel.Image.gz-dtb",
+        "sha256": "aa33d9b29a5c4d3e5a3805842df385858589de62272e8cca8a5f263adaef5d17"
       },
       "rescue": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rescue.tar",

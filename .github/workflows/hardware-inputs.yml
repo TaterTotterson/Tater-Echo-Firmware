@@ -1,0 +1,101 @@
+name: Verify public hardware release inputs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-inputs:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [checkers, cronos, crown, rook, athena, athena-codecs]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Test bounded archive verification
+        run: python3 -m unittest tools.test_release_hardware_inputs
+      - name: Download and verify exact published input
+        run: |
+          python3 tools/release_hardware_inputs.py verify-lock
+          python3 tools/release_hardware_inputs.py fetch \
+            --name '${{ matrix.name }}' --output /tmp/verified-public-input
+      - name: Verify source provenance
+        run: |
+          python3 - <<'PY'
+          import hashlib, subprocess
+          from pathlib import Path
+          from tools import release_hardware_inputs as inputs, hardware_bundle, athena_codec_bundle
+          lock = inputs.load()
+          source = Path('/tmp/hardware-source')
+          subprocess.run(['git', 'clone', '--filter=blob:none', '--no-checkout', lock['source']['repository'], str(source)], check=True)
+          subprocess.run(['git', '-C', str(source), 'checkout', '--detach', lock['source']['commit']], check=True)
+          name = '${{ matrix.name }}'
+          if name == 'athena-codecs':
+              codec = athena_codec_bundle.load_lock()
+              files = {**codec['codec_source_lock']['sources'], **codec['module_sources']}
+          else:
+              files = hardware_bundle.load_lock(name)['sources']
+          for relative, expected in files.items():
+              path = source / relative
+              assert not path.is_symlink() and path.is_file(), relative
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, relative
+          print('Source content pins verified; this is not physical firmware qualification.')
+          PY
+
+  kernel-inputs:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [biscuit, radar, checkers, cronos, crown, athena, rook]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download and verify pinned public kernel or boot
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from tools import athena_codec_bundle, fetch_platform_input, package_echo_release as release
+          target = os.environ['TARGET']
+          if target in ('biscuit', 'radar'):
+              key = f'platforms.dot.targets.{target}.kernel'
+          elif target in ('checkers', 'cronos', 'crown'):
+              key = f'platforms.show.targets.{target}.boot'
+          else:
+              key = f'platforms.{target}.' + ('kernel' if target == 'rook' else 'boot')
+          output = Path('/tmp/verified-platform-input')
+          fetch_platform_input.fetch(key, output)
+          if target in ('biscuit', 'radar'):
+              release.verify_dot_audio_kernel(output, target)
+          elif target in ('checkers', 'cronos', 'crown'):
+              expected = release.PLATFORM_LOCK['platforms']['show'][target+'_hardware']['kernel_image_sha256']
+              release.verify_hardware_boot(output, target.title(), expected)
+          elif target == 'athena':
+              assert release.digest(output) == athena_codec_bundle.load_lock()['kernel_template_sha256']
+          else:
+              assert release.digest(output) == release.QUALIFIED_ROOK_KERNEL_SHA256
+          print(target + ': public input verified; no device accessed or physical gate changed.')
+          PY
+
+  athena-mesa:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
+        with:
+          platforms: arm
+      - name: Recreate Mesa from pinned signed Alpine packages
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/TaterTotterson/Tater-Echo-Hardware /tmp/hardware-source
+          git -C /tmp/hardware-source checkout --detach \
+            "$(python3 -c 'from tools.release_hardware_inputs import load; print(load()["source"]["commit"])')"
+          builder=$(python3 tools/platform_lock.py builder-reference --platform linux/arm/v7)
+          docker pull --platform linux/arm/v7 "$builder"
+          python3 tools/prepare_release_mesa.py --source /tmp/hardware-source \
+            --output /tmp/verified-mesa

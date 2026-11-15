@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "source": {
+    "repository": "https://github.com/TaterTotterson/Tater-Echo-Hardware",
+    "commit": "cfa4c854f36e3537fcefc79492be0a2363a1a650"
+  },
+  "inputs": {
+    "checkers": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-checkers-public.tar.gz",
+      "sha256": "8d3f3140fb332d513537b8f96f81a90ad1e9daad457eb051f30bcd68f28e23db",
+      "size": 105236
+    },
+    "cronos": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-cronos-public.tar.gz",
+      "sha256": "9aa91715c71bc3cbce05f1045e365053d6d7819c8d3d0154f61c6cf8398b4e24",
+      "size": 100386
+    },
+    "crown": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-crown-public.tar.gz",
+      "sha256": "5eb934dcf80e35a7d9a329c51cf5a99d78358832fd73b79a4a71bc3c4a8d4ad5",
+      "size": 100052
+    },
+    "rook": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-rook-public.tar.gz",
+      "sha256": "94ec677165cb17baafb36e0e31cfbdbcb913fc90c9d028bd9646d7e0d0b9a0d5",
+      "size": 98298
+    },
+    "athena": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-athena-public.tar.gz",
+      "sha256": "cc41c70f4a2a809524d1b23ece9e9a536adb9dc0b5dca3ba0923e1cf98b291d2",
+      "size": 13658
+    },
+    "athena-codecs": {
+      "url": "https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/download/hardware-inputs-v1.0.0-rc.1/tater-athena-codecs-public.tar.gz",
+      "sha256": "60c70466e17e5a13e035dc979cea292220029b82a156d78b47f16bb704437b2a",
+      "size": 96316
+    }
+  }
+}

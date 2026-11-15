@@ -76,7 +76,7 @@ class PlatformLockTests(unittest.TestCase):
     def test_video_decoder_is_a_pinned_tater_linux_asset(self) -> None:
         value = platform_lock.load()
         decoder = value["platforms"]["athena"]["video_decoder"]
-        self.assertEqual(decoder["release"], "video-decoder-v8.1.2-1")
+        self.assertEqual(decoder["release"], "video-decoder-v8.1.2-2")
         self.assertRegex(decoder["source_commit"], r"^[0-9a-f]{40}$")
         self.assertIn("TaterTotterson/Tater-Echo-Linux/releases/download/", decoder["url"])
         self.assertRegex(decoder["sha256"], r"^[0-9a-f]{64}$")
@@ -94,9 +94,9 @@ class PlatformLockTests(unittest.TestCase):
         value = platform_lock.load()
         athena = value["platforms"]["athena"]
         boot = athena["boot"]
-        self.assertEqual(athena["kernel_release"], "athena-kernel-v1.0.0")
+        self.assertEqual(athena["kernel_release"], "hardware-kernels-v1.0.0-rc.1")
         self.assertIn(f"/releases/download/{athena['kernel_release']}/", boot["url"])
-        self.assertEqual(boot["name"], "boot-athena.img")
+        self.assertEqual(boot["name"], "tater-echo-athena-hardware-boot.img")
         self.assertRegex(boot["sha256"], r"^[0-9a-f]{64}$")
         self.assertGreater(boot["size"], 0)
 

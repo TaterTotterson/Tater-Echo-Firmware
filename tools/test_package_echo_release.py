@@ -67,14 +67,15 @@ class PackageEchoReleaseTests(unittest.TestCase):
 
     @staticmethod
     def _rook_boot(path: Path) -> None:
+        kernel = b'rook-kernel-fixture'
         ramdisk = lzma.compress(b"INSTALLING TATER\nTATER RECOVERY\nTATER LINUX\n")
         page = 2048
         header = b"ANDROID!" + struct.pack(
             "<9I",
-            0, 0, len(ramdisk), 0, 0, 0, 0, page, 0,
+            len(kernel), 0, len(ramdisk), 0, 0, 0, 0, page, 0,
         )
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(header.ljust(page, b"\0") + ramdisk)
+        path.write_bytes(header.ljust(page, b"\0") + kernel.ljust(page,b'\0') + ramdisk)
 
     @staticmethod
     def _rook_rootfs(path: Path, version: str, public: Path | None = None) -> None:
@@ -582,12 +583,16 @@ class PackageEchoReleaseTests(unittest.TestCase):
             hardware = HardwareBundleTests().fixture(public, "rook")
             self._rook_rootfs(rootfs, version, public)
             platform = json.loads(json.dumps(package_echo_release.PLATFORM_LOCK))
-            platform["platforms"]["rook"]["hardware"] = {"release_qualified": True}
+            rook=platform["platforms"]["rook"]
+            kernel_sha=hashlib.sha256(b'rook-kernel-fixture').hexdigest()
+            rook["kernel"]["sha256"]=kernel_sha
+            rook["hardware"] = {"release_qualified": True,"source_commit":rook['commit'],"kernel_image_sha256":kernel_sha}
 
             with (
                 mock.patch.object(package_echo_release, "REPO", root),
                 mock.patch.object(package_echo_release, "TARGETS", targets),
                 mock.patch.object(package_echo_release, "PLATFORM_LOCK", platform),
+                mock.patch.object(package_echo_release, "QUALIFIED_ROOK_KERNEL_SHA256", kernel_sha),
                 mock.patch.object(package_echo_release.hardware_bundle, "load_lock", return_value=hardware),
                 mock.patch.dict(os.environ, {
                     "TATER_ROOK_ROOTFS": str(rootfs),
@@ -716,6 +721,11 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 mock.patch.object(package_echo_release, "TARGETS", targets),
                 mock.patch.object(package_echo_release.subprocess, "check_output",
                                   return_value=package_echo_release.ATHENA_PLATFORM_COMMIT + "\n"),
+                mock.patch.object(package_echo_release, "require_athena_hardware_platform"),
+                mock.patch.object(package_echo_release.athena_codec_bundle, "load_lock", return_value={
+                    **package_echo_release.athena_codec_bundle.load_lock(),
+                    "kernel_template_sha256": hashlib.sha256(b"athena-mainline-boot").hexdigest()
+                }),
                 mock.patch.dict(os.environ, {
                     "TATER_ATHENA_PLATFORM_SOURCE": str(platform),
                     "TATER_ATHENA_ROOTFS": str(rootfs),

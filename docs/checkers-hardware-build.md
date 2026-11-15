@@ -1,9 +1,11 @@
 # Checkers hardware helper build and private runtime provisioning
 
-This is an unpublished Checkers-only pipeline, not release qualification or a
-kernel migration. Other Echo targets remain disabled. Do not flash or publish
-these artifacts until the remaining [release gates](checkers-release-readiness.md)
-pass.
+The open helper inputs are published separately from installable firmware.
+They do not constitute kernel migration or release qualification. Do not flash
+or release firmware until the remaining
+[release gates](checkers-release-readiness.md) pass. The current cross-target
+[build-input and installer audit](echo-5-build-inputs.md) distinguishes published
+inputs from the remaining end-user runtime delivery and physical checks.
 
 ## Source and artifact ownership
 
@@ -18,7 +20,7 @@ pass.
   `tater-hw-venc`, and `tater-hardware.json`. Vendor libraries, linker inputs,
   device identities, configuration, recordings, and private runtime directories
   are not public helper artifacts. Keep public source/license notices available
-  alongside any eventual publication; repository licensing still needs review.
+  alongside publication; they are included in the input prerelease.
 
 ## Build once; consume the same verified set everywhere
 
@@ -47,22 +49,25 @@ explicit `TATER_HARDWARE_SOURCE`, `TATER_HARDWARE_NDK`,
 cannot silently build a release rootfs without its locked helpers. Passing a
 helper set to another target is refused.
 
-The release workflow consumes a verified public helper archive using the
-`TATER_CHECKERS_HARDWARE_BUNDLE_URL` repository variable. **No URL is currently
-configured by this work.** Set it only after authorized public source/artifact
-publication and audit. Missing input fails the Checkers release job; it does
-not download private libraries or publish a software-only build as accelerated.
-Downloaded archives have a size limit and an exact file allowlist; paths,
-duplicates, links, non-ARM32 helpers, and lock/hash mismatches are refused.
+The release workflow consumes the public helper archive pinned in
+`platforms/hardware-release-inputs.json`; mutable GitHub URL variables are no
+longer needed. `tools/release_hardware_inputs.py fetch --name checkers --output
+/path/to/new-directory` verifies its outer size/hash and exact inner source,
+metadata and executable hashes. Paths, duplicates, links, non-ARM32 helpers,
+private extra files and mismatches are refused. The separate **Verify public
+hardware release inputs** workflow exercises downloads without waiving physical
+qualification. Source/license details accompany the
+[input prerelease](https://github.com/TaterTotterson/Tater-Echo-Hardware/releases/tag/hardware-inputs-v1.0.0-rc.1).
 
-The Checkers packer also requires an explicitly reviewed
+The Checkers packer also requires an explicitly reviewed, `release_qualified`
+true
 `platforms.show.checkers_hardware` record in the platform lock: `source_commit`
 must match the selected Show platform revision, `kernel_image_sha256` must
 match the qualified camera kernel, and `boot_sha256` must match the selected
 Checkers boot artifact. The packer independently hashes the **actual kernel
 payload** inside that boot image. That record is deliberately not fabricated
-by this work: the current older boot/source pins cannot be released as the new
-hardware-enabled firmware.
+by this work. The current public candidate pins are reproducible, but still
+require installed-candidate qualification before release.
 
 ## Application/system slots and rollback
 
@@ -118,7 +123,8 @@ private and contains no helpers, credentials, calibration, or recording files.
 
 ## Verify or explicitly provision by USB
 
-The factory archive includes `provision_hardware.py` for Checkers:
+The shared Checkers/Cronos factory archive includes `provision_hardware.py`.
+The examples below select Checkers; pass `--target cronos` for Cronos:
 
 ```sh
 # Local verification only; no device is opened.
@@ -134,8 +140,8 @@ verifies the supplied files **before** its ordinary flashing workflow and then
 provisions after normal Linux boot. This does not supply the still-pending
 kernel migration by itself: the USB provisioning guard requires the qualified
 Checkers kernel build (`4.9.337-g8d928c5176cc`, build `#4`) and new helper-enabled
-rootfs. Existing published factory boot pins do not yet satisfy that release
-gate and must be migrated/qualified before publication.
+rootfs. The new public candidate must still be physically qualified before
+publishing installable firmware.
 
 The provisioner rechecks target, kernel, normal-slot boot, disk space, the
 complete private inventory, uploaded archive digest and every staged file.

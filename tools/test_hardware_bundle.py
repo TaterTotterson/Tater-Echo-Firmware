@@ -105,7 +105,8 @@ class HardwareBundleTests(unittest.TestCase):
             self.assertIn(lock["helpers"][name], (bundle.ROOT / relative).read_text())
         workflow = (bundle.ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("if: matrix.target == 'checkers'", workflow)
-        self.assertIn("TATER_CHECKERS_HARDWARE_BUNDLE_URL", workflow)
+        self.assertIn("tools/release_hardware_inputs.py fetch", workflow)
+        self.assertNotIn("vars.TATER_CHECKERS_HARDWARE_BUNDLE_URL", workflow)
 
     def test_old_kernel_release_pin_is_refused(self):
         with self.assertRaisesRegex(SystemExit, "hardware release is blocked"):
@@ -116,12 +117,18 @@ class HardwareBundleTests(unittest.TestCase):
             release.require_crown_hardware_platform()
         with self.assertRaisesRegex(SystemExit, "Rook hardware release is blocked"):
             release.require_rook_hardware_platform()
+        with self.assertRaisesRegex(SystemExit, "Athena hardware release is blocked"):
+            release.require_athena_hardware_platform()
 
     def test_rook_requires_explicit_release_qualification(self):
         for qualified in (None, False, "true", True):
             with self.subTest(qualified=qualified):
                 platform = json.loads(json.dumps(release.PLATFORM_LOCK))
-                platform["platforms"]["rook"]["hardware"] = {"release_qualified": qualified}
+                rook=platform["platforms"]["rook"]
+                rook["kernel"]["sha256"]=release.QUALIFIED_ROOK_KERNEL_SHA256
+                rook["hardware"] = {"release_qualified": qualified,
+                                    "source_commit":rook["commit"],
+                                    "kernel_image_sha256":release.QUALIFIED_ROOK_KERNEL_SHA256}
                 with mock.patch.object(release, "PLATFORM_LOCK", platform):
                     if qualified is True:
                         release.require_rook_hardware_platform()
@@ -186,6 +193,7 @@ class HardwareBundleTests(unittest.TestCase):
         lock = json.loads(json.dumps(release.PLATFORM_LOCK))
         show = lock["platforms"]["show"]
         show["checkers_hardware"] = {
+            "release_qualified": True,
             "source_commit": show["checkers_commit"],
             "kernel_image_sha256": release.QUALIFIED_CHECKERS_KERNEL_SHA256,
             "boot_sha256": show["targets"]["checkers"]["boot"]["sha256"],
@@ -195,6 +203,21 @@ class HardwareBundleTests(unittest.TestCase):
             show["checkers_hardware"]["source_commit"] = "0" * 40
             with self.assertRaises(SystemExit):
                 release.require_checkers_hardware_platform()
+
+    def test_input_pins_do_not_waive_physical_qualification(self):
+        for target in ('checkers', 'cronos'):
+            lock = json.loads(json.dumps(release.PLATFORM_LOCK))
+            show = lock['platforms']['show']
+            record = show[target+'_hardware'] = {
+                'release_qualified': False,
+                'source_commit': show['checkers_commit'],
+                'kernel_image_sha256': getattr(release, 'QUALIFIED_'+target.upper()+'_KERNEL_SHA256'),
+                'boot_sha256': show['targets'][target]['boot']['sha256'],
+            }
+            with mock.patch.object(release, 'PLATFORM_LOCK', lock):
+                with self.assertRaises(SystemExit): getattr(release, 'require_'+target+'_hardware_platform')()
+                record['release_qualified'] = True
+                getattr(release, 'require_'+target+'_hardware_platform')()
 
     def test_rootfs_helpers_are_the_exact_ota_source(self):
         with tempfile.TemporaryDirectory() as temporary:

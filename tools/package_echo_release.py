@@ -22,7 +22,7 @@ import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools import athena_mesa, hardware_bundle, platform_lock  # noqa: E402
+from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, release_hardware_inputs  # noqa: E402
 from linux.dot import build_kernel as dot_kernel  # noqa: E402
 from linux.dot import early_boot as dot_early_boot  # noqa: E402
 
@@ -61,8 +61,12 @@ DOT_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["dot"]["commit"]
 ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
 PLATFORM_REPOSITORY = PLATFORM_LOCK["source"]["repository"]
 DOT_AUDIO_LOCK_PATH = REPO / "platforms/dot-audio-lock.json"
-QUALIFIED_CHECKERS_KERNEL_SHA256 = "758cb695409303453232e4313574af005a670619007df47c479afb473344e957"
+# Reviewed build inputs, not an assertion of physical release qualification.
+# The separate release_qualified gates must also pass. Checkers restores the
+# public baseline's independent microphones and uses a clean initramfs build.
+QUALIFIED_CHECKERS_KERNEL_SHA256 = "dee4a1d17315d61d3cc83b8b1d2b1526395a6068020da11eefbc034fc84590f0"
 QUALIFIED_CRONOS_KERNEL_SHA256 = "79410d93c4a5a5c2920cd4b4164f2d99afef17661b0cdaea1a45336e6ab734e4"
+QUALIFIED_ROOK_KERNEL_SHA256 = "aa33d9b29a5c4d3e5a3805842df385858589de62272e8cca8a5f263adaef5d17"
 
 
 def require_dot_audio_platform(target: str) -> None:
@@ -87,8 +91,12 @@ def verify_dot_audio_kernel(kernel: Path, target: str) -> None:
 def require_rook_hardware_platform() -> None:
     # Functional owner-device trials do not replace final fleet OTA/factory
     # qualification or authorize publishing the owner's private libraries.
-    hardware = PLATFORM_LOCK["platforms"]["rook"].get("hardware", {})
-    if hardware.get("release_qualified") is not True:
+    platform = PLATFORM_LOCK["platforms"]["rook"]
+    hardware = platform.get("hardware", {})
+    if (hardware.get("release_qualified") is not True
+            or hardware.get("source_commit") != platform["commit"]
+            or hardware.get("kernel_image_sha256") != QUALIFIED_ROOK_KERNEL_SHA256
+            or platform["kernel"]["sha256"] != QUALIFIED_ROOK_KERNEL_SHA256):
         raise SystemExit("Rook hardware release is blocked: finish the final OTA/factory audit before distribution")
 
 
@@ -108,7 +116,8 @@ def require_crown_hardware_platform() -> None:
 def require_cronos_hardware_platform() -> None:
     show = PLATFORM_LOCK["platforms"]["show"]
     hardware = show.get("cronos_hardware", {})
-    if (hardware.get("source_commit") != show["checkers_commit"]
+    if (hardware.get("release_qualified") is not True
+            or hardware.get("source_commit") != show["checkers_commit"]
             or not re.fullmatch(r"[0-9a-f]{40}", str(hardware.get("source_commit", "")))
             or hardware.get("kernel_image_sha256") != QUALIFIED_CRONOS_KERNEL_SHA256
             or hardware.get("boot_sha256") != show["targets"]["cronos"]["boot"]["sha256"]):
@@ -122,7 +131,8 @@ def require_cronos_hardware_platform() -> None:
 def require_checkers_hardware_platform() -> None:
     show = PLATFORM_LOCK["platforms"]["show"]
     hardware = show.get("checkers_hardware", {})
-    if (hardware.get("source_commit") != show["checkers_commit"]
+    if (hardware.get("release_qualified") is not True
+            or hardware.get("source_commit") != show["checkers_commit"]
             or not re.fullmatch(r"[0-9a-f]{40}", str(hardware.get("source_commit", "")))
             or hardware.get("kernel_image_sha256") != QUALIFIED_CHECKERS_KERNEL_SHA256
             or hardware.get("boot_sha256") != show["targets"]["checkers"]["boot"]["sha256"]):
@@ -131,6 +141,19 @@ def require_checkers_hardware_platform() -> None:
             "qualified kernel image and matching redistributable boot artifact first; "
             "see docs/checkers-hardware-build.md"
         )
+
+
+def require_athena_hardware_platform() -> None:
+    platform = PLATFORM_LOCK["platforms"]["athena"]
+    hardware = platform.get("hardware", {})
+    codec = athena_codec_bundle.load_lock()
+    if (hardware.get("release_qualified") is not True
+            or hardware.get("source_commit") != platform["commit"]
+            or hardware.get("boot_sha256") != codec["kernel_template_sha256"]
+            or platform["boot"]["sha256"] != codec["kernel_template_sha256"]
+            or hardware.get("mesa_manifest_sha256") != athena_mesa.MANIFEST_SHA256
+            or hardware.get("codec_lock_sha256") != digest(athena_codec_bundle.LOCK)):
+        raise SystemExit("Athena hardware release is blocked: finish matching kernel/Mesa/codec and private-runtime installer qualification before distribution")
 
 
 def verify_checkers_hardware_boot(boot: Path) -> None:
@@ -178,7 +201,47 @@ def hardware_files_from_rootfs(rootfs_source: Path, target: str = "checkers") ->
                     (directory / filename).write_bytes(source.read())
                     seen.add(filename)
         hardware_bundle.verify(directory, target=target)
-        return {path.name: path.read_bytes() for path in directory.iterdir()}
+        result = {path.name: path.read_bytes() for path in directory.iterdir()}
+    if target == "athena":
+        # GPU-only app archives omit the AP pair and silently disable codecs
+        # after an app update. Verify the complete system-owned codec set, but
+        # include only its executable pair in an application OTA; kernel
+        # modules remain in their matching system slot.
+        with tempfile.TemporaryDirectory(prefix="tater-athena-public-codecs-") as temporary:
+            directory = Path(temporary)
+            codec_lock = athena_codec_bundle.load_lock()
+            locations = {"usr/local/bin/"+name: name
+                         for name in codec_lock['codec_source_lock']['helpers']}
+            locations.update({"usr/lib/tater-athena-codecs/"+name: name
+                              for name in (*codec_lock['modules'], athena_codec_bundle.MANIFEST)})
+            seen = set()
+            template_seen = False
+            with tarfile.open(rootfs_source, "r:gz") as archive:
+                for entry in archive:
+                    name = entry.name.removeprefix("./")
+                    if name == 'usr/lib/tater-athena-codecs' and not entry.isdir():
+                        raise ValueError('Athena codec root may not be a file or link')
+                    if name == 'usr/share/techo5/kernel/boot-athena.img':
+                        if template_seen or not entry.isfile() or not 0 < entry.size <= 16*1024*1024:
+                            raise ValueError('unsafe or duplicate Athena kernel template')
+                        data = archive.extractfile(entry).read()
+                        if hashlib.sha256(data).hexdigest() != codec_lock['kernel_template_sha256']:
+                            raise ValueError('Athena rootfs codec kernel template mismatch')
+                        template_seen = True
+                    if name not in locations:
+                        if name.startswith('usr/lib/tater-athena-codecs/') and not entry.isdir():
+                            raise ValueError('unexpected Athena codec sidecar')
+                        continue
+                    relative = locations[name]
+                    if relative in seen or not entry.isfile() or not 0 < entry.size <= 8*1024*1024:
+                        raise ValueError('unsafe or duplicate Athena codec entry')
+                    (directory/relative).write_bytes(archive.extractfile(entry).read())
+                    seen.add(relative)
+            if not template_seen:
+                raise ValueError('Athena codec kernel template missing from rootfs')
+            athena_codec_bundle.verify(directory)
+            result.update({name: (directory/name).read_bytes() for name in codec_lock['codec_source_lock']['helpers']})
+    return result
 
 
 def platform_provenance(target: str) -> dict:
@@ -224,10 +287,17 @@ def platform_provenance(target: str) -> dict:
         "builder": f"{builder['image']}@{builder['digest']}",
         "source": source,
     }
-    if target in ("checkers", "cronos", "crown", "rook"):
+    if target in ("checkers", "cronos", "crown", "athena", "rook"):
         lock = hardware_bundle.load_lock(target)
         provenance["hardware_helpers"] = {"bundle_id": lock["bundle_id"],
                                           "source_lock_sha256": hardware_bundle.lock_digest(lock)}
+        inputs = release_hardware_inputs.load()
+        provenance["hardware_helpers"].update({
+            "source": inputs["source"], "archive": inputs["inputs"][target],
+        })
+        if target == "athena":
+            provenance["athena_codecs"] = inputs["inputs"]["athena-codecs"]
+            provenance["athena_mesa_manifest_sha256"] = athena_mesa.MANIFEST_SHA256
     return provenance
 
 
@@ -398,6 +468,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
         require_crown_hardware_platform()
     elif target == "rook":
         require_rook_hardware_platform()
+    elif target == "athena":
+        require_athena_hardware_platform()
     required_system_version = minimum_system_version(target, targets[target], version)
     output.mkdir(parents=True, exist_ok=True)
     stem = f"tater-echo-{target}-{version}"
@@ -648,6 +720,8 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             if not system_value or not boot_value:
                 raise SystemExit("TATER_ATHENA_SYSTEM_IMAGE and TATER_ATHENA_BOOT_IMAGE are required")
             system_source, boot_source = Path(system_value), Path(boot_value)
+            if digest(boot_source) != athena_codec_bundle.load_lock()['kernel_template_sha256']:
+                raise SystemExit('Athena factory boot does not match the codec kernel template')
             inputs = {
                 "install.sh": (REPO / "factory/athena-linux/install.sh", 0o755),
                 "install.py": (REPO / "factory/athena-linux/install.py", 0o755),
@@ -669,6 +743,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             if not boot_source.is_file():
                 raise SystemExit(f"required Rook boot image is missing: {boot_source}")
             verify_rook_factory_inputs(rootfs_source, boot_source, version)
+            verify_hardware_boot(boot_source, 'Rook', QUALIFIED_ROOK_KERNEL_SHA256)
             inputs = {
                 "install.sh": (REPO / "factory/rook-linux/install.sh", 0o755),
                 "install.py": (REPO / "factory/rook-linux/install.py", 0o755),
@@ -689,7 +764,7 @@ def build(version: str, target: str, output: Path) -> list[Path]:
             REPO / "LICENSES/ECHOLOCAL-MIT.txt", 0o644)
         inputs["licenses/SENDSPIN-MIT.txt"] = (
             REPO / "LICENSES/SENDSPIN-MIT.txt", 0o644)
-        if target == "checkers":
+        if target in ("checkers", "cronos"):
             inputs["provision_hardware.py"] = (REPO / "factory/provision_hardware.py", 0o755)
         inputs["to_recovery.py"] = (REPO / "factory/to_recovery.py", 0o755)
         inputs["recovery_install.py"] = (REPO / "factory/recovery_install.py", 0o755)

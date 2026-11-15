@@ -36,6 +36,12 @@ jobs:
           python3 -m unittest \
             tools.test_build_scripts \
             tools.test_hardware_bundle \
+            tools.test_release_hardware_inputs \
+            tools.test_prepare_release_mesa \
+            tools.test_athena_release_inventory \
+            tools.test_athena_codec_bundle \
+            tools.test_athena_codec_boot \
+            tools.test_athena_mesa \
             tools.test_ssh_access \
             tools.test_platform_lock \
             tools.test_extract_platform_member \

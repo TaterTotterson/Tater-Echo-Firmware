@@ -340,7 +340,7 @@ def parse_args():
     parser.add_argument("--lineage-zip", type=Path,
                         help="use the target's pinned LineageOS 18.1 ZIP instead of downloading it")
     parser.add_argument("--hardware-runtime", type=Path,
-                        help="separately prepared owner-local Checkers runtime; never included in the factory bundle")
+                        help="separately prepared target-specific owner-local runtime; never included in the factory bundle")
     parser.add_argument("--name")
     parser.add_argument("--room")
     parser.add_argument("--wifi")
@@ -372,10 +372,10 @@ def main() -> int:
     verify_lineage_zip(args.lineage_zip, profile)
     hardware = None
     if getattr(args, "hardware_runtime", None) is not None:
-        if target != "checkers":
-            raise InstallError("hardware runtime provisioning is qualified only for Checkers")
+        if target not in ("checkers", "cronos"):
+            raise InstallError("this target's private hardware runtime installer is not yet qualified")
         hardware = load_module("tater_private_hardware", ROOT / "provision_hardware.py")
-        hardware.verify(args.hardware_runtime)
+        hardware.verify(args.hardware_runtime, target=target)
 
     serial, _state = select_device(args.adb, args.serial)
     if not args.name:
@@ -393,8 +393,8 @@ def main() -> int:
         provision.wait_for_console(console)
         port = console.port or console.find()
         if not port:
-            raise InstallError("the installed Checkers USB console did not appear")
-        hardware.install(args.hardware_runtime, library, port)
+            raise InstallError("the installed target's USB console did not appear")
+        hardware.install(args.hardware_runtime, library, port, target=target)
         print("Owner-local hardware libraries verified/provisioned; reboot normally to enable them.")
     finish_tater_provisioning(args, serial, preserved_pairing)
     print(
