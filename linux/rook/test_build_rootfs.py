@@ -114,10 +114,11 @@ t5_wifi_up() {
         cases = (
             ("00:90:4c:1a:09:00", "001122334455", "TEST-ROOK-000001", "00:11:22:33:44:55"),
             ("00:90:4c:1a:09:00", "00904C1A0900", "TEST-ROOK-000001", None),
+            ("00:90:4c:1a:09:00", "00904C1A0900", "TESTROOK000001", None),
             ("02:12:34:56:78:9a", "001122334455", "TEST-ROOK-000001", "unchanged"),
         )
         for current, factory, serial, expected in cases:
-            with self.subTest(current=current, factory=factory):
+            with self.subTest(current=current, factory=factory, serial=serial):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     library = root / "lib/techo5-lib.sh"
@@ -160,7 +161,13 @@ tater_rook_wifi_mac wlan0
                         self.assertEqual("", commands)
                     else:
                         if expected is None:
-                            digest = hashlib.sha256(serial.encode()).hexdigest()[:10]
+                            # Match the firmware's ASCII-alphanumeric IDME
+                            # normalization before hashing synthetic serials.
+                            normalized_serial = "".join(
+                                character for character in serial
+                                if character.isascii() and character.isalnum()
+                            )
+                            digest = hashlib.sha256(normalized_serial.encode("ascii")).hexdigest()[:10]
                             raw = "02" + digest
                             expected = ":".join(raw[i:i + 2] for i in range(0, 12, 2))
                         self.assertIn(f"link set wlan0 address {expected}", commands)

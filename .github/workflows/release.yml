@@ -234,20 +234,14 @@ jobs:
           git -C /tmp/tater-echo-linux-dot checkout \
             "$(python3 tools/platform_lock.py get platforms.dot.commit)"
 
-      - name: Build target-specific audio kernel from pinned source
-        env:
-          WORK: /tmp/tater-dot-audio-kernel-work
-          TOOLCHAIN: /tmp/tater-dot-audio-toolchain/arm-eabi-4.8
+      - name: Fetch and verify reviewed target-specific audio kernel
         run: |
-          # Use the runner's existing host tools; never replace the pinned
-          # cross compiler or install floating packages during a release.
-          for tool in make gcc bison flex bc openssl patch curl tar xz; do
-            command -v "$tool" >/dev/null || { echo "::error::Kernel host tool missing: $tool"; exit 1; }
-          done
-          python3 linux/dot/build_kernel.py --target '${{ matrix.target }}' \
-            --platform /tmp/tater-echo-linux-dot/platforms/dot \
-            --output /tmp/tater-dot-audio-kernel
-          cp /tmp/tater-dot-audio-kernel/zImage-dtb /tmp/${{ matrix.kernel_name }}
+          # Package the exact reviewed kernel used for USB qualification.
+          # Source rebuilds remain available through linux/dot/build_kernel.py;
+          # a runner-specific rebuild must never replace an accepted image.
+          python3 tools/fetch_platform_input.py \
+            platforms.dot.targets.${{ matrix.target }}.kernel \
+            /tmp/${{ matrix.kernel_name }}
           python3 linux/dot/build_kernel.py --target '${{ matrix.target }}' \
             --verify-kernel /tmp/${{ matrix.kernel_name }}
 

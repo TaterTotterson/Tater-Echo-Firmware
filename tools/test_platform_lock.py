@@ -105,6 +105,18 @@ class PlatformLockTests(unittest.TestCase):
         value = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(path.read_text(encoding="utf-8"), json.dumps(value, indent=2) + "\n")
 
+    def test_dot_release_kernel_assets_match_the_reviewed_audio_profiles(self) -> None:
+        dot = platform_lock.load()["platforms"]["dot"]
+        audio = json.loads((ROOT / "platforms/dot-audio-lock.json").read_text())
+        for target in ("biscuit", "radar"):
+            with self.subTest(target=target):
+                asset = dot["targets"][target]["kernel"]
+                self.assertEqual(audio["targets"][target]["kernel_image_sha256"], asset["sha256"])
+                self.assertIn(
+                    f"TaterTotterson/Tater-Echo-Linux/releases/download/{dot['kernel_release']}/",
+                    asset["url"],
+                )
+
     def test_accepted_hardware_profiles_have_a_public_review_record(self) -> None:
         platforms = platform_lock.load()["platforms"]
         profiles = [platforms["show"][target + "_hardware"]

@@ -29,6 +29,13 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("-X main.target=rook", script)
         self.assertIn("-e GOMODCACHE=/root/go/pkg/mod", script)
 
+    def test_dot_release_uses_the_reviewed_kernel_instead_of_a_runner_rebuild(self) -> None:
+        workflow = RELEASE_WORKFLOW.read_text()
+        self.assertIn("Fetch and verify reviewed target-specific audio kernel", workflow)
+        self.assertIn("platforms.dot.targets.${{ matrix.target }}.kernel", workflow)
+        self.assertIn("--verify-kernel /tmp/${{ matrix.kernel_name }}", workflow)
+        self.assertNotIn("--output /tmp/tater-dot-audio-kernel", workflow)
+
     def test_rook_camera_build_uses_held_slots_and_restores_pinned_driver(self) -> None:
         script = (ROOT / "linux/rook/build_camera_helper.sh").read_text()
         self.assertIn('camera-helper/tater_capture_slots_spot.go', script)

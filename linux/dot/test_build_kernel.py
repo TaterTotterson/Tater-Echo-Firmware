@@ -57,10 +57,13 @@ class DotAudioKernelTests(unittest.TestCase):
                             "-o", str(binary)], check=True, capture_output=True)
             subprocess.run([str(binary)], check=True, capture_output=True)
 
-    def test_release_build_uses_target_source_instead_of_old_kernel_download(self):
+    def test_release_uses_reviewed_kernel_and_verifies_its_target_profile(self):
         workflow = (kernel.ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("python3 tools/fetch_platform_input.py", workflow)
+        self.assertIn("platforms.dot.targets.${{ matrix.target }}.kernel", workflow)
         self.assertIn("linux/dot/build_kernel.py --target '${{ matrix.target }}'", workflow)
-        self.assertNotIn("'platforms.dot.targets.${{ matrix.target }}.kernel'", workflow)
+        self.assertIn("--verify-kernel /tmp/${{ matrix.kernel_name }}", workflow)
+        self.assertNotIn("--output /tmp/tater-dot-audio-kernel", workflow)
 
 
 if __name__ == "__main__":

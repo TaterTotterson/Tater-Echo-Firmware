@@ -393,6 +393,15 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio kernel verification failed"):
                     package_echo_release.verify_dot_audio_kernel(kernel, target)
 
+    def test_valid_dot_profile_with_an_unreviewed_kernel_digest_is_rejected(self) -> None:
+        with mock.patch.object(package_echo_release.dot_kernel, "verify_kernel",
+                               return_value={"sha256": "0" * 64}):
+            for target in ("biscuit", "radar"):
+                with self.subTest(target=target), self.assertRaisesRegex(
+                    SystemExit, "factory kernel differs from the reviewed audio kernel",
+                ):
+                    package_echo_release.verify_dot_audio_kernel(Path("unused"), target)
+
     def test_minimum_system_version_defaults_and_validates(self) -> None:
         self.assertEqual(
             "v4.2.1",

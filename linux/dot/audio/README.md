@@ -6,9 +6,15 @@ slots of all four stereo TLV320ADC3101s. No vendor firmware, calibration or
 device boot image is included. The math and isolated Biscuit trial are recorded
 in Tater-Echo-Hardware's `docs/findings/biscuit-adc3101-hpf-trial.md`.
 
-The normal firmware release workflow now invokes `linux/dot/build_kernel.py`
-for each target. It copies **committed** files from the pinned platform source,
-retains all 50 existing security/USB patches, adds this overlay, checks the
+The firmware release workflow downloads each target's reviewed kernel from
+the pinned Tater Echo Linux release and verifies its SHA-256 and embedded
+board/audio profile before packaging. These are the accepted USB candidate
+images, not fresh builds made with the GitHub runner's host tools. Packaging
+also requires the exact digest in `platforms/dot-audio-lock.json`.
+
+For source builds, `linux/dot/build_kernel.py` copies **committed** files from
+the pinned platform source, retains all 50 existing security/USB patches, adds
+this overlay, checks the
 original AOSP GCC 4.8 commit, and fixes the build timestamp. It never edits the
 platform checkout. Separate Biscuit/Radar configs and appended device trees
 are retained. Output contains the kernel, config, System.map and provenance
