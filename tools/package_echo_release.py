@@ -22,7 +22,7 @@ import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, release_hardware_inputs  # noqa: E402
+from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, prepare_release_mesa, release_hardware_inputs  # noqa: E402
 from linux.dot import build_kernel as dot_kernel  # noqa: E402
 from linux.dot import early_boot as dot_early_boot  # noqa: E402
 
@@ -298,6 +298,11 @@ def platform_provenance(target: str) -> dict:
         if target == "athena":
             provenance["athena_codecs"] = inputs["inputs"]["athena-codecs"]
             provenance["athena_mesa_manifest_sha256"] = athena_mesa.MANIFEST_SHA256
+            provenance["athena_mesa_source"] = {
+                "repository": inputs["source"]["repository"],
+                "commit": prepare_release_mesa.SOURCE_COMMIT,
+                "files": prepare_release_mesa.SOURCES,
+            }
     return provenance
 
 

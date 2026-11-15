@@ -147,6 +147,8 @@ class ProvisionHardwareTests(unittest.TestCase):
                             self.assertEqual(result.returncode, 0, result.stderr)
                             self.assertIn("TATER_HARDWARE_PROVISIONED", result.stdout)
                             self.assertEqual(b"library", (root / "data/tater-gpu/lib/libtest.so").read_bytes())
+                            self.assertEqual((root / "data/tater-gpu").stat().st_mode & 0o777, 0o555)
+                            self.assertEqual((root / "data/tater-gpu/lib").stat().st_mode & 0o777, 0o555)
                             inode = (root / "data/tater-gpu/lib/libtest.so").stat().st_ino
                             if attempt == 0:
                                 original_inode = inode

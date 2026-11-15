@@ -94,7 +94,7 @@ jobs:
           git clone --filter=blob:none --no-checkout \
             https://github.com/TaterTotterson/Tater-Echo-Hardware /tmp/hardware-source
           git -C /tmp/hardware-source checkout --detach \
-            "$(python3 -c 'from tools.release_hardware_inputs import load; print(load()["source"]["commit"])')"
+            "$(python3 -c 'from tools.prepare_release_mesa import SOURCE_COMMIT; print(SOURCE_COMMIT)')"
           builder=$(python3 tools/platform_lock.py builder-reference --platform linux/arm/v7)
           docker pull --platform linux/arm/v7 "$builder"
           python3 tools/prepare_release_mesa.py --source /tmp/hardware-source \

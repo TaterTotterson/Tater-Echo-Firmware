@@ -181,10 +181,13 @@ def install_command(inventory: dict[str, str], *, target: str = "checkers") -> s
         lines.append("fi")
     for runtime in (*runtimes, "tater-venc"):
         lines.append(f'if [ ! -e /data/{runtime} ]; then')
-        lines.append(f'  chmod 555 "$stage/{runtime}"')
-        if runtime in runtimes:
-            lines.append(f'  chmod 555 "$stage/{runtime}/lib"')
+        # Keep the private staging directory movable by an unprivileged
+        # owner; lock it read-only only after the no-clobber rename succeeds.
         lines.append(f'  mv -Tn "$stage/{runtime}" /data/{runtime}')
+        lines.append(f'  test ! -e "$stage/{runtime}"')
+        lines.append(f'  chmod 555 /data/{runtime}')
+        if runtime in runtimes:
+            lines.append(f'  chmod 555 /data/{runtime}/lib')
         lines.append('fi')
     lines.append("sync")
     # Delete only named files we uploaded; never recursively remove a runtime,

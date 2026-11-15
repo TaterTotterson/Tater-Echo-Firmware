@@ -10,12 +10,13 @@ from tools import prepare_release_mesa as mesa
 class PrepareReleaseMesaTests(unittest.TestCase):
     def test_source_pins_match_the_public_recipe(self):
         self.assertEqual(len(mesa.SOURCES), 2)
+        self.assertRegex(mesa.SOURCE_COMMIT, r'^[0-9a-f]{40}$')
         self.assertEqual(mesa.PACKAGE_BASE, 'https://dl-cdn.alpinelinux.org/alpine/v3.21/main/armv7/')
 
     def test_source_drift_is_rejected_before_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            commit = mesa.release_hardware_inputs.load()['source']['commit']
+            commit = mesa.SOURCE_COMMIT
             with mock.patch.object(mesa.subprocess, 'check_output', return_value=commit+'\n'), mock.patch.object(mesa.subprocess, 'run') as run:
                 with self.assertRaises(ValueError): mesa.prepare(root, root/'packages', root/'output')
                 run.assert_not_called()

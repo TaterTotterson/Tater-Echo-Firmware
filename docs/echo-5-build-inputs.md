@@ -21,7 +21,11 @@ release approval. No satellite was flashed or rebooted in this work.
   tests verify Annex-B conversion and ordered decoding.
 - Athena Mesa is recreated from 29 exact signed Alpine packages. Download
   hashes, the preparation script and the resulting runtime manifest are pinned.
-  Both the cached-input and actual network-download paths were checked.
+  Both the cached-input and actual network-download paths were checked. The
+  preparer has its own source pin at Hardware commit
+  `23d62e186915dbe55dc9b426ac0f18aa8020700e`, including native-Linux Docker staging
+  ownership cleanup; the helper/module archives retain their original source
+  pin and byte identities.
 
 `platforms/hardware-release-inputs.json` pins helper archive sizes/hashes as well
 as their source commit. `platforms/tater-echo-linux-lock.json` pins platform

@@ -14,10 +14,11 @@ from urllib import request
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools import athena_mesa, platform_lock, release_hardware_inputs  # noqa: E402
+from tools import athena_mesa, platform_lock  # noqa: E402
 
+SOURCE_COMMIT = '23d62e186915dbe55dc9b426ac0f18aa8020700e'
 SOURCES = {
-    'scripts/prepare_athena_mesa_runtime.py': '64a3944ac863de7202fae00a67996115643f39e51dcee1ef0bc4f862fb544def',
+    'scripts/prepare_athena_mesa_runtime.py': 'eb3157dcc982c28a0018c41d37017435e7b0298d76a679bb7bfe37329c145216',
     'probes/mt8163-gpu/athena-mesa-packages.json': '47a2897809587b022f6970ee05334c30e27b0392f63cb2b3c484bf74cdc9cf77',
 }
 PACKAGE_BASE = 'https://dl-cdn.alpinelinux.org/alpine/v3.21/main/armv7/'
@@ -25,9 +26,8 @@ MAX_PACKAGE = 128 * 1024 * 1024
 
 
 def prepare(source: Path, packages: Path, output: Path) -> None:
-    commit = release_hardware_inputs.load()['source']['commit']
     actual = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-    if actual != commit:
+    if actual != SOURCE_COMMIT:
         raise ValueError('Mesa preparer must come from the pinned hardware source commit')
     for relative, expected in SOURCES.items():
         path = source/relative
