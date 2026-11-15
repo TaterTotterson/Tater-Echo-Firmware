@@ -35,10 +35,19 @@ installer on a similar-looking Echo from another generation.
 Target metadata used by Tater and the release builds lives in
 [`targets/targets.json`](targets/targets.json).
 
-Platform and kernel sources are maintained in
-[Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux).
-Original hardware helpers, diagnostics and interface research live in
-[Tater Echo Hardware](https://github.com/TaterTotterson/Tater-Echo-Hardware).
+## Firmware, kernel and hardware sources
+
+- **This repository:** Satellite applications, screen UI, installers and
+  release/OTA packaging.
+- [**Tater Echo Linux**](https://github.com/TaterTotterson/Tater-Echo-Linux):
+  Kernel sources, boot/recovery, platform builds and baseline inputs.
+- [**Tater Echo Hardware**](https://github.com/TaterTotterson/Tater-Echo-Hardware):
+  Open GPU/video helpers, diagnostics, hardware interfaces and build provenance.
+
+Vendor libraries remain device-local; they are not included in these source
+repositories or public Tater firmware archives. See
+[what changed in 5.0.0](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/tag/v5.0.0)
+and the [release validation coverage](docs/echo-5-release-review.md).
 
 ## Features
 
@@ -116,7 +125,7 @@ details and per-device test results.
 >
 > **Pre-v5 Biscuit and Radar:**
 >
-> 1. Boot the satellite normally.
+> 1. Leave normal power connected and boot the satellite normally into Tater.
 > 2. Extract the v5 factory archive for the device.
 > 3. Connect the satellite directly by USB.
 > 4. Open Terminal in the extracted archive folder and run:
@@ -125,7 +134,9 @@ details and per-device test results.
 >    python3 to_twrp.py
 >    ```
 >
-> 5. Wait for TWRP to start.
+>    On Windows, use `py -3 to_twrp.py`.
+>
+> 5. Wait for the computer to detect TWRP over USB.
 > 6. Run the factory installer:
 >
 >    ```bash
@@ -134,6 +145,9 @@ details and per-device test results.
 >
 > You do not need to hold Volume Up or enter Tater Recovery. Do not use
 > `--repair`; it only repairs an existing Tater system slot.
+> After the v5 USB installation, holding Volume Up while powering on also
+> provides the new early TWRP route. Keep normal power connected throughout
+> the recovery handoff.
 
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
@@ -163,9 +177,9 @@ Do not flash or boot Fire OS as part of the Tater installation.
 1. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz`.
 2. Enter TWRP.
 
-   When upgrading a pre-v4 Biscuit:
+   When upgrading a Biscuit already running Tater, including v4.2.3:
 
-   1. Boot the Biscuit normally.
+   1. Leave normal power connected and boot the Biscuit normally into Tater.
    2. Connect it directly to the computer by USB.
    3. Open Terminal in the extracted factory archive folder.
    4. Run:
@@ -174,7 +188,9 @@ Do not flash or boot Fire OS as part of the Tater installation.
       python3 to_twrp.py
       ```
 
-   5. Wait for the ring to turn white.
+      On Windows, use `py -3 to_twrp.py`.
+
+   5. Wait for the computer to detect TWRP over USB; the ring turns white.
 
    For a new installation, enter TWRP using the amonet-biscuit instructions.
 
@@ -208,7 +224,7 @@ saved Wi-Fi, pairing, SSH, and satellite settings.
 
 Keep the generated `backups/` directory private. See the shared
 [`factory/dot-linux` guide](factory/dot-linux/README.md) for recovery and
-advanced options. After v4.0.0 is installed, use `python3 to_recovery.py` from
+advanced options. After v5.0.0 is installed, use `python3 to_recovery.py` from
 an extracted Biscuit or Radar factory archive when a system repair is needed.
 
 > [!NOTE]
@@ -226,14 +242,14 @@ and confirming that TWRP works. Do not flash or boot Fire OS as part of the
 Tater installation. The device has no external USB socket; keep normal power
 connected and use the D+, D-, and GND pads documented in that guide.
 These steps are also the required upgrade path for every Radar running Tater
-firmware earlier than v4.0.0.
+firmware earlier than v5.0.0, including v4.2.3.
 
 1. Download and extract `tater-echo-radar-<version>-factory.tar.gz`.
 2. Enter TWRP.
 
-   When upgrading a pre-v4 Radar:
+   When upgrading a Radar already running Tater, including v4.2.3:
 
-   1. Boot the Radar normally.
+   1. Leave normal power connected and boot the Radar normally into Tater.
    2. Connect its internal USB pads to the computer.
    3. Open Terminal in the extracted factory archive folder.
    4. Run:
@@ -242,7 +258,9 @@ firmware earlier than v4.0.0.
       python3 to_twrp.py
       ```
 
-   5. Wait for TWRP to start.
+      On Windows, use `py -3 to_twrp.py`.
+
+   5. Wait for the computer to detect TWRP over USB.
 
    For a new installation, enter TWRP using the amonet-radar instructions.
 

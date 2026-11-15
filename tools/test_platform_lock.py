@@ -105,6 +105,21 @@ class PlatformLockTests(unittest.TestCase):
         value = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(path.read_text(encoding="utf-8"), json.dumps(value, indent=2) + "\n")
 
+    def test_accepted_hardware_profiles_have_a_public_review_record(self) -> None:
+        platforms = platform_lock.load()["platforms"]
+        profiles = [platforms["show"][target + "_hardware"]
+                    for target in ("checkers", "cronos", "crown")]
+        profiles += [platforms[target]["hardware"] for target in ("rook", "athena")]
+        audio = json.loads((ROOT / "platforms/dot-audio-lock.json").read_text())
+        profiles += list(audio["targets"].values())
+        for profile in profiles:
+            if profile.get("release_qualified") is True:
+                self.assertTrue(profile.get("qualification_basis"))
+                record = profile.get("qualification_record", "")
+                self.assertTrue(record.startswith("docs/"))
+                self.assertNotIn("..", Path(record).parts)
+                self.assertTrue((ROOT / record).is_file())
+
     def test_fetcher_rejects_non_asset_nodes(self) -> None:
         with self.assertRaises(SystemExit):
             fetch_platform_input.fetch("platforms.dot", ROOT / "unused")

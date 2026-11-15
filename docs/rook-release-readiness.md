@@ -1,7 +1,46 @@
 # Rook hardware/UI development qualification
 
+Release acceptance (2026-11-15): see the
+[final review and owner-approved test waivers](echo-5-release-review.md).
+The checks below remain bounded evidence, not claims that the waived tests ran.
+
 Current USB-candidate status (2026-11-15): the automatic library installer and
-exact 4.2.3 boot allowlist are prepared. Full USB/OTA qualification is pending;
+exact 4.2.3 boot allowlist are prepared. The first development-unit USB trial
+exposed a first-boot runtime identity mismatch: Rook's qualified bootloader
+omits `androidboot.product`. The installer now checks the exact MT8163/Rook LCD
+and Linux-boot identity, rejects contradictory or duplicate tokens, and retains
+the exact kernel, immutable platform, mounted-data, root-slot and framebuffer
+checks. A read-only probe passes on the connected unit; regression cases cover
+valid and invalid identities. The same trial caught a missing Rook entry in the
+shared Device Info label; it was the correct Rook renderer, not a Checkers
+installation. The corrected R4 candidate completed the full ordinary,
+settings-preserving installer with exit zero, including automatic library
+assembly and a distinct verified reboot. All 61 saved regular settings files
+match both the immediate preinstall archive and the original development-unit
+archive. All 104 runtime files/manifests and 12 firmware/helper/startup/wake
+library files match the candidate; the boot extent matches too. The running
+factory renderer reports active retained GPU composition at 480×480 and its
+Rook helper holds `/dev/mali0`. No development runtime files were staged.
+R4 changes only the renderer versus R3's rootfs; its host runtime probe is the
+other factory-bundle change. Kernel, camera, audio, models and runtime recipe
+remain unchanged. The normal five-minute root trial committed and restarted
+into good A 5.0.0, with the store read-only and native GPU composition active.
+The owner passed correct Rook/GPU information labels, the round home screen,
+responsive menus/paging/sliders/equalizer, volume and microphone mute/unmute,
+immediate first-word requests/replies, reply interruption and normal camera
+preview colors/motion. A real Checkers call negotiated balanced H.264 in both
+directions, with Rook's actual 640×480 hardware encoder, 768×432 hardware
+receiver and GPU compositor concurrent. The owner passed call motion/colors/
+delay, and the observed relay counters had no sequence or audio drops. The
+continuous two-minute sample did not complete; this is not a sustained-call
+pass. The owner accepted the current unit and explicitly stopped the remaining
+full suite. Extended call/audio/privacy, final installed cold recovery and
+post-recovery checks are unverified, not silently marked passed. Final fleet
+OTA/rollback remains deferred as planned.
+The original custom development boot and all partitions/application/settings
+were independently backed up before a separately authorized boot preparation;
+the ordinary installer allowlist was not relaxed. This unit is not an untouched
+older-firmware migration sample. Full USB/OTA qualification is pending;
 see [the fleet test plan](echo-5-build-inputs.md). Earlier sections below are
 development evidence, not approval of the assembled 5.0.0 factory image.
 

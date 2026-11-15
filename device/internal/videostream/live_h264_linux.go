@@ -24,6 +24,26 @@ func HardwareH264Available(ctx context.Context) bool {
 	return CheckHardwareH264(ctx) == nil
 }
 
+func liveVDECHelperSHA256(config hardwareDecoderConfig) string {
+	switch config.target {
+	case "checkers":
+		if config.lineage {
+			return checkersLineageVDECHelper
+		}
+		return neonVDECHelperSHA256
+	case "cronos":
+		return cronosVDECHelperSHA256
+	case "crown":
+		return crownVDECHelperSHA256
+	case "rook":
+		return rookVDECHelperSHA256
+	case "athena":
+		return athenaVDECHelperSHA256
+	default:
+		return neonVDECHelperSHA256
+	}
+}
+
 // CheckHardwareH264 explains a local decoder preflight failure without opening
 // a codec session or including any remote URL or authentication material.
 func CheckHardwareH264(ctx context.Context) error {
@@ -37,15 +57,8 @@ func CheckHardwareH264(ctx context.Context) error {
 	// Legacy owner-local helpers remain valid for ordinary media playback,
 	// but cannot keep up with simultaneous 720p capture. Do not negotiate a
 	// live call until the exact sustained-test-qualified converter is present.
-	expected := neonVDECHelperSHA256
-	if config.target == "cronos" {
-		expected = cronosVDECHelperSHA256
-	} else if config.target == "crown" {
-		expected = crownVDECHelperSHA256
-	} else if config.target == "rook" {
-		expected = rookVDECHelperSHA256
-	} else if config.target == "athena" {
-		expected = athenaVDECHelperSHA256
+	expected := liveVDECHelperSHA256(config)
+	if config.target == "athena" {
 		if !deviceNodeExists("/dev/tater-athena-ap-vdec") {
 			return errors.New("Athena AP decoder device node is unavailable")
 		}

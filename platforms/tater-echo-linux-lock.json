@@ -73,26 +73,32 @@
     "show": {
       "checkers_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
       "checkers_hardware": {
-        "release_qualified": false,
+        "release_qualified": true,
+        "qualification_basis": "USB/hardware trial plus owner-accepted remaining code review",
+        "qualification_record": "docs/echo-5-release-review.md",
         "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
         "kernel_image_sha256": "dee4a1d17315d61d3cc83b8b1d2b1526395a6068020da11eefbc034fc84590f0",
         "boot_sha256": "4db3729916877c44ca3cd2c0974c1c58d3161fd358dec59d39c8001767a702d8",
-        "remaining": "Retest restored separate microphones and complete private-runtime factory/OTA qualification"
+        "remaining": "No blocking review finding; final device OTA/rollback and extended soak waived by owner"
       },
       "cronos_hardware": {
-        "release_qualified": false,
+        "release_qualified": true,
+        "qualification_basis": "USB/hardware trial plus owner-accepted remaining code review",
+        "qualification_record": "docs/echo-5-release-review.md",
         "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
         "kernel_image_sha256": "79410d93c4a5a5c2920cd4b4164f2d99afef17661b0cdaea1a45336e6ab734e4",
         "boot_sha256": "53a634522b9d27504fafb784392706fa6e57d97afb067e7ccd1c2ed080453130",
-        "remaining": "Complete private-runtime factory/OTA qualification"
+        "remaining": "No blocking review finding; final device OTA/rollback and extended soak waived by owner"
       },
       "crown_hardware": {
-        "release_qualified": false,
+        "release_qualified": true,
+        "qualification_basis": "USB/hardware trial plus owner-accepted remaining code review",
+        "qualification_record": "docs/echo-5-release-review.md",
         "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
         "kernel_image_sha256": "0efd78f0179294f95e97e5314a2b963574c9faa1f82ab9eb1a646def0eb1dd89",
         "boot_sha256": "e00bed964d9b2ce31df152d183d2aeb45a7839cc5f7460a93dd97d70715ad1b7",
         "kernel_origin": "retained public baseline custody image; untested camera-clock candidate excluded",
-        "remaining": "Complete private-runtime installer, hardware call and factory/OTA qualification"
+        "remaining": "No blocking review finding; final device OTA/rollback and extended soak waived by owner"
       },
       "release": "v0.9.26",
       "custody_release": "satellite-baselines-v1.0.0",
@@ -127,12 +133,14 @@
     "athena": {
       "commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
       "hardware": {
-        "release_qualified": false,
+        "release_qualified": true,
+        "qualification_basis": "USB/hardware trial plus owner-accepted remaining code review",
+        "qualification_record": "docs/echo-5-release-review.md",
         "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
         "boot_sha256": "c6f38f2ca803845b395fe676df21de655a122377f884260d123bd8012fa3de8c",
         "mesa_manifest_sha256": "ab77ccdd446064c327bf3fe150b3eeb73d65cc8f9bf3c5aeb79f7376725a5ef8",
         "codec_lock_sha256": "5b1842005582b5adaf8cdfefea608876012a05c074d5e8eda9d2cee5d03c8d38",
-        "remaining": "Finish private-runtime factory integration and final factory/OTA qualification"
+        "remaining": "No blocking review finding; final device OTA/rollback and extended soak waived by owner"
       },
       "release": "v1.6.4",
       "custody_release": "satellite-baselines-v1.0.0",
@@ -166,10 +174,12 @@
       "kernel_release": "hardware-kernels-v1.0.0-rc.1",
       "commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
       "hardware": {
-        "release_qualified": false,
+        "release_qualified": true,
+        "qualification_basis": "development-unit USB/hardware trial plus owner-accepted older-migration and remaining code review",
+        "qualification_record": "docs/echo-5-release-review.md",
         "source_commit": "af8de59aa2e589133d733cb06624cc82cb564c54",
         "kernel_image_sha256": "aa33d9b29a5c4d3e5a3805842df385858589de62272e8cca8a5f263adaef5d17",
-        "remaining": "Finish private-runtime factory integration and final factory/OTA qualification"
+        "remaining": "No blocking review finding; clean older-unit USB, extended call, final cold recovery and device OTA/rollback tests waived by owner"
       },
       "rootfs": {
         "url": "https://github.com/TaterTotterson/Tater-Echo-Linux/releases/download/satellite-baselines-v1.0.0/tater-echo-rook-baseline-rootfs.tar.gz",

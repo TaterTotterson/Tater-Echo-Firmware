@@ -11,13 +11,17 @@
   "targets": {
     "biscuit": {
       "kernel_image_sha256": "6d86314ad86f712c822de80ba30402f363ec667a19570fa09109fe11075cf55c",
-      "release_qualified": false,
-      "remaining": "Combined permanent gain/filter, extended headroom/playback and final kernel/OTA qualification"
+      "release_qualified": true,
+      "qualification_basis": "two older-unit USB trials plus owner-accepted remaining code review",
+      "qualification_record": "docs/echo-5-release-review.md",
+      "remaining": "No blocking review finding; extended acoustic and final device OTA/rollback tests waived by owner"
     },
     "radar": {
       "kernel_image_sha256": "b566da06193c98813f61dc70febee224c67550d791eab7bb7e8d179343f8bc3c",
-      "release_qualified": false,
-      "remaining": "Physical Radar voice/privacy/headroom checks and final kernel/OTA qualification"
+      "release_qualified": true,
+      "qualification_basis": "owner-accepted code review; physical Radar tests not performed",
+      "qualification_record": "docs/echo-5-release-review.md",
+      "remaining": "No blocking review finding; physical Radar and final device OTA/rollback tests waived by owner"
     }
   }
 }

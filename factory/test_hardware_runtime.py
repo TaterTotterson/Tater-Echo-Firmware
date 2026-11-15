@@ -137,6 +137,16 @@ class HardwareRuntimeTests(unittest.TestCase):
                     runtime.install(plan, mock.Mock(), console)
                 upload.assert_not_called()
 
+    def test_runtime_restart_uses_the_installed_firmware_reboot_helper(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = self.fixture(Path(temporary))
+            console = mock.Mock()
+            console.run.side_effect = ["TATER_RUNTIME_READY", "1000000", None]
+            with mock.patch("factory.recovery_install.upload_rootfs"), \
+                    mock.patch("factory.recovery_install.exchange", return_value="TATER_RUNTIME_INSTALLED"):
+                runtime.install(plan, mock.Mock(), console)
+            console.run.assert_called_with("/usr/local/bin/tater-reboot-now", 3)
+
     def test_probes_check_exact_product_kernel_panel_and_immutable_platform(self):
         for target in ("checkers", "cronos", "crown", "rook", "athena"):
             profile = runtime.recipe(target)[1]
@@ -154,6 +164,49 @@ class HardwareRuntimeTests(unittest.TestCase):
         for name in ("/absolute", "../outside", "x/../y", "x//y", "$(command)", "x\ny"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 runtime.safe_path(name)
+
+    def test_rook_probe_accepts_qualified_metadata_without_optional_product(self):
+        profile = runtime.recipe("rook")[1]
+        good = "androidboot.hardware=mt8163 lcm=1-hx8379c_wvga_dsi_vdo techo5=linux"
+        cases = [(good, True), (good + " androidboot.product=rook", True),
+                 (good + " androidboot.product=crown", False),
+                 (good + " androidboot.product=", False),
+                 (good + " androidboot.product=rook androidboot.product=rook", False),
+                 (good.replace("hx8379c", "other"), False),
+                 (good + " lcm=1-hx8379c_wvga_dsi_vdo", False),
+                 (good.replace("mt8163", "mt8183"), False),
+                 (good + " androidboot.hardware=mt8163", False),
+                 (good.replace("techo5=linux", "techo5=android"), False)]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            files = {"/run/techo5/slot": "a\n", "/proc/mounts": "disk /data ext4 rw 0 0\n",
+                     "/etc/tater-ota-platform": "echo-hardware-v1/rook\n",
+                     "/sys/class/graphics/fb0/virtual_size": profile["panel"] + "\n",
+                     "/sys/class/graphics/fb0/bits_per_pixel": "32\n", "/proc/cmdline": good}
+            for name, value in files.items():
+                path = root / name[1:]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(value)
+            script = runtime.probe("rook", profile)
+            for name in files:
+                script = script.replace(name, str(root / name[1:]))
+            script = 'id() { echo 0; }; uname() { echo "' + profile["kernel"] + '"; };\n' + script
+            for command, accepted in cases:
+                with self.subTest(command=command):
+                    (root / "proc/cmdline").write_text(command + "\n")
+                    result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+            (root / "proc/cmdline").write_text(good + "\n")
+            for name, invalid in (("/sys/class/graphics/fb0/virtual_size", "480,2880"),
+                                  ("/sys/class/graphics/fb0/bits_per_pixel", "16"),
+                                  ("/etc/tater-ota-platform", "echo-hardware-v1/crown")):
+                path = root / name[1:]
+                original = path.read_text()
+                path.write_text(invalid + "\n")
+                try:
+                    self.assertNotEqual(subprocess.run(["sh", "-c", script], capture_output=True).returncode, 0)
+                finally:
+                    path.write_text(original)
 
     def test_post_install_wait_requires_a_new_verified_boot(self):
         previous = "00000000-0000-0000-0000-000000000001"

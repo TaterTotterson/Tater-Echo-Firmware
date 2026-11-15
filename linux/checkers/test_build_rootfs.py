@@ -45,16 +45,16 @@ class BootPatchTests(unittest.TestCase):
         self.assertIn('[ "$TATER_FIRMWARE_TARGET" = checkers ]', build_rootfs.TATER_CAMERA_RUN)
         self.assertNotIn("/data/tater-venc/runtime.json", build_rootfs.TATER_CAMERA_RUN)
         self.assertIn("export TATER_VENC_ENABLE=0", build_rootfs.TATER_CAMERA_RUN)
-        self.assertIn('if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then\n    export TATER_VENC_ENABLE=1\nfi', build_rootfs.TATER_CAMERA_RUN)
+        self.assertIn('if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ] || [ "$TATER_FIRMWARE_TARGET" = rook ]; then\n    export TATER_VENC_ENABLE=1\nfi', build_rootfs.TATER_CAMERA_RUN)
         self.assertIn("/data/tater-vdec/runtime.json", build_rootfs.TATER_RUN)
         self.assertIn("export TATER_VDEC_ENABLE=1", build_rootfs.TATER_RUN)
         policy = build_rootfs.TATER_CAMERA_RUN.split("LOG=", 1)[0]
-        for target in ("checkers", "cronos", "crown", "athena", "rook", ""):
+        for target in ("checkers", "cronos", "crown", "athena", "rook", "biscuit", "radar", ""):
             result = subprocess.check_output(
                 ["sh", "-c", policy + 'printf "%s" "$TATER_VENC_ENABLE"'],
                 env={"TATER_FIRMWARE_TARGET": target}, text=True,
             )
-            self.assertEqual("1" if target in ("checkers", "cronos", "crown") else "0", result)
+            self.assertEqual("1" if target in ("checkers", "cronos", "crown", "rook") else "0", result)
 
     def test_show_run_enables_only_owner_local_optional_media_runtimes(self):
         self.assertIn("/data/tater-vdec/runtime.json", build_rootfs.TATER_SHOW_RUN)
@@ -63,6 +63,38 @@ class BootPatchTests(unittest.TestCase):
         self.assertIn("export TATER_GPU_ENABLE=1", build_rootfs.TATER_SHOW_RUN)
         self.assertEqual(3, build_rootfs.TATER_SHOW_RUN.count(
             '[ "$TATER_FIRMWARE_TARGET" = checkers ]'))
+
+    def test_factory_athena_camera_requires_matched_boot_and_runtime(self):
+        policy = build_rootfs.TATER_CAMERA_RUN.split("LOG=", 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ready = root / 'run/tater-athena-ap.ready'
+            manifests = [root / 'data/tater-athena-codec/runtime.json',
+                         root / 'data/tater-athena-codec/omx-lib/runtime.json']
+            node = root / 'dev/tater-athena-ap-venc'
+            for path in [ready, *manifests, node]:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            ready.write_text('athena-ap-live-20261114.2\n')
+            for path in manifests:
+                path.write_text('{}')
+            # Type check only: the synthetic policy never opens a camera/codec.
+            node.symlink_to('/dev/null')
+            for prefix in ('/run/', '/data/', '/dev/'):
+                policy = policy.replace(prefix, str(root) + prefix)
+            def run():
+                return subprocess.check_output(
+                    ['sh', '-c', policy + 'printf "%s:%s" "$TATER_VENC_ENABLE" "${TATER_ATHENA_AP_ENABLE:-0}"'],
+                    env={'TATER_FIRMWARE_TARGET': 'athena'}, text=True)
+            self.assertEqual('1:1', run(), 'factory camera stayed JPEG despite verified AP boot')
+            for path in [ready, *manifests, node]:
+                holding = path.with_name(path.name + '.saved')
+                path.rename(holding)
+                try:
+                    self.assertEqual('0:0', run(), str(path))
+                finally:
+                    holding.rename(path)
+            ready.write_text('unmatched-adapter\n')
+            self.assertEqual('0:0', run())
 
     def test_tater_run_refreshes_stale_builtin_wake_assets(self):
         self.assertIn('cmp -s "$source" "$target" || cp -f "$source" "$target"',

@@ -312,10 +312,24 @@ def probe(target, profile):
              "test \"$(uname -r)\" = " + profile["kernel"]]
     if target == "athena":
         lines.append("tr '\\000' '\\n' < /proc/device-tree/compatible | grep -qx amzn,athena")
+    elif target == "rook":
+        # Rook's qualified bootloader does not supply androidboot.product.
+        # Match the hardware helpers' MT8163 + exact Rook LCD + Linux-boot
+        # contract instead; contradictory/duplicate identity tokens fail closed.
+        lines.extend(["rook_args=$(tr ' ' '\\n' < /proc/cmdline)",
+                      "test \"$(printf '%s\\n' \"$rook_args\" | grep -c '^androidboot.hardware=')\" = 1",
+                      "printf '%s\\n' \"$rook_args\" | grep -qx androidboot.hardware=mt8163",
+                      "test \"$(printf '%s\\n' \"$rook_args\" | grep -c '^lcm=')\" = 1",
+                      "printf '%s\\n' \"$rook_args\" | grep -qx lcm=1-hx8379c_wvga_dsi_vdo",
+                      "test \"$(printf '%s\\n' \"$rook_args\" | grep -c '^techo5=')\" = 1",
+                      "printf '%s\\n' \"$rook_args\" | grep -qx techo5=linux",
+                      "rook_product=$(printf '%s\\n' \"$rook_args\" | sed -n '/^androidboot.product=/p')",
+                      "test -z \"$rook_product\" || test \"$rook_product\" = androidboot.product=rook"])
     else:
         lines.extend(["test \"$(tr ' ' '\\n' < /proc/cmdline | grep -c '^androidboot.product=')\" = 1",
-                      "tr ' ' '\\n' < /proc/cmdline | grep -qx androidboot.product=" + target,
-                      "test \"$(cat /sys/class/graphics/fb0/virtual_size)\" = " + profile["panel"],
+                      "tr ' ' '\\n' < /proc/cmdline | grep -qx androidboot.product=" + target])
+    if target != "athena":
+        lines.extend(["test \"$(cat /sys/class/graphics/fb0/virtual_size)\" = " + profile["panel"],
                       "test \"$(cat /sys/class/graphics/fb0/bits_per_pixel)\" = 32"])
     return "\n".join(lines)
 
@@ -418,7 +432,12 @@ def install(plan, library, console):
         if "TATER_RUNTIME_INSTALLED" not in answer.splitlines():
             raise ValueError("runtime installation refused; existing libraries were not overwritten. Keep the USB connection and staging for repair/retry")
     print("Device-local hardware libraries installed and verified; restarting the satellite to load them.", flush=True)
-    console.run("sync; (sleep 2; /bin/busybox.static reboot -f) >/dev/null 2>&1 &", 3)
+    # The assembly script already synced its verified files. Use the reboot
+    # helper shipped in every screen rootfs, not rescue-only busybox.static.
+    # Invoke directly: an interactive USB shell can terminate background jobs
+    # when the host closes the port. A lost reply here is expected; completion
+    # still requires a different, target-verified boot identity below.
+    console.run("/usr/local/bin/tater-reboot-now", 3)
 
 
 def finish_factory(plan, tools, serial):

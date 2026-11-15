@@ -1359,6 +1359,9 @@ func (r *renderer) localTime(now time.Time) time.Time {
 }
 
 func (r *renderer) showTarget() string {
+	if strings.EqualFold(strings.TrimSpace(r.target), "rook") {
+		return "Rook"
+	}
 	if strings.EqualFold(strings.TrimSpace(r.target), "athena") {
 		return "Athena"
 	}
@@ -2858,6 +2861,8 @@ func main() {
 		deviceName = "Tater Cronos"
 	} else if normalizedTarget == "crown" {
 		deviceName = "Tater Crown"
+	} else if normalizedTarget == "rook" {
+		deviceName = "Tater Rook"
 	} else if spotScreen {
 		deviceName = "Tater Spot"
 	}

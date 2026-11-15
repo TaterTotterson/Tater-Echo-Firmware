@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import lzma
@@ -315,9 +316,33 @@ class PackageEchoReleaseTests(unittest.TestCase):
                 self.assertFalse(kernel_update["included_in_application_ota"])
 
     def test_unqualified_dot_audio_cannot_be_published(self) -> None:
-        for target in ("biscuit", "radar"):
-            with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio release is blocked"):
-                package_echo_release.require_dot_audio_platform(target)
+        # Exercise refusal independently of the real release's acceptance state.
+        profile = json.loads(package_echo_release.DOT_AUDIO_LOCK_PATH.read_text())
+        for entry in profile["targets"].values():
+            entry["release_qualified"] = False
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "audio.json"
+            lock.write_text(json.dumps(profile))
+            with mock.patch.object(package_echo_release, "DOT_AUDIO_LOCK_PATH", lock):
+                for target in ("biscuit", "radar"):
+                    with self.subTest(target=target), self.assertRaisesRegex(SystemExit, "audio release is blocked"):
+                        package_echo_release.require_dot_audio_platform(target)
+
+    def test_screen_release_acceptance_does_not_bypass_source_identity(self) -> None:
+        for target in ("checkers", "cronos", "crown", "rook", "athena"):
+            gate = getattr(package_echo_release, "require_" + target + "_hardware_platform")
+            for accepted, wrong_source in ((False, False), (True, True)):
+                value = copy.deepcopy(package_echo_release.PLATFORM_LOCK)
+                hardware = (value["platforms"]["show"][target + "_hardware"]
+                            if target in ("checkers", "cronos", "crown")
+                            else value["platforms"][target]["hardware"])
+                hardware["release_qualified"] = accepted
+                if wrong_source:
+                    hardware["source_commit"] = "0" * 40
+                with self.subTest(target=target, accepted=accepted), \
+                        mock.patch.object(package_echo_release, "PLATFORM_LOCK", value), \
+                        self.assertRaises(SystemExit):
+                    gate()
 
     def test_usb_candidate_has_no_ota_files_or_publishable_feed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -749,6 +774,8 @@ class PackageEchoReleaseTests(unittest.TestCase):
             platform = root / "platform"
             for relative in ("tools/install-athena.py", "tools/techo5lib.py", "LICENSE", "NOTICE"):
                 self._write(platform / relative, (relative + "\n").encode())
+            self._write(platform / "tools/install-athena.py",
+                        (REAL_REPO / "tools/testdata/athena_userdata_prepare.py").read_bytes())
             build = root / "device/build"
             for name, value in (
                 ("tater-echo", b"athena-daemon"),
@@ -824,6 +851,9 @@ class PackageEchoReleaseTests(unittest.TestCase):
                     "tools/install-athena.py", "tools/techo5lib.py", "recovery_install.py",
                 ):
                     self.assertIn(f"{prefix}/{relative}", members)
+                installer_source = archive.extractfile(f"{prefix}/tools/install-athena.py").read().decode()
+                self.assertIn("ud + '/techo5/tater-linux/app'", installer_source)
+                self.assertIn("ud + '/techo5/local/etc/tater'", installer_source)
                 archive.extractall(extract)
             verified = subprocess.run(
                 [str(extract / prefix / "install.sh"), "--verify-bundle"],

@@ -531,6 +531,7 @@ jobs:
             factory.test_to_twrp \
             factory.test_to_recovery \
             factory.test_recovery_install \
+            tools.test_athena_userdata \
             tools.test_package_echo_release
           python3 -m py_compile \
             linux/checkers/build_rootfs.py \

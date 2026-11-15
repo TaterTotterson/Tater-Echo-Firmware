@@ -110,9 +110,14 @@ def build(args: argparse.Namespace) -> None:
 
         inittab = common.INITTAB.format(target="Rook")
         common.write(root / "etc/inittab", inittab, 0o755)
-        common.write(root / "usr/local/sbin/tater-run", common.TATER_RUN, 0o755)
-        common.write(root / "usr/local/sbin/tater-show-run", common.TATER_SHOW_RUN, 0o755)
-        common.write(root / "usr/local/sbin/tater-camera-run", common.TATER_CAMERA_RUN, 0o755)
+        for name, script in (("tater-run", common.TATER_RUN),
+                             ("tater-show-run", common.TATER_SHOW_RUN),
+                             ("tater-camera-run", common.TATER_CAMERA_RUN)):
+            # Init starts each runner independently; exports in the daemon's
+            # shell cannot configure the camera or renderer sibling processes.
+            script = script.replace("export PATH\n",
+                                    "export PATH\nexport TATER_FIRMWARE_TARGET=rook\n", 1)
+            common.write(root / "usr/local/sbin" / name, script, 0o755)
         common.write(root / "usr/local/sbin/tater-app", common.TATER_APP, 0o755)
         common.write(root / "etc/hostname", "tater-rook\n")
         common.write(root / "etc/motd", "Tater Linux for Echo Spot (Rook).\n"

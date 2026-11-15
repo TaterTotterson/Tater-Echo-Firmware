@@ -40,6 +40,34 @@ func TestDeviceInfoGraphicsRendererLabels(t *testing.T) {
 	}
 }
 
+func TestDeviceInfoTargetLabels(t *testing.T) {
+	for _, test := range []struct {
+		target string
+		want   string
+	}{
+		{"checkers", "Checkers"},
+		{"cronos", "Cronos"},
+		{"crown", "Crown"},
+		{"athena", "Athena"},
+		{"rook", "Rook"},
+		{" Rook ", "Rook"},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			r := &renderer{settingsPage: "info", target: test.target}
+			_, rows := r.settingRows()
+			for _, row := range rows {
+				if row.label == "Device" {
+					if row.options != test.want {
+						t.Fatalf("Device = %q, want %q", row.options, test.want)
+					}
+					return
+				}
+			}
+			t.Fatal("Device Info is missing its Device row")
+		})
+	}
+}
+
 func TestWorkspaceSettingsStayLocalAndSlidersCommitOnlyOnRelease(t *testing.T) {
 	r, _, _ := gpuTestRenderer(t)
 	r.settingsOpen, r.settingsPage = true, "sound"

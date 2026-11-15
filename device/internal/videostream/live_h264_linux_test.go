@@ -14,6 +14,29 @@ import (
 	"time"
 )
 
+func TestLiveVDECHelperMatchesExactTargetAndABI(t *testing.T) {
+	for _, test := range []struct {
+		target  string
+		lineage bool
+		want    string
+	}{
+		{"checkers", false, neonVDECHelperSHA256},
+		{"checkers", true, checkersLineageVDECHelper},
+		{"cronos", false, cronosVDECHelperSHA256},
+		{"cronos", true, cronosVDECHelperSHA256},
+		{"crown", false, crownVDECHelperSHA256},
+		{"crown", true, crownVDECHelperSHA256},
+		{"rook", false, rookVDECHelperSHA256},
+		{"rook", true, rookVDECHelperSHA256},
+		{"athena", false, athenaVDECHelperSHA256},
+		{"athena", true, athenaVDECHelperSHA256},
+	} {
+		if got := liveVDECHelperSHA256(hardwareDecoderConfig{target: test.target, lineage: test.lineage}); got != test.want {
+			t.Errorf("live helper for %s lineage=%t = %s, want %s", test.target, test.lineage, got, test.want)
+		}
+	}
+}
+
 func TestLiveH264DecoderResetDrainsBeforeKilling(t *testing.T) {
 	for _, test := range []struct {
 		name             string

@@ -109,16 +109,20 @@ class HardwareBundleTests(unittest.TestCase):
         self.assertNotIn("vars.TATER_CHECKERS_HARDWARE_BUNDLE_URL", workflow)
 
     def test_old_kernel_release_pin_is_refused(self):
-        with self.assertRaisesRegex(SystemExit, "hardware release is blocked"):
-            release.require_checkers_hardware_platform()
-        with self.assertRaisesRegex(SystemExit, "Cronos hardware release is blocked"):
-            release.require_cronos_hardware_platform()
-        with self.assertRaisesRegex(SystemExit, "Crown hardware release is blocked"):
-            release.require_crown_hardware_platform()
-        with self.assertRaisesRegex(SystemExit, "Rook hardware release is blocked"):
-            release.require_rook_hardware_platform()
-        with self.assertRaisesRegex(SystemExit, "Athena hardware release is blocked"):
-            release.require_athena_hardware_platform()
+        # A release approval must not make an older/different image acceptable.
+        # Do not rely on the real lock still being awaiting owner acceptance.
+        for target in ("checkers", "cronos", "crown", "rook", "athena"):
+            platform = json.loads(json.dumps(release.PLATFORM_LOCK))
+            hardware = (platform["platforms"]["show"][target + "_hardware"]
+                        if target in ("checkers", "cronos", "crown")
+                        else platform["platforms"][target]["hardware"])
+            hardware["release_qualified"] = True
+            key = "boot_sha256" if target in ("crown", "athena") else "kernel_image_sha256"
+            hardware[key] = "0" * 64
+            with self.subTest(target=target), \
+                    mock.patch.object(release, "PLATFORM_LOCK", platform), \
+                    self.assertRaisesRegex(SystemExit, "hardware release is blocked"):
+                getattr(release, "require_" + target + "_hardware_platform")()
 
     def test_rook_requires_explicit_release_qualification(self):
         for qualified in (None, False, "true", True):

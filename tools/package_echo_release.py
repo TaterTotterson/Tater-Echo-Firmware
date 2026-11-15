@@ -22,7 +22,7 @@ import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from tools import athena_codec_bundle, athena_mesa, hardware_bundle, platform_lock, prepare_release_mesa, release_hardware_inputs, runtime_compat  # noqa: E402
+from tools import athena_codec_bundle, athena_mesa, athena_userdata, hardware_bundle, platform_lock, prepare_release_mesa, release_hardware_inputs, runtime_compat  # noqa: E402
 from linux.dot import build_kernel as dot_kernel  # noqa: E402
 from linux.dot import early_boot as dot_early_boot  # noqa: E402
 
@@ -62,7 +62,9 @@ ATHENA_PLATFORM_COMMIT = PLATFORM_LOCK["platforms"]["athena"]["commit"]
 PLATFORM_REPOSITORY = PLATFORM_LOCK["source"]["repository"]
 DOT_AUDIO_LOCK_PATH = REPO / "platforms/dot-audio-lock.json"
 # Reviewed build inputs, not an assertion of physical release qualification.
-# The separate release_qualified gates must also pass. Checkers restores the
+# The separate recorded release-acceptance gates must also pass. A true flag
+# is approval under its qualification record, not a claim of unperformed tests.
+# Checkers restores the
 # public baseline's independent microphones and uses a clean initramfs build.
 QUALIFIED_CHECKERS_KERNEL_SHA256 = "dee4a1d17315d61d3cc83b8b1d2b1526395a6068020da11eefbc034fc84590f0"
 QUALIFIED_CRONOS_KERNEL_SHA256 = "79410d93c4a5a5c2920cd4b4164f2d99afef17661b0cdaea1a45336e6ab734e4"
@@ -89,8 +91,8 @@ def verify_dot_audio_kernel(kernel: Path, target: str) -> None:
 
 
 def require_rook_hardware_platform() -> None:
-    # Functional owner-device trials do not replace final fleet OTA/factory
-    # qualification or authorize publishing the owner's private libraries.
+    # Acceptance scope and owner-approved test waivers are recorded separately;
+    # helper/source/kernel identities remain mandatory. Never publish private libraries.
     platform = PLATFORM_LOCK["platforms"]["rook"]
     hardware = platform.get("hardware", {})
     if (hardware.get("release_qualified") is not True
@@ -102,7 +104,7 @@ def require_rook_hardware_platform() -> None:
 
 def require_crown_hardware_platform() -> None:
     # A successful owner-local application trial is not distribution approval.
-    # Keep release packaging closed until final installer/OTA qualification.
+    # Keep release packaging closed until recorded release acceptance.
     show = PLATFORM_LOCK["platforms"]["show"]
     hardware = show.get("crown_hardware", {})
     if (hardware.get("release_qualified") is not True
@@ -791,6 +793,12 @@ def build(version: str, target: str, output: Path, *, usb_test_candidate: bool =
 
         for relative, (source, mode) in inputs.items():
             copy(source, factory / relative, mode)
+        if target == "athena":
+            # Normal Linux binds userdata/techo5 to /data. Correct only the
+            # reviewed upstream cleanup function, before checksumming the
+            # bundled script, so old app slots cannot override this image.
+            installer = factory / "tools/install-athena.py"
+            installer.write_text(athena_userdata.patch_source(installer.read_text()))
         if target in LINUX_SHOW_TARGETS:
             require_asset(
                 factory / "tools/techo5/boot-logo/tater-wordmark.bin",

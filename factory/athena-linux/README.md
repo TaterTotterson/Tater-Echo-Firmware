@@ -54,14 +54,18 @@ slots and can stage a verified rootfs in the inactive System slot. Use `./instal
 --repair` from Tater Recovery when the device cannot boot far enough for OTA.
 
 Holding **Volume Up** while Athena powers on enters TWRP and stays there,
-without an automatic Tater Recovery redirect. Use `to_recovery.py` from a
-normally running satellite for explicit USB Tater Recovery, or `to_twrp.py`
-for TWRP.
+without an automatic Tater Recovery redirect. Use this physical entry for the
+USB installation: on older Athena mainline firmware, a software TWRP request
+can return to normal Tater instead. Confirm `adb devices` reports `recovery`
+before running the installer. `to_recovery.py` requests the separate Tater
+Recovery environment from a normally running satellite.
 
-A factory install or System OTA reboots Athena into a trial root-system slot.
-After its connected health check passes, Athena commits that slot in place and
-does not make the additional five-minute confirmation restart used by Checkers,
-Crown, and Rook. Routine application OTA does not use the root-system slot.
+The factory image starts with root-system slot A already marked good. A later
+System OTA uses an inactive trial slot and commits it after the connected
+health check, without the additional five-minute confirmation restart used by
+Checkers, Crown, and Rook. Routine application OTA does not use the root-system
+slot. A stable factory boot does not qualify the separate System OTA/rollback
+path; test that path independently.
 
 The Athena kernel, installer, store layout, and hardware enablement are maintained
 in [Tater Echo Linux](https://github.com/TaterTotterson/Tater-Echo-Linux), based

@@ -2,7 +2,27 @@
 
 Current USB-candidate status (2026-11-15): the matched AP codec/kernel/Mesa
 factory image and automatic device-local library installer are assembled and
-software-verified. Full USB/OTA qualification is pending; see
+software-verified. The first full USB trial caught a nested persistent-app
+cleanup omission: an old application could override the newly installed system.
+The corrected installer retest selected the actual 5.0.0 factory binaries,
+retained setup, and passed owner voice/GPU/control checks. It also caught a
+factory-camera startup omission: application updates supplied the AP codec
+opt-in, but the immutable supervisor still disabled encoding. The separately
+regression-tested camera-startup correction has now passed another full,
+settings-preserving USB install, including automatic library verification and
+the final restart. Actual factory binaries, runtime hashes, matched boot and
+guarded hardware-video capability are verified. The owner also passed final
+first words/replies/interruption, camera-cover checks, audible Sendspin and
+controls. A sustained real Checkers call passed balanced hardware H.264 both
+ways, ordered motion/colors, two-way audio, privacy mute/resume, clean teardown
+and immediate post-call voice. Physical cold Volume Up reached TWRP directly;
+recovery/vendor/bootloader/TEE read-backs remained unchanged. Normal return
+booted the good 5.0.0 slot with GPU, hardware video and matching runtimes intact;
+the owner passed final first words/replies/menu/volume. USB qualification passes
+on this previously upgraded development unit. Final fleet OTA/rollback and
+extended tests were subsequently waived after review; see the
+[owner-approved release acceptance](echo-5-release-review.md).
+See
 [the fleet test plan](echo-5-build-inputs.md). Earlier entries below are a
 development history and do not describe the final candidate's codec inventory.
 

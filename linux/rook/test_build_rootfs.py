@@ -112,9 +112,9 @@ t5_wifi_up() {
 }
 """
         cases = (
-            ("00:90:4c:1a:09:00", "50DCE7EE6568", "G070RQ07747500K5", "50:dc:e7:ee:65:68"),
-            ("00:90:4c:1a:09:00", "00904C1A0900", "G070RQ07747500K5", None),
-            ("40:a9:cf:18:d4:b7", "50DCE7EE6568", "G070RQ07747500K5", "unchanged"),
+            ("00:90:4c:1a:09:00", "001122334455", "TEST-ROOK-000001", "00:11:22:33:44:55"),
+            ("00:90:4c:1a:09:00", "00904C1A0900", "TEST-ROOK-000001", None),
+            ("02:12:34:56:78:9a", "001122334455", "TEST-ROOK-000001", "unchanged"),
         )
         for current, factory, serial, expected in cases:
             with self.subTest(current=current, factory=factory):
@@ -394,6 +394,8 @@ log "boot script done"
                 groups = archive.extractfile("./etc/group").read().decode()
                 passwd = archive.extractfile("./etc/passwd").read().decode()
                 runner = archive.extractfile("./usr/local/sbin/tater-camera-run").read().decode()
+                native_runners = [archive.extractfile("./usr/local/sbin/" + name).read().decode()
+                                  for name in ("tater-run", "tater-show-run", "tater-camera-run")]
                 license_text = archive.extractfile("./usr/share/licenses/tater-linux/TECHO5-LICENSE").read().decode()
                 ffmpeg_license = archive.extractfile("./usr/share/licenses/tater-linux/FFMPEG-LGPL-2.1.txt").read().decode()
                 wake_bundle = archive.extractfile("./usr/share/tater/microwakeword/hey_tater.wake-bundle.json").read()
@@ -418,6 +420,16 @@ log "boot script done"
             self.assertIn("inet:x:3003:techo5-video", groups)
             self.assertIn("techo5-video:x:89:89:", passwd)
             self.assertIn("/usr/local/bin/tater-camera", runner)
+            for native_runner in native_runners:
+                self.assertIn("export TATER_FIRMWARE_TARGET=rook\n", native_runner)
+            policy = runner.split("LOG=", 1)[0]
+            for inherited in ({}, {"TATER_FIRMWARE_TARGET": "crown"}):
+                actual = subprocess.check_output(
+                    ["sh", "-c", policy + 'printf "%s:%s:%s" "$TATER_FIRMWARE_TARGET" "$TATER_VENC_ENABLE" "${TATER_CHECKERS_LINEAGE_ENABLE:-0}"'],
+                    env=inherited, text=True,
+                )
+                self.assertEqual("rook:1:0", actual,
+                                 "factory Rook camera lost its own target/hardware opt-in")
             self.assertEqual(license_text, "MIT license\n")
             self.assertEqual(ffmpeg_license, "MIT license\n")
             self.assertEqual(wake_bundle, b"trial-binary")

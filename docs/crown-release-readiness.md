@@ -1,5 +1,68 @@
 # Crown hardware/UI development qualification
 
+## Echo 5 USB checkpoint — 2026-11-15
+
+The full settings-preserving USB installer completed on one previously upgraded
+development Crown. This is a bounded USB qualification, not public release
+approval or an untouched pre-v5 migration sample. The earlier sections below
+describe development history; this checkpoint supersedes their application-only
+installation and missing live hardware-call evidence.
+
+The refreshed candidate archive SHA-256 is
+`7514297cab5b91bd106753590b47fed48e6f4133cd5ccbd7db41466878f0e587`.
+It retains Crown's published baseline kernel, not the unqualified camera-clock
+kernel discussed below. Only daemon/renderer and the Athena-only camera-startup
+guard differ from the prepared rootfs; Crown's camera policy, audio, kernel and
+runtime inputs are unchanged.
+
+The ordinary installer downloaded and verified its public inputs from an empty
+cache, without development libraries or a FireOS backup. Before erasure, all
+15 partition/boot-area backups independently matched the device, and all 40
+saved settings files matched with pairing complete. The installer exited zero,
+including settings restoration, automatic device-local library assembly and
+its verified final restart. Independent read-back matched all 104 runtime
+files/manifests, all 10 checked firmware/helper/startup/wake-runtime files and
+the bundled branded boot image. Factory applications are selected and running,
+not older app overrides. Pairing, Wi-Fi, SSH and other saved files are unchanged;
+only the screen settings gained the normal server-synced text-style field.
+
+The normal five-minute root trial committed and automatically restarted into
+good A 5.0.0 with a read-only store. Native Crown GPU composition and six-channel
+S24_3LE/16 kHz microphone capture are active. The owner passed immediate first
+words/replies/interruption, menus/fades/touch/sliders/equalizer, Graphics GPU,
+volume, microphone mute/unmute and camera-cover blocking/reopening.
+
+A real Crown/Checkers call negotiated `echo-h264-balanced` both ways, with
+Crown's actual 768×432 encoder, 768×432 decoder and GPU compositor concurrent.
+A continuous 120.2-second sample sent 1,803 video frames in each direction
+(approximately 15 FPS), with no dropped GOPs, missing/duplicate/reversed source
+sequences, audio drops or accumulating sampled queues. Occasional picture gaps
+up to approximately 0.293 seconds remain; this is not zero-latency or 30 FPS
+certification. The owner passed sustained ordered motion/colors/delay, two-way
+audio and physical privacy mute/resume. Call end released the camera capture
+devices and both codec helpers while GPU/microphone stayed running. The latest
+300-second microphone clock reported zero stalls/subscriber drops, and the
+owner's immediate post-call request passed.
+
+Physical cold Volume Up reached native TWRP directly. Bootloader/TEE/logo/
+recovery/SWDL/boot0 whole-area hashes match the original backups. Extra checks
+flagged boot1 and persist rather than silently ignoring them: complete byte
+comparisons isolated only the numeric bootcount increase and ext4 mount/write
+bookkeeping. All device-identity, file/inode and other bytes are unchanged.
+Cache was mounted with no recovery-redirect script. Normal reboot returned to
+good A 5.0.0, a read-only store, factory applications, GPU and balanced hardware
+video. All runtime/firmware/boot/settings checks were repeated successfully.
+The owner passed final immediate first words, replies, menu and volume after
+recovery. Crown's settings-preserving USB trial passes on this one development
+unit.
+
+The owner subsequently accepted the remaining fleet checks by code review;
+see the [release acceptance and explicit test waivers](echo-5-release-review.md).
+No firmware push, tag or release was made during this trial. Private unit
+identities, backups, credentials and installer logs remain outside source.
+
+## Earlier development history
+
 Date: 2026-11-14. Unpublished owner-device development, not release approval.
 
 ## Scope and rollback

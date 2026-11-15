@@ -934,14 +934,25 @@ export TATER_VENC_ENABLE=0
 if [ "$TATER_FIRMWARE_TARGET" = checkers ]; then
     export TATER_CHECKERS_LINEAGE_ENABLE=1
 fi
-if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then
+if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ] || [ "$TATER_FIRMWARE_TARGET" = rook ]; then
+    export TATER_VENC_ENABLE=1
+fi
+# Athena's immutable camera is started by init, not the Go application-slot
+# launcher. Give it the same AP opt-in only after the matched boot adapter and
+# device-local runtime are ready. The helper still verifies all pinned hashes.
+if [ "$TATER_FIRMWARE_TARGET" = athena ] &&
+   grep -qx 'athena-ap-live-20261114.2' /run/tater-athena-ap.ready 2>/dev/null &&
+   [ -s /data/tater-athena-codec/runtime.json ] &&
+   [ -s /data/tater-athena-codec/omx-lib/runtime.json ] &&
+   [ -c /dev/tater-athena-ap-venc ]; then
+    export TATER_ATHENA_AP_ENABLE=1
     export TATER_VENC_ENABLE=1
 fi
 LOG=/data/tater-linux/tater-camera.log
 mkdir -p /data/tater-linux
 echo "tater-camera-run: starting at $(date)" >> "$LOG"
 binary=/usr/local/bin/tater-camera
-if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ]; then
+if [ "$TATER_FIRMWARE_TARGET" = checkers ] || [ "$TATER_FIRMWARE_TARGET" = cronos ] || [ "$TATER_FIRMWARE_TARGET" = crown ] || [ "$TATER_FIRMWARE_TARGET" = rook ]; then
     binary=$(tater-app binary tater-camera)
 fi
 exec "$binary" >> "$LOG" 2>&1

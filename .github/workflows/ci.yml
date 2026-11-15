@@ -42,6 +42,7 @@ jobs:
             tools.test_athena_codec_bundle \
             tools.test_athena_codec_boot \
             tools.test_athena_mesa \
+            tools.test_athena_userdata \
             tools.test_ssh_access \
             tools.test_platform_lock \
             tools.test_extract_platform_member \

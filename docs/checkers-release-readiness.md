@@ -1,10 +1,30 @@
 # Checkers hardware release qualification
 
 Current USB-candidate status (2026-11-15): see
-[Echo 5 build inputs and fleet qualification](echo-5-build-inputs.md). The
-retained-Lineage codec profile and corrected separate-microphone kernel need
-their full USB/hardware trial. The sections below retain development history;
-earlier application-only results do not approve the assembled 5.0.0 image.
+[Echo 5 build inputs and fleet qualification](echo-5-build-inputs.md). The normal
+settings-preserving installer completed from fresh public inputs and assembled
+the retained-Lineage runtimes automatically. Independent read-back matched all
+101 library files, three manifests and the installed boot image. The corrected
+kernel's immediate first words, reply interruption, controls/mute and GPU menu
+checks passed. Thirty generated frames passed hardware encoding/decoding in
+order, with decoded YUV identical to an independent software decoder.
+
+The USB trial exposed a separate live-call gate still requiring the old
+Checkers decoder helper hash. A regression reproduced it; the corrected
+ABI-specific hash selection passes the Linux video/UI race tests. The final
+USB candidate also fixes the installer's rescue-only reboot path. Its complete
+end-user installation, automatic library/reboot setup, all 39 settings files,
+104 runtime files/manifests, firmware/boot read-backs and five-minute root-slot
+commit pass. A real balanced-H.264 Checkers/Cronos call verified both actual
+hardware codecs and GPU composition; the owner passed sustained motion/colors,
+audio and privacy, and teardown was clean. Physical cold-boot Volume Up reached
+native TWRP directly with the recovery/SWDL partitions unchanged; normal return
+and final immediate first words, replies, menu and volume passed.
+USB qualification passes on this one previously upgraded development unit.
+Final fleet OTA/rollback and extended tests were subsequently waived by the owner
+after code review; see the [release acceptance](echo-5-release-review.md).
+The sections below retain development history; earlier
+application-only results do not approve the assembled 5.0.0 image.
 
 This is the release gate for the unpublished Checkers hardware/camera work.
 Passing individual hardware probes is not sufficient to publish a release.

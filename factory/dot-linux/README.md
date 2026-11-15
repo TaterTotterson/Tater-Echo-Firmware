@@ -5,21 +5,25 @@ Existing Tater pairing, Wi-Fi, SSH, and satellite settings are preserved by
 default; add `--factory-reset` when you deliberately want a clean setup.
 
 > [!IMPORTANT]
-> Every Biscuit and Radar running Tater firmware earlier than v4.0.0 must use
-> this USB/TWRP factory installer once. A pre-v4 updater cannot safely install the
-> complete v4 platform transition. The installer keeps any Tater setup it can
+> Every Biscuit and Radar running Tater firmware earlier than v5.0.0, including
+> v4.2.3, must use this USB/TWRP factory installer once. An older updater cannot
+> safely install the complete v5 kernel/platform transition. The installer keeps any Tater setup it can
 > verify, but replaces the old firmware and application slots. Compatible
-> releases after v4.0.0 use the normal verified application and System OTA flow.
+> updates after the v5 USB installation use the normal verified application and
+> System OTA flow.
 
 > [!NOTE]
-> On a pre-v4 Biscuit or Radar, boot the satellite normally and connect it
-> directly by USB. Run `python3 to_twrp.py` from this extracted archive
-> (`py -3 to_twrp.py` on Windows), wait for TWRP to start, and then continue
+> On a Biscuit or Radar already running Tater, leave normal power connected,
+> boot normally into Tater and connect USB data to the computer. Run
+> `python3 to_twrp.py` from this extracted archive (`py -3 to_twrp.py` on Windows),
+> wait for the computer to detect TWRP over USB, and then continue
 > with the normal installer below. You do not need to hold Volume Up or enter
-> Tater Recovery first. Do not use `--repair` for the v4 upgrade; repair mode
+> Tater Recovery first. Do not use `--repair` for the v5 upgrade; repair mode
 > only fixes an existing Tater system slot.
 
-1. Complete the matching amonet unlock and boot the unit into TWRP.
+1. On an existing Tater installation, use the helper above to enter TWRP.
+   For a new installation, complete the matching amonet unlock and enter TWRP
+   using that device's unlock instructions instead.
 2. Connect USB and extract the matching factory archive.
 3. Run `./install.sh --verify-bundle`, then `./install.sh` (macOS/Linux), or
    run `python3 install.py --verify-bundle`, then `python3 install.py`
@@ -29,7 +33,7 @@ default; add `--factory-reset` when you deliberately want a clean setup.
 5. A previously paired satellite reconnects automatically. On a new or reset
    satellite, join `Tater-Setup-XXXX`, open `http://192.168.4.1`, and pair it.
 
-The factory installer and a compatible post-v4 System OTA reboot Biscuit or
+The factory installer and a compatible post-v5 System OTA reboot Biscuit or
 Radar into a trial root-system slot. A healthy root slot commits in place on
 these two targets, without the additional five-minute confirmation restart used
 by Checkers, Crown, and Rook. Routine application OTA does not use the root slot.
@@ -78,7 +82,7 @@ wait for the main Linux system or Tater application to start. While TWRP runs
 from RAM, the existing handoff restores Linux so the next restart returns to
 Tater. Keep power connected throughout this recovery-image swap.
 
-This early route needs the new **USB factory upgrade**; application/System OTA
+This early route needs the **v5 USB factory upgrade**; application/System OTA
 does not install it. Old boot images retain their existing late Volume Up
 gesture: a five-second hold during the first 90 seconds of Tater startup arms
 Tater Recovery. That late fallback also remains available when an early

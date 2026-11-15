@@ -1,4 +1,33 @@
-# Cronos hardware/UI development qualification
+# Cronos hardware release qualification
+
+Current USB-candidate status (2026-11-15): the full settings-preserving
+end-user 5.0.0 installer passes on one previously upgraded development unit.
+See [Echo 5 build inputs and fleet qualification](echo-5-build-inputs.md).
+The installer used an empty download cache and assembled the hardware runtimes
+from verified public inputs and the retained Lineage vendor files, without
+development-library staging or a FireOS backup. Its automatic runtime restart
+completed and the wrapper exited zero. Firmware/boot read-backs and all 104
+runtime files/manifests match. Original settings were preserved; the only
+settings-file change adds the newly supported text style configured in Tater.
+
+The normal five-minute root trial committed A good, then restarted normally.
+The owner passed immediate first words/replies, reply interruption, GPU menus,
+touch/sliders/equalizer, volume, microphone mute and the physical camera cover.
+A real balanced-H.264 Cronos/Checkers call verified hardware encoding/decoding
+and both GPU scenes. The 123-second relay sample had no dropped GOPs, missing,
+duplicate or reversed source sequences, audio drops or accumulated queues.
+Cronos encoded approximately 15 FPS at 640×480. The owner passed sustained
+motion/colors, two-way audio and privacy mute/resume. Camera/codecs stopped
+cleanly and immediate post-call voice passed.
+
+Physical cold-boot Volume Up reached native TWRP directly. Both recovery/SWDL
+partitions still match the original backups, with no cached recovery redirect.
+Normal return booted the good 5.0.0 slot, read-only store, paired connection,
+GPU and hardware-video support; runtime/settings checks and the owner's final
+immediate voice/menu/volume checks passed. Final fleet OTA/rollback and extended
+tests were subsequently waived after review; see the
+[owner-approved release acceptance](echo-5-release-review.md). The
+sections below retain development history, not newer release approvals.
 
 Date: 2026-11-13. Unpublished development work; not a release approval.
 
