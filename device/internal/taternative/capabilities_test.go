@@ -56,6 +56,9 @@ func TestSupportedEchoTargetsAdvertiseOutputChain(t *testing.T) {
 		if got := CapabilitiesForTarget(target)["output_chain"]; got != true {
 			t.Errorf("%s output_chain = %#v, want true", target, got)
 		}
+		if got := CapabilitiesForTarget(target)["eq_presets"]; got != true {
+			t.Errorf("%s eq_presets = %#v, want true", target, got)
+		}
 	}
 	if got := CapabilitiesForTarget("future-echo")["output_chain"]; got != nil {
 		t.Fatalf("unknown target output_chain = %#v, want absent", got)

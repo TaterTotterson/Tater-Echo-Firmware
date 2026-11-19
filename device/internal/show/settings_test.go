@@ -5,7 +5,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
 func TestScreenSettingsRejectUnsafeAndMalformedChanges(t *testing.T) {
@@ -34,8 +37,9 @@ func TestScreenPreferencesRoundTripAndDoNotLeakSecretsOrSlices(t *testing.T) {
 	values["screen_popup_effect"] = "slide"
 	values["screen_text_style"] = "matrix"
 	copy := CopyScreenSettings(values)
+	firstBand := values["eq_bands"].([]float64)[0]
 	copy["eq_bands"].([]float64)[0] = 5
-	if values["eq_bands"].([]float64)[0] != 0 {
+	if values["eq_bands"].([]float64)[0] != firstBand {
 		t.Fatal("settings copy aliases the equalizer")
 	}
 	if err := SaveScreenSettings(path, values); err != nil {
@@ -52,6 +56,48 @@ func TestScreenPreferencesRoundTripAndDoNotLeakSecretsOrSlices(t *testing.T) {
 	loaded := LoadScreenSettings(path)
 	if loaded["screen_popup_effect"] != "slide" || loaded["screen_text_style"] != "matrix" || loaded["ssh_password"] != nil || loaded["wake_word_url"] != nil {
 		t.Fatalf("invalid round trip: %#v", loaded)
+	}
+}
+
+func TestEqualizerPresetValidationPersistenceAndLegacyManualMigration(t *testing.T) {
+	if ScreenSettingDefaults()["eq_preset"] != "warm" {
+		t.Fatal("new screen defaults must select Warm")
+	}
+	for _, preset := range outchain.EQPresets() {
+		values, err := ValidateScreenSettings(map[string]any{"eq_preset": preset.ID})
+		if err != nil || !reflect.DeepEqual(values["eq_bands"], preset.Bands[:]) || values["eq_loudness"] != false {
+			t.Fatal("preset selection did not resolve its curve", preset, values, err)
+		}
+		path := filepath.Join(t.TempDir(), "preferences.json")
+		if err := SaveScreenSettings(path, values); err != nil {
+			t.Fatal(err)
+		}
+		if loaded := LoadScreenSettings(path); !reflect.DeepEqual(loaded, values) {
+			t.Fatal("preset changed during save/restore", loaded, values)
+		}
+	}
+	for _, data := range []string{
+		`{"eq_bands":[0,0,0,0,0,0,0,0],"eq_loudness":false}`,
+		`{"eq_bands":[3,3,-1,-3,-2,-1,-2,-3],"eq_loudness":false}`,
+		`{"eq_preset":"warm","eq_bands":[1,2,3,4,5,6,7,8]}`,
+	} {
+		path := filepath.Join(t.TempDir(), "legacy.json")
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var original map[string]any
+		_ = json.Unmarshal([]byte(data), &original)
+		loaded := LoadScreenSettings(path)
+		actual, _ := json.Marshal(loaded["eq_bands"])
+		expected, _ := json.Marshal(original["eq_bands"])
+		if loaded["eq_preset"] != "manual" || string(actual) != string(expected) {
+			t.Fatal("old user's EQ was reset or auto-assigned a preset", loaded)
+		}
+	}
+	for _, invalid := range []any{"bass-boost", nil, 1} {
+		if _, err := ValidateScreenSettings(map[string]any{"eq_preset": invalid}); err == nil {
+			t.Fatal("invalid preset accepted", invalid)
+		}
 	}
 }
 

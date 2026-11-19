@@ -84,6 +84,10 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.settings["eq_preset"] = "manual"
+	c.settings["eq_bands"] = []float64{1, 2, 3, 4, 5, 6, 7, 8}
+	c.settings["eq_loudness"] = true
+	c.settings["ssh_password"] = "not-for-hello"
 	c.PushAudio([]byte{1, 0, 1, 0})
 	c.PushAudio([]byte{2, 0, 2, 0})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,6 +104,14 @@ func TestHandshakeWakeAckFlushesPreRollInOrder(t *testing.T) {
 	case hello := <-helloPayload:
 		if hello["firmware_target"] != "biscuit" {
 			t.Fatalf("firmware_target = %v, want biscuit", hello["firmware_target"])
+		}
+		equalizer, ok := hello["eq_settings"].(map[string]any)
+		if !ok || len(equalizer) != 3 || equalizer["eq_preset"] != "manual" || equalizer["eq_loudness"] != true {
+			t.Fatal("saved EQ missing or unrelated settings leaked into hello", equalizer)
+		}
+		bands, ok := equalizer["eq_bands"].([]any)
+		if !ok || len(bands) != 8 || bands[0] != float64(1) || bands[7] != float64(8) {
+			t.Fatal("saved EQ curve was not available before initial settings", bands)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not receive hello")

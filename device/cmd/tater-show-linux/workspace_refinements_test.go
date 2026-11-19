@@ -204,7 +204,7 @@ func TestVerticalEqualizerPresenceBoostStaysOnTheSamePage(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(wire.Bytes()), &command); err != nil {
 		t.Fatal(err)
 	}
-	if command.Settings["eq_loudness"] != true || len(command.Settings) != 1 || r.settingsPage != "equalizer" {
+	if command.Settings["eq_loudness"] != true || command.Settings["eq_preset"] != "manual" || len(command.Settings) != 2 || r.settingsPage != "equalizer" {
 		t.Fatalf("presence boost changed unrelated settings/page: %#v", command)
 	}
 }

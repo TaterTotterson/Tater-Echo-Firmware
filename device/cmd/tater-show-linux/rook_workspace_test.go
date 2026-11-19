@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/draw"
 	"math"
 	"testing"
 	"time"
@@ -103,13 +104,18 @@ func TestRookHomeUsesShowsOutlineWeatherArtwork(t *testing.T) {
 					r.state.DisplayTheme = theme
 					r.state.Weather = &show.Weather{TemperatureText: "68°", ConditionKind: kind, Daylight: daylight}
 					r.drawRookHome(canvas, now)
-					bounds := r.rookHomeWeatherLayout().icon
+					digits, suffix := r.clockParts(r.localTime(now))
+					bounds := r.rookHomeMainLayout(digits, suffix).icon
 					reference := image.NewRGBA(canvas.Rect)
-					// Composite the shared glyph over the same wallpaper at its
-					// new compact size, including the anti-aliased edge pixels.
-					r.state.Weather.TemperatureText = ""
-					r.drawRookHome(reference, now)
-					r.state.Weather.TemperatureText = "68°"
+					// Build the same background without the clock, which recenters
+					// into the glyph's space when weather is disabled.
+					wallpaper := r.activeWallpaper(now)
+					if wallpaper == nil {
+						t.Fatal("missing fixture wallpaper")
+					}
+					drawPreparedCover(reference, reference.Rect, wallpaper)
+					draw.Draw(reference, reference.Rect, image.NewUniform(color.NRGBA{R: 17, G: 18, B: 19, A: 70}), image.Point{}, draw.Over)
+					drawPopupShade(reference, 70, 180, .58)
 					background := bytes.Clone(reference.Pix)
 					drawWorkspaceWeatherGlyph(reference, bounds, weatherDisplayKind(r.state.Weather, r.localTime(now)), r.menuPalette().primary)
 					checked := 0

@@ -8,8 +8,7 @@ import (
 	"sync/atomic"
 )
 
-// Params is the chain's whole configuration. Defaults match
-// em_db.DEFAULT_DEVICE_CONFIG.
+// Params is the chain's whole configuration.
 type Params struct {
 	Bands              [NumBands]float64
 	Loudness           bool
@@ -20,10 +19,11 @@ type Params struct {
 	LimiterReleaseMs   float64
 }
 
-// DefaultParams mirrors the controller's defaults, so a device that has not
-// yet had a config push sounds the way the controller would have made it.
+// DefaultParams supplies Warm until saved/controller settings arrive.
 func DefaultParams() Params {
+	preset, _ := FindEQPreset(DefaultEQPreset)
 	return Params{
+		Bands:              preset.Bands,
 		GuardEnabled:       true,
 		GuardDb:            -30,
 		LimiterEnabled:     true,

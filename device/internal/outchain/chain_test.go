@@ -192,8 +192,7 @@ func BenchmarkPeriod(b *testing.B) {
 	benchPeriod(b, p)
 }
 
-// BenchmarkPeriodDefaults is the chain as the fleet runs it: flat EQ, guard
-// and limiter on — the common case, where the EQ costs nothing.
+// BenchmarkPeriodDefaults runs the Warm starting curve, guard and limiter.
 func BenchmarkPeriodDefaults(b *testing.B) { benchPeriod(b, DefaultParams()) }
 
 func benchPeriod(b *testing.B, p Params) {

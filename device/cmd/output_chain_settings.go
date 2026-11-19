@@ -104,23 +104,40 @@ func nativeOutputBands(value any) ([]float64, error) {
 // it into the existing config package. Applied values are reported back in
 // Tater's snake_case vocabulary even when a legacy camelCase key arrived.
 func applyNativeOutputSettings(values, applied map[string]any, msg *config.ConfigMessage) error {
+	equalizer := map[string]any{}
+	if value, ok := nativeOutputSetting(values, "eq_preset", "eqPreset"); ok {
+		id, valid := value.(string)
+		if _, named := outchain.FindEQPreset(id); !valid || !named && id != "manual" {
+			return fmt.Errorf("eq_preset must be flat, warm, voice or manual")
+		}
+		equalizer["eq_preset"] = id
+		delete(applied, "eqPreset")
+	}
 	if value, ok := nativeOutputSetting(values, "eq_bands", "eqBands"); ok {
 		bands, err := nativeOutputBands(value)
 		if err != nil {
 			return err
 		}
-		msg.EqBands = bands
+		equalizer["eq_bands"] = bands
 		delete(applied, "eqBands")
-		applied["eq_bands"] = bands
 	}
 	if value, ok := nativeOutputSetting(values, "eq_loudness", "eqLoudness"); ok {
 		enabled, err := nativeOutputBool(value, "eq_loudness")
 		if err != nil {
 			return err
 		}
-		msg.EqLoudness = &enabled
+		equalizer["eq_loudness"] = enabled
 		delete(applied, "eqLoudness")
-		applied["eq_loudness"] = enabled
+	}
+	outchain.ResolveEQSettings(equalizer)
+	if bands, ok := equalizer["eq_bands"].([]float64); ok {
+		msg.EqBands = bands
+	}
+	if enabled, ok := equalizer["eq_loudness"].(bool); ok {
+		msg.EqLoudness = &enabled
+	}
+	for key, value := range equalizer {
+		applied[key] = value
 	}
 	if value, ok := nativeOutputSetting(values, "bass_guard_enabled", "bassGuardEnabled"); ok {
 		enabled, err := nativeOutputBool(value, "bass_guard_enabled")

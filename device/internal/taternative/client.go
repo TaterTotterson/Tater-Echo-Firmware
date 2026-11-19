@@ -374,6 +374,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 	switch target {
 	case "biscuit", "radar", "checkers", "cronos", "crown", "athena", "rook":
 		capabilities["output_chain"] = true
+		capabilities["eq_presets"] = true
 		capabilities["ssh_management"] = true
 		capabilities["ssh_management_version"] = 1
 		capabilities["system_ota_version"] = 1
@@ -500,6 +501,20 @@ func (c *Client) runOnce(parent context.Context) error {
 		"firmware_version": c.cfg.FirmwareVersion, "room": c.cfg.Room,
 		"capabilities": c.cfg.Capabilities,
 	}
+	// Let a controller with no saved EQ adopt the restored local curve before
+	// it sends its first defaults. Only these public tone preferences belong
+	// in hello; the remaining settings may contain private configuration.
+	c.stateMu.RLock()
+	if _, saved := c.settings["eq_preset"]; saved {
+		equalizer := map[string]any{}
+		for _, key := range []string{"eq_preset", "eq_bands", "eq_loudness"} {
+			if value, ok := c.settings[key]; ok {
+				equalizer[key] = value
+			}
+		}
+		hello["eq_settings"] = equalizer
+	}
+	c.stateMu.RUnlock()
 	raw, _ := marshalEnvelope("hello", "", hello)
 	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {

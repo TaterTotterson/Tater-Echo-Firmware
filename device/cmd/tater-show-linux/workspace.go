@@ -597,9 +597,11 @@ func (r *renderer) commitSettings(client *socketClient, values map[string]any) {
 			values["eq_bands"] = bands
 		}
 	}
-	if _, err := show.ValidateScreenSettings(values); err != nil {
+	validated, err := show.ValidateScreenSettings(values)
+	if err != nil {
 		return
 	}
+	values = validated
 	if r.state.Settings == nil {
 		r.state.Settings = show.ScreenSettingDefaults()
 	}

@@ -151,15 +151,17 @@ layouts. Rook is accepted for moving on to the next device. System OTA testing
 is explicitly deferred to the combined fleet test; this functional acceptance
 does not enable the public release gate.
 
-A subsequent source-only follow-up adopts the owner's approved Quiet clock
-home layout: the smaller centered clock has its date below, followed by a
-compact outline icon/temperature/condition row, a separate feels-like reading
-and up to two round-safe sensor rows. The assistant/room heading, status dot,
-optional room temperature, themes, wallpaper rotation, clock format and
+The v5.0.1 follow-up adopts the owner's approved option B,
+the compact Show-style home order: clock, divider and outline weather
+icon/temperature share the main row; the date and condition sit below it;
+then the centered assistant/status dot/room/optional room temperature row,
+followed by a separate feels-like reading and up to two round-safe sensor
+rows. The [native-size production preview](mockups/home-screen-rook-show-order-v1-480x480.png)
+matches the approved mockup. Themes, wallpaper rotation, clock format and
 day/night selection remain supported. Weather uses the Shows' shared outline
-renderer rather than the legacy shaded PNGs. Disabled weather does not leave
-condition text, and independently enabled sensors remain available. Menus,
-voice, camera and hardware playback are unchanged.
+renderer. Disabled weather recenters the clock and leaves no divider, icon or
+condition text; independently enabled sensors remain available. Menus, voice,
+camera and hardware playback are unchanged.
 
 Native-size production previews, bounded-layout/long-label/sensor tests,
 retained GPU upload checks, the renderer race suite and a Rook-linked ARM build

@@ -17,7 +17,7 @@ import (
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/show"
 )
 
-func rookQuietHomeFixture(t *testing.T) (*renderer, *image.RGBA, time.Time) {
+func rookHomeFixture(t *testing.T) (*renderer, *image.RGBA, time.Time) {
 	t.Helper()
 	r, canvas, _ := rookFixture(t)
 	r.state.Room, r.state.DisplayTheme = "Game Room", "tater"
@@ -29,7 +29,7 @@ func rookQuietHomeFixture(t *testing.T) (*renderer, *image.RGBA, time.Time) {
 	}
 	r.state.WallpaperURLs = []string{"preview-only"}
 	r.wallpaperImage = prepareCoverImage(art, canvas.Rect.Size())
-	return r, canvas, time.Date(2026, time.November, 14, 8, 40, 0, 0, time.UTC)
+	return r, canvas, time.Date(2026, time.November, 18, 8, 40, 0, 0, time.UTC)
 }
 
 func assertRookHomeTextFits(t *testing.T, r *renderer, value string, size int, at image.Point) {
@@ -46,23 +46,27 @@ func assertRookHomeTextFits(t *testing.T, r *renderer, value string, size int, a
 	}
 }
 
-func TestRookQuietClockMatchesApprovedHierarchy(t *testing.T) {
-	r, canvas, now := rookQuietHomeFixture(t)
+func TestRookHomeMatchesApprovedShowOrder(t *testing.T) {
+	r, canvas, now := rookHomeFixture(t)
 	before := *r.state.Weather
 	h := r.rookHomeHeading()
-	row := r.rookHomeWeatherLayout()
-	if rookHomeClockSize != 82 || rookHomeClockY != 227 || rookHomeDateY != 266 || h.assistantAt.Y != 112 || row.icon.Dx() != 36 || row.icon.Min.Y != 298 {
-		t.Fatal("Quiet clock no longer has the approved compact hierarchy", h, row)
+	digits, suffix := r.clockParts(r.localTime(now))
+	row := r.rookHomeMainLayout(digits, suffix)
+	if rookHomeClockSize != 74 || row.clockAt.Y != 250 || rookHomeDateY != 289 || h.assistantAt.Y != 327 || row.icon.Dx() != 36 || row.icon.Min.Y != 214 {
+		t.Fatal("Rook no longer has the approved compact Show order", h, row)
 	}
-	if row.temperature != "68°" || row.condition != "Partly cloudy" || row.separator.Dy() != 24 {
-		t.Fatal("weather is not the compact icon / temperature / condition row", row)
+	if row.temperature != "68°" || row.separator.Dy() != 52 || row.separator.Min.X <= row.clockAt.X+r.clockWidth(digits, suffix, rookHomeClockSize) {
+		t.Fatal("weather no longer shares the clock row with a divider", row)
+	}
+	if detail := r.rookHomeDate(r.localTime(now)); detail != "Wednesday, November 18 · Partly cloudy" {
+		t.Fatal("date and condition should be together below the clock", detail)
 	}
 	if got := rookHomeFeelsLike(r.state.Weather); got != "Feels like 66°" {
 		t.Fatal("feels-like should have its own formatted row", got)
 	}
 	lines, size := r.rookHomeSensorLines()
 	if len(lines) != 1 || size != 15 || lines[0] != "Room humidity 42% · Wind NW 5 mph" {
-		t.Fatal("ordinary sensors no longer fit the approved quiet footer", lines, size)
+		t.Fatal("ordinary sensors no longer fit the approved footer", lines, size)
 	}
 	r.drawRookHome(canvas, now)
 	if *r.state.Weather != before {
@@ -81,43 +85,54 @@ func TestRookQuietClockMatchesApprovedHierarchy(t *testing.T) {
 	}
 }
 
-func TestRookQuietClockHandlesClockFormatsAndLongLabels(t *testing.T) {
-	r, canvas, now := rookQuietHomeFixture(t)
+func TestRookHomeHandlesClockFormatsAndLongLabels(t *testing.T) {
+	r, canvas, now := rookHomeFixture(t)
 	r.state.AssistantName, r.state.Room = strings.Repeat("Long", 40), strings.Repeat("Room ", 50)
 	r.state.Weather.Condition, r.state.Weather.TemperatureText = strings.Repeat("Thunderstorms ", 20), "-123.4°C"
 	r.state.Weather.IndoorTemperatureText = "-100.5°C"
-	for _, format := range []string{"12h", "24h"} {
-		r.state.ScreenClockFormat = format
-		for hour := 0; hour < 24; hour++ {
-			local := time.Date(2026, time.September, 30, hour, 59, 0, 0, time.UTC)
-			digits, suffix := r.clockParts(local)
-			if (suffix == "") != (format == "24h") {
-				t.Fatal("clock format was ignored", format, digits, suffix)
+	weather := r.state.Weather
+	for _, visible := range []bool{true, false} {
+		if !visible {
+			r.state.Weather = nil
+		}
+		for _, format := range []string{"12h", "24h"} {
+			r.state.ScreenClockFormat = format
+			for hour := 0; hour < 24; hour++ {
+				local := time.Date(2026, time.September, 30, hour, 59, 0, 0, time.UTC)
+				digits, suffix := r.clockParts(local)
+				if (suffix == "") != (format == "24h") {
+					t.Fatal("clock format was ignored", format, digits, suffix)
+				}
+				row := r.rookHomeMainLayout(digits, suffix)
+				assertRookHomeTextFits(t, r, digits, rookHomeClockSize, row.clockAt)
+				if suffix != "" {
+					size := clockSuffixSize(rookHomeClockSize)
+					at := row.clockAt.Add(image.Pt(textWidth(r.faces.regular[rookHomeClockSize], digits)+size/3, 0))
+					assertRookHomeTextFits(t, r, suffix, size, at)
+				}
+				if visible {
+					assertRookHomeTextFits(t, r, row.temperature, rookHomeWeatherSize, row.temperatureAt)
+					if row.separator.Min.X <= row.clockAt.X+r.clockWidth(digits, suffix, rookHomeClockSize) || row.icon.Min.X <= row.separator.Max.X || row.temperatureAt.X <= row.icon.Max.X {
+						t.Fatal("long clock/weather values overlap", row)
+					}
+				} else if row.clockAt.X != (480-r.clockWidth(digits, suffix, rookHomeClockSize))/2 || !row.icon.Empty() || !row.separator.Empty() {
+					t.Fatal("weather-free clock is not centered on its own", row)
+				}
+				date := r.rookHomeDate(local)
+				assertRookHomeTextFits(t, r, date, 16, image.Pt(240-textWidth(r.faces.regular[16], date)/2, rookHomeDateY))
 			}
-			width := textWidth(r.faces.regular[rookHomeClockSize], digits)
-			if suffix != "" {
-				width += 9 + textWidth(r.faces.regular[24], suffix)
-			}
-			assertRookHomeTextFits(t, r, digits, rookHomeClockSize, image.Pt((480-width)/2, rookHomeClockY))
-			date := local.Format("Monday, January 2")
-			assertRookHomeTextFits(t, r, date, 18, image.Pt(240-textWidth(r.faces.regular[18], date)/2, rookHomeDateY))
 		}
 	}
+	r.state.Weather = weather
 	h := r.rookHomeHeading()
 	for value, at := range map[string]image.Point{h.assistant: h.assistantAt, h.room: h.roomAt, h.temperature: h.temperatureAt} {
 		assertRookHomeTextFits(t, r, value, 17, at)
 	}
-	row := r.rookHomeWeatherLayout()
-	assertRookHomeTextFits(t, r, row.temperature, 32, row.temperatureAt)
-	assertRookHomeTextFits(t, r, row.condition, 18, row.conditionAt)
-	if row.conditionAt.X <= row.separator.Max.X || row.separator.Min.X <= row.temperatureAt.X+textWidth(r.faces.regular[32], row.temperature) {
-		t.Fatal("long weather values overlap", row)
-	}
 	r.drawRookHome(canvas, now)
 }
 
-func TestRookQuietClockRetainsEveryNormalSensorAndFitsLongReadings(t *testing.T) {
-	r, canvas, now := rookQuietHomeFixture(t)
+func TestRookHomeRetainsEveryNormalSensorAndFitsLongReadings(t *testing.T) {
+	r, canvas, now := rookHomeFixture(t)
 	w := r.state.Weather
 	w.HumidityText, w.RainText, w.LightningText = "68%", "65%", "3 strikes"
 	before := *w
@@ -144,7 +159,7 @@ func TestRookQuietClockRetainsEveryNormalSensorAndFitsLongReadings(t *testing.T)
 			if width > rookHomeSensorWidth(index) {
 				t.Fatal("sensor line exceeded its round-safe width", lines)
 			}
-			assertRookHomeTextFits(t, r, value, size, image.Pt(240-width/2, 403+index*24))
+			assertRookHomeTextFits(t, r, value, size, image.Pt(240-width/2, rookHomeSensorY+index*24))
 		}
 		r.drawRookHome(canvas, now)
 	}
@@ -155,10 +170,11 @@ func TestRookQuietClockRetainsEveryNormalSensorAndFitsLongReadings(t *testing.T)
 	}
 }
 
-func TestRookQuietClockHidesOnlyDisabledWeather(t *testing.T) {
-	r, canvas, now := rookQuietHomeFixture(t)
+func TestRookHomeHidesOnlyDisabledWeather(t *testing.T) {
+	r, canvas, now := rookHomeFixture(t)
 	r.state.Weather.TemperatureText = " \t"
-	if row := r.rookHomeWeatherLayout(); !row.icon.Empty() || !row.separator.Empty() || row.condition != "" {
+	digits, suffix := r.clockParts(r.localTime(now))
+	if row := r.rookHomeMainLayout(digits, suffix); !row.icon.Empty() || !row.separator.Empty() || strings.Contains(r.rookHomeDate(r.localTime(now)), "cloudy") {
 		t.Fatal("hidden weather left a condition, glyph or separator", row)
 	}
 	if lines, _ := r.rookHomeSensorLines(); len(lines) != 1 || rookHomeFeelsLike(r.state.Weather) != "Feels like 66°" {
@@ -178,16 +194,16 @@ func TestRookQuietClockHidesOnlyDisabledWeather(t *testing.T) {
 	r.drawRookHome(canvas, now)
 }
 
-func TestRookQuietClockGPUKeepsHomeUntilVisibleDataChanges(t *testing.T) {
-	r, canvas, now := rookQuietHomeFixture(t)
+func TestRookHomeGPUKeepsHomeUntilVisibleDataChanges(t *testing.T) {
+	r, canvas, now := rookHomeFixture(t)
 	frame, ok := r.prepareGPUScene(canvas, now, true, true, true)
 	if !ok || len(frame.source) == 0 || r.gpuScene.surface != "home" {
-		t.Fatal("Quiet clock was not uploaded through the retained GPU path")
+		t.Fatal("Rook home was not uploaded through the retained GPU path")
 	}
 	want := image.NewRGBA(canvas.Rect)
 	r.drawRookHome(want, now)
 	if !bytes.Equal(frame.source, want.Pix) {
-		t.Fatal("GPU home is not the Quiet clock renderer")
+		t.Fatal("GPU home does not match the production renderer")
 	}
 	for _, delay := range []time.Duration{time.Millisecond, time.Second, 5 * time.Second} {
 		copy := *r.state.Weather
@@ -218,18 +234,20 @@ func TestRookQuietClockGPUKeepsHomeUntilVisibleDataChanges(t *testing.T) {
 }
 
 // Preview uses the production renderer, not an approximation of its layout.
-func TestRookQuietClockNativePreviews(t *testing.T) {
+func TestRookHomeNativePreviews(t *testing.T) {
 	directory := os.Getenv("TATER_ROOK_HOME_PREVIEWS")
 	if directory == "" {
 		t.Skip("set TATER_ROOK_HOME_PREVIEWS for native-size production previews")
 	}
-	for _, state := range []string{"quiet-clock", "all-sensors", "no-weather", "night", "24-hour", "ocean"} {
-		r, canvas, now := rookQuietHomeFixture(t)
+	for _, state := range []string{"show-order", "all-sensors", "no-weather", "long-room", "night", "24-hour", "ocean"} {
+		r, canvas, now := rookHomeFixture(t)
 		switch state {
 		case "all-sensors":
 			r.state.Weather.HumidityText, r.state.Weather.RainText, r.state.Weather.LightningText = "68%", "65%", "3 strikes"
 		case "no-weather":
 			r.state.Weather = nil
+		case "long-room":
+			r.state.Room = "Upstairs Reading Room"
 		case "night":
 			r.state.Weather.Daylight = "night"
 		case "24-hour":

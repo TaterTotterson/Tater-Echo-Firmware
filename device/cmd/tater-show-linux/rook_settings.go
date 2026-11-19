@@ -163,29 +163,34 @@ func (r *renderer) drawRookToggle(canvas *image.RGBA, box image.Rectangle, on bo
 }
 
 func rookEqualizerCell(index int) image.Rectangle {
-	return image.Rect(92+index*74, 145, 92+(index+1)*74, 327)
+	return image.Rect(92+index*74, 184, 92+(index+1)*74, 337)
 }
 
 func rookEqualizerTrack(index int) image.Rectangle {
 	cell := rookEqualizerCell(index)
 	x := cell.Min.X + cell.Dx()/2
-	return image.Rect(x-3, 173, x+3, 293)
+	return image.Rect(x-3, 213, x+3, 301)
+}
+
+func rookEqualizerPresetBounds() image.Rectangle {
+	return image.Rect(88, 124, 392, 166)
 }
 
 func (r *renderer) drawRookEqualizer(canvas *image.RGBA) {
+	r.drawEqualizerPresetSelector(canvas, rookEqualizerPresetBounds(), 14)
 	_, rows := r.settingRows()
 	start := max(0, min(1, r.settingsIndex)) * 4
 	for index := 0; index < 4; index++ {
 		row, cell, track := rows[start+index], rookEqualizerCell(index), rookEqualizerTrack(index)
 		cx := cell.Min.X + cell.Dx()/2
 		value := math.Max(-12, math.Min(12, settingFloat(r.settingValue(row.key))))
-		r.centeredText(canvas, cx, 156, fmt.Sprintf("%+.1f dB", value), 14, false, workspaceMuted)
+		r.centeredText(canvas, cx, 196, fmt.Sprintf("%+.1f dB", value), 14, false, workspaceMuted)
 		line(canvas, cx, track.Min.Y, cx, track.Max.Y, 6, workspaceBorder)
 		zero := track.Min.Y + track.Dy()/2
 		y := track.Max.Y - int((value+12)*float64(track.Dy())/24)
 		line(canvas, cx, min(y, zero), cx, max(y, zero), 6, r.menuPalette().primary)
 		drawMenuRoundedRect(canvas, image.Rect(cx-14, y-5, cx+14, y+5), 5, workspaceText)
-		r.centeredText(canvas, cx, 321, strings.ReplaceAll(strings.TrimSuffix(row.label, " Hz"), " kHz", "k"), 15, false, workspaceMuted)
+		r.centeredText(canvas, cx, 327, strings.ReplaceAll(strings.TrimSuffix(row.label, " Hz"), " kHz", "k"), 15, false, workspaceMuted)
 	}
 	if start > 0 {
 		r.text(canvas, 101, 359, "Presence boost", 17, false, workspaceText)
@@ -278,6 +283,9 @@ func (r *renderer) handleRookSettingsTouch(client *socketClient, event linuxinpu
 
 func (r *renderer) handleRookEqualizerTouch(client *socketClient, event linuxinput.TouchEvent) {
 	point := image.Pt(event.X, event.Y)
+	if r.handleEqualizerPresetTouch(client, event, rookEqualizerPresetBounds()) {
+		return
+	}
 	if r.settingsIndex == 1 && event.Kind == linuxinput.Up && r.settingsDragging == "" && point.In(image.Rect(90, 331, 390, 374)) {
 		r.commitSettings(client, map[string]any{"eq_loudness": !settingBool(r.settingValue("eq_loudness"))})
 		return

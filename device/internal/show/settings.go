@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
 // ScreenSettingDefaults is deliberately limited to safe local preferences.
@@ -16,6 +18,7 @@ import (
 // URLs, credentials, microphones, OTA, and speaker protection are not writable
 // through the touch renderer either.
 func ScreenSettingDefaults() map[string]any {
+	preset, _ := outchain.FindEQPreset(outchain.DefaultEQPreset)
 	return map[string]any{
 		"volume_percent": 65,
 		"display_theme":  "tater", "display_edge_glow": true, "screen_popup_effect": "fade",
@@ -26,8 +29,9 @@ func ScreenSettingDefaults() map[string]any {
 		"screen_night_brightness": 3, "screen_night_start": "22:00", "screen_night_end": "07:00",
 		"screen_night_display": "red_clock", "screen_clock_format": "12h",
 		"dnd_enabled": false, "dnd_schedule_enabled": false, "dnd_start": "22:00", "dnd_end": "07:00",
+		"eq_preset":   preset.ID,
 		"eq_loudness": false,
-		"eq_bands":    make([]float64, 8),
+		"eq_bands":    append([]float64(nil), preset.Bands[:]...),
 	}
 }
 
@@ -107,6 +111,8 @@ func ValidateScreenSettings(values map[string]any) (map[string]any, error) {
 			}
 			allowed := ""
 			switch key {
+			case "eq_preset":
+				allowed = "flat,warm,voice,manual"
 			case "display_theme":
 				allowed = "tater,ocean,violet,forest,sunset"
 			case "screen_popup_effect":
@@ -138,6 +144,7 @@ func ValidateScreenSettings(values map[string]any) (map[string]any, error) {
 		}
 		result[key] = value
 	}
+	outchain.ResolveEQSettings(result)
 	return result, nil
 }
 
@@ -216,5 +223,6 @@ func LoadScreenSettings(path string) map[string]any {
 	// The mixer's existing volume persistence remains authoritative, including
 	// physical button changes made after this preferences file was written.
 	delete(result, "volume_percent")
+	outchain.ResolveEQSettings(result)
 	return result
 }

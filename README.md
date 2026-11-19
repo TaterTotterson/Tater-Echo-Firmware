@@ -46,7 +46,7 @@ Target metadata used by Tater and the release builds lives in
 
 Vendor libraries remain device-local; they are not included in these source
 repositories or public Tater firmware archives. See
-[what changed in 5.0.0](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/tag/v5.0.0)
+[what changed in 5.0.1](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/tag/v5.0.1)
 and the [release validation coverage](docs/echo-5-release-review.md).
 
 ## Features

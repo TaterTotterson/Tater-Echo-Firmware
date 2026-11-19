@@ -1,10 +1,12 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/config"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
 
 func TestApplyNativeOutputSettingsAcceptsControllerWireKeys(t *testing.T) {
@@ -47,6 +49,32 @@ func TestApplyNativeOutputSettingsAcceptsControllerWireKeys(t *testing.T) {
 		if _, ok := applied[nativeKey]; !ok {
 			t.Errorf("applied response missing native key %q", nativeKey)
 		}
+	}
+}
+
+func TestNativeEQPresetsApplyCanonicalToneOnly(t *testing.T) {
+	for _, preset := range outchain.EQPresets() {
+		msg, applied := config.ConfigMessage{}, map[string]any{}
+		if err := applyNativeOutputSettings(map[string]any{"eqPreset": preset.ID}, applied, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(msg.EqBands, preset.Bands[:]) || msg.EqLoudness == nil || *msg.EqLoudness || applied["eq_preset"] != preset.ID {
+			t.Fatal("native preset was not resolved/reported", msg, applied)
+		}
+		if msg.BassGuardDb != nil || msg.BassGuardEnabled != nil || msg.LimiterEnabled != nil || msg.LimiterThreshold != nil || msg.LimiterRelease != nil {
+			t.Fatal("preset changed hardware protection")
+		}
+	}
+	msg, applied := config.ConfigMessage{}, map[string]any{}
+	if err := applyNativeOutputSettings(map[string]any{"eq_bands": make([]float64, 8)}, applied, &msg); err != nil || applied["eq_preset"] != "manual" {
+		t.Fatal("an explicit curve must select Manual", applied, err)
+	}
+	msg = config.ConfigMessage{}
+	if err := applyNativeOutputSettings(map[string]any{"eq_preset": "manual"}, applied, &msg); err != nil || msg.EqBands != nil || msg.EqLoudness != nil {
+		t.Fatal("selecting Manual must leave tone untouched", msg, err)
+	}
+	if err := applyNativeOutputSettings(map[string]any{"eq_preset": "unknown"}, applied, &msg); err == nil {
+		t.Fatal("invalid native preset accepted")
 	}
 }
 

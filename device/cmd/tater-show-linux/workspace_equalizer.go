@@ -10,11 +10,79 @@ import (
 	"strings"
 
 	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/linuxinput"
+	"github.com/TaterTotterson/Tater-Echo-Firmware/internal/outchain"
 )
+
+func equalizerPresetBounds(width, height int) image.Rectangle {
+	return image.Rect(width/3, 112, width-48, 164)
+}
+
+func equalizerPresetButton(box image.Rectangle, index int) image.Rectangle {
+	return image.Rect(box.Min.X+box.Dx()*index/4+3, box.Min.Y, box.Min.X+box.Dx()*(index+1)/4-3, box.Max.Y)
+}
+
+func equalizerPresetOptions() []outchain.EQPreset {
+	return append(outchain.EQPresets(), outchain.EQPreset{ID: "manual", Label: "Manual"})
+}
+
+func (r *renderer) equalizerPresetID() string {
+	// Old saved curves have no preset marker, even if they match a named curve.
+	if _, named := r.state.Settings["eq_preset"]; !named {
+		if _, bands := r.state.Settings["eq_bands"]; bands {
+			return "manual"
+		}
+		if _, boost := r.state.Settings["eq_loudness"]; boost {
+			return "manual"
+		}
+	}
+	id := fmt.Sprint(r.settingValue("eq_preset"))
+	preset, named := outchain.FindEQPreset(id)
+	if !named || settingBool(r.settingValue("eq_loudness")) {
+		return "manual"
+	}
+	for index, band := range preset.Bands {
+		if settingFloat(r.settingValue(fmt.Sprintf("eq_band_%d", index))) != band {
+			return "manual"
+		}
+	}
+	if strings.HasPrefix(r.settingsDragging, "eq_band_") {
+		return "manual"
+	}
+	return id
+}
+
+func (r *renderer) drawEqualizerPresetSelector(canvas *image.RGBA, box image.Rectangle, size int) {
+	selected := r.equalizerPresetID()
+	for index, preset := range equalizerPresetOptions() {
+		button := equalizerPresetButton(box, index)
+		fill, border, ink, stroke := workspacePanel, workspaceBorder, workspaceMuted, 1
+		if preset.ID == selected {
+			fill, border, ink, stroke = workspaceControl, r.menuPalette().primary, workspaceText, 2
+		}
+		drawMenuRoundedRect(canvas, button, 10, fill)
+		drawMenuRoundedOutline(canvas, button, 10, stroke, border)
+		r.centeredText(canvas, button.Min.X+button.Dx()/2, button.Min.Y+button.Dy()/2+size/3, preset.Label, size, false, ink)
+	}
+}
+
+func (r *renderer) handleEqualizerPresetTouch(client *socketClient, event linuxinput.TouchEvent, box image.Rectangle) bool {
+	if r.settingsDragging != "" || !image.Pt(event.X, event.Y).In(box) {
+		return false
+	}
+	if event.Kind == linuxinput.Up {
+		for index, preset := range equalizerPresetOptions() {
+			if image.Pt(event.X, event.Y).In(equalizerPresetButton(box, index)) {
+				r.commitSettings(client, map[string]any{"eq_preset": preset.ID})
+				break
+			}
+		}
+	}
+	return true
+}
 
 func equalizerBandBounds(width, height, index int) image.Rectangle {
 	left, right := 48, width-48
-	return image.Rect(left+(right-left)*index/8, 142, left+(right-left)*(index+1)/8, height-128)
+	return image.Rect(left+(right-left)*index/8, 202, left+(right-left)*(index+1)/8, height-128)
 }
 
 func equalizerTrackBounds(width, height, index int) image.Rectangle {
@@ -35,6 +103,8 @@ func (r *renderer) drawWorkspaceEqualizer(canvas *image.RGBA) {
 	if height >= 600 {
 		size = 24
 	}
+	r.text(canvas, 60, 138+size/3, "Sound preset", size+1, false, workspaceText)
+	r.drawEqualizerPresetSelector(canvas, equalizerPresetBounds(width, height), size)
 	for index, row := range rows[:8] {
 		cell, track := equalizerBandBounds(width, height, index), equalizerTrackBounds(width, height, index)
 		cx := cell.Min.X + cell.Dx()/2
@@ -69,6 +139,9 @@ func (r *renderer) drawWorkspaceEqualizer(canvas *image.RGBA) {
 
 func (r *renderer) handleWorkspaceEqualizerTouch(client *socketClient, event linuxinput.TouchEvent, width, height int) {
 	point := image.Pt(event.X, event.Y)
+	if r.handleEqualizerPresetTouch(client, event, equalizerPresetBounds(width, height)) {
+		return
+	}
 	if event.Kind == linuxinput.Up && r.settingsDragging == "" && point.In(equalizerPresenceBounds(width, height)) {
 		r.commitSettings(client, map[string]any{"eq_loudness": !settingBool(r.settingValue("eq_loudness"))})
 		return

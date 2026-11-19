@@ -1,5 +1,40 @@
 # Changelog
 
+## v5.0.1
+
+### Speaker EQ presets
+
+- Added **Flat**, **Warm**, **Voice** and **Manual** selectors to the Equalizer
+  on Checkers, Cronos, Crown, Athena and both Rook EQ pages.
+- Warm is the starting EQ for devices without saved settings. It uses
+  @MartyTremblay's community listening curve from
+  [issue #13](https://github.com/TaterTotterson/Tater-Echo-Firmware/issues/13):
+  +3/+3/-1/-3/-2/-1/-2/-3 dB at 125/250/500 Hz and 1/2/3.5/5.5/8 kHz.
+- Preserve existing saved EQ curves as Manual, including saved flat curves.
+  Moving a fader or changing Presence boost selects Manual automatically;
+  selecting a named preset applies all eight bands with Presence boost off.
+- Keep bass protection and limiting independent of presets. Existing Tater
+  defaults remain -10 dB on Radar/Crown/Athena and -30 dB on
+  Biscuit/Checkers/Cronos/Rook; explicit user overrides are retained.
+- Save preset choices locally and synchronize them with Tater across
+  reconnects. Restore older local EQ before a controller without saved EQ sends
+  its first defaults. Update the companion
+  [Tater controller](https://github.com/TaterTotterson/Tater) for this preset
+  synchronization and the matching Warm defaults.
+
+### Rook home screen
+
+- Match the Shows' information order while fitting the round screen: clock
+  and weather, date and condition, Tater/status/room, then sensor readings.
+- Center the clock when weather is disabled and keep long labels, both clock
+  formats and enabled sensor rows inside the circular panel.
+
+This is a compatible application OTA for the v5.0.0 hardware baseline; no
+additional USB installation is required for devices already on that baseline.
+Renderer race tests, settings/migration tests, controller reconnect tests and
+ARM builds cover these changes. The community EQ curve is a starting point,
+not measured calibration for every speaker model.
+
 ## v5.0.0
 
 > **One-time USB upgrade required:** Every supported Echo running pre-v5 firmware,

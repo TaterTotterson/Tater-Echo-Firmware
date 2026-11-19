@@ -23,6 +23,45 @@ the vertical EQ and revised home layout. Its real health trial and detailed
 startup timings are tracked in the release-readiness record.
 See [the installed-test record](checkers-release-readiness.md#workspace-ui-installed-smoke-test).
 
+### Equalizer presets
+
+The local Equalizer now offers **Flat**, **Warm**, **Voice** and **Manual** on
+Checkers, Cronos, Crown, Athena and Rook. Shows have a four-button selector
+above all eight vertical faders. Rook has the same selector on both pages,
+above four faders that fit the circular panel.
+
+At the owner's request, Warm is the starting curve for devices without saved
+EQ. It reproduces the listening curve proposed in
+[firmware issue #13](https://github.com/TaterTotterson/Tater-Echo-Firmware/issues/13).
+Voice reduces bass and gently lifts the speech bands; Flat sets all bands to
+zero. Each named preset disables the separate Presence boost. Selecting Manual
+keeps the current sound; changing a slider or Presence boost also selects Manual.
+
+Existing saved EQ remains unchanged and migrates to Manual, including a saved
+flat curve or one that happens to match a named preset. `eq_preset` is persisted
+with the eight bands and boost flag. The companion Tater controller change
+preserves these per-device choices across reconnects and adopts a restored local
+curve during hello when the controller has no saved EQ. An existing controller
+EQ override remains authoritative during initial connection.
+
+Presets change tone only. Tater retains the existing bass-protection defaults:
+Radar/Crown/Athena use -10 dB, and Biscuit/Checkers/Cronos/Rook use -30 dB;
+explicit protection overrides and limiter settings are preserved. Warm is also
+the firmware's initial EQ fallback on the two screenless Echo targets.
+
+Native production previews:
+[Show 5](mockups/eq-presets/show-5-warm.png),
+[Show 8](mockups/eq-presets/show-8-warm.png),
+[Rook lower bands](mockups/eq-presets/rook-warm-low.png),
+[Rook upper bands](mockups/eq-presets/rook-warm-high.png),
+[Rook Manual](mockups/eq-presets/rook-manual.png).
+Regenerate with `TATER_EQ_PREVIEWS` and `TestEqualizerPresetNativePreviews`.
+The controller persistence/migration tests, firmware settings tests, renderer
+race suite and ARMv7 renderer build cover this v5.0.1 follow-up. Installation
+on the owner's devices and deployment to the running Tater controller are
+separate from publication; listening and on-device touch acceptance remain
+pending.
+
 ### Conversation text style
 
 Display → Appearance & motion → **Conversation text** offers **Smooth** (the
