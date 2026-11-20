@@ -14,11 +14,12 @@ const DefaultBootstrapPath = "/data/local/etc/tater/native.json"
 // receive live settings from Tater. Token may initially be a six-digit pairing
 // code; the permanent device token returned by hello.ack is stored separately.
 type Bootstrap struct {
-	URL        string `json:"url"`
-	Token      string `json:"token,omitempty"`
-	TokenPath  string `json:"token_path,omitempty"`
-	DeviceName string `json:"device_name,omitempty"`
-	Room       string `json:"room,omitempty"`
+	URL             string `json:"url"`
+	Token           string `json:"token,omitempty"`
+	TokenPath       string `json:"token_path,omitempty"`
+	DeviceName      string `json:"device_name,omitempty"`
+	Room            string `json:"room,omitempty"`
+	IdentityUpdated bool   `json:"identity_updated,omitempty"`
 }
 
 // LoadBootstrap reads a strict single-object bootstrap file. A missing file is

@@ -1,5 +1,26 @@
 # Changelog
 
+## v5.0.2
+
+### Live satellite name and room
+
+- Edit the satellite name and room from Tater 3.0.4 or Home Assistant bridge
+  1.4.18, including Home Assistant's device editor through the bridge.
+  Apply confirmed changes immediately without a reboot or re-pairing.
+- Save both fields atomically in the existing bootstrap configuration. Preserve
+  pairing tokens, connection settings, and unknown configuration fields; failed
+  writes leave the previous live identity intact. Clear the room with an empty value.
+- Restore saved edits ahead of initial environment defaults on restart. Update
+  the local screen and trainer source name immediately while retaining the stable
+  device ID, playback groups, and other preferences.
+- Advertise identity editing support only when persistent storage is configured.
+  Add regressions for validation, storage failures, restoration, and environment-only
+  bootstrap creation.
+
+This is a compatible application OTA for devices already on the v5 hardware
+baseline. Older pre-v5 installations still require their matching full USB/TWRP
+factory upgrade as described in the v5.0.0 notes.
+
 ## v5.0.1
 
 ### Speaker EQ presets

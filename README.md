@@ -46,7 +46,7 @@ Target metadata used by Tater and the release builds lives in
 
 Vendor libraries remain device-local; they are not included in these source
 repositories or public Tater firmware archives. See
-[what changed in 5.0.1](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/tag/v5.0.1)
+[what changed in 5.0.2](https://github.com/TaterTotterson/Tater-Echo-Firmware/releases/tag/v5.0.2)
 and the [release validation coverage](docs/echo-5-release-review.md).
 
 ## Features
@@ -72,6 +72,10 @@ and the [release validation coverage](docs/echo-5-release-review.md).
   each supported microphone array.
 - **Voice features:** Continued conversation, playback barge-in, intercom,
   announcements, wake sounds, controls, and wake-audio training samples.
+- **Live name and room:** Edit through Tater, the HA bridge, or HA's device editor
+  with the updated bridge. Values are saved together in the satellite's native
+  configuration, refresh the local screen, and survive restart without resetting
+  Wi-Fi, pairing, or device identity.
 - **Do Not Disturb:** Immediate or scheduled blocking of remote playback while
   wake detection and safety-critical timers and alarms remain active.
 - **Timers and alarms:** Local alerts with spoken, physical-button, and on-screen

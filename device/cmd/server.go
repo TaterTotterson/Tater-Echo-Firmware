@@ -265,6 +265,9 @@ func main() {
 
 	ctx := context.Background()
 	bootstrapPath := strings.TrimSpace(os.Getenv("TATER_NATIVE_CONFIG"))
+	if bootstrapPath == "" {
+		bootstrapPath = taternative.DefaultBootstrapPath
+	}
 	bootstrap, err := taternative.LoadBootstrap(bootstrapPath)
 	if err != nil {
 		log.Fatalf("Tater native bootstrap: %v", err)
@@ -277,7 +280,7 @@ func main() {
 		log.Fatalf("Tater native bootstrap has no server URL; run setup or configure TATER_NATIVE_URL")
 	}
 	sendspinName := strings.TrimSpace(bootstrap.DeviceName)
-	if value := strings.TrimSpace(os.Getenv("TATER_DEVICE_NAME")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("TATER_DEVICE_NAME")); value != "" && !bootstrap.IdentityUpdated {
 		sendspinName = value
 	}
 	if sendspinName == "" {
@@ -626,6 +629,9 @@ func main() {
 	}
 	deviceName := sendspinName
 	room := firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_ROOM")), bootstrap.Room)
+	if bootstrap.IdentityUpdated {
+		room = bootstrap.Room
+	}
 	var screenDiagnostics atomic.Pointer[show.ScreenDiagnostics]
 	var videoAudioMu sync.Mutex
 	videoAudioSession := ""
@@ -941,8 +947,13 @@ func main() {
 		URL: nativeURL, Token: firstNonEmpty(strings.TrimSpace(os.Getenv("TATER_TOKEN")), bootstrap.Token), TokenPath: tokenPath,
 		DeviceID: deviceID, HardwareID: deviceID, DeviceName: deviceName,
 		Board: detectedBoard, FirmwareTarget: client.FirmwareTarget, FirmwareVersion: client.Version,
-		Room: room, Capabilities: nativeCapabilities,
+		Room: room, Capabilities: nativeCapabilities, BootstrapPath: bootstrapPath,
 	}, taternative.Hooks{
+		IdentityChanged: func(name, room string) {
+			updateShow(showServerPtr.Load(), func(snapshot *show.Snapshot) {
+				snapshot.DeviceName, snapshot.Room = name, room
+			})
+		},
 		ReplyDirection: s.SetReplyDirectionDegrees,
 		DNDChanged: func(active bool) {
 			sendspinSetBlocked(active)

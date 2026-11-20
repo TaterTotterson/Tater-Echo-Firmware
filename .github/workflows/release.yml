@@ -14,7 +14,7 @@ on:
       version:
         description: 'Build version for a non-release validation run (vX.Y.Z)'
         required: false
-        default: 'v5.0.1-rc.1'
+        default: 'v5.0.2-rc.1'
 
 jobs:
   ota-compatibility:

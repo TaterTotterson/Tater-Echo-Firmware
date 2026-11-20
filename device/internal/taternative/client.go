@@ -34,6 +34,7 @@ type Config struct {
 	URL             string
 	Token           string
 	TokenPath       string
+	BootstrapPath   string
 	DeviceID        string
 	HardwareID      string
 	DeviceName      string
@@ -124,6 +125,7 @@ type Hooks struct {
 	Disconnected        func(error)
 	State               func(state string, payload map[string]any)
 	Settings            func(values map[string]any) (map[string]any, error)
+	IdentityChanged     func(name, room string)
 	Status              func() map[string]any
 	ReplyDirection      func(angleDegrees float64)
 	PlayWakeSound       func() bool
@@ -208,6 +210,9 @@ type Client struct {
 	state           string
 	settings        map[string]any
 	selector        string
+	identityMu      sync.RWMutex
+	identityName    string
+	identityRoom    string
 
 	audioMu             sync.Mutex
 	preRoll             [][]byte
@@ -310,6 +315,7 @@ func New(cfg Config, hooks Hooks) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
 		cfg: cfg, hooks: hooks, url: normalized,
+		identityName: cfg.DeviceName, identityRoom: cfg.Room,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		started: time.Now(), out: make(chan outbound, outgoingCapacity),
 		videoOut: make(chan outbound, liveh264.QueuedFrames),
@@ -494,12 +500,15 @@ func (c *Client) runOnce(parent context.Context) error {
 	}
 	defer conn.Close()
 
+	name, room := c.Identity()
+	capabilities := copyMap(c.cfg.Capabilities)
+	capabilities["identity_update"] = c.cfg.BootstrapPath != ""
 	hello := map[string]any{
 		"device_id": c.cfg.DeviceID, "hardware_id": c.cfg.HardwareID,
-		"device_name": c.cfg.DeviceName, "board": c.cfg.Board,
+		"device_name": name, "board": c.cfg.Board,
 		"firmware_target":  c.cfg.FirmwareTarget,
-		"firmware_version": c.cfg.FirmwareVersion, "room": c.cfg.Room,
-		"capabilities": c.cfg.Capabilities,
+		"firmware_version": c.cfg.FirmwareVersion, "room": room,
+		"capabilities": capabilities,
 	}
 	// Let a controller with no saved EQ adopt the restored local curve before
 	// it sends its first defaults. Only these public tone preferences belong

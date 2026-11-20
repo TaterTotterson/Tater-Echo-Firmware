@@ -17,6 +17,8 @@ func (c *Client) handle(message Envelope) {
 		return
 	}
 	switch message.Type {
+	case "identity.set":
+		c.updateIdentity(message.ID, payload)
 	case "sat_chat.directory":
 		participants := decodeSatChatParticipants(payload["participants"])
 		if hook := c.hooks.SatChatDirectory; hook != nil {
