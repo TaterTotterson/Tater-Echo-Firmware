@@ -1218,3 +1218,10 @@ func (m *BlueZManager) linkAddressForPath(path dbus.ObjectPath) string {
 	}
 	return ""
 }
+
+// SetPowered releases radio resources while retaining the daemon's persistent bonds.
+func (m *BlueZManager) SetPowered(on bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), bluezCallTimeout)
+	defer cancel()
+	return m.bus.Object(bluezBus, m.adapter).CallWithContext(ctx, bluezProperties+".Set", 0, bluezAdapter, "Powered", dbus.MakeVariant(on)).Err
+}

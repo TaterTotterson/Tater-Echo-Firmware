@@ -1,5 +1,26 @@
 # Changelog
 
+## v5.0.3
+
+### On-demand Bluetooth
+
+- Remove automatic room presence scanning. Enable Bluetooth only for explicit
+  bounded discovery or a device operation, and power it down after the last
+  active link and discovery end. Saved bonds remain intact and do not start scans.
+- Support ordered Scan and Stop requests from Tater 3.0.5 and Home Assistant
+  bridge 1.4.19. Opening the Bluetooth page and reading slots do not start a scan.
+  Meshtastic Core 0.3.6 starts its own bounded discovery window.
+- Keep active GATT links when scanning stops, and pause discovery during voice
+  activity. Protect in-flight startup and connection attempts from controller
+  disconnects; allow controller shutdown callbacks to read status safely.
+- Retain the existing GATT operations and authenticated PIN pairing across raw
+  HCI and BlueZ targets. Preserve saved bonds and existing device settings.
+
+This is an application OTA for the existing v5 hardware baseline. Broadcast-only
+Bluetooth sensors are no longer monitored continuously. Bluetooth speaker audio
+is outside this proxy. Automated race tests and an ARM server build pass;
+physical pairing, reconnection, and voice coexistence testing remain pending.
+
 ## v5.0.2
 
 ### Live satellite name and room

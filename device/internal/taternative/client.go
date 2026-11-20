@@ -367,6 +367,7 @@ func DefaultCapabilities() map[string]any {
 		"dual_wake_confirmation":      true,
 		"ble_advertisements":          true, "ble_advertisements_version": 1,
 		"ble_gatt": true, "ble_gatt_version": 1,
+		"ble_on_demand": true, "ble_on_demand_version": 1,
 		"ble_gatt_pairing": true, "ble_gatt_pairing_version": 1,
 	}
 }

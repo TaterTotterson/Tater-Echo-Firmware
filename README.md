@@ -91,10 +91,19 @@ and the [release validation coverage](docs/echo-5-release-review.md).
   feeds with automatic fallback and optional push-to-talk.
 - **LED feedback:** Biscuit and Radar animations for wake, voice, music, volume,
   mute, timers, setup, connection, and updates.
-- **Bluetooth:** BLE presence forwarding and secure GATT connections for
+- **Bluetooth:** on-demand BLE discovery and secure GATT connections for
   services such as Meshtastic Core.
 - **Setup and updates:** Captive-portal pairing and verified A/B OTA updates with
   automatic rollback.
+
+
+Bluetooth stays off when unused. Choose **Scan for devices** in Tater or the HA
+bridge to discover nearby peripherals; discovery times out and pauses during
+voice activity. Opening Bluetooth settings does not start a scan. Active GATT
+connections keep the radio enabled until disconnected, then it powers down
+after a short idle delay. Saved bonds are preserved and do not start scanning.
+Broadcast-only sensors need ongoing listening and are not monitored continuously
+by this on-demand mode. Bluetooth speaker audio is not provided by this proxy.
 
 ## USB Ethernet adapters
 

@@ -41,7 +41,7 @@ The Linux generation keeps the existing satellite protocol and feature set:
   NWW, MWW + OWW, or MWW + NWW detection;
 - TTS, Sendspin media and synchronized group audio, timers, alarms, announcements,
   intercom, mute, and volume;
-- BLE presence advertisement forwarding;
+- on-demand BLE discovery and advertisement forwarding;
 - weather, room sensors, notifications, Room Vision, tool status, media and
   timer surfaces on the native UI;
 - framebuffer brightness, touchscreen controls, hardware buttons, camera
@@ -262,7 +262,7 @@ committed:
 - speaker, AEC reference, and local wake word initialize;
 - native UI connects over loopback and touch input is present;
 - camera `/snapshot` returns a valid JPEG;
-- BLE passive scan remains up and reports advertisements without disrupting
+- BLE discovery runs only when requested and reports advertisements without disrupting
   Wi-Fi;
 - an OTA installs the opposite application slot and a kernel-level reboot reaches it;
 - TWRP remains bootable and the preceding good slot remains selectable.

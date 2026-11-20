@@ -894,3 +894,6 @@ func (m *ConnManager) Write(addr string, handle uint16, value []byte, withRespon
 	}
 	return parseWriteRsp(rsp)
 }
+
+// Ready reports transport attachment, independently of occupied connection slots.
+func (m *ConnManager) Ready() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.host != nil }

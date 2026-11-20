@@ -58,9 +58,8 @@ type Stats struct {
 type BatchCallback func([]Advert)
 
 // Scanner owns the /dev/stpbt transport and the passive-scan lifecycle.
-// SetEnabled(true/false) follows native target support and shutdown state;
-// the run loop keeps the scan alive (with backoff + watchdog re-init)
-// until disabled.
+// SetEnabled controls controller ownership; SetScanning independently controls
+// bounded discovery without dropping active GATT links.
 type Scanner struct {
 	onBatch BatchCallback
 
@@ -91,9 +90,10 @@ type Scanner struct {
 	// conns shares the controller with the passive scanner. connHold asks the
 	// session loop to pause advertisements while an LE connection is being
 	// established, which avoids the MediaTek radio starving the initiator.
-	conns    *ConnManager
-	connHold atomic.Bool
-	connSig  chan struct{}
+	conns      *ConnManager
+	connHold   atomic.Bool
+	scanWanted atomic.Bool
+	connSig    chan struct{}
 
 	bluedroidDisabled bool
 }
@@ -106,6 +106,7 @@ func NewScanner(onBatch BatchCallback) *Scanner {
 		gate:    newEmitGate(),
 		connSig: make(chan struct{}, 1),
 	}
+	s.scanWanted.Store(true) // Legacy/test callers explicitly starting the scanner.
 	s.conns = newConnManager(func(hold bool) {
 		if s.connHold.Swap(hold) != hold {
 			select {
@@ -126,6 +127,16 @@ func (s *Scanner) Conns() *ConnManager { return s.conns }
 // session signal as direct-HCI connection establishment.
 func (s *Scanner) SetConnectionHold(hold bool) {
 	if s.connHold.Swap(hold) != hold {
+		select {
+		case s.connSig <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// SetScanning controls discovery without disconnecting links on the same radio.
+func (s *Scanner) SetScanning(wanted bool) {
+	if s.scanWanted.Swap(wanted) != wanted {
 		select {
 		case s.connSig <- struct{}{}:
 		default:
@@ -289,25 +300,24 @@ func (s *Scanner) serveMode(rw io.ReadWriteCloser, stopCh chan struct{}, kernel 
 		if on {
 			enable = 1
 		}
-		// filter_duplicates=0 — every advert is forwarded so the controller/HA
-		// (Bermuda) sees continuous RSSI updates.
+		// filter_duplicates=0 retains changing payloads during discovery.
 		if _, err := sendCmd(opLESetScanEnable, []byte{enable, 0x00}); err != nil {
 			return err
 		}
 		scanOn = on
 		return nil
 	}
-	if err := setScan(true); err != nil {
+	if err := setScan(s.scanWanted.Load() && !s.connHold.Load()); err != nil {
 		return err
 	}
-	s.scanning.Store(true)
+	s.scanning.Store(scanOn)
 	defer s.scanning.Store(false)
 	transport := "stpbt"
 	if kernel {
 		transport = "hci0"
 	}
-	log.Printf("[ble] passive scan running (transport=%s interval=%dms window=%dms bdaddr=%s)",
-		transport, intervalMs, windowMs, s.bdAddr)
+	log.Printf("[ble] controller ready (transport=%s discovery=%t interval=%dms window=%dms bdaddr=%s)",
+		transport, scanOn, intervalMs, windowMs, s.bdAddr)
 
 	flushTicker := time.NewTicker(flushInterval)
 	defer flushTicker.Stop()
@@ -330,17 +340,20 @@ func (s *Scanner) serveMode(rw io.ReadWriteCloser, stopCh chan struct{}, kernel 
 		}
 	}
 
+	resetWatchdog()
 	for {
 		select {
 		case <-s.connSig:
-			want := !s.connHold.Load()
+			want := s.scanWanted.Load() && !s.connHold.Load()
 			if want != scanOn {
 				if err := setScan(want); err != nil {
 					return err
 				}
+				s.scanning.Store(scanOn)
 				resetWatchdog()
 			}
 		case <-host.active:
+			s.scanning.Store(scanOn)
 			resetWatchdog()
 		case pkt := <-host.adv:
 			if adverts := parseAdvReports(pkt); len(adverts) > 0 {

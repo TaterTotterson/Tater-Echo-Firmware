@@ -473,7 +473,8 @@ func main() {
 			log.Printf("[ble] active GATT uses BlueZ on hci0")
 		}
 	}
-	bleGATTBridge := bluetooth.NewBridge(bleGATTManager, func(raw []byte) {
+	bleDemand := bluetooth.NewDemandManager(bleGATTManager, bleScanner)
+	bleGATTBridge := bluetooth.NewBridge(bleDemand, func(raw []byte) {
 		if nativeClient != nil {
 			nativeClient.ReportBLEGATT(raw)
 		}
@@ -863,6 +864,7 @@ func main() {
 	if !activeGATTEnabled {
 		nativeCapabilities["ble_gatt"] = false
 		nativeCapabilities["ble_gatt_pairing"] = false
+		nativeCapabilities["ble_on_demand"] = false
 	}
 	var (
 		satChatVideoMu     sync.Mutex
@@ -1113,6 +1115,7 @@ func main() {
 			}
 		},
 		Connected: func(selector string) {
+			bleGATTBridge.SetEnabled(activeGATTEnabled)
 			log.Printf("[tater-native] connected as %s", selector)
 			if platform.Base() == platform.TaterLinux {
 				if err := os.WriteFile("/run/tater-connected", []byte(client.Version+"\n"), 0o644); err != nil {
@@ -1152,6 +1155,8 @@ func main() {
 			})
 		},
 		Disconnected: func(err error) {
+			bleGATTBridge.SetEnabled(false)
+			go bleDemand.Reset()
 			if platform.Base() == platform.TaterLinux {
 				_ = os.Remove("/run/tater-connected")
 			}
@@ -1172,6 +1177,7 @@ func main() {
 			})
 		},
 		State: func(state string, payload map[string]any) {
+			bleDemand.SetBusy(state != "idle")
 			dataClient.ApplyNativeBeamState(state)
 			if state == "idle" || state == "error" {
 				s.ClearDirection()
@@ -1380,11 +1386,6 @@ func main() {
 				log.Printf("[screen] saved settings unavailable: %v", err)
 			}
 		}
-	}
-	if nativeBLEEnabled {
-		// Start only after nativeClient is fully constructed so the first
-		// batch cannot race initialization or disappear into a nil client.
-		bleScanner.SetEnabled(true)
 	}
 	dataClient.OnPCMWithSpeech(nativeClient.PushAudioWithSpeech)
 	applyCurrentWake()
@@ -1605,7 +1606,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
 	log.Printf("Received %v — shutting down (muting output, amp off)", sig)
-	bleScanner.SetEnabled(false) // scan off + /dev/stpbt closed so the chip idles
+	bleDemand.Close() // End discovery and links, then power down the controller.
 	if nativeClient != nil {
 		nativeClient.Close()
 	}

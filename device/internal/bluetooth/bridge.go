@@ -27,6 +27,8 @@ type bridgeRequest struct {
 	Value    []byte `json:"value"`
 	Response bool   `json:"response"`
 	PIN      string `json:"pin"`
+	Duration int    `json:"duration_s"`
+	epoch    uint64
 }
 
 type wireDescriptor struct {
@@ -90,6 +92,8 @@ type Bridge struct {
 	m       GATTManager
 	send    func([]byte)
 	enabled atomic.Bool
+	epoch   atomic.Uint64
+	control chan bridgeRequest
 
 	mu      sync.Mutex
 	workers map[string]*bridgeWorker
@@ -98,7 +102,7 @@ type Bridge struct {
 // NewBridge takes over the manager's callbacks. send must not block for long
 // and may be called from several goroutines.
 func NewBridge(m GATTManager, send func([]byte)) *Bridge {
-	b := &Bridge{m: m, send: send, workers: map[string]*bridgeWorker{}}
+	b := &Bridge{m: m, send: send, workers: map[string]*bridgeWorker{}, control: make(chan bridgeRequest, 4)}
 	m.SetCallbacks(func(addr string, handle uint16, value []byte, indication bool) {
 		b.emit(map[string]any{"t": "notify", "addr": addr, "handle": handle, "value": value, "ind": indication})
 	}, func(addr string, reason byte) {
@@ -106,6 +110,7 @@ func NewBridge(m GATTManager, send func([]byte)) *Bridge {
 		b.emit(map[string]any{"t": "disconnected", "addr": addr, "reason": int(reason)})
 		b.sendSlots(nil)
 	})
+	go b.discoveryWorker()
 	return b
 }
 
@@ -116,6 +121,7 @@ func (b *Bridge) SetEnabled(enabled bool) {
 		return
 	}
 	if !enabled {
+		b.epoch.Add(1)
 		b.DropAll()
 	}
 	b.sendSlots(nil)
@@ -146,6 +152,10 @@ func (b *Bridge) sendSlots(req *uint32) {
 		addrs = []string{}
 	}
 	msg := map[string]any{"t": "slots", "free": free, "limit": limit, "addrs": addrs}
+	if status, ok := b.m.(interface{ RadioStatus() (bool, bool) }); ok {
+		enabled, scanning := status.RadioStatus()
+		msg["enabled"], msg["scanning"] = enabled, scanning
+	}
 	if req != nil {
 		msg["req"] = *req
 	}
@@ -172,6 +182,20 @@ func (b *Bridge) Handle(raw []byte) {
 	if err := json.Unmarshal(raw, &r); err != nil || r.T == "" {
 		return
 	}
+	r.epoch = b.epoch.Load()
+	if r.T == "scan" || r.T == "stop_scan" {
+		if !b.enabled.Load() {
+			b.fail(r.Req, "unavailable")
+			return
+		}
+		select {
+		case b.control <- r:
+		default:
+			b.fail(r.Req, "busy")
+		}
+		return
+	}
+
 	if r.T == "slots" {
 		b.sendSlots(&r.Req)
 		return
@@ -226,6 +250,10 @@ func (b *Bridge) work(w *bridgeWorker) {
 }
 
 func (b *Bridge) run(r bridgeRequest) {
+	if r.epoch != b.epoch.Load() {
+		b.fail(r.Req, "disconnected")
+		return
+	}
 	res := bridgeResult{T: "result", Req: r.Req}
 	var err error
 	switch r.T {
@@ -335,4 +363,31 @@ func toWireServices(services []Service) []wireService {
 		out = append(out, ws)
 	}
 	return out
+}
+
+// Discovery commands run in arrival order without blocking the WebSocket reader.
+func (b *Bridge) discoveryWorker() {
+	for r := range b.control {
+		discovery, ok := b.m.(interface {
+			Discover(int) error
+			StopDiscovery()
+		})
+		if !ok || !b.enabled.Load() || r.epoch != b.epoch.Load() {
+			b.fail(r.Req, "unavailable")
+			continue
+		}
+		if r.T == "stop_scan" {
+			discovery.StopDiscovery()
+		} else if err := discovery.Discover(r.Duration); err != nil {
+			b.fail(r.Req, err.Error())
+			continue
+		}
+		if r.epoch != b.epoch.Load() {
+			discovery.StopDiscovery()
+			b.fail(r.Req, "disconnected")
+			continue
+		}
+		b.emit(bridgeResult{T: "result", Req: r.Req, OK: true})
+		b.sendSlots(nil)
+	}
 }

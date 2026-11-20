@@ -131,7 +131,7 @@ installer, recovery, or OTA paths:
 7. Verify volume and physical privacy controls, including booting both muted
    and unmuted, and confirm `SW_MUTE_DEVICE`, the hardware camera/microphone
    cutout, the screen, capture gate, persistence, and controller report agree.
-8. Test passive BLE presence, active GATT, Room Vision, a complete application
+8. Test on-demand BLE discovery, active GATT, Room Vision, a complete application
    OTA health commit, a rejected bundle, automatic rollback, Tater Recovery,
    and the TWRP fallback.
 9. Power-cycle repeatedly and confirm no dark-panel boot, rootfs trial loop,

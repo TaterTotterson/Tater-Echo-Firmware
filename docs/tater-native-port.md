@@ -190,7 +190,7 @@ See [`athena.md`](athena.md) and
 ### Rook
 
 Rook (the 2017 Echo Spot) runs Tater Linux with a native 480×480 round display,
-touch, BLE presence, and a loopback-only camera helper. Its measured PCM22
+touch, on-demand Bluetooth, and a loopback-only camera helper. Its measured PCM22
 layout has four microphones followed by two playback-loopback channels. The
 microphones form a compact square in front-right, rear-right, rear-left,
 front-left channel order.
@@ -234,7 +234,7 @@ The native protocol supports:
   left/right stereo-pair routing, clock correction, and underrun recovery;
 - native TTS overlays, local audio scenes, and sample-counted music ducking;
 - Tater-selected LED/display animations and tool progress; and
-- bounded BLE advertisement batches for Tater presence; and
+- bounded, explicitly requested BLE discovery batches; and
 - active BLE GATT discovery, reads, writes, notifications, indications,
   disconnects, and persistent authenticated six-digit-PIN bonds for services
   such as Meshtastic Core. The PIN is not stored, unpairing removes the bond,
@@ -310,7 +310,7 @@ GitHub Actions cross-builds every target and assembles the target-matched Linux
 rootfs and installer artifacts.
 
 Hardware release checks still include wake and first-word retention, barge-in,
-Sendspin group synchronization, BLE presence, physical recovery gestures, clean/cold
+Sendspin group synchronization, Bluetooth discovery/GATT, physical recovery gestures, clean/cold
 boots, a successful OTA, and one deliberate rollback.
 
 ## Guardrails

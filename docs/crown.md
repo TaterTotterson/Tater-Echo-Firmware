@@ -63,7 +63,7 @@ Complete these in order and retain the installer's private recovery backup:
    produces a startup pop or mute is inverted.
 6. Test every touch edge/corner, weather, timers, notifications, live tool
    state, and display wake/sleep behavior.
-7. Test Room Vision, passive BLE presence, and one active BLE GATT device.
+7. Test Room Vision, on-demand BLE discovery, and one active BLE GATT device.
 8. Install one Crown application OTA, confirm slot commit after the health
    trial, then exercise rollback with a deliberately rejected test bundle.
 
