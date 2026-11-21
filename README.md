@@ -17,6 +17,12 @@ Tater voice satellites. Wake detection, audio processing, playback, displays,
 controls, Bluetooth, and OTA updates run directly on the Echo. Home Assistant
 and a separate Echo controller are not required.
 
+**Using Home Assistant?** Install the
+[Tater Home Assistant Satellites bridge](https://github.com/TaterTotterson/Tater-Home-Assistant-Satellites)
+to connect your Echo directly to Home Assistant as a native Assist satellite.
+The bridge README covers installation and pairing; the Tater app does not
+need to be installed or running.
+
 ## Supported devices
 
 Only the exact generations and codenames below are supported. Do not use an
