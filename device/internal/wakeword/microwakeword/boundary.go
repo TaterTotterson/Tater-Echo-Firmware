@@ -109,13 +109,21 @@ func (e *BoundaryEstimator) Estimate(pcm []byte, audioEndAt, detectedAt time.Tim
 	windowStart := detectedAt.Add(-time.Duration(e.settings.SearchBeforeMS) * time.Millisecond)
 	windowEnd := detectedAt.Add(time.Duration(e.settings.SearchAfterMS) * time.Millisecond)
 	best := BoundaryEstimate{}
+	var runStart time.Time
 	for i, score := range scores {
 		at := lastAt.Add(-time.Duration(len(scores)-1-i) * period)
-		if at.Before(windowStart) || at.After(windowEnd) || score < e.settings.Threshold {
+		if at.Before(windowStart) || at.After(windowEnd) || !(score >= e.settings.Threshold) {
+			runStart = time.Time{}
 			continue
 		}
+		if runStart.IsZero() {
+			runStart = at
+		}
+		// Keep the leading threshold crossing of the strongest confidence run.
+		// A later peak or plateau can already fall inside immediate command speech.
+		// Separate weaker early blips must not displace the strongest event.
 		if best.At.IsZero() || score > best.Score {
-			best = BoundaryEstimate{At: at.Add(time.Duration(e.settings.EndpointOffsetMS) * time.Millisecond), Score: score}
+			best = BoundaryEstimate{At: runStart.Add(time.Duration(e.settings.EndpointOffsetMS) * time.Millisecond), Score: score}
 		}
 	}
 	return best, !best.At.IsZero(), nil

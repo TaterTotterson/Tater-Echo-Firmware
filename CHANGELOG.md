@@ -1,5 +1,24 @@
 # Changelog
 
+## v5.0.4
+
+### Preserve speech immediately after the wake word
+
+- Select the leading threshold crossing of the strongest wake-boundary confidence
+  run instead of its later peak. This retains the start of commands spoken without
+  pausing after the wake phrase, including when confidence keeps rising or plateaus.
+- Apply the correction through the shared estimator on Biscuit, Radar, Checkers,
+  Cronos, Crown, Athena, and Rook, for every detector mode using the boundary model.
+- Retain the existing model threshold, search window, endpoint offset, 80 ms guard,
+  and detector fallback. Separate weaker confidence blips do not replace the
+  strongest event. No additional host padding or fixed wait is introduced.
+- Add regression coverage using the recorded Sat1 confidence pattern, separate
+  events, tied peaks, window limits, threshold edges, and invalid scores.
+
+This is a compatible application OTA for the existing v5 hardware baseline and
+works with both Tater and the Home Assistant bridge. The selection policy was
+validated on Sat1 and recorded audio; physical Echo testing remains pending.
+
 ## v5.0.3
 
 ### On-demand Bluetooth
