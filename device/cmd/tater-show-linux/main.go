@@ -231,6 +231,7 @@ type renderer struct {
 	settingsDraft           map[string]any
 	gpuAvailable            bool
 	cameraOpen              bool
+	cameraPopupDismissedID  string
 	cameraPage              int
 	cameraTalkPressed       bool
 	cameraFrameID           string
@@ -742,6 +743,8 @@ func (r *renderer) renderCheckers(canvas *image.RGBA, now time.Time, width, heig
 		r.drawFullscreenNotification(canvas, now, seconds, accent, motion)
 	case r.state.Timer != nil && r.state.Timer.Active:
 		r.drawFullscreenTimer(canvas, now, seconds, accent)
+	case r.cameraPopupActive(now):
+		r.drawCameraScreen(canvas, now, accent)
 	case r.settingsOpen:
 		r.drawWorkspaceSettings(canvas)
 	case r.climateOpen:
@@ -1139,7 +1142,7 @@ func (r *renderer) crownCacheKey(now time.Time, accent color.RGBA) string {
 		r.clockKey(now), fmt.Sprint(r.mediaImage != nil), r.wallpaperID,
 		stableCacheValue(r.state.WallpaperURLs),
 		fmt.Sprint(r.climateOpen, "|", r.climatePage),
-		fmt.Sprint(r.cameraOpen, "|", r.cameraPage),
+		fmt.Sprint(r.cameraVisible(now), "|", r.cameraPage),
 		fmt.Sprint(r.menuOpen),
 		r.workspaceCacheKey(),
 	}, "|")
@@ -1214,7 +1217,7 @@ func (r *renderer) checkersCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
 		stableCacheValue(r.state.Conversation),
-		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
+		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage) + "|" + fmt.Sprint(r.cameraVisible(now), "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
 		stableCacheValue(r.state.Notification),
@@ -1249,7 +1252,7 @@ func (r *renderer) drawCheckersMotion(canvas *image.RGBA, now time.Time, width, 
 		r.drawFullscreenNotificationProgress(canvas, now, noticeColor)
 		return
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
+	if r.climateOpen || r.cameraVisible(now) || r.menuOpen || r.settingsOpen {
 		if speaking {
 			r.drawMutedBadge(canvas, width)
 		}
@@ -1288,7 +1291,7 @@ func (r *renderer) checkersMotionRegions(now time.Time, width, height int) []ima
 		regions = append(regions, popupNotificationProgressBounds(width, height))
 		return regions
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
+	if r.climateOpen || r.cameraVisible(now) || r.menuOpen || r.settingsOpen {
 		return regions
 	}
 	if media := r.state.Media; media != nil && media.Active {
@@ -3001,7 +3004,13 @@ func main() {
 			frameRequests.request()
 		case <-frameRequests:
 			started := time.Now()
-			displayPower.Update(renderer.state, renderer.localTime(started), started)
+			powerState := renderer.state
+			if renderer.cameraPopupActive(started) {
+				// Temporarily show an explicitly requested doorbell popup at the
+				// normal configured brightness, then restore the night schedule.
+				powerState.ScreenNightMode = false
+			}
+			displayPower.Update(powerState, renderer.localTime(started), started)
 			renderer.nightModeActive = displayPower.night
 			// A failed loopback fetch clears its image identity. Rechecking here
 			// lets slow devices recover during the same notification (and lets a
@@ -3227,6 +3236,16 @@ func handleQueuedTouch(renderer *renderer, client *socketClient, event linuxinpu
 }
 
 func handleTouch(renderer *renderer, client *socketClient, event linuxinput.TouchEvent) {
+	if renderer.cameraPopupActive(time.Now()) && !renderer.conversationActive() &&
+		!renderer.satChatVisible() && !renderer.notificationActive(time.Now()) &&
+		!(renderer.state.Timer != nil && renderer.state.Timer.Active) && !renderer.displayVideoVisible() {
+		width, height := renderer.showSize()
+		if renderer.spotScreen {
+			width, height = 480, 480
+		}
+		renderer.handleCameraTouch(client, event, width, height, renderer.spotScreen)
+		return
+	}
 	if renderer.settingsVisible(time.Now()) {
 		width, height := renderer.showSize()
 		if renderer.spotScreen {
@@ -3822,7 +3841,7 @@ func (r *renderer) applyScreenImage(result screenImageResult) {
 			r.satChatVideoShown = result.identity
 		}
 	case cameraVideoScreenImage:
-		if result.image != nil && !r.cameraStreamShown && r.state.Cameras != nil && r.cameraOpen &&
+		if result.image != nil && !r.cameraStreamShown && r.state.Cameras != nil && r.cameraVisible(time.Now()) &&
 			result.session != "" && result.session == r.state.Cameras.SelectedID {
 			r.cameraFrameImage = result.image
 			r.cameraFrameShown = result.identity

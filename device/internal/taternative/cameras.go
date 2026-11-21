@@ -16,16 +16,18 @@ type DisplayCamera struct {
 }
 
 type DisplayCameras struct {
-	Available        bool
-	Items            []DisplayCamera
-	SelectedID       string
-	SelectedName     string
-	SelectedRoom     string
-	SelectedTalkback bool
-	StreamURL        string
-	StreamActive     bool
-	Loading          bool
-	Error            string
+	Available            bool
+	Items                []DisplayCamera
+	SelectedID           string
+	SelectedName         string
+	SelectedRoom         string
+	SelectedTalkback     bool
+	StreamURL            string
+	StreamActive         bool
+	Loading              bool
+	Error                string
+	PopupID              string
+	PopupExpiresAtUnixMS int64
 }
 
 func decodeCameraFrame(frame []byte) ([]byte, bool) {
@@ -46,7 +48,9 @@ func decodeDisplayCameras(payload map[string]any) DisplayCameras {
 		SelectedName: stringValue(payload["selected_name"]), SelectedRoom: stringValue(payload["selected_room"]),
 		SelectedTalkback: boolValue(payload["selected_talkback"]), Loading: boolValue(payload["loading"]),
 		StreamURL: stringValue(payload["stream_url"]), StreamActive: boolValue(payload["stream_active"]),
-		Error: stringValue(payload["error"]),
+		Error:                stringValue(payload["error"]),
+		PopupID:              stringValue(payload["popup_id"]),
+		PopupExpiresAtUnixMS: int64(numberValue(payload["popup_expires_at"], 0) * 1000),
 	}
 	rows, _ := payload["cameras"].([]any)
 	for _, value := range rows {

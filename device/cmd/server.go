@@ -1020,6 +1020,7 @@ func main() {
 					SelectedTalkback: cameras.SelectedTalkback, Loading: cameras.Loading,
 					Error: cameras.Error, FrameURL: frameURL, StreamURL: cameras.StreamURL,
 					StreamActive: cameras.StreamActive,
+					PopupID:      cameras.PopupID, PopupExpiresAtUnixMS: cameras.PopupExpiresAtUnixMS,
 				}
 			})
 		},

@@ -311,7 +311,7 @@ func settingsPageButton(width, height int, next, spot bool) image.Rectangle {
 }
 
 func (r *renderer) settingsVisible(now time.Time) bool {
-	return r.settingsOpen && r.state.Connected && !now.Before(r.volumeOverlayUntil) && !r.nightClockVisible(now) && !r.conversationActive() && !r.notificationActive(now) &&
+	return r.settingsOpen && !r.cameraPopupActive(now) && r.state.Connected && !now.Before(r.volumeOverlayUntil) && !r.nightClockVisible(now) && !r.conversationActive() && !r.notificationActive(now) &&
 		!(r.state.Timer != nil && r.state.Timer.Active) && !r.satChatVisible() && !r.displayVideoVisible()
 }
 

@@ -173,12 +173,19 @@ func (r *renderer) handleCameraTouch(client *socketClient, event linuxinput.Touc
 		return
 	}
 	if point.In(r.cameraCloseBounds(width, height, spot, selected)) {
-		r.cameraOpen = false
+		if r.cameraPopupActive(time.Now()) {
+			r.cameraPopupDismissedID = r.state.Cameras.PopupID
+		} else {
+			r.cameraOpen = false
+		}
 		client.sendCamera("camera.close", "")
 		return
 	}
 	if selected {
 		if point.In(cameraBackBounds(width, height, spot)) {
+			if r.cameraPopupActive(time.Now()) {
+				r.cameraPopupDismissedID = r.state.Cameras.PopupID
+			}
 			client.sendCamera("camera.close", "")
 		}
 		return
@@ -788,7 +795,7 @@ func (r *renderer) cameraVideoBounds() image.Rectangle {
 }
 
 func (r *renderer) cameraVideoActive() bool {
-	return r.cameraOpen && r.state.Cameras != nil && r.state.Cameras.SelectedID != ""
+	return r.cameraVisible(time.Now()) && r.state.Cameras != nil && r.state.Cameras.SelectedID != ""
 }
 
 func (r *renderer) cameraVideoRenderKey(accent color.RGBA) string {

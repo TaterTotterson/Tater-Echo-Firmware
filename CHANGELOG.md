@@ -15,6 +15,20 @@
 - Add regression coverage using the recorded Sat1 confidence pattern, separate
   events, tied peaks, window limits, threshold edges, and invalid scores.
 
+### Doorbell camera popups
+
+- Add explicit, expiring camera popups for Show and Rook displays. The Home
+  Assistant bridge can open a selected doorbell camera without a menu tap.
+- Advertise camera popup support separately from ordinary camera viewing, carry
+  popup identity and expiry over the existing authenticated display connection,
+  and restore the previous workspace when the popup expires or is dismissed.
+- Keep dismissal stable across new camera frames, preserve ordinary camera
+  browsing, and temporarily use normal display brightness for the popup before
+  restoring the night schedule. Add protocol and screen regression tests.
+- Use with Home Assistant bridge 1.4.22 or newer. All five Show/Rook display
+  targets share the popup behavior; ordinary camera payloads keep their existing
+  behavior. Speaker-only Biscuit and Radar retain the wake-boundary correction.
+
 This is a compatible application OTA for the existing v5 hardware baseline and
 works with both Tater and the Home Assistant bridge. The selection policy was
 validated on Sat1 and recorded audio; physical Echo testing remains pending.

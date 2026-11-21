@@ -58,6 +58,9 @@ func (r *renderer) renderSpotFrame(canvas *image.RGBA, now time.Time, seconds fl
 	case r.state.Timer != nil && r.state.Timer.Active:
 		legacyContext = false
 		r.drawRookTimer(canvas, now, seconds)
+	case r.cameraPopupActive(now):
+		legacyContext = false
+		r.drawSpotCameraScreen(canvas, now, accent)
 	case r.settingsOpen:
 		legacyContext = false
 		r.drawWorkspaceSettings(canvas)
@@ -269,7 +272,7 @@ func (r *renderer) spotFrameCacheKey(now time.Time, accent color.RGBA) string {
 		fmt.Sprint(accent),
 		stableCacheValue(r.state.Weather),
 		stableCacheValue(r.state.Conversation),
-		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage, "|", r.rookClimateRooms) + "|" + fmt.Sprint(r.cameraOpen, "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
+		stableCacheValue(r.state.Climate) + "|" + fmt.Sprint(r.climateOpen, "|", r.climatePage, "|", r.rookClimateRooms) + "|" + fmt.Sprint(r.cameraVisible(now), "|", r.cameraPage) + "|" + fmt.Sprint(r.menuOpen),
 		stableCacheValue(r.state.Cameras),
 		stableCacheValue(r.state.Timer),
 		fmt.Sprint(duration > 0),
@@ -297,7 +300,7 @@ func (r *renderer) drawSpotMotion(canvas *image.RGBA, now time.Time, seconds flo
 	if r.state.Timer != nil && r.state.Timer.Active {
 		return
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
+	if r.climateOpen || r.cameraVisible(now) || r.menuOpen || r.settingsOpen {
 		return
 	}
 	if media := r.state.Media; media != nil && media.Active {
@@ -345,7 +348,7 @@ func (r *renderer) spotMotionRegions(now time.Time) []image.Rectangle {
 	if r.state.Timer != nil && r.state.Timer.Active {
 		return regions
 	}
-	if r.climateOpen || r.cameraOpen || r.menuOpen || r.settingsOpen {
+	if r.climateOpen || r.cameraVisible(now) || r.menuOpen || r.settingsOpen {
 		return regions
 	}
 	if media := r.state.Media; media != nil && media.Active {

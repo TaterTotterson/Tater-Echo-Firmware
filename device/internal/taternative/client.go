@@ -404,6 +404,7 @@ func CapabilitiesForTarget(target string) map[string]any {
 		capabilities["screen_weather"] = true
 		capabilities["screen_climate"] = true
 		capabilities["screen_cameras"] = true
+		capabilities["screen_camera_popup_version"] = 1
 		capabilities["screen_camera_stream"] = true
 		capabilities["screen_camera_stream_version"] = 1
 		capabilities["screen_video_playback"] = true

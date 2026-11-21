@@ -317,7 +317,7 @@ func (controller *displayVideoController) Close() {
 }
 
 func (r *renderer) displayVideoVisible() bool {
-	return r.state.Video != nil && r.state.Video.Active && r.state.Video.SessionID != ""
+	return !r.cameraPopupActive(time.Now()) && r.state.Video != nil && r.state.Video.Active && r.state.Video.SessionID != ""
 }
 
 func (r *renderer) resetDisplayVideo(controller *displayVideoController) {

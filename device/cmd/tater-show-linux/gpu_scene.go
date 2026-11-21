@@ -85,6 +85,9 @@ func (r *renderer) gpuSurface(now time.Time) string {
 	if r.state.Timer != nil && r.state.Timer.Active {
 		return ""
 	}
+	if r.cameraPopupActive(now) {
+		return "camera-video:" + r.state.Cameras.SelectedID
+	}
 	if r.settingsOpen {
 		return fmt.Sprintf("settings:%s:%d", r.settingsPage, r.settingsIndex)
 	}

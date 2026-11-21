@@ -168,17 +168,19 @@ type Camera struct {
 }
 
 type Cameras struct {
-	Available        bool     `json:"available"`
-	Items            []Camera `json:"cameras,omitempty"`
-	SelectedID       string   `json:"selected_id,omitempty"`
-	SelectedName     string   `json:"selected_name,omitempty"`
-	SelectedRoom     string   `json:"selected_room,omitempty"`
-	SelectedTalkback bool     `json:"selected_talkback"`
-	Loading          bool     `json:"loading"`
-	Error            string   `json:"error,omitempty"`
-	FrameURL         string   `json:"frame_url,omitempty"`
-	StreamURL        string   `json:"stream_url,omitempty"`
-	StreamActive     bool     `json:"stream_active"`
+	Available            bool     `json:"available"`
+	Items                []Camera `json:"cameras,omitempty"`
+	SelectedID           string   `json:"selected_id,omitempty"`
+	SelectedName         string   `json:"selected_name,omitempty"`
+	SelectedRoom         string   `json:"selected_room,omitempty"`
+	SelectedTalkback     bool     `json:"selected_talkback"`
+	Loading              bool     `json:"loading"`
+	Error                string   `json:"error,omitempty"`
+	FrameURL             string   `json:"frame_url,omitempty"`
+	StreamURL            string   `json:"stream_url,omitempty"`
+	StreamActive         bool     `json:"stream_active"`
+	PopupID              string   `json:"popup_id,omitempty"`
+	PopupExpiresAtUnixMS int64    `json:"popup_expires_at_unix_ms,omitempty"`
 }
 
 // Video is one provider-neutral fullscreen playback session. The stream URL

@@ -154,7 +154,7 @@ func (r *renderer) nightClockVisible(now time.Time) bool {
 	if !r.nightModeActive || strings.ToLower(strings.TrimSpace(r.state.ScreenNightDisplay)) != "red_clock" {
 		return false
 	}
-	if !r.state.Connected || r.state.Phase != "idle" || r.menuOpen || r.cameraOpen || r.satChatOpen || r.climateOpen {
+	if !r.state.Connected || r.state.Phase != "idle" || r.menuOpen || r.cameraVisible(now) || r.satChatOpen || r.climateOpen {
 		return false
 	}
 	if r.notificationActive(now) || (r.state.Timer != nil && r.state.Timer.Active) {
