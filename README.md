@@ -23,6 +23,9 @@ to connect your Echo directly to Home Assistant as a native Assist satellite.
 The bridge README covers installation and pairing; the Tater app does not
 need to be installed or running.
 
+Pairing, wake words, and everyday device settings can be managed from
+**Tater or the Home Assistant bridge**.
+
 ## Supported devices
 
 Only the exact generations and codenames below are supported. Do not use an
