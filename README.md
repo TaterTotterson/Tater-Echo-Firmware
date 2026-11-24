@@ -151,6 +151,12 @@ details and per-device test results.
 > On Checkers, Cronos, Crown, Athena, and Rook, hold Volume Up while the satellite
 > starts to enter TWRP.
 >
+> **Biscuit and Radar on v5.0.0 or newer:** Hold **Volume Up before powering
+> on**, then keep holding through the early three-second confirmation to enter
+> TWRP. This shortcut is installed by the v5 USB factory upgrade; no
+> `to_twrp.py` command is needed. Keep normal power connected throughout the
+> recovery handoff.
+>
 > **Pre-v5 Biscuit and Radar:**
 >
 > 1. Leave normal power connected and boot the satellite normally into Tater.
@@ -171,11 +177,9 @@ details and per-device test results.
 >    ./install.sh
 >    ```
 >
-> You do not need to hold Volume Up or enter Tater Recovery. Do not use
-> `--repair`; it only repairs an existing Tater system slot.
-> After the v5 USB installation, holding Volume Up while powering on also
-> provides the new early TWRP route. Keep normal power connected throughout
-> the recovery handoff.
+> For this pre-v5 upgrade, you do not need to hold Volume Up or enter Tater
+> Recovery. Do not use `--repair`; it only repairs an existing Tater system
+> slot. Keep normal power connected throughout the recovery handoff.
 
 > [!IMPORTANT]
 > Athena's installer validates the display panel and unit-specific speaker
@@ -205,7 +209,11 @@ Do not flash or boot Fire OS as part of the Tater installation.
 1. Download and extract `tater-echo-biscuit-<version>-factory.tar.gz`.
 2. Enter TWRP.
 
-   When upgrading a Biscuit already running Tater, including v4.2.3:
+   **Tater v5.0.0 or newer:** Hold **Volume Up before powering on**, and keep
+   holding through the early three-second confirmation to enter TWRP. Keep USB
+   and normal power connected throughout the handoff.
+
+   **Tater earlier than v5.0.0, including v4.2.3:**
 
    1. Leave normal power connected and boot the Biscuit normally into Tater.
    2. Connect it directly to the computer by USB.
@@ -275,7 +283,11 @@ firmware earlier than v5.0.0, including v4.2.3.
 1. Download and extract `tater-echo-radar-<version>-factory.tar.gz`.
 2. Enter TWRP.
 
-   When upgrading a Radar already running Tater, including v4.2.3:
+   **Tater v5.0.0 or newer:** Hold **Volume Up before powering on**, and keep
+   holding through the early three-second confirmation to enter TWRP. Keep USB
+   and normal power connected throughout the handoff.
+
+   **Tater earlier than v5.0.0, including v4.2.3:**
 
    1. Leave normal power connected and boot the Radar normally into Tater.
    2. Connect its internal USB pads to the computer.
@@ -524,20 +536,24 @@ enters Tater Recovery, repair its inactive root slot with
 preserves Wi-Fi, pairing, room, and satellite settings. Add `--factory-reset`
 only when those settings should also be cleared.
 
-All seven Echo targets support entering **Tater Recovery with Volume Up**.
-Biscuit and Radar detect an uninterrupted five-second hold during the first 90
-seconds of Tater Linux startup and arm their one-boot rescue environment.
+On **Biscuit and Radar with the v5 factory boot image**, holding Volume Up
+before powering on enters **TWRP** through the early boot handoff. The later
+**Tater Recovery** gesture is separate: an uninterrupted five-second hold
+during the first 90 seconds of Tater Linux startup arms the one-boot rescue
+environment. That later gesture also remains available on older boot images.
+
 Checkers, Cronos, Crown, Athena, and Rook still reach their retained TWRP first
 in the native boot chain; a verified one-command router then arms the existing
 Tater slot-store rescue marker and returns through the normal boot image. The
 router checks the boot image and Tater store before writing anything. If any
 check fails, it returns to TWRP instead of guessing or modifying recovery.
 
-TWRP remains the explicit lower-level, device-specific fallback. Run
-`python3 to_twrp.py` from a normally booted satellite only when Tater Recovery
-cannot perform the repair; on screen devices the helper marks that boot so the
-router deliberately stays in TWRP. A unit that cannot start Tater Linux or has
-not yet armed the router still has its normal amonet/TWRP recovery procedure.
+TWRP remains the explicit lower-level, device-specific fallback. On v5 Biscuit
+and Radar, use the Volume Up power-on shortcut above. The `python3 to_twrp.py`
+helper is the pre-v5 entry route and remains an advanced fallback from a
+normally booted satellite; on screen devices it marks that boot so the router
+deliberately stays in TWRP. A unit that cannot use these routes still has its
+normal amonet/TWRP recovery procedure.
 
 ## Updates and release files
 
