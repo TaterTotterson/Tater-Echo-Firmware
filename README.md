@@ -65,8 +65,9 @@ and the [release validation coverage](docs/echo-5-release-review.md).
   cycling symbols, selectable locally or per satellite in Tater/HA Bridge.
 - **Hardware microphone gain/filter:** Biscuit/Radar ADC gain and verified
   80 Hz high-pass filtering avoid redundant software processing.
-- **Wake boundaries:** Model-driven endpoints preserve speech immediately after
-  the wake phrase without sending the wake phrase to speech recognition.
+- **Speak without pausing:** A matching wake-boundary model helps preserve the
+  start of commands spoken immediately after the wake phrase, such as
+  “Hey Tater, turn on the lights.”
 - **USB Ethernet:** Automatic wired networking with Wi-Fi fallback, including a
   tested single-cable powered setup for Biscuit.
 - **Sat Chat:** Satellite and phone audio/video calls; Biscuit and Radar support
@@ -74,6 +75,11 @@ and the [release validation coverage](docs/echo-5-release-review.md).
 - **Wake engines:** On-device microWakeWord, openWakeWord, and NanoWakeWord with
   MWW + OWW and MWW + NWW dual wake-word modes, custom bundles, sensitivity,
   and room profiles.
+- **Recommended wake setup:** Use **dual mode (MWW + OWW or MWW + NWW)** for
+  fully on-device false-wake prevention. Both detectors must agree on the same
+  wake phrase; this check needs no STT service.
+- **MWW-only setups:** Enable **STT wake verification** in Tater or the Home
+  Assistant bridge for false-wake prevention through your configured STT service.
 - **Microphone processing:** Per-device beamforming and echo cancellation for
   each supported microphone array.
 - **Voice features:** Continued conversation, playback barge-in, intercom,
