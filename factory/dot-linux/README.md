@@ -13,15 +13,20 @@ default; add `--factory-reset` when you deliberately want a clean setup.
 > System OTA flow.
 
 > [!NOTE]
-> On a Biscuit or Radar already running Tater, leave normal power connected,
-> boot normally into Tater and connect USB data to the computer. Run
+> **Tater v5.0.0 or newer:** Hold **Volume Up before powering on** and keep
+> holding through the early three-second confirmation to enter **TWRP**. Keep
+> normal power connected throughout the handoff. This shortcut is installed by
+> the v5 USB factory upgrade.
+>
+> **Tater earlier than v5.0.0:** Leave normal power connected, boot normally
+> into Tater and connect USB data to the computer. Run
 > `python3 to_twrp.py` from this extracted archive (`py -3 to_twrp.py` on Windows),
 > wait for the computer to detect TWRP over USB, and then continue
-> with the normal installer below. You do not need to hold Volume Up or enter
-> Tater Recovery first. Do not use `--repair` for the v5 upgrade; repair mode
+> with the normal installer below. For this pre-v5 upgrade, you do not need to
+> hold Volume Up or enter Tater Recovery first. Do not use `--repair`; repair mode
 > only fixes an existing Tater system slot.
 
-1. On an existing Tater installation, use the helper above to enter TWRP.
+1. On an existing Tater installation, use the matching entry method above.
    For a new installation, complete the matching amonet unlock and enter TWRP
    using that device's unlock instructions instead.
 2. Connect USB and extract the matching factory archive.

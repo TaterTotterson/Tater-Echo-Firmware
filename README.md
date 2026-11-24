@@ -258,10 +258,12 @@ saved Wi-Fi, pairing, SSH, and satellite settings.
   slots.
 - Retains the stock system partitions and a verified TWRP copy.
 
-Keep the generated `backups/` directory private. See the shared
-[`factory/dot-linux` guide](factory/dot-linux/README.md) for recovery and
-advanced options. After v5.0.0 is installed, use `python3 to_recovery.py` from
-an extracted Biscuit or Radar factory archive when a system repair is needed.
+Keep the generated `backups/` directory private. On **v5.0.0 or newer**, hold
+**Volume Up before powering on** and keep holding through the early
+three-second confirmation to enter **TWRP**. Keep normal power connected
+throughout the handoff. See the shared
+[`factory/dot-linux` guide](factory/dot-linux/README.md) for system repair and
+advanced recovery options.
 
 > [!NOTE]
 > A factory install or System OTA reboots Biscuit into a trial root-system
@@ -317,10 +319,12 @@ firmware earlier than v5.0.0, including v4.2.3.
 The installer uses the pinned Radar-specific Linux kernel, builds the recovery
 image from the unit's own TWRP header, verifies every partition backup and
 write, and retains the stock system slots as first-boot firmware donors. Keep
-the private backup and USB connection available. From Tater Linux, reconnect
-USB and run `python3 to_recovery.py` from the extracted factory archive to
-enter Tater Recovery. See the shared
-[`factory/dot-linux` guide](factory/dot-linux/README.md).
+the private backup and USB connection available. On **v5.0.0 or newer**, hold
+**Volume Up before powering on** and keep holding through the early
+three-second confirmation to enter **TWRP**. Keep normal power connected
+throughout the handoff. See the shared
+[`factory/dot-linux` guide](factory/dot-linux/README.md) for system repair and
+advanced recovery options.
 
 > [!NOTE]
 > A factory install or System OTA reboots Radar into a trial root-system slot.
